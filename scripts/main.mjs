@@ -75,7 +75,9 @@ export async function perturb(file,nodeId,action,value) {
   ir.review_status='needs_review'; ir.review_notes.push(`编辑扰动测试: ${action} ${nodeId}`);
   const target=path.join(data.base,`slideir.${action}.${randomUUID().slice(0,8)}.json`);
   await writeJson(target,ir);
-  return {ir:target,...await compile(target)};
+  // A perturbation edit is deliberately not the recorded revision, so the
+  // authoring sidecar cannot describe it.
+  return {ir:target,...await compile(target,{requireAuthoring:false})};
 }
 
 async function main() {

@@ -186,3 +186,27 @@ export async function loadIR(file) {
   return {ir,info,file,base,source,ir_sha256:sha256(bytes)};
 }
 
+export const AUTHORING_FILE='authoring.json';
+
+// Authoring sidecar: binds an author to one exact IR revision. Absent is allowed
+// (runs prepared before the sidecar existed); present but stale is a hard
+// failure, because the IR was edited after it was recorded.
+export async function assertAuthoring(file) {
+  file=path.resolve(file);
+  const record=path.join(path.dirname(file),AUTHORING_FILE);
+  let bytes;
+  try { bytes=await fs.readFile(record); }
+  catch (error) { if (error.code==='ENOENT') return null; throw error; }
+  const text=bytes.toString('utf8');
+  let authoring;
+  try { authoring=JSON.parse(text.charCodeAt(0)===0xFEFF?text.slice(1):text); }
+  catch { throw new Error(AUTHORING_FILE+' 不是合法 JSON。'); }
+  const recorded=authoring?.ir_sha256;
+  if (typeof recorded!=='string' || !/^[a-f0-9]{64}$/.test(recorded)) throw new Error(AUTHORING_FILE+' 缺少有效的 ir_sha256。');
+  const actual=sha256(await fs.readFile(file));
+  if (recorded!==actual) {
+    throw new Error(AUTHORING_FILE+' 与当前 IR 不符：记录 '+recorded.slice(0,12)+'，实际 '+actual.slice(0,12)+'。完成 IR 后请重新记录 authoring。');
+  }
+  return authoring;
+}
+

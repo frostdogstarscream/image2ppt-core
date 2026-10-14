@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { validateIR, localFile, loadIR } from '../scripts/ir.mjs';
+import { assertAuthoring, loadIR, localFile, sha256, validateIR } from '../scripts/ir.mjs';
 
 function fixture() {
   return {schema_version:'0.1',canvas:{source_px:[1280,720],target_px:[1280,720]},background:{color:'FFFFFF'},
@@ -44,4 +44,20 @@ test('blocks local traversal and remote asset paths',async()=>{const temp=await 
 test('loads the preserved synthetic input and its asset hashes',async()=>{const d=await loadIR(fileURLToPath(new URL('../examples/synthetic/slideir.json',import.meta.url)));assert.equal(d.ir.nodes.length,7);assert.equal(d.ir.groups.length,1);});
 test('rejects wrong source dimensions and stale source hashes',async()=>{const original=new URL('../examples/synthetic/',import.meta.url);const temp=await fs.mkdtemp(path.join(os.tmpdir(),'image2ppt-input-'));await fs.cp(original,temp,{recursive:true});const file=path.join(temp,'slideir.json'),ir=JSON.parse(await fs.readFile(file,'utf8'));ir.canvas.source_px=[2560,1440];await fs.writeFile(file,JSON.stringify(ir));await assert.rejects(loadIR(file),/实际 PNG/);ir.canvas.source_px=[1280,720];ir.source_sha256='0'.repeat(64);await fs.writeFile(file,JSON.stringify(ir));await assert.rejects(loadIR(file),/SHA256/);});
 test('accepts editable rounded gradients and rejects malformed stops',()=>{const x=fixture();x.nodes[0]={id:'panel',type:'shape',bbox:[20,20,500,80],z:1,evidence_ids:['ev-title'],geometry:'roundRect',fill:'FFF8FA',corner_radius_px:7,fill_gradient:{angle_deg:90,stops:[{offset:0,color:'FFF8FA'},{offset:100000,color:'FFF0F4'}]}};assert.doesNotThrow(()=>validateIR(x));x.nodes[0].fill_gradient.stops[1].offset=0;assert.throws(()=>validateIR(x),/色标顺序/);x.nodes[0].corner_radius_px=100;assert.throws(()=>validateIR(x),/圆角/);});
+
+test('authoring sidecar is optional but must describe the exact IR bytes',async()=>{
+  const temp=await fs.mkdtemp(path.join(os.tmpdir(),'image2ppt-authoring-'));
+  const ir=path.join(temp,'slideir.json'),record=path.join(temp,'authoring.json');
+  await fs.writeFile(ir,'{"schema_version":"0.1"}');
+  const stamp=async value=>fs.writeFile(record,JSON.stringify({ir_sha256:value}));
+  assert.equal(await assertAuthoring(ir),null,'a missing sidecar predates the record');
+  const real=sha256(await fs.readFile(ir));
+  await stamp(real); assert.equal((await assertAuthoring(ir)).ir_sha256,real);
+  await stamp('0'.repeat(64));
+  await assert.rejects(assertAuthoring(ir),/与当前 IR 不符/);
+  await stamp('not-a-hash');
+  await assert.rejects(assertAuthoring(ir),/有效的 ir_sha256/);
+  await fs.writeFile(record,'{oops');
+  await assert.rejects(assertAuthoring(ir),/不是合法 JSON/);
+});
 
