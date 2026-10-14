@@ -1,0 +1,41 @@
+name: ci
+
+# Two tiers only: the protocol validator and the unit/fault suite. Both are
+# runtime-free by construction (tests/test_core.py injects a FakeBackend; the
+# protocol tier is pure JS). Real compilation and rendering need the
+# proprietary @oai/artifact-tool runtime, which this project may not
+# redistribute and which therefore never runs on a public runner.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-free:
+    name: protocol + unit tiers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: install pinned python deps
+        run: pip install -r requirements-core.lock
+
+      - name: protocol tier (SlideIR validator)
+        run: node --test tests/ir.test.mjs
+
+      - name: unit and fault tier
+        run: python -m unittest discover -s tests -t tests -p 'test_*.py' -v
+
+      - name: tests must not mutate tracked files
+        run: git diff --exit-code

@@ -15,3 +15,11 @@ build/
 .env.*
 !.env.example
 
+# Generated export artifacts. The packaging scripts themselves stay tracked.
+exports/*
+!exports/build_source_package.py
+!exports/package_skill_entries.py
+
+# Private business input; must never enter VCS or a public CI checkout.
+/PPT图片/
+/PPT图片.zip
