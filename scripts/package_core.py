@@ -11,10 +11,11 @@ parser.add_argument('--output', required=True)
 args = parser.parse_args()
 target = Path(args.output).resolve()
 target.parent.mkdir(parents=True, exist_ok=True)
-paths = [ROOT / name for name in ('README.md','AGENTS.md','.gitignore','image2ppt.ps1','pyproject.toml','requirements-core.lock')]
+paths = [ROOT / name for name in ('README.md','AGENTS.md','.gitignore','image2ppt.ps1','image2ppt.sh','pyproject.toml','requirements-core.lock')]
 for directory, extensions in {
     'src/image2ppt': {'.py'}, 'scripts': {'.py','.mjs'}, 'tests': {'.py','.mjs'},
-    'skills/image2ppt': {'.md','.yaml'}, '.agents/skills/image2ppt': {'.md','.yaml'},
+    'skills/image2ppt': {'.md','.yaml'}, 'skills/image2ppt-claude': {'.md'},
+    '.agents/skills/image2ppt': {'.md','.yaml'},
     'configs': {'.json'}, 'docs': {'.md'},
 }.items():
     paths.extend(p for p in (ROOT / directory).rglob('*') if p.is_file() and p.suffix in extensions and '__pycache__' not in p.parts)

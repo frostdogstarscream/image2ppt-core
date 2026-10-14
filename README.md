@@ -12,6 +12,22 @@
 
 专用技能负责忠实重建；不应用通用演示文稿的文案改写、默认字号和重新设计要求。
 
+## 在 Claude Code 中使用
+
+Claude Code 加载 `~/.claude/skills/image2ppt/`（由维护源 `skills/image2ppt-claude/` 部署）。它的 shell 是 bash，
+而 `.\image2ppt.ps1` 在 bash 下是语法错误（`syntax error near unexpected token`），因此命令请走转发脚本：
+
+```bash
+cd D:/Code/image2PPT
+./image2ppt.sh doctor
+./image2ppt.sh compile -InputPath runs/具体任务/slideir.json
+./image2ppt.sh compose -InputPath 'runs/<run02>/slideir.json,runs/<run03>/slideir.json' -OutputPath outputs/deck
+```
+
+两个 skill flavor 各自有独立维护源：Codex 版在 `skills/image2ppt/`，Claude Code 版在 `skills/image2ppt-claude/`。
+两者不能互相复制，也不要靠字符串替换从 Codex 版生成 Claude 版；改完维护源后重新导出（见 `exports/`）。
+另外 `image2ppt.ps1` 含非 ASCII 文本，必须保留 UTF-8 BOM，否则 Windows PowerShell 5.1 直接解析失败。
+
 ## 最短工具命令
 
 ```powershell
@@ -22,8 +38,11 @@ cd D:\Code\image2PPT
 .\image2ppt.ps1 prepare -InputPath 'D:\路径\幻灯片.png'
 .\image2ppt.ps1 compile -InputPath 'D:\Code\image2PPT\runs\具体任务\slideir.json'
 .\image2ppt.ps1 perturb -InputPath 'D:\Code\image2PPT\runs\具体任务\slideir.json' -NodeId title -Action replace -Value '新的标题'
+.\image2ppt.ps1 compose -InputPath 'runs\任务A\slideir.json,runs\任务B\slideir.json' -OutputPath 'outputs\deck'
 .\image2ppt.ps1 test
 ```
+
+在 bash / Claude Code 中，把 `.\image2ppt.ps1` 换成 `./image2ppt.sh`，参数不变。
 
 `prepare` 只建立输入和待分析结构；之后由当前 Codex 聊天查看图片并填写 SlideIR。`demo` 使用固定合成样本验证工具链，结构来自测试夹具，不代表真实图片识别效果。
 
@@ -42,7 +61,7 @@ cd D:\Code\image2PPT
 - 文本和资产内容归属校验、文件哈希、独立输出版本、PPTX 结构检查及实际文件重新导入预览。
 - 删除、移动和改写的扰动副本。测试不会覆盖原始 IR。
 
-PDF 解析、自动 OCR、自动擦字与背景修复、原生表格/图表、多页图片自动识别、网站/API 尚未实现。M1 支持固定清单的逐页回放回归，不负责自动识别整套图片。复杂图表可以明确保留为图片；其中的数据不可编辑。复杂底图需要先提供经检查的清理资产，不能在原图文字上叠加可编辑文字冒充还原。
+PDF 解析、自动 OCR、自动擦字与背景修复、原生表格/图表、多页图片自动识别、网站/API 尚未实现。M1 支持固定清单的逐页回放回归，不负责自动识别整套图片。`compose` 可以把多个**已还原页**的 IR 组装成一个多页 deck（传入顺序即页序），但它是打包步骤，不代替逐页识别，也不修复还原得不好的页。复杂图表可以明确保留为图片；其中的数据不可编辑。复杂底图需要先提供经检查的清理资产，不能在原图文字上叠加可编辑文字冒充还原。
 
 ## 运行环境
 
