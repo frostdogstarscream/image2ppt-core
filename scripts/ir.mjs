@@ -6,8 +6,18 @@ export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const expect = (ok, message) => { if (!ok) throw new Error(message); };
 const color = value => typeof value === 'string' && /^[0-9a-fA-F]{6}$/.test(value);
 const array = value => Array.isArray(value);
+const fields = (value, allowed, label) => {
+  expect(value && typeof value==='object' && !array(value), `${label} 必须为对象。`);
+  const unknown=Object.keys(value).filter(k=>!allowed.split(' ').includes(k));
+  expect(!unknown.length, `${label} 未支持字段: ${unknown.join(', ')}。`);
+};
 
 export function validateIR(ir) {
+  fields(ir,'schema_version source_image source_sha256 canvas background review_status review_notes nodes evidence assets groups unresolved_evidence_ids','SlideIR');
+  fields(ir.canvas,'source_px target_px','canvas');
+  fields(ir.background,'color asset_id','background');
+  if(ir.source_image!==undefined) expect(typeof ir.source_image==='string' && ir.source_image.length>0,'source_image 无效。');
+  if(ir.source_sha256!==undefined) expect(typeof ir.source_sha256==='string' && /^[a-f0-9]{64}$/.test(ir.source_sha256),'source_sha256 无效。');
   expect(ir?.schema_version === '0.1', '只支持 SlideIR 0.1。');
   expect(array(ir.canvas?.source_px) && ir.canvas.source_px.length===2 && array(ir.canvas?.target_px) && ir.canvas.target_px.length===2, '缺少有效的源画布与目标画布。');
   const [w,h] = ir.canvas.source_px, [tw,th] = ir.canvas.target_px;
@@ -18,6 +28,38 @@ export function validateIR(ir) {
   expect(['needs_review','source_checked'].includes(ir.review_status), '缺少有效 review_status。');
   expect(array(ir.review_notes) && ir.review_notes.every(x=>typeof x==='string'), 'review_notes 必须为字符串数组。');
   for (const key of ['nodes','evidence','assets','groups']) expect(array(ir[key]), `${key} 必须为数组。`);
+  for(const e of ir.evidence) fields(e,'id kind bbox text description','evidence');
+  for(const a of ir.assets) {
+    fields(a,'id path purpose sha256 contains_evidence_ids description','asset');
+    expect(typeof a.path==='string' && a.path.length>0,'asset.path 无效。');
+  }
+  for(const g of ir.groups) fields(g,'id member_ids','group');
+  for(const entry of [...ir.evidence,...ir.assets]) if(entry.description!==undefined) expect(typeof entry.description==='string','description 必须为字符串。');
+  for(const node of ir.nodes) {
+    expect(['text','shape','image'].includes(node?.type), `${node?.id} 不支持的节点类型 ${node?.type}。`);
+    const common='id type bbox z evidence_ids';
+    const byType={text:'text font bold color align wrap line_spacing_pt runs text_override_reason source_text_bbox',
+      shape:'geometry fill line corner_radius_px fill_gradient',image:'asset_id'};
+    fields(node,common+' '+(byType[node?.type]||''),'node');
+    if(node.type==='text') {
+      fields(node.font,'latin ea size_pt','font');
+      if(node.bold!==undefined) expect(typeof node.bold==='boolean',`${node.id} bold 必须为 boolean。`);
+      if(node.text_override_reason!==undefined) expect(typeof node.text_override_reason==='string' && node.text_override_reason.trim(),`${node.id} text_override_reason 无效。`);
+      if(node.runs!==undefined) {
+        expect(array(node.runs) && node.runs.length>0,`${node.id} runs 必须为非空数组。`);
+        for(const run of node.runs) {
+          fields(run,'text color bold','run');
+          if(run.bold!==undefined) expect(typeof run.bold==='boolean',`${node.id} run.bold 必须为 boolean。`);
+        }
+      }
+    }
+    if(node.line!==undefined) fields(node.line,'color width_pt','line');
+    if(node.fill_gradient!==undefined) {
+      fields(node.fill_gradient,'angle_deg stops','fill_gradient');
+      expect(array(node.fill_gradient.stops),'gradient.stops 必须为数组。');
+      for(const stop of node.fill_gradient.stops) fields(stop,'offset color','gradient.stop');
+    }
+  }
   expect(ir.nodes.length > 0 && ir.nodes.length <= 500, '页面需要 1—500 个节点；准备模板不能直接交付。');
   expect(ir.evidence.length > 0, '必须建立源内容清单。');
   const idCheck = (items, label) => {
@@ -65,6 +107,7 @@ export function validateIR(ir) {
   for (const node of ir.nodes) {
     expect(['text','shape','image'].includes(node.type), `${node.id} 不支持的节点类型 ${node.type}。`);
     boxCheck(node.bbox,node.id);
+    if(node.source_text_bbox!==undefined) boxCheck(node.source_text_bbox,node.id+' source_text_bbox');
     expect(Number.isInteger(node.z) && !zs.has(node.z), `${node.id} z 必须是唯一整数。`); zs.add(node.z);
     claim(node.evidence_ids,node.id);
     if (node.type==='text') {

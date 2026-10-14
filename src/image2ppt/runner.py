@@ -10,7 +10,7 @@ from .contracts import BuildManifest, ProviderResult, RegressionSuite, RunState
 from .prepare import import_bundle
 from .providers import ManualDraftProvider, ReplayProvider
 from .quality import evaluate, inspect_pptx, probe
-from .storage import digest, index_run, inventory, key, local_file, now, read_json, run_lock, verify_files, write_json
+from .storage import digest, update_index, inventory, key, local_file, now, read_json, run_lock, verify_files, write_json
 
 
 class Runner:
@@ -41,7 +41,7 @@ class Runner:
             def save():
                 RunState.model_validate(state)
                 write_json(run/'run.json',state)
-                index_run(run,state)
+                update_index(run,state)
             try:
                 state['status']='RUNNING'; state.pop('error',None); save()
                 if 'input' not in state:
@@ -212,5 +212,5 @@ def regress(suite_file, output, backend):
             results.append({'id':page.id,**result})
         except Exception as error:
             results.append({'id':page.id,'execution_status':'FAILED','error':str(error)})
-        write_json(directory/'report.json',{'suite_sha256':digest(suite_file),'pages':results,'network_calls':0,'human_acceptance':False})
+        write_json(directory/'report.json',{'suite_sha256':digest(suite_file),'pages':results,'executed_count':len(results),'network_calls':0,'human_acceptance':False})
     return {'report':str(directory/'report.json'),'pages':results,'execution_status':'FAILED' if any(p['execution_status']=='FAILED' for p in results) else 'COMPLETED'}

@@ -105,9 +105,9 @@ def run_lock(directory):
                 fcntl.flock(stream, fcntl.LOCK_UN)
 
 
-def index_run(run, state):
+def index_run(run, state, *, database=None):
     run = Path(run)
-    with closing(sqlite3.connect(run.parent / "index.sqlite3", timeout=30)) as db, db:
+    with closing(sqlite3.connect(database or run.parent / "index.sqlite3", timeout=0.1)) as db, db:
         db.execute("CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, path TEXT, status TEXT, updated TEXT)")
         db.execute("CREATE TABLE IF NOT EXISTS revisions(run_id TEXT, revision TEXT, build TEXT, hash TEXT, PRIMARY KEY(run_id,revision))")
         db.execute("CREATE TABLE IF NOT EXISTS stages(run_id TEXT, name TEXT, key TEXT, data TEXT, PRIMARY KEY(run_id,name))")
@@ -116,3 +116,44 @@ def index_run(run, state):
             db.execute("INSERT OR REPLACE INTO stages VALUES(?,?,?,?)", (run.name, name, stage['key'], json.dumps(stage)))
         for build in sorted((run / "revisions").glob("r*/build.json")):
             db.execute("INSERT OR REPLACE INTO revisions VALUES(?,?,?,?)", (run.name, build.parent.name, str(build), digest(build)))
+
+
+def update_index(run, state):
+    """Derived-index failure must not change primary state or mask its error."""
+    import logging
+    import time
+    for attempt in range(2):
+        try:
+            index_run(run, state)
+            return
+        except (sqlite3.Error, OSError) as error:
+            code = getattr(error, 'sqlite_errorcode', None)
+            busy = code is not None and (code & 255) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+            if busy and attempt == 0:
+                time.sleep(0.05)
+                continue
+            diagnostic = {'at':now(), 'status':'DEGRADED', 'type':type(error).__name__,
+                          'message':str(error), 'sqlite_code':code, 'attempts':attempt+1,
+                          'action':'Original index preserved; rebuild explicitly into a new file.'}
+            try:
+                write_json(Path(run)/'index-warning.json', diagnostic)
+            except OSError as warning_error:
+                logging.getLogger(__name__).warning('Could not persist index warning: %s', warning_error)
+            logging.getLogger(__name__).warning('Derived SQLite index unavailable: %s', error)
+            return
+
+
+def rebuild_index(directory, output):
+    """Explicit rebuild to a NEW database; original damaged/locked file is untouched."""
+    directory, output = Path(directory).resolve(strict=True), Path(output).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.touch(exist_ok=False)
+    from .contracts import RunState
+    count = 0
+    for file in sorted(directory.glob('run-*/run.json')):
+        state = RunState.model_validate(read_json(file)).model_dump(exclude_none=True)
+        index_run(file.parent, state, database=output)
+        count += 1
+    if count == 0:
+        raise ValueError('no run records found; new empty database retained for diagnosis')
+    return {'database':str(output), 'runs_indexed':count, 'original_preserved':True}

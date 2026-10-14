@@ -74,9 +74,13 @@ def style_value(props, attr):
         if attr == 'bold' and prop.get('b') is not None:
             return prop.get('b') in ('1', 'true')
         if attr == 'color':
-            rgb = prop.find('a:solidFill/a:srgbClr', NS)
-            if rgb is not None:
-                return rgb.get('val', '').upper()
+            fill = prop.find('a:solidFill', NS)
+            if fill is not None:
+                rgb = fill.find('a:srgbClr', NS)
+                # An explicit unresolved color overrides lower-priority defaults.
+                return rgb.get('val', '').upper() if rgb is not None and len(rgb)==0 else None
+            if any(prop.find('a:'+kind, NS) is not None for kind in ('noFill','gradFill','blipFill','pattFill','grpFill')):
+                return None
     return None  # theme/master inheritance is deliberately not guessed
 
 
@@ -152,6 +156,11 @@ def evaluate(ir, objects):
                          missing=sorted(expected_names-set(actual)),unexpected=sorted(set(actual)-expected_names)))
     for node in ir['nodes']:
         obj=actual.get(node['id'])
+        if obj is not None:
+            expected_kind='pic' if node['type']=='image' else 'sp'
+            valid=obj['kind']==expected_kind and (node['type']!='text' or obj['text'] is not None)
+            results.append(check('object_type:'+node['id'],'PASS' if valid else 'FAIL','IR type versus actual OOXML object kind',
+                                 [node['id']],expected=expected_kind,actual=obj['kind']))
         if node['type']!='text' or obj is None:
             continue
         same=node['text']==obj['text']
@@ -159,12 +168,20 @@ def evaluate(ir, objects):
         if node.get('runs') and same:
             expected=[(r.get('color',node['color']).upper(),r.get('bold',node.get('bold',False))) for r in node['runs'] for _ in r['text']]
             observed=[(r['color'],r['bold']) for r in obj['runs'] for _ in r['text']]
-            mismatch=[i for i,(a,b) in enumerate(zip(expected,observed)) if a!=b and None not in b]
+            property_mismatches={name:[i for i,(a,b) in enumerate(zip(expected,observed)) if b[j] is not None and a[j]!=b[j]]
+                                 for j,name in enumerate(('color','bold'))}
+            unknown_properties={name:[i for i,b in enumerate(observed) if b[j] is None] for j,name in enumerate(('color','bold'))}
+            mismatch=sorted(set(property_mismatches['color']+property_mismatches['bold']))
             unknown=any(None in value for value in observed)
             status='FAIL' if mismatch or len(expected)!=len(observed) else 'REVIEW_REQUIRED' if unknown else 'PASS'
             results.append(check('run_style:'+node['id'],status,'effective explicit OOXML run styles; unresolved inheritance is not guessed',
                                  [node['id']],mismatch_character_indices=mismatch,unknown_inheritance=unknown,
+                                 property_mismatches=property_mismatches,unknown_properties=unknown_properties,
                                  expected_styles=[list(v) for v in dict.fromkeys(expected)],actual_styles=[list(v) for v in dict.fromkeys(observed)]))
+    for group in ir['groups']:
+        obj=actual.get(group['id'])
+        results.append(check('group_type:'+group['id'],'PASS' if obj and obj['kind']=='grpSp' else 'FAIL',
+                             'IR group versus actual OOXML group',[group['id']]))
     results.append(check('source_completeness','NOT_RUN','requires independent source annotation; declared ownership alone is insufficient'))
     results.append(check('visual_review','REVIEW_REQUIRED','actual-file preview provided; no automatic semantic visual acceptance'))
     for software in ('PowerPoint','WPS','human_acceptance'):
@@ -327,7 +344,7 @@ def probe(build_file, cases_file, backend):
     if digest(source)!=initial_hash:
         raise ValueError('original PPTX changed during probe')
     report={'build_sha256':digest(build_file),'source_pptx_sha256':initial_hash,'original_preserved':True,
-            'method':'direct_final_pptx_copy','cases':results,'human_acceptance':False,
+            'method':'direct_final_pptx_copy','cases':results,'executed_count':len(results),'human_acceptance':False,
             'execution_status':'FAILED' if any(r['execution_status']=='FAILED' for r in results) else 'COMPLETED'}
     write_json(directory/'report.json',report,exclusive=True)
     return {'report':str(directory/'report.json'),**report}

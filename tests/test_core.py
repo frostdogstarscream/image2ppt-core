@@ -188,7 +188,7 @@ class CoreTests(unittest.TestCase):
     def test_canonical_validator_rejects_duplicate_ids(self):
         duplicate=copy.deepcopy(self.ir['nodes'][0]); duplicate['z']=2
         self.ir['nodes'].append(duplicate); write_json(self.input,self.ir)
-        with self.assertRaises(RuntimeError): ArtifactBackend(ROOT).validate(self.input)
+        with self.assertRaisesRegex(RuntimeError, '节点 ID 重复'): ArtifactBackend(ROOT).validate(self.input)
 
     def test_damaged_pptx_is_rejected(self):
         pptx=self.root/'broken.pptx'; pptx.write_bytes(b'not a zip')

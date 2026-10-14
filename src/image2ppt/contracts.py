@@ -116,7 +116,7 @@ class ProbeCase(Record):
 
 class ProbeCases(Record):
     format_version: Literal["1"] = "1"
-    cases: list[ProbeCase]
+    cases: list[ProbeCase] = Field(min_length=1)
 
     @model_validator(mode="after")
     def unique(self):
@@ -134,7 +134,7 @@ class SuitePage(Record):
 
 class RegressionSuite(Record):
     format_version: Literal["1"] = "1"
-    pages: list[SuitePage]
+    pages: list[SuitePage] = Field(min_length=1)
 
     @model_validator(mode="after")
     def unique(self):

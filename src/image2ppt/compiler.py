@@ -86,9 +86,25 @@ class ArtifactBackend:
         result = self.invoke('core_bridge.mjs', 'doctor')
         result.update(python=sys.version, python_executable=sys.executable, node_executable=str(self.node),
                       python_packages={name: importlib.metadata.version(name) for name in ('pydantic', 'Pillow')})
-        paths = list((self.root / 'src/image2ppt').glob('*.py')) + [self.root/'scripts'/name for name in
-                 ('runtime.mjs','ir.mjs','compile.mjs','main.mjs','pptx_xml.py','core_bridge.mjs','render.mjs')]
-        result['implementation_sha256'] = key({p.relative_to(self.root).as_posix(): digest(p) for p in paths})
+        from . import __version__
+        package = Path(__file__).resolve().parent
+        python_files = {p.name: {'path':str(p), 'sha256':digest(p)} for p in sorted(package.glob('*.py'))}
+        for name, module in sorted(sys.modules.copy().items()):
+            if name == 'image2ppt' or name.startswith('image2ppt.'):
+                file = getattr(module, '__file__', None)
+                if file and Path(file).suffix == '.py':
+                    p = Path(file).resolve()
+                    python_files['loaded:'+name] = {'path':str(p), 'sha256':digest(p)}
+        result['python_core'] = {'package_directory':str(package), 'version':__version__, 'files':python_files}
+        result['toolchain_root'] = str(self.root)
+        result['python_core_fingerprint'] = key(result['python_core'])
+        # Include local helpers imported by compiler extensions, not only a fixed list.
+        scripts = [p for p in (self.root/'scripts').rglob('*') if p.suffix in ('.py','.mjs') and '__pycache__' not in p.parts]
+        result['js_compiler_fingerprint'] = key({p.relative_to(self.root).as_posix():digest(p) for p in scripts})
+        result['renderer_fingerprint'] = key({k:result.get(k) for k in ('engine','artifact_version','node_modules')})
+        result['external_helpers_fingerprint'] = key(result.get('helpers', {}))
+        result['implementation_sha256'] = key({k:result[k] for k in (
+            'python_core_fingerprint','js_compiler_fingerprint','renderer_fingerprint','external_helpers_fingerprint')})
         fonts = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts'
         result['font_files'] = {p.name: digest(p) for pattern in ('msyh*.ttc','arial*.ttf') for p in fonts.glob(pattern)} if fonts.exists() else {}
         result['effective_font_resolution'] = 'NOT_VERIFIED; inventory does not prove renderer font selection'

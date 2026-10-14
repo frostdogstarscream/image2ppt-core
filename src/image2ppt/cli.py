@@ -5,7 +5,7 @@ from pathlib import Path
 from .compiler import ArtifactBackend
 from .quality import inspect_pptx, probe
 from .runner import Runner, regress
-from .storage import read_json
+from .storage import read_json, rebuild_index
 
 
 def main(argv=None):
@@ -14,6 +14,7 @@ def main(argv=None):
     parser.add_argument('--timeout',type=float,default=300)
     commands=parser.add_subparsers(dest='command',required=True)
     commands.add_parser('doctor')
+    rebuild=commands.add_parser('rebuild-index'); rebuild.add_argument('--directory',required=True); rebuild.add_argument('--output',required=True)
     replay=commands.add_parser('replay'); inputs=replay.add_mutually_exclusive_group(required=True)
     inputs.add_argument('--ir'); inputs.add_argument('--build'); replay.add_argument('--output',required=True)
     inspect=commands.add_parser('inspect'); inspect.add_argument('--pptx',required=True)
@@ -25,7 +26,9 @@ def main(argv=None):
         import math
         if not math.isfinite(args.timeout) or args.timeout<=0:
             raise ValueError('timeout must be finite and positive')
-        if args.command=='inspect':
+        if args.command=='rebuild-index':
+            result=rebuild_index(args.directory,args.output)
+        elif args.command=='inspect':
             result=inspect_pptx(args.pptx)
         else:
             root=args.project_root

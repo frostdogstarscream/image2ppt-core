@@ -13,6 +13,24 @@ function fixture() {
     nodes:[{id:'title',type:'text',bbox:[20,20,500,80],z:1,evidence_ids:['ev-title'],text:'收入增长 18%',font:{latin:'Arial',ea:'Microsoft YaHei',size_pt:24},color:'222222'}]};
 }
 
+test('rejects duplicate node IDs with the exact business diagnostic',()=>{const x=fixture();x.nodes.push({...structuredClone(x.nodes[0]),z:2});assert.throws(()=>validateIR(x),/节点 ID 重复/);});
+test('requires boolean node and run bold',()=>{
+  for(const value of ['false',0,null]) {
+    const x=fixture();x.nodes[0].bold=value;assert.throws(()=>validateIR(x),/bold 必须为 boolean/);
+    delete x.nodes[0].bold;x.nodes[0].runs=[{text:x.nodes[0].text,bold:value}];assert.throws(()=>validateIR(x),/run.bold 必须为 boolean/);
+  }
+  const x=fixture();x.nodes[0].bold=false;x.nodes[0].runs=[{text:x.nodes[0].text,bold:true}];assert.doesNotThrow(()=>validateIR(x));
+});
+test('rejects unknown semantic fields at each boundary',()=>{
+  for(const change of [x=>x.rotation=45,x=>x.canvas.dpi=96,x=>x.background.opacity=0.5,x=>x.nodes[0].rotation=45,x=>x.nodes[0].font.weight=700,
+    x=>x.nodes[0].runs=[{text:x.nodes[0].text,italic:true}],x=>x.evidence[0].confidence=0.5]) {
+    const x=fixture();change(x);assert.throws(()=>validateIR(x),/未支持字段/);
+  }
+});
+test('rejects null or empty runs instead of silently ignoring them',()=>{
+  for(const value of [null,[],false]) {const x=fixture();x.nodes[0].runs=value;assert.throws(()=>validateIR(x),/runs 必须为非空数组/);}
+});
+
 test('keeps source text and evidence ownership',()=>assert.equal(validateIR(fixture()).owners.get('ev-title'),'title'));
 test('rejects silent number rewriting',()=>{const x=fixture();x.nodes[0].text='收入增长 81%';assert.throws(()=>validateIR(x),/改写源文字/);});
 test('records intentional text changes',()=>{const x=fixture();x.nodes[0].text='收入增长 20%';x.nodes[0].text_override_reason='编辑测试';assert.match(validateIR(x).warnings[0],/编辑测试/);});
