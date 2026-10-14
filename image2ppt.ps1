@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [Parameter(Position=0, Mandatory=$true)]
   [ValidateSet('doctor','demo','prepare','compile','validate','inspect','perturb','test','replay','regress','resume')]
