@@ -1,9 +1,9 @@
 ﻿[CmdletBinding()]
 param(
   [Parameter(Position=0, Mandatory=$true)]
-  [ValidateSet('doctor','demo','prepare','compile','validate','inspect','perturb','test','replay','regress','resume')]
+  [ValidateSet('doctor','demo','prepare','compile','validate','inspect','perturb','test','replay','regress','resume','compose')]
   [string]$Command,
-  [string]$InputPath,
+  [string[]]$InputPath,
   [string]$NodeId,
   [ValidateSet('delete','move','replace')][string]$Action,
   [string]$Value,
@@ -18,11 +18,11 @@ if ($env:IMAGE2PPT_PYTHON) { $pythonExecutable = $env:IMAGE2PPT_PYTHON }
 if ($Command -in @('replay','regress','resume')) {
   if (-not $InputPath) { throw "$Command 需要 -InputPath。" }
   $coreArguments = @((Join-Path $PSScriptRoot 'scripts\core_cli.py'), $Command)
-  if ($Command -eq 'resume') { $coreArguments += @('--run', $InputPath) }
+  if ($Command -eq 'resume') { $coreArguments += @('--run') + $InputPath }
   else {
     $inputOption = if ($Command -eq 'replay') { '--ir' } else { '--suite' }
     if (-not $OutputPath) { $OutputPath = Join-Path $PSScriptRoot 'outputs\core' }
-    $coreArguments += @($inputOption, $InputPath, '--output', $OutputPath)
+    $coreArguments += @($inputOption) + $InputPath + @('--output', $OutputPath)
   }
   & $pythonExecutable -X utf8 @coreArguments
 } elseif ($Command -eq 'prepare') {
@@ -30,9 +30,15 @@ if ($Command -in @('replay','regress','resume')) {
   & $pythonExecutable -X utf8 (Join-Path $PSScriptRoot 'scripts\prepare.py') prepare $InputPath
 } elseif ($Command -eq 'test') {
   & $nodeExecutable --test (Join-Path $PSScriptRoot 'tests\ir.test.mjs')
+} elseif ($Command -eq 'compose') {
+  if (-not $InputPath) { throw 'compose 需要 -InputPath，按页序传入一个或多个 IR。' }
+  $irPaths = @($InputPath | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+  $commandArgs = @((Join-Path $PSScriptRoot 'scripts\compose.mjs')) + $irPaths
+  if ($OutputPath) { $commandArgs += @('--output', $OutputPath) }
+  & $nodeExecutable @commandArgs
 } else {
   $commandArgs = @((Join-Path $PSScriptRoot 'scripts\main.mjs'), $Command)
-  if ($InputPath) { $commandArgs += @('--input', $InputPath) }
+  if ($InputPath) { $commandArgs += @('--input') + $InputPath }
   if ($NodeId) { $commandArgs += @('--node', $NodeId) }
   if ($Action) { $commandArgs += @('--action', $Action) }
   if ($Value) { $commandArgs += @('--value', $Value) }
