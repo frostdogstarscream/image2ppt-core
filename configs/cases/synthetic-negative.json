@@ -1,0 +1,14 @@
+{
+  "format_version": "1",
+  "cases": [
+    {
+      "id": "negative-control-retained-image-text",
+      "action": "delete_text",
+      "targets": ["title"],
+      "related_image": "visual-module",
+      "roi": [730, 340, 400, 76],
+      "expected_solid": "FFFFFF",
+      "synthetic": true
+    }
+  ]
+}

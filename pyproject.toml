@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "image2ppt-core"
+version = "0.1.0"
+description = "Offline replay and evidence-based checks for SlideIR 0.1"
+requires-python = ">=3.12"
+dependencies = ["pydantic==2.13.5", "Pillow==12.3.0"]
+
+[project.scripts]
+image2ppt-core = "image2ppt.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

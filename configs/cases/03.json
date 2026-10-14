@@ -1,0 +1,20 @@
+{
+  "format_version": "1",
+  "cases": [
+    {
+      "id": "F01-delete-native-text",
+      "action": "delete_text",
+      "targets": [
+        "text-072",
+        "text-073"
+      ],
+      "related_image": "image-103",
+      "roi": [
+        1064,
+        472,
+        210,
+        126
+      ]
+    }
+  ]
+}

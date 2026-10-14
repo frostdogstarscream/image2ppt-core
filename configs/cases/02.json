@@ -1,0 +1,37 @@
+{
+  "format_version": "1",
+  "cases": [
+    {
+      "id": "F03-dark-card",
+      "action": "change_fill",
+      "targets": [
+        "shape-011"
+      ],
+      "fill": "172B4D",
+      "related_image": "image-012",
+      "roi": [
+        52,
+        230,
+        418,
+        77
+      ]
+    },
+    {
+      "id": "group-move",
+      "action": "move_group",
+      "targets": [
+        "card-group-015"
+      ],
+      "delta_px": [
+        24.0,
+        16.0
+      ],
+      "roi": [
+        52,
+        230,
+        418,
+        77
+      ]
+    }
+  ]
+}

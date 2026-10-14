@@ -1,0 +1,271 @@
+{
+  "schema_version": "0.1",
+  "source_image": "source/page.png",
+  "source_sha256": "fd11f363d9e34bdedfb3b789e27783fa24bf1d6646237e6c821738bc19ea0542",
+  "canvas": {
+    "source_px": [
+      1280,
+      720
+    ],
+    "target_px": [
+      1280,
+      720
+    ]
+  },
+  "background": {
+    "color": "FFFFFF"
+  },
+  "review_status": "needs_review",
+  "review_notes": [
+    "合成测试页，结构来自测试夹具，未进行真实图片识别评测。",
+    "字体为测试指定字体；尚未在 PowerPoint/WPS 中人工编辑。"
+  ],
+  "evidence": [
+    {
+      "id": "ev-title",
+      "kind": "text",
+      "bbox": [
+        72,
+        52,
+        1100,
+        68
+      ],
+      "text": "2026 年业务规划"
+    },
+    {
+      "id": "ev-subtitle",
+      "kind": "text",
+      "bbox": [
+        74,
+        137,
+        1050,
+        40
+      ],
+      "text": "收入增长 18% · 成本下降 7% · Q4 交付"
+    },
+    {
+      "id": "ev-card-bg",
+      "kind": "shape",
+      "bbox": [
+        72,
+        230,
+        520,
+        298
+      ]
+    },
+    {
+      "id": "ev-card-title",
+      "kind": "text",
+      "bbox": [
+        100,
+        263,
+        455,
+        50
+      ],
+      "text": "交付目标"
+    },
+    {
+      "id": "ev-card-body",
+      "kind": "text",
+      "bbox": [
+        100,
+        342,
+        455,
+        112
+      ],
+      "text": "主要文字可以修改\n简单模块可以移动\n修改之后保留完整内容"
+    },
+    {
+      "id": "ev-visual-bg",
+      "kind": "shape",
+      "bbox": [
+        672,
+        230,
+        520,
+        298
+      ]
+    },
+    {
+      "id": "ev-visual-text",
+      "kind": "text",
+      "bbox": [
+        730,
+        340,
+        400,
+        76
+      ],
+      "text": "复杂视觉模块"
+    },
+    {
+      "id": "ev-footer",
+      "kind": "text",
+      "bbox": [
+        74,
+        628,
+        1100,
+        38
+      ],
+      "text": "合成测试页：仅用于验证工具链，不代表真实图片还原效果。"
+    }
+  ],
+  "assets": [
+    {
+      "id": "visual",
+      "path": "assets/visual.png",
+      "purpose": "module",
+      "sha256": "527d2de876c34b54c49da39dbc5fefcb3b089397be40b769cf73a087e323e506",
+      "contains_evidence_ids": [
+        "ev-visual-bg",
+        "ev-visual-text"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "delivery-card",
+      "member_ids": [
+        "card-bg",
+        "card-title",
+        "card-body"
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "title",
+      "type": "text",
+      "bbox": [
+        72,
+        52,
+        1100,
+        68
+      ],
+      "z": 10,
+      "text": "2026 年业务规划",
+      "font": {
+        "latin": "Arial",
+        "ea": "Microsoft YaHei",
+        "size_pt": 32
+      },
+      "bold": true,
+      "color": "172B4D",
+      "evidence_ids": [
+        "ev-title"
+      ]
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "bbox": [
+        74,
+        137,
+        1050,
+        40
+      ],
+      "z": 20,
+      "text": "收入增长 18% · 成本下降 7% · Q4 交付",
+      "font": {
+        "latin": "Arial",
+        "ea": "Microsoft YaHei",
+        "size_pt": 20
+      },
+      "color": "536479",
+      "evidence_ids": [
+        "ev-subtitle"
+      ]
+    },
+    {
+      "id": "card-bg",
+      "type": "shape",
+      "geometry": "rect",
+      "bbox": [
+        72,
+        230,
+        520,
+        298
+      ],
+      "z": 30,
+      "fill": "EAF2FA",
+      "evidence_ids": [
+        "ev-card-bg"
+      ]
+    },
+    {
+      "id": "card-title",
+      "type": "text",
+      "bbox": [
+        100,
+        263,
+        455,
+        50
+      ],
+      "z": 40,
+      "text": "交付目标",
+      "font": {
+        "latin": "Arial",
+        "ea": "Microsoft YaHei",
+        "size_pt": 24
+      },
+      "bold": true,
+      "color": "172B4D",
+      "evidence_ids": [
+        "ev-card-title"
+      ]
+    },
+    {
+      "id": "card-body",
+      "type": "text",
+      "bbox": [
+        100,
+        342,
+        455,
+        112
+      ],
+      "z": 50,
+      "text": "主要文字可以修改\n简单模块可以移动\n修改之后保留完整内容",
+      "font": {
+        "latin": "Arial",
+        "ea": "Microsoft YaHei",
+        "size_pt": 20
+      },
+      "color": "26384B",
+      "evidence_ids": [
+        "ev-card-body"
+      ]
+    },
+    {
+      "id": "footer",
+      "type": "text",
+      "bbox": [
+        74,
+        628,
+        1100,
+        38
+      ],
+      "z": 80,
+      "text": "合成测试页：仅用于验证工具链，不代表真实图片还原效果。",
+      "font": {
+        "latin": "Arial",
+        "ea": "Microsoft YaHei",
+        "size_pt": 16
+      },
+      "color": "536479",
+      "evidence_ids": [
+        "ev-footer"
+      ]
+    },
+    {
+      "id": "visual-module",
+      "type": "image",
+      "bbox": [
+        672,
+        230,
+        520,
+        298
+      ],
+      "z": 60,
+      "asset_id": "visual",
+      "evidence_ids": []
+    }
+  ]
+}

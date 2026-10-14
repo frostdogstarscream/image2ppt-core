@@ -1,0 +1,5 @@
+interface:
+  display_name: "image2PPT 图片还原"
+  short_description: "用 Codex 理解幻灯片图片，保留原文和布局，生成可编辑 PPT 与实际预览"
+  default_prompt: "使用 $image2ppt 将这张幻灯片图片还原为可编辑 PPT，保留原文与布局，并检查实际导出文件。"
+
