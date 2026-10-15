@@ -23,3 +23,6 @@ exports/*
 # Private business input; must never enter VCS or a public CI checkout.
 /PPT图片/
 /PPT图片.zip
+
+# Isolated agent worktrees live here.
+.claude/worktrees/
