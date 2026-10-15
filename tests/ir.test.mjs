@@ -61,3 +61,32 @@ test('authoring sidecar is optional but must describe the exact IR bytes',async(
   await assert.rejects(assertAuthoring(ir),/不是合法 JSON/);
 });
 
+// The two skill flavors have separate maintained sources, but two mirrors must
+// never drift: the installed Codex copy, and the protocol reference, which is
+// flavor-independent. Nothing else enforced this, so an edit to one side could
+// ship a stale skill silently.
+test('skill copies stay byte-identical to their maintained sources',async()=>{
+  const pairs=[
+    ['../skills/image2ppt/SKILL.md','../.agents/skills/image2ppt/SKILL.md'],
+    ['../skills/image2ppt/references/slideir.md','../.agents/skills/image2ppt/references/slideir.md'],
+    ['../skills/image2ppt/references/core.md','../.agents/skills/image2ppt/references/core.md'],
+    ['../skills/image2ppt/agents/openai.yaml','../.agents/skills/image2ppt/agents/openai.yaml'],
+    ['../skills/image2ppt/references/slideir.md','../skills/image2ppt-claude/references/slideir.md'],
+  ];
+  for(const [left,right] of pairs){
+    const a=await fs.readFile(fileURLToPath(new URL(left,import.meta.url)));
+    const b=await fs.readFile(fileURLToPath(new URL(right,import.meta.url)));
+    assert.ok(a.equals(b),`${left} 与 ${right} 不再逐字节一致；改完维护源后请同步镜像`);
+  }
+});
+
+// The policy must not silently revert to cropping whole complex regions: the
+// unconditional instruction was the root cause of uneditable text.
+test('the skill still asks for decomposition rather than whole-region crops',async()=>{
+  for(const file of ['../skills/image2ppt/SKILL.md','../skills/image2ppt-claude/SKILL.md']){
+    const text=await fs.readFile(fileURLToPath(new URL(file,import.meta.url)),'utf8');
+    assert.doesNotMatch(text,/Keep complex visual modules as cropped images/,'整块裁图的无条件规则不得回归');
+    assert.match(text,/[Dd]ecompos/,'应保留下拆解优先的要求');
+  }
+});
+

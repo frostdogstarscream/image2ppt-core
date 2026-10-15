@@ -1,6 +1,6 @@
 # SlideIR 0.1
 
-This protocol is a single-page reconstruction contract. It accepts only `text`, `shape`, and `image` nodes, plus real groups. Tables/charts are explicit image fallbacks in this version. The compiler rejects unsupported types rather than silently skipping them.
+This protocol is a single-page reconstruction contract. It accepts `text`, `shape`, and `image` nodes, plus real groups; native `table` and `chart` nodes are accepted only in builds whose `doctor` reports `native_tables` / `native_charts` as supported, and are explicit image fallbacks everywhere else. The compiler rejects unsupported types rather than silently skipping them.
 
 ```json
 {
@@ -40,10 +40,10 @@ This protocol is a single-page reconstruction contract. It accepts only `text`, 
 ## Evidence ownership and assets
 
 - Inventory source content in `evidence`. Each item needs one owner: a node's `evidence_ids`, an image asset's `contains_evidence_ids` through its node, or `unresolved_evidence_ids`. Duplicate ownership and omitted evidence fail validation. An unresolved item requires `needs_review`; it is not permission to omit it from a delivered result.
-- A text node cannot silently change source evidence wording. Native text plus an image that still contains that evidence is rejected.
-- Image node: `{id,type:"image",bbox,z,asset_id,evidence_ids:[]}`. Asset: `{id,path,contains_evidence_ids:[],purpose:"module"|"cleaned_background",sha256}`. Paths are local relative paths confined to the run directory; URLs and absolute/traversal paths are rejected. SHA-256 is checked before embedding.
+- A text node cannot silently change source evidence wording. Native text plus an image that still contains that evidence is prohibited. This rule is not mechanically enforced: validation compares evidence IDs, never overlapping pixels, so a crop whose pixels still show a text a sibling native node re-emits will pass every check. Honouring it is the author's responsibility, and the quality report will not detect a violation.
+- Image node: `{id,type:"image",bbox,z,asset_id,evidence_ids:[]}`. Asset: `{id,path,contains_evidence_ids:[],purpose:"module"|"cleaned_background",sha256}`. Paths are local relative paths confined to the run directory; URLs and absolute/traversal paths are rejected. SHA-256 is checked before embedding. A decomposed region is still `purpose:"module"`; its reduced extent is expressed by `contains_evidence_ids`, not by a new purpose.
 - `background.asset_id` may reference a cleaned background. It is compiled beneath all nodes. Retained content ownership is validated. Declaring a background clean does not establish that it was successfully repaired; compare source and perturbation previews.
-- Every asset must be used exactly once. A source crop of a complex module owns all evidence it still contains. Crop from the preserved page; do not redraw logos or photos.
+- Every asset must be used exactly once. A crop owns the evidence still visible in it, and `contains_evidence_ids` may be any non-empty subset of the evidence inside its `bbox` — it need not own everything the rectangle covers. That subset is how a decomposed region is expressed: the crop keeps only what must stay raster (a photo, an illustration, a logo, an icon, or a background that cannot be rebuilt) while sibling native text and shape nodes own the rest. No two owners may claim the same evidence ID. Crop from the preserved page; do not redraw logos or photos.
 - Only PNG and JPEG are embedded. Convert other formats during preparation.
 
 ## Groups and review
