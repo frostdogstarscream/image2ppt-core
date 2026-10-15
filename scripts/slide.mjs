@@ -40,6 +40,20 @@ export async function buildSlide(presentation, {ir, info}, pageLabel) {
         .assign({textStyle:{typeface:node.font.ea,fontSize:node.font.size_pt*96/72}});
       continue;
     }
+    if (node.type==='chart') {
+      // Name goes on the handle, not in the options — see the table branch.
+      const typeface={typeface:node.font.ea};
+      const chart=slide.charts.add(node.chart_type,{position:position(node.bbox),
+        ...(node.title!==undefined?{title:node.title,titleTextStyle:typeface}:{}),
+        categories:node.categories,
+        series:node.series.map(s=>({name:s.name,values:s.values})),
+        xAxis:{textStyle:typeface},yAxis:{textStyle:typeface},
+        ...(node.has_legend!==undefined?{hasLegend:node.has_legend}:{}),
+        ...(node.legend_position?{legend:{position:node.legend_position,textStyle:typeface}}
+          :node.has_legend?{legend:{textStyle:typeface}}:{})});
+      chart.name=node.id;
+      continue;
+    }
     const shape=slide.shapes.add({geometry:node.type==='text'?'textbox':node.geometry,name:node.id,position:position(node.bbox),
       fill:node.type==='text' || node.fill==='none' ? 'none' : node.fill_gradient ? {
         type:'gradient',gradientKind:'linear',angleDeg:node.fill_gradient.angle_deg,

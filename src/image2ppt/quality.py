@@ -105,7 +105,11 @@ def inspect_pptx(file):
                     if name in names or oid in ids:
                         raise ValueError('duplicate object identity on slide')
                     names.add(name); ids.add(oid)
-                    transform = element.find('p:grpSpPr/a:xfrm' if kind == 'grpSp' else 'p:spPr/a:xfrm', NS)
+                    # A graphicFrame (table or chart) carries p:xfrm directly, not
+                    # p:spPr/a:xfrm; reading the wrong path leaves bbox_emu empty
+                    # and breaks the probe geometry.
+                    transform_path = 'p:grpSpPr/a:xfrm' if kind == 'grpSp' else 'p:xfrm' if kind == 'graphicFrame' else 'p:spPr/a:xfrm'
+                    transform = element.find(transform_path, NS)
                     transform_data = {} if transform is None else {n.tag.rsplit('}',1)[-1]: {k:int(v) for k,v in n.attrib.items()} for n in transform}
                     off, ext = transform_data.get('off', {}), transform_data.get('ext', {})
                     obj = {'name':name,'object_id':oid,'kind':kind,'parent_group':parent_group,'z':len(objects),
@@ -157,7 +161,7 @@ def evaluate(ir, objects):
     for node in ir['nodes']:
         obj=actual.get(node['id'])
         if obj is not None:
-            expected_kind='pic' if node['type']=='image' else 'sp'
+            expected_kind={'image':'pic','table':'graphicFrame','chart':'graphicFrame'}.get(node['type'],'sp')
             valid=obj['kind']==expected_kind and (node['type']!='text' or obj['text'] is not None)
             results.append(check('object_type:'+node['id'],'PASS' if valid else 'FAIL','IR type versus actual OOXML object kind',
                                  [node['id']],expected=expected_kind,actual=obj['kind']))

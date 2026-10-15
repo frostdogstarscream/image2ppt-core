@@ -26,3 +26,7 @@ exports/*
 
 # Isolated agent worktrees live here.
 .claude/worktrees/
+
+# Staging dirs the finalizer leaves in the workspace when it snapshots
+# literal chart data into an embedded workbook.
+.chart-data-*/
