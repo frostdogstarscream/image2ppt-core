@@ -32,9 +32,19 @@ export const IR_NODE_TYPES = Object.freeze([
   ...(COMPILER.native_charts ? ['chart'] : []),
 ]);
 
-// Shape geometries the IR accepts. Narrower than the engine's preset catalog on
-// purpose: every entry is one this pipeline has actually compiled.
-export const IR_SHAPE_GEOMETRIES = Object.freeze(['rect', 'roundRect', 'ellipse', 'line']);
+// Shape geometries the IR accepts. Still narrower than the engine's preset
+// catalog on purpose — every entry is one this pipeline has compiled and one
+// the engine probe confirms, so a version that drops a preset shows up in
+// doctor rather than at compile time. The flow-diagram entries earn their place:
+// without them a chevron ribbon has to be cropped whole, and the text sitting on
+// it can never become editable.
+export const IR_SHAPE_GEOMETRIES = Object.freeze([
+  'rect', 'roundRect', 'ellipse', 'line',
+  // ribbons and connectors
+  'chevron', 'pentagon', 'rightArrow', 'leftArrow',
+  // common slide presets
+  'trapezoid', 'parallelogram', 'hexagon', 'diamond', 'triangle',
+]);
 
 export const IR_EVIDENCE_KINDS = Object.freeze(['text', 'shape', 'image']);
 
@@ -81,6 +91,14 @@ export function probeEngine(rt) {
     report.detail = String((error && error.message) || error);
     return report;
   }
+  // Every geometry the IR accepts is exercised here, so a preset the installed
+  // build dropped is reported by doctor instead of surfacing as a failed
+  // compile halfway through authoring a page.
+  report.geometry_count = IR_SHAPE_GEOMETRIES.length;
+  report.geometry_unavailable = IR_SHAPE_GEOMETRIES.filter(geometry => attempt(() => slide.shapes.add({
+    geometry, name: 'probe_' + geometry, position: { left: 0, top: 0, width: 80, height: 40 },
+    fill: '#4477AA', line: { fill: 'none', width: 0 },
+  })) !== true);
   report.tables = attempt(() => slide.tables.add({ rows: 1, columns: 1, left: 0, top: 0, width: 120, height: 40, values: [['x']] }));
   report.charts = attempt(() => slide.charts.add('bar', {
     position: { left: 0, top: 0, width: 240, height: 180 },

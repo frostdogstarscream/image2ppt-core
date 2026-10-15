@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { assertAuthoring, loadIR, localFile, sha256, validateIR } from '../scripts/ir.mjs';
-import { COMPILER, IR_NODE_TYPES, capabilities } from '../scripts/capabilities.mjs';
+import { COMPILER, IR_NODE_TYPES, IR_SHAPE_GEOMETRIES, capabilities } from '../scripts/capabilities.mjs';
 
 function fixture() {
   return {schema_version:'0.1',canvas:{source_px:[1280,720],target_px:[1280,720]},background:{color:'FFFFFF'},
@@ -92,6 +92,24 @@ test('compiler capability flags agree with the code that implements them',async(
   for(const [flag,marker] of [['native_tables','tables.add'],['native_charts','charts.add']]){
     assert.equal(COMPILER[flag],builder.includes(marker),
       `${flag} 声明为 ${COMPILER[flag]}，但 slide.mjs ${builder.includes(marker)?'含':'不含'} ${marker}；能力表必须与实现同步`);
+  }
+});
+
+// The shape catalogue is a contract between the validator and the protocol
+// reference. Widening one without the other either rejects a shape the author
+// was told to use, or advertises one the compiler will refuse.
+test('the documented shape geometries match the ones the IR accepts',async()=>{
+  const doc=await fs.readFile(fileURLToPath(new URL('../skills/image2ppt/references/slideir.md',import.meta.url)),'utf8');
+  for(const geometry of IR_SHAPE_GEOMETRIES){
+    assert.match(doc,new RegExp('`'+geometry+'`'),`slideir.md 未记录几何 ${geometry}`);
+  }
+});
+
+// Dropping these silently would put the flow-diagram class back out of reach,
+// which is the regression this catalogue was widened to fix.
+test('the flow-diagram geometries stay in the catalogue',()=>{
+  for(const geometry of ['chevron','pentagon','rightArrow','leftArrow']){
+    assert.ok(IR_SHAPE_GEOMETRIES.includes(geometry),`${geometry} 必须保留在形状白名单里`);
   }
 });
 
