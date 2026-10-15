@@ -227,6 +227,9 @@ test('the skill asks for per-sub-region decomposition, not whole-region crops',a
     assert.match(text,/[Dd]ecompos/,`${file} 应保留下拆解要求`);
     assert.match(text,/sub-region/,`${file} 应按子区域判定`);
     assert.match(text,/part native and part crop/,`${file} 应说明半原生半裁剪是正常结果`);
+    // Decomposition without the gate produced a deck measurably worse than the
+    // crops it replaced; the gate is what keeps a rebuild honest.
+    assert.match(text,/fidelity_gate/,`${file} 应要求用保真度闸门判定每一块重建`);
   }
 });
 
