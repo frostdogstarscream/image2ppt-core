@@ -3,7 +3,7 @@ import argparse
 import hashlib
 import json
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -62,6 +62,17 @@ def prepare(source):
             "evidence": [], "assets": [], "groups": [], "nodes": [],
         }
         save_json(run / "slideir.json", ir)
+        # Authoring sidecar. Filling in the IR invalidates the hash stamped here,
+        # so the author must re-record; replay refuses a record that no longer
+        # describes its IR. Runs prepared before this existed have no sidecar and
+        # still replay.
+        save_json(run / "authoring.json", {
+            "format_version": "1", "tool": "unrecorded", "model_id": "unrecorded",
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "ir_sha256": digest(run / "slideir.json"),
+            "node_decisions": {}, "font_candidates": [], "unresolved_ids": [],
+            "review_notes": ["准备阶段占位。完成 SlideIR 后必须更新 ir_sha256、tool 与 model_id。"],
+        })
         metadata = {"source_name": source.name, "original_sha256": digest(source), "page_sha256": digest(page),
                     "original_size": original_size, "source_px": [w, h], "exif_orientation": orientation,
                     "analysis_px": list(analysis.size), "analysis_to_page_scale": [w / analysis.width, h / analysis.height],

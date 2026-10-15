@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
 import { runtime, ROOT, writeJson } from './runtime.mjs';
-import { loadIR, sha256 } from './ir.mjs';
+import { assertAuthoring, loadIR, sha256 } from './ir.mjs';
 import { renderPptx } from './render.mjs';
 import { buildSlide } from './slide.mjs';
 import { pythonJson } from './compile.mjs';
@@ -21,7 +21,7 @@ const pageNumber = ir => {
 export async function compose(files, outputRoot) {
   if (!files || !files.length) throw new Error('compose 需要至少一个 IR。');
   const loaded = [];
-  for (const file of files) loaded.push(await loadIR(file));
+  for (const file of files) { await assertAuthoring(file); loaded.push(await loadIR(file)); }
 
   const [sw, sh] = loaded[0].ir.canvas.source_px, [tw, th] = loaded[0].ir.canvas.target_px;
   for (const {ir, file} of loaded) {

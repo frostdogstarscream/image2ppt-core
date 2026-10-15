@@ -11,11 +11,41 @@ class FileRecord(Record):
     bytes: int = Field(ge=0)
 
 
+class AuthoringRecord(Record):
+    """Provenance for a hand-authored SlideIR.
+
+    The model step runs outside this project, so the only thing the pipeline can
+    check is that the record still describes the IR it claims to: `ir_sha256`
+    must equal the digest of the neighbouring slideir.json. Editing the IR
+    without re-recording is the failure this exists to catch.
+
+    Three fields are recorded but not yet interpreted by the pipeline; they are
+    the author's own record, kept so a reviewer can see the reasoning behind a
+    page: `node_decisions` maps a node id to why it is native text or shape, an
+    image fallback, or grouped as it is; `font_candidates` lists the typefaces
+    considered before the one actually used; `unresolved_ids` names what the
+    author could not settle from the source alone.
+
+    `created_at` is when this record was written, not when the page was
+    prepared. Refresh it together with `ir_sha256` when you re-record.
+    """
+    format_version: Literal["1"] = "1"
+    tool: str = Field(min_length=1, max_length=80)
+    model_id: str = Field(min_length=1, max_length=120)
+    created_at: str = Field(min_length=1, max_length=40)
+    ir_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    node_decisions: dict[str, str] = Field(default_factory=dict)
+    font_candidates: list[str] = Field(default_factory=list)
+    unresolved_ids: list[str] = Field(default_factory=list)
+    review_notes: list[str] = Field(default_factory=list)
+
+
 class ProviderResult(Record):
     kind: Literal["manual", "replay"]
     ir_file: str
     previous_environment: dict[str, Any] | None = None
     model_record: Literal["not_provided"] = "not_provided"
+    authoring: AuthoringRecord | None = None
 
 
 class CheckResult(Record):

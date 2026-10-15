@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { runtime, ROOT, writeJson, saveBlob } from './runtime.mjs';
-import { loadIR, sha256 } from './ir.mjs';
+import { assertAuthoring, loadIR, sha256 } from './ir.mjs';
 import { renderPptx } from './render.mjs';
 import { buildSlide } from './slide.mjs';
 
@@ -14,7 +14,10 @@ export function pythonJson(rt, args) {
   return JSON.parse(result.stdout);
 }
 
-export async function compile(file) {
+// requireAuthoring is off only for the diagnostic `perturb` path, which edits a
+// throwaway copy of the IR and therefore cannot describe a recorded revision.
+export async function compile(file, {requireAuthoring=true}={}) {
+  if (requireAuthoring) await assertAuthoring(file);
   const data=await loadIR(file), {ir,info}=data;
   if (ir.unresolved_evidence_ids?.length) throw new Error('还有未处理源内容；先用图片回退保留内容，再导出。');
   const rt=await runtime();
