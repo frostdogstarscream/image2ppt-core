@@ -110,13 +110,19 @@ test('every native capability lands in exactly one doctor list',()=>{
   assert.equal(new Set(not_implemented).size,not_implemented.length,'not_implemented 不应重复');
 });
 
-// The policy must not silently revert to cropping whole complex regions: the
-// unconditional instruction was the root cause of uneditable text.
-test('the skill still asks for decomposition rather than whole-region crops',async()=>{
-  for(const file of ['../skills/image2ppt/SKILL.md','../skills/image2ppt-claude/SKILL.md']){
+// The policy must not silently revert to cropping whole complex regions. Two
+// wordings have caused that, and both must stay gone: the original
+// unconditioned instruction, and the escape hatch that let one resisting
+// sub-region collapse an entire region back into a single crop.
+test('the skill asks for per-sub-region decomposition, not whole-region crops',async()=>{
+  const files=['../skills/image2ppt/SKILL.md','../skills/image2ppt-claude/SKILL.md'];
+  for(const file of files){
     const text=await fs.readFile(fileURLToPath(new URL(file,import.meta.url)),'utf8');
     assert.doesNotMatch(text,/Keep complex visual modules as cropped images/,'整块裁图的无条件规则不得回归');
-    assert.match(text,/[Dd]ecompos/,'应保留下拆解优先的要求');
+    assert.doesNotMatch(text,/Only when the background itself cannot be rebuilt does the whole region/,'整块保留的逃生舱不得回归');
+    assert.match(text,/[Dd]ecompos/,`${file} 应保留下拆解要求`);
+    assert.match(text,/sub-region/,`${file} 应按子区域判定`);
+    assert.match(text,/part native and part crop/,`${file} 应说明半原生半裁剪是正常结果`);
   }
 });
 
