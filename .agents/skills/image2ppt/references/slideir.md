@@ -37,6 +37,16 @@ This protocol is a single-page reconstruction contract. It accepts `text`, `shap
 - Shape `geometry` accepts `rect`, `roundRect`, `ellipse`, `line`, the flow-diagram presets `chevron`, `pentagon`, `rightArrow`, `leftArrow`, and the common presets `trapezoid`, `parallelogram`, `hexagon`, `diamond`, `triangle`. That is the whole list: the engine carries many more presets, but this pipeline only accepts what it has compiled and what `doctor` confirms the installed build still provides. `fill` is a six-digit RGB color or `none`, `line` is `{color,width_pt}` or omitted. Decorations recreated from a source are still evidence-backed shapes.
 - Optional `corner_radius_px` is a source-pixel radius, converted with the page geometry. Optional `fill_gradient` is `{angle_deg,stops:[{offset:0,color:"FFF8FA"},{offset:100000,color:"FFF0F4"}]}`; offsets are strictly increasing from 0 to 100000. These are native editable shape properties.
 
+## Tables
+
+A `table` node is a native PowerPoint table. It is accepted only where `doctor` reports `native_tables`, and is an image fallback everywhere else.
+
+- `{id,type:"table",bbox,z,evidence_ids,rows,font}` plus optional `column_tracks`, `header_row`, `banded_rows`. `rows` is the whole grid as a 2D array of strings or finite numbers; the row and column counts follow from it. A cell string is at most 2048 characters, the grid at most 2000 rows by 100 columns, and one page may hold at most 100 tables — the same bounds the delivered package is validated against, so an IR that validates here cannot produce a table the finalizer refuses.
+- `font` is required and has the same shape as a text node's: `{latin,ea,size_pt}`. The engine would otherwise leave the cells on its own default family, which no build approves; declaring the font is the author's choice, and `ea` is the one applied.
+- Optional `column_tracks` is one `{mode:"fr"|"fixed",value}` per column, matching the column count; `fixed` values are target pixels.
+- A table node carries its source region as one `shape` evidence item. Cell text is not separately evidence-backed; `evidence` describes source content classes, and nothing compares a cell string to an evidence string.
+- A table may be laid out taller than its `bbox`; that is reported as `native_table_overflow`, which is a review diagnostic and does not fail the build.
+
 ## Evidence ownership and assets
 
 - Inventory source content in `evidence`. Each item needs one owner: a node's `evidence_ids`, an image asset's `contains_evidence_ids` through its node, or `unresolved_evidence_ids`. Duplicate ownership and omitted evidence fail validation. An unresolved item requires `needs_review`; it is not permission to omit it from a delivered result.

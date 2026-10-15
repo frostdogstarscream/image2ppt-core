@@ -21,6 +21,25 @@ export async function buildSlide(presentation, {ir, info}, pageLabel) {
   if (ir.background.asset_id) await addImage('background-image',info.assets.get(ir.background.asset_id),[0,0,w,h]);
   for (const node of info.ordered) {
     if (node.type==='image') { await addImage(node.id,info.assets.get(node.asset_id),node.bbox); continue; }
+    if (node.type==='table') {
+      // The name must be set on the handle: passing `name` in the add options is
+      // silently ignored, and the OOXML adapter looks objects up by it.
+      const table=slide.tables.add({rows:node.rows.length,columns:node.rows[0].length,...position(node.bbox),
+        values:node.rows,
+        ...(node.column_tracks?{columnTracks:node.column_tracks.map(t=>({mode:t.mode,value:t.value}))}:{})});
+      if (node.header_row!==undefined || node.banded_rows!==undefined) {
+        table.styleOptions={...(node.header_row!==undefined?{headerRow:node.header_row}:{}),
+          ...(node.banded_rows!==undefined?{bandedRows:node.banded_rows}:{})};
+      }
+      table.name=node.id;
+      // Cells default to Calibri otherwise, which the layout validator rejects
+      // as an unapproved family; the declared font is the author's choice.
+      // The cell style key is `typeface`; passing latin/ea here is silently
+      // ignored, and `fontSize` is in pixels.
+      table.cells.block({row:0,column:0,rowCount:node.rows.length,columnCount:node.rows[0].length})
+        .assign({textStyle:{typeface:node.font.ea,fontSize:node.font.size_pt*96/72}});
+      continue;
+    }
     const shape=slide.shapes.add({geometry:node.type==='text'?'textbox':node.geometry,name:node.id,position:position(node.bbox),
       fill:node.type==='text' || node.fill==='none' ? 'none' : node.fill_gradient ? {
         type:'gradient',gradientKind:'linear',angleDeg:node.fill_gradient.angle_deg,

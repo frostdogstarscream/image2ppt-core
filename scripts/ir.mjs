@@ -40,7 +40,8 @@ export function validateIR(ir) {
     expect(IR_NODE_TYPES.includes(node?.type), `${node?.id} 不支持的节点类型 ${node?.type}。`);
     const common='id type bbox z evidence_ids';
     const byType={text:'text font bold color align wrap line_spacing_pt runs text_override_reason source_text_bbox',
-      shape:'geometry fill line corner_radius_px fill_gradient',image:'asset_id'};
+      shape:'geometry fill line corner_radius_px fill_gradient',image:'asset_id',
+      table:'rows font column_tracks header_row banded_rows'};
     fields(node,common+' '+(byType[node?.type]||''),'node');
     if(node.type==='text') {
       fields(node.font,'latin ea size_pt','font');
@@ -137,8 +138,37 @@ export function validateIR(ir) {
         expect(g.stops.every(s=>Number.isFinite(s.offset) && s.offset>=0 && s.offset<=100000 && color(s.color)), `${node.id} 渐变色标无效。`);
         expect(g.stops[0].offset===0 && g.stops.at(-1).offset===100000 && g.stops.every((s,i)=>!i || s.offset>g.stops[i-1].offset), `${node.id} 渐变色标顺序无效。`);
       }
-    } else useAsset(node.asset_id,node.id);
+    } else if (node.type==='table') {
+      // Bounds mirror native_table_arithmetic_gate.py so a hand-authored IR can
+      // never produce a table the finalizer's gate will refuse.
+      const rows=node.rows;
+      expect(array(rows) && rows.length>=1 && rows.length<=2000, `${node.id} 表格行数须为 1—2000。`);
+      const cols=rows[0].length;
+      expect(Number.isInteger(cols) && cols>=1 && cols<=100, `${node.id} 表格列数须为 1—100。`);
+      expect(rows.every(r=>array(r) && r.length===cols), `${node.id} 表格各行长度必须一致。`);
+      expect(rows.every(r=>r.every(c=>(typeof c==='string' && c.length<=2048) || (typeof c==='number' && Number.isFinite(c)))),
+        `${node.id} 单元格须为字符串（≤2048 字符）或有限数字。`);
+      // A table must declare its font: the engine would otherwise default the
+      // cells to Calibri, which is not an approved family and fails the layout
+      // validator after a successful build.
+      expect(node.font && ['latin','ea'].every(k=>typeof node.font[k]==='string' && node.font[k].trim()), `${node.id} 缺少字体。`);
+      expect(Number.isFinite(node.font.size_pt) && node.font.size_pt>0 && node.font.size_pt<=400, `${node.id} 字号无效。`);
+      fields(node.font,'latin ea size_pt','font');
+      if (node.column_tracks!==undefined) {
+        expect(array(node.column_tracks) && node.column_tracks.length===cols, `${node.id} column_tracks 长度必须等于列数。`);
+        for (const track of node.column_tracks) {
+          expect(track && typeof track==='object' && !array(track), `${node.id} column_track 必须为对象。`);
+          fields(track,'mode value','column_track');
+          expect(['fr','fixed'].includes(track.mode) && Number.isFinite(track.value) && track.value>0, `${node.id} column_track 无效。`);
+        }
+      }
+      if (node.header_row!==undefined) expect(typeof node.header_row==='boolean', `${node.id} header_row 必须为 boolean。`);
+      if (node.banded_rows!==undefined) expect(typeof node.banded_rows==='boolean', `${node.id} banded_rows 必须为 boolean。`);
+    } else if (node.type==='image') {
+      useAsset(node.asset_id,node.id);
+    }
   }
+  expect(ir.nodes.filter(n=>n.type==='table').length<=100, '一页最多 100 个表格。');
   expect(usedAssets.size===assets.size, '存在未使用资产；请移除旧资产声明。');
   const unresolved = ir.unresolved_evidence_ids || [];
   claim(unresolved,'unresolved');

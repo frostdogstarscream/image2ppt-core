@@ -81,6 +81,52 @@ test('skill copies stay byte-identical to their maintained sources',async()=>{
   }
 });
 
+// A table node. The bounds below mirror native_table_arithmetic_gate.py, so an
+// IR that validates here cannot produce a table the finalizer later refuses.
+function tableFixture(overrides={}) {
+  const x=fixture();
+  x.evidence.push({id:'ev-tbl',kind:'shape',bbox:[20,120,500,120]});
+  x.nodes.push({id:'tbl',type:'table',bbox:[20,120,500,120],z:2,evidence_ids:['ev-tbl'],
+    rows:[['指标','本期'],['收入','1240']],
+    font:{latin:'Arial',ea:'Microsoft YaHei',size_pt:14},...overrides});
+  return x;
+}
+
+test('a table node validates and keeps its own evidence',()=>{
+  assert.equal(validateIR(tableFixture()).owners.get('ev-tbl'),'tbl');
+});
+
+test('a table node no longer falls through to the image-asset path',()=>{
+  // The branch chain used to end in `else useAsset(node.asset_id,...)`, which
+  // dereferenced an undefined asset_id for any other node type.
+  assert.doesNotThrow(()=>validateIR(tableFixture()));
+});
+
+test('table bounds mirror the finalizer gate',()=>{
+  const long=tableFixture(); long.nodes.at(-1).rows[0][0]='x'.repeat(2049);
+  assert.throws(()=>validateIR(long),/单元格/);
+  const cols=tableFixture(); cols.nodes.at(-1).rows=[Array.from({length:101},()=>'c')];
+  assert.throws(()=>validateIR(cols),/列数/);
+  const ragged=tableFixture(); ragged.nodes.at(-1).rows=[['a','b'],['c']];
+  assert.throws(()=>validateIR(ragged),/各行长度/);
+  const empty=tableFixture(); empty.nodes.at(-1).rows=[];
+  assert.throws(()=>validateIR(empty),/行数/);
+});
+
+test('a table must declare its font and well-formed column tracks',()=>{
+  const noFont=tableFixture(); delete noFont.nodes.at(-1).font;
+  assert.throws(()=>validateIR(noFont),/缺少字体/);
+  const badTrack=tableFixture(); badTrack.nodes.at(-1).column_tracks=[{mode:'pct',value:1},{mode:'fr',value:1}];
+  assert.throws(()=>validateIR(badTrack),/column_track/);
+  const short=tableFixture(); short.nodes.at(-1).column_tracks=[{mode:'fr',value:1}];
+  assert.throws(()=>validateIR(short),/column_tracks 长度/);
+});
+
+test('a table node rejects unknown fields like every other node type',()=>{
+  const x=tableFixture(); x.nodes.at(-1).merge=true;
+  assert.throws(()=>validateIR(x),/未支持字段/);
+});
+
 // A capability list is only honest if it is derived from the code rather than
 // maintained beside it. These three hold the derivation together: the IR schema
 // follows the flags, the flags follow the builder, and every native flag lands

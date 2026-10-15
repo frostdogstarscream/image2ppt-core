@@ -52,12 +52,15 @@ export async function compose(files, outputRoot) {
   const packageInfo = pythonJson(rt, adaptArgs);
 
   const { finalizePresentation } = await import(pathToFileURL(path.join(rt.skill,'container_tools/artifact_tool_utils.mjs')).href);
+  // Slide numbers, not IR paths: the finalizer keys on the delivered deck.
+  const tableOwners = loaded.flatMap(({ir}, index) => ir.nodes.some(n=>n.type==='table') ? [index+1] : []);
   await finalizePresentation({workspaceDir:ROOT,candidatePath:candidate,finalPath:final,pythonExecutable:rt.python,
-    explicitTotalSlideCount:loaded.length,requiredNativeTableOwnerSlides:[],requiredNativeChartOwnerSlides:[],
+    explicitTotalSlideCount:loaded.length,requiredNativeTableOwnerSlides:tableOwners,requiredNativeChartOwnerSlides:[],
     integrityValidatorPath:path.join(rt.skill,'container_tools/inspect_presentation_package_integrity.py'),
     layoutValidatorPath:path.join(rt.skill,'container_tools/inspect_presentation_layout_geometry.py'),
-    layoutArgs:['--expected-slide-size-emu',`${Math.round(tw*9525)},${Math.round(th*9525)}`],
-    fontPolicy:{basis:'design',families:[...new Set(loaded.flatMap(({ir})=>ir.nodes.filter(n=>n.type==='text').flatMap(n=>[n.font.latin,n.font.ea])))]},
+    layoutArgs:['--expected-slide-size-emu',`${Math.round(tw*9525)},${Math.round(th*9525)}`,
+      ...tableOwners.flatMap(n=>['--require-native-table-slide',String(n)])],
+    fontPolicy:{basis:'design',families:[...new Set(loaded.flatMap(({ir})=>ir.nodes.filter(n=>n.type==='text'||n.type==='table').flatMap(n=>[n.font.latin,n.font.ea])))]},
     verifyArtifactToolImport:true,receiptPath:path.join(buildDir,'validation.json')});
 
   const rendered = await renderPptx(final, path.join(buildDir,'render'));

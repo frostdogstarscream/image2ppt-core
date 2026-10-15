@@ -21,7 +21,7 @@
 // and the list the skill reads move together. Adding a table node type without
 // adding the slide.mjs branch is caught by the capability test.
 export const COMPILER = Object.freeze({
-  native_tables: false,
+  native_tables: true,
   native_charts: false,
 });
 
