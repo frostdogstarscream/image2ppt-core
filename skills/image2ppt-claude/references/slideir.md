@@ -47,6 +47,16 @@ A `table` node is a native PowerPoint table. It is accepted only where `doctor` 
 - A table node carries its source region as one `shape` evidence item. Cell text is not separately evidence-backed; `evidence` describes source content classes, and nothing compares a cell string to an evidence string.
 - A table may be laid out taller than its `bbox`; that is reported as `native_table_overflow`, which is a review diagnostic and does not fail the build.
 
+## Charts
+
+A `chart` node is a native PowerPoint chart. It is accepted only where `doctor` reports `native_charts`, and is an image fallback everywhere else.
+
+- `{id,type:"chart",bbox,z,evidence_ids,chart_type,font,categories,series}` plus optional `title`, `has_legend`, `legend_position`. `chart_type` is one of `bar`, `line`, `area`, `pie`, `doughnut`. `categories` is 1—1000 strings, `series` is 1—128 entries of `{name,values}`, and every series has exactly one value per category.
+- `font` is required, for the same reason as a table: the chart's title, axis and legend text would otherwise inherit the theme's family, which no build approves. `ea` is the one applied.
+- `title` is optional. An absent title produces no title element, which the delivered package accepts; but when a title is given it must be a real one — an empty string, or the engine's own placeholder, fails the build's title gate.
+- Data is literal. The compiler declares the chart's owning slide to the finalizer and enables the literal-workbook snapshot, so the delivered file carries an engine-generated embedded workbook whose values reconcile exactly with the chart's caches. That workbook is a **snapshot of the values**: no source formulas are recovered or claimed, and the review notes should say so.
+- Prefer `title` when the source chart shows one, and a review note when it does not — an untitled chart that came from a titled source is a silent fidelity loss.
+
 ## Evidence ownership and assets
 
 - Inventory source content in `evidence`. Each item needs one owner: a node's `evidence_ids`, an image asset's `contains_evidence_ids` through its node, or `unresolved_evidence_ids`. Duplicate ownership and omitted evidence fail validation. An unresolved item requires `needs_review`; it is not permission to omit it from a delivered result.

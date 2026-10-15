@@ -127,6 +127,46 @@ test('a table node rejects unknown fields like every other node type',()=>{
   assert.throws(()=>validateIR(x),/未支持字段/);
 });
 
+function chartFixture(overrides={}) {
+  const x=fixture();
+  x.evidence.push({id:'ev-ch',kind:'shape',bbox:[20,120,500,200]});
+  x.nodes.push({id:'ch',type:'chart',bbox:[20,120,500,200],z:2,evidence_ids:['ev-ch'],
+    chart_type:'bar',title:'各季度营收',categories:['春','夏'],series:[{name:'营收',values:[1,2]}],
+    font:{latin:'Arial',ea:'Microsoft YaHei',size_pt:14},...overrides});
+  return x;
+}
+
+test('a chart node validates and keeps its own evidence',()=>{
+  assert.equal(validateIR(chartFixture()).owners.get('ev-ch'),'ch');
+});
+
+test('a chart title must be real when present',()=>{
+  // The delivered package fails an empty title or the engine's placeholder.
+  const empty=chartFixture(); empty.nodes.at(-1).title='   ';
+  assert.throws(()=>validateIR(empty),/title 不得为空/);
+  const placeholder=chartFixture(); placeholder.nodes.at(-1).title='Chart Title';
+  assert.throws(()=>validateIR(placeholder),/占位符/);
+  // Absent is allowed: the engine then emits no title element at all.
+  const absent=chartFixture(); delete absent.nodes.at(-1).title;
+  assert.doesNotThrow(()=>validateIR(absent));
+});
+
+test('chart data must be internally consistent',()=>{
+  const mismatch=chartFixture(); mismatch.nodes.at(-1).series[0].values=[1,2,3];
+  assert.throws(()=>validateIR(mismatch),/长度必须等于/);
+  const noName=chartFixture(); noName.nodes.at(-1).series[0].name='';
+  assert.throws(()=>validateIR(noName),/series 缺少名称/);
+  const badType=chartFixture(); badType.nodes.at(-1).chart_type='treemap';
+  assert.throws(()=>validateIR(badType),/图表类型不支持/);
+  const noFont=chartFixture(); delete noFont.nodes.at(-1).font;
+  assert.throws(()=>validateIR(noFont),/缺少字体/);
+});
+
+test('a chart node rejects unknown fields',()=>{
+  const x=chartFixture(); x.nodes.at(-1).stacked=true;
+  assert.throws(()=>validateIR(x),/未支持字段/);
+});
+
 // A capability list is only honest if it is derived from the code rather than
 // maintained beside it. These three hold the derivation together: the IR schema
 // follows the flags, the flags follow the builder, and every native flag lands

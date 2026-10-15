@@ -37,8 +37,13 @@ export async function compile(file, {requireAuthoring=true}={}) {
   // --require-native-table-slide, which is also what makes the layout validator
   // assert the table is really there.
   const tableOwners=ir.nodes.some(n=>n.type==='table')?[1]:[];
+  const chartOwners=ir.nodes.some(n=>n.type==='chart')?[1]:[];
   await finalizePresentation({workspaceDir:ROOT,candidatePath:candidate,finalPath:final,pythonExecutable:rt.python,
-    explicitTotalSlideCount:1,requiredNativeTableOwnerSlides:tableOwners,requiredNativeChartOwnerSlides:[],
+    explicitTotalSlideCount:1,requiredNativeTableOwnerSlides:tableOwners,requiredNativeChartOwnerSlides:chartOwners,
+    // The engine authors literal charts; portable mode requires every chart to
+    // resolve an embedded workbook whose cells reconcile exactly with its
+    // caches, so let the finalizer snapshot the literals into one.
+    materializeLiteralChartWorkbooks:true,
     integrityValidatorPath:path.join(rt.skill,'container_tools/inspect_presentation_package_integrity.py'),
     layoutValidatorPath:path.join(rt.skill,'container_tools/inspect_presentation_layout_geometry.py'),
     layoutArgs:['--expected-slide-size-emu',`${Math.round(tw*9525)},${Math.round(th*9525)}`,

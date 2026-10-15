@@ -22,7 +22,7 @@
 // adding the slide.mjs branch is caught by the capability test.
 export const COMPILER = Object.freeze({
   native_tables: true,
-  native_charts: false,
+  native_charts: true,
 });
 
 // The accepted IR node kinds, derived rather than duplicated.
@@ -45,6 +45,10 @@ export const IR_SHAPE_GEOMETRIES = Object.freeze([
   // common slide presets
   'trapezoid', 'parallelogram', 'hexagon', 'diamond', 'triangle',
 ]);
+
+// Chart types the IR exposes. The engine carries many more; these are the ones
+// a restored slide realistically shows, kept deliberately short.
+export const IR_CHART_TYPES = Object.freeze(['bar', 'line', 'area', 'pie', 'doughnut']);
 
 export const IR_EVIDENCE_KINDS = Object.freeze(['text', 'shape', 'image']);
 

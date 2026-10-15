@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { IR_EVIDENCE_KINDS, IR_NODE_TYPES, IR_SHAPE_GEOMETRIES } from './capabilities.mjs';
+import { IR_CHART_TYPES, IR_EVIDENCE_KINDS, IR_NODE_TYPES, IR_SHAPE_GEOMETRIES } from './capabilities.mjs';
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const expect = (ok, message) => { if (!ok) throw new Error(message); };
@@ -41,7 +41,8 @@ export function validateIR(ir) {
     const common='id type bbox z evidence_ids';
     const byType={text:'text font bold color align wrap line_spacing_pt runs text_override_reason source_text_bbox',
       shape:'geometry fill line corner_radius_px fill_gradient',image:'asset_id',
-      table:'rows font column_tracks header_row banded_rows'};
+      table:'rows font column_tracks header_row banded_rows',
+      chart:'chart_type title font categories series has_legend legend_position'};
     fields(node,common+' '+(byType[node?.type]||''),'node');
     if(node.type==='text') {
       fields(node.font,'latin ea size_pt','font');
@@ -164,11 +165,41 @@ export function validateIR(ir) {
       }
       if (node.header_row!==undefined) expect(typeof node.header_row==='boolean', `${node.id} header_row 必须为 boolean。`);
       if (node.banded_rows!==undefined) expect(typeof node.banded_rows==='boolean', `${node.id} banded_rows 必须为 boolean。`);
+    } else if (node.type==='chart') {
+      expect(IR_CHART_TYPES.includes(node.chart_type), `${node.id} 图表类型不支持。`);
+      // The delivered package's title gate fails an empty title or the engine's
+      // "Chart title" placeholder. An absent title is fine, so it stays optional —
+      // but when one is given it must be a real one.
+      if (node.title!==undefined) {
+        expect(typeof node.title==='string' && node.title.trim().length>0, `${node.id} title 不得为空。`);
+        expect(node.title.trim().toLowerCase().replace(/\s+/g,' ')!=='chart title', `${node.id} title 不能是占位符 "Chart title"。`);
+      }
+      // Like a table, a chart must declare its font: its text otherwise inherits
+      // the theme's Calibri, which no build approves.
+      expect(node.font && ['latin','ea'].every(k=>typeof node.font[k]==='string' && node.font[k].trim()), `${node.id} 缺少字体。`);
+      expect(Number.isFinite(node.font.size_pt) && node.font.size_pt>0 && node.font.size_pt<=400, `${node.id} 字号无效。`);
+      fields(node.font,'latin ea size_pt','font');
+      expect(array(node.categories) && node.categories.length>=1 && node.categories.length<=1000, `${node.id} categories 须为 1—1000 项。`);
+      expect(node.categories.every(c=>typeof c==='string' && c.length<=2000), `${node.id} category 须为不超过 2000 字符的字符串。`);
+      expect(array(node.series) && node.series.length>=1 && node.series.length<=128, `${node.id} series 须为 1—128 条。`);
+      let points=0;
+      for (const s of node.series) {
+        expect(s && typeof s==='object' && !array(s), `${node.id} series 项必须为对象。`);
+        fields(s,'name values','series');
+        expect(typeof s.name==='string' && s.name.trim().length>0 && s.name.length<=2000, `${node.id} series 缺少名称。`);
+        expect(array(s.values) && s.values.length===node.categories.length, `${node.id} series values 长度必须等于 categories 长度。`);
+        expect(s.values.every(v=>(typeof v==='number' && Number.isFinite(v)) || v===null), `${node.id} series values 须为有限数字或 null。`);
+        points+=s.values.length;
+      }
+      expect(points<=100000, `${node.id} 图表数据点过多。`);
+      if (node.has_legend!==undefined) expect(typeof node.has_legend==='boolean', `${node.id} has_legend 必须为 boolean。`);
+      if (node.legend_position!==undefined) expect(['left','top','topRight','right','bottom'].includes(node.legend_position), `${node.id} legend_position 无效。`);
     } else if (node.type==='image') {
       useAsset(node.asset_id,node.id);
     }
   }
   expect(ir.nodes.filter(n=>n.type==='table').length<=100, '一页最多 100 个表格。');
+  expect(ir.nodes.filter(n=>n.type==='chart').length<=25, '一页最多 25 个图表。');
   expect(usedAssets.size===assets.size, '存在未使用资产；请移除旧资产声明。');
   const unresolved = ir.unresolved_evidence_ids || [];
   claim(unresolved,'unresolved');

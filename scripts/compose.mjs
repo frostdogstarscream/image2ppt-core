@@ -54,8 +54,10 @@ export async function compose(files, outputRoot) {
   const { finalizePresentation } = await import(pathToFileURL(path.join(rt.skill,'container_tools/artifact_tool_utils.mjs')).href);
   // Slide numbers, not IR paths: the finalizer keys on the delivered deck.
   const tableOwners = loaded.flatMap(({ir}, index) => ir.nodes.some(n=>n.type==='table') ? [index+1] : []);
+  const chartOwners = loaded.flatMap(({ir}, index) => ir.nodes.some(n=>n.type==='chart') ? [index+1] : []);
   await finalizePresentation({workspaceDir:ROOT,candidatePath:candidate,finalPath:final,pythonExecutable:rt.python,
-    explicitTotalSlideCount:loaded.length,requiredNativeTableOwnerSlides:tableOwners,requiredNativeChartOwnerSlides:[],
+    explicitTotalSlideCount:loaded.length,requiredNativeTableOwnerSlides:tableOwners,
+    requiredNativeChartOwnerSlides:chartOwners,materializeLiteralChartWorkbooks:true,
     integrityValidatorPath:path.join(rt.skill,'container_tools/inspect_presentation_package_integrity.py'),
     layoutValidatorPath:path.join(rt.skill,'container_tools/inspect_presentation_layout_geometry.py'),
     layoutArgs:['--expected-slide-size-emu',`${Math.round(tw*9525)},${Math.round(th*9525)}`,
