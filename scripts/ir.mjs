@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { IR_EVIDENCE_KINDS, IR_NODE_TYPES, IR_SHAPE_GEOMETRIES } from './capabilities.mjs';
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const expect = (ok, message) => { if (!ok) throw new Error(message); };
@@ -36,7 +37,7 @@ export function validateIR(ir) {
   for(const g of ir.groups) fields(g,'id member_ids','group');
   for(const entry of [...ir.evidence,...ir.assets]) if(entry.description!==undefined) expect(typeof entry.description==='string','description 必须为字符串。');
   for(const node of ir.nodes) {
-    expect(['text','shape','image'].includes(node?.type), `${node?.id} 不支持的节点类型 ${node?.type}。`);
+    expect(IR_NODE_TYPES.includes(node?.type), `${node?.id} 不支持的节点类型 ${node?.type}。`);
     const common='id type bbox z evidence_ids';
     const byType={text:'text font bold color align wrap line_spacing_pt runs text_override_reason source_text_bbox',
       shape:'geometry fill line corner_radius_px fill_gradient',image:'asset_id'};
@@ -77,7 +78,7 @@ export function validateIR(ir) {
   const evidence = new Map(ir.evidence.map(e=>[e.id,e]));
   for (const e of ir.evidence) {
     boxCheck(e.bbox,e.id);
-    expect(['text','shape','image'].includes(e.kind), `${e.id} 证据类型无效。`);
+    expect(IR_EVIDENCE_KINDS.includes(e.kind), `${e.id} 证据类型无效。`);
     if (e.kind==='text') expect(typeof e.text==='string', `${e.id} 缺少源文字。`);
   }
   const owners = new Map(), usedAssets = new Set();
@@ -105,7 +106,7 @@ export function validateIR(ir) {
   }
   const zs = new Set();
   for (const node of ir.nodes) {
-    expect(['text','shape','image'].includes(node.type), `${node.id} 不支持的节点类型 ${node.type}。`);
+    expect(IR_NODE_TYPES.includes(node.type), `${node.id} 不支持的节点类型 ${node.type}。`);
     boxCheck(node.bbox,node.id);
     if(node.source_text_bbox!==undefined) boxCheck(node.source_text_bbox,node.id+' source_text_bbox');
     expect(Number.isInteger(node.z) && !zs.has(node.z), `${node.id} z 必须是唯一整数。`); zs.add(node.z);
@@ -126,7 +127,7 @@ export function validateIR(ir) {
         expect(node.runs.every(r=>typeof r.text==='string' && (r.color===undefined || color(r.color))), `${node.id} run 无效。`);
       }
     } else if (node.type==='shape') {
-      expect(['rect','roundRect','ellipse','line'].includes(node.geometry), `${node.id} 形状不支持。`);
+      expect(IR_SHAPE_GEOMETRIES.includes(node.geometry), `${node.id} 形状不支持。`);
       expect(node.fill==='none' || color(node.fill), `${node.id} 填充无效。`);
       if (node.line) expect(color(node.line.color) && Number.isFinite(node.line.width_pt) && node.line.width_pt>=0, `${node.id} 线条无效。`);
       if (node.corner_radius_px!==undefined) expect(Number.isFinite(node.corner_radius_px) && node.corner_radius_px>=0 && node.corner_radius_px<=Math.min(node.bbox[2],node.bbox[3])/2, `${node.id} 圆角半径无效。`);

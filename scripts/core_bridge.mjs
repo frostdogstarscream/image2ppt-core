@@ -4,6 +4,7 @@ import { runtime } from './runtime.mjs';
 import { sha256 } from './ir.mjs';
 import { renderPptx } from './render.mjs';
 import { compile } from './compile.mjs';
+import { doctorCapabilities } from './capabilities.mjs';
 // Keep helper diagnostics off the machine-readable stdout channel.
 const emit = process.stdout.write.bind(process.stdout);
 process.stdout.write = process.stderr.write.bind(process.stderr);
@@ -20,7 +21,8 @@ try {
       helpers[name]={path:file,sha256:sha256(await fs.readFile(file))};
     }
     result={engine:'@oai/artifact-tool',artifact_version:rt.artifact_version,node_version:process.version,
-      node_modules:rt.node_modules,compiler_python:rt.python,presentations_skill:rt.skill,helpers,network_calls:0};
+      node_modules:rt.node_modules,compiler_python:rt.python,presentations_skill:rt.skill,helpers,network_calls:0,
+      ...doctorCapabilities(rt)};
   } else throw new Error('Unsupported bridge command');
   emit(JSON.stringify(result)+'\n');
 } catch(error) {console.error(error.stack||error.message);process.exitCode=1;}

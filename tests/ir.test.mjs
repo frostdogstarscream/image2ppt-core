@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { assertAuthoring, loadIR, localFile, sha256, validateIR } from '../scripts/ir.mjs';
+import { COMPILER, IR_NODE_TYPES, capabilities } from '../scripts/capabilities.mjs';
 
 function fixture() {
   return {schema_version:'0.1',canvas:{source_px:[1280,720],target_px:[1280,720]},background:{color:'FFFFFF'},
@@ -78,6 +79,35 @@ test('skill copies stay byte-identical to their maintained sources',async()=>{
     const b=await fs.readFile(fileURLToPath(new URL(right,import.meta.url)));
     assert.ok(a.equals(b),`${left} 与 ${right} 不再逐字节一致；改完维护源后请同步镜像`);
   }
+});
+
+// A capability list is only honest if it is derived from the code rather than
+// maintained beside it. These three hold the derivation together: the IR schema
+// follows the flags, the flags follow the builder, and every native flag lands
+// in exactly one doctor list. The dangerous drift is a capability that exists in
+// code but not in the list — the skill then rasterises something it could have
+// rebuilt, silently.
+test('compiler capability flags agree with the code that implements them',async()=>{
+  const builder=await fs.readFile(fileURLToPath(new URL('../scripts/slide.mjs',import.meta.url)),'utf8');
+  for(const [flag,marker] of [['native_tables','tables.add'],['native_charts','charts.add']]){
+    assert.equal(COMPILER[flag],builder.includes(marker),
+      `${flag} 声明为 ${COMPILER[flag]}，但 slide.mjs ${builder.includes(marker)?'含':'不含'} ${marker}；能力表必须与实现同步`);
+  }
+});
+
+test('the IR node types derive from the capability flags',()=>{
+  assert.ok(IR_NODE_TYPES.includes('text'));
+  assert.equal(IR_NODE_TYPES.includes('table'),COMPILER.native_tables);
+  assert.equal(IR_NODE_TYPES.includes('chart'),COMPILER.native_charts);
+});
+
+test('every native capability lands in exactly one doctor list',()=>{
+  const {supported,not_implemented}=capabilities();
+  for(const flag of ['native_tables','native_charts']){
+    assert.notEqual(supported.includes(flag),not_implemented.includes(flag),`${flag} 必须恰好出现在一张表里`);
+  }
+  assert.equal(new Set(supported).size,supported.length,'supported 不应重复');
+  assert.equal(new Set(not_implemented).size,not_implemented.length,'not_implemented 不应重复');
 });
 
 // The policy must not silently revert to cropping whole complex regions: the

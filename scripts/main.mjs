@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { runtime, ROOT, writeJson, saveBlob } from './runtime.mjs';
 import { loadIR, sha256 } from './ir.mjs';
 import { compile, pythonJson } from './compile.mjs';
+import { doctorCapabilities } from './capabilities.mjs';
 
 export async function demo() {
   const rt=await runtime();
@@ -89,8 +90,7 @@ async function main() {
     const metadata=JSON.parse(await fs.readFile(path.join(rt.node_modules,'@oai/artifact-tool/package.json'),'utf8'));
     result={engine_available:true,artifact_version:metadata.version,node_modules:rt.node_modules,python:rt.python,
       source:'Codex bundled runtime; project-local recovery if primary packages are absent',model_api_required:false,
-      supported:['single_page_image','native_text','simple_shapes','image_modules','real_groups','final_pptx_reimport_preview'],
-      not_implemented:['automatic_ocr','pdf_ingestion','automatic_inpainting','native_tables','native_charts']};
+      ...doctorCapabilities(rt)};
   } else if (cmd==='demo') result=await demo();
   else if (cmd==='compile') result=await compile(values.input);
   else if (cmd==='validate') {const d=await loadIR(values.input);result={valid:true,nodes:d.ir.nodes.length,warnings:d.info.warnings};}
