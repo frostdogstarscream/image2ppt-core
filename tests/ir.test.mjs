@@ -38,6 +38,11 @@ test('records intentional text changes',()=>{const x=fixture();x.nodes[0].text='
 test('rejects source text repeated in a preserved image',()=>{const x=fixture();x.assets=[{id:'a',path:'a.png',sha256:'0'.repeat(64),purpose:'module',contains_evidence_ids:['ev-title']}];x.nodes.push({id:'image',type:'image',bbox:[20,20,500,80],z:2,evidence_ids:[],asset_id:'a'});assert.throws(()=>validateIR(x),/重复输出/);});
 test('rejects omitted source content',()=>{const x=fixture();x.evidence.push({id:'forgotten',kind:'text',bbox:[20,200,400,50],text:'负号 -7%'});assert.throws(()=>validateIR(x),/未分配输出/);});
 test('rejects arbitrary types and nonfinite coordinates',()=>{const x=fixture();x.nodes[0].type='execute';assert.throws(()=>validateIR(x),/不支持/);x.nodes[0].type='text';x.nodes[0].bbox[0]=Infinity;assert.throws(()=>validateIR(x),/bbox 无效/);});
+test('accepts text insets and vertical anchor with strict bounds',()=>{
+  const x=fixture();x.nodes[0].insets=[4,2,4,2];x.nodes[0].vertical_anchor='middle';assert.doesNotThrow(()=>validateIR(x));
+  for(const value of [[1,2,3],[-1,0,0,0],['4',0,0,0],4]) {const y=fixture();y.nodes[0].insets=value;assert.throws(()=>validateIR(y),/insets 必须是四个非负像素值/);}
+  for(const value of ['center','ctr','']) {const y=fixture();y.nodes[0].vertical_anchor=value;assert.throws(()=>validateIR(y),/垂直锚点无效/);}
+});
 test('rejects canvas stretching and out of bounds',()=>{const x=fixture();x.canvas.target_px=[1280,800];assert.throws(()=>validateIR(x),/禁止静默拉伸/);x.canvas.target_px=[1280,720];x.nodes[0].bbox[0]=1200;assert.throws(()=>validateIR(x),/超出源画布/);});
 test('rejects duplicate z and unresolved content declared checked',()=>{const x=fixture();x.nodes.push({...structuredClone(x.nodes[0]),id:'other',evidence_ids:[]});assert.throws(()=>validateIR(x),/z 必须/);const y=fixture();y.evidence.push({id:'uncertain',kind:'text',bbox:[20,200,400,50],text:'?'});y.unresolved_evidence_ids=['uncertain'];y.review_status='source_checked';assert.throws(()=>validateIR(y),/needs_review/);});
 test('rejects noncontiguous and multiply owned group members',()=>{const x=fixture();for(let i=2;i<=3;i++){x.evidence.push({id:'e'+i,kind:'shape',bbox:[20,200,40,40]});x.nodes.push({id:'n'+i,type:'shape',bbox:[20,200,40,40],z:i,evidence_ids:['e'+i],geometry:'rect',fill:'FFFFFF'});}x.groups=[{id:'g',member_ids:['title','n3']}];assert.throws(()=>validateIR(x),/不连续/);x.groups=[{id:'g',member_ids:['title','n2']},{id:'g2',member_ids:['n2','n3']}];assert.throws(()=>validateIR(x),/多个分组/);});
@@ -125,6 +130,18 @@ test('a table must declare its font and well-formed column tracks',()=>{
 test('a table node rejects unknown fields like every other node type',()=>{
   const x=tableFixture(); x.nodes.at(-1).merge=true;
   assert.throws(()=>validateIR(x),/未支持字段/);
+});
+
+test('table merges preserve cell text and reject overlap or lost content',()=>{
+  const x=tableFixture({rows:[['合并标题',''],['收入','1240']],row_heights:[40,80],merges:[{row:0,column:0,row_span:1,column_span:2}],cell_styles:[{row:0,column:0,fill:'F0F0F0',color:'000000',bold:true}]});
+  assert.doesNotThrow(()=>validateIR(x));
+  x.nodes.at(-1).rows[0][1]='不能覆盖';assert.throws(()=>validateIR(x),/必须为空/);
+  x.nodes.at(-1).rows[0][1]='';x.nodes.at(-1).merges.push({row:0,column:0,row_span:2,column_span:1});assert.throws(()=>validateIR(x),/重叠/);
+});
+
+test('table row heights and cell styles have strict bounds',()=>{
+  for(const values of [[60,'60'],[60,61],[0,120],[60]]) assert.throws(()=>validateIR(tableFixture({row_heights:values})),/row_heights/);
+  for(const s of [{row:2,column:0},{row:0,column:0,bold:1},{row:0,column:0,fill:'bad'}]) assert.throws(()=>validateIR(tableFixture({cell_styles:[s]})),/cell/);
 });
 
 function chartFixture(overrides={}) {

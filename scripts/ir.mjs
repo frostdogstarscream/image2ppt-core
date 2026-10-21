@@ -39,9 +39,9 @@ export function validateIR(ir) {
   for(const node of ir.nodes) {
     expect(IR_NODE_TYPES.includes(node?.type), `${node?.id} 不支持的节点类型 ${node?.type}。`);
     const common='id type bbox z evidence_ids';
-    const byType={text:'text font bold color align wrap line_spacing_pt runs text_override_reason source_text_bbox',
+    const byType={text:'text font bold color align wrap line_spacing_pt runs text_override_reason source_text_bbox insets vertical_anchor',
       shape:'geometry fill line corner_radius_px fill_gradient',image:'asset_id',
-      table:'rows font column_tracks header_row banded_rows',
+      table:'rows font column_tracks header_row banded_rows row_heights merges cell_styles',
       chart:'chart_type title font categories series has_legend legend_position'};
     fields(node,common+' '+(byType[node?.type]||''),'node');
     if(node.type==='text') {
@@ -121,6 +121,8 @@ export function validateIR(ir) {
       expect(node.align===undefined || ['left','center','right'].includes(node.align), `${node.id} 对齐无效。`);
       expect(node.wrap===undefined || typeof node.wrap==='boolean', `${node.id} wrap 无效。`);
       if (node.line_spacing_pt!==undefined) expect(Number.isFinite(node.line_spacing_pt) && node.line_spacing_pt>0, `${node.id} 行距无效。`);
+      if (node.insets!==undefined) expect(array(node.insets) && node.insets.length===4 && node.insets.every(v=>Number.isFinite(v) && v>=0), `${node.id} insets 必须是四个非负像素值。`);
+      if (node.vertical_anchor!==undefined) expect(['top','middle','bottom'].includes(node.vertical_anchor), `${node.id} 垂直锚点无效。`);
       const texts=node.evidence_ids.map(id=>evidence.get(id)).filter(e=>e.kind==='text').map(e=>e.text);
       expect(texts.length>0, `${node.id} 没有源文字证据。`);
       if (texts.join('\n')!==node.text) expect(typeof node.text_override_reason==='string' && node.text_override_reason.trim(), `${node.id} 改写源文字但未说明原因。`);
@@ -165,6 +167,35 @@ export function validateIR(ir) {
       }
       if (node.header_row!==undefined) expect(typeof node.header_row==='boolean', `${node.id} header_row 必须为 boolean。`);
       if (node.banded_rows!==undefined) expect(typeof node.banded_rows==='boolean', `${node.id} banded_rows 必须为 boolean。`);
+      if (node.row_heights!==undefined) {
+        expect(array(node.row_heights) && node.row_heights.length===rows.length && node.row_heights.every(v=>Number.isFinite(v) && v>0), `${node.id} row_heights 无效。`);
+        expect(Math.abs(node.row_heights.reduce((a,b)=>a+b,0)-node.bbox[3]*ir.canvas.target_px[1]/ir.canvas.source_px[1])<=0.01, `${node.id} row_heights 总高不匹配。`);
+      }
+      const occupied=new Set();
+      if (node.merges!==undefined) {
+        expect(array(node.merges), `${node.id} merges 无效。`);
+        for (const m of node.merges) {
+          fields(m,'row column row_span column_span','table merge');
+          expect(['row','column','row_span','column_span'].every(k=>Number.isInteger(m[k])) && m.row>=0 && m.column>=0 && m.row_span>=1 && m.column_span>=1 && m.row_span*m.column_span>1 && m.row+m.row_span<=rows.length && m.column+m.column_span<=cols, `${node.id} merge 越界或无效。`);
+          for(let r=m.row;r<m.row+m.row_span;r++) for(let c=m.column;c<m.column+m.column_span;c++) {
+            const key=`${r}:${c}`;
+            expect(!occupied.has(key), `${node.id} merge 重叠。`);occupied.add(key);
+            expect((r===m.row && c===m.column) || rows[r][c]==='', `${node.id} merge 覆盖的单元格必须为空。`);
+          }
+        }
+      }
+      if (node.cell_styles!==undefined) {
+        expect(array(node.cell_styles), `${node.id} cell_styles 无效。`);
+        const styled=new Set();
+        for(const s of node.cell_styles) {
+          fields(s,'row column fill color bold','cell style');
+          expect(Number.isInteger(s.row) && Number.isInteger(s.column) && s.row>=0 && s.column>=0 && s.row<rows.length && s.column<cols, `${node.id} cell style 越界。`);
+          const key=`${s.row}:${s.column}`;expect(!styled.has(key), `${node.id} cell style 重复。`);styled.add(key);
+          if(s.fill!==undefined) expect(color(s.fill), `${node.id} cell fill 无效。`);
+          if(s.color!==undefined) expect(color(s.color), `${node.id} cell color 无效。`);
+          if(s.bold!==undefined) expect(typeof s.bold==='boolean', `${node.id} cell bold 无效。`);
+        }
+      }
     } else if (node.type==='chart') {
       expect(IR_CHART_TYPES.includes(node.chart_type), `${node.id} 图表类型不支持。`);
       // The delivered package's title gate fails an empty title or the engine's

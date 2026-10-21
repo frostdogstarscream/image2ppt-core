@@ -38,6 +38,11 @@ export async function buildSlide(presentation, {ir, info}, pageLabel) {
       // ignored, and `fontSize` is in pixels.
       table.cells.block({row:0,column:0,rowCount:node.rows.length,columnCount:node.rows[0].length})
         .assign({textStyle:{typeface:node.font.ea,fontSize:node.font.size_pt*96/72}});
+      if(node.row_heights) node.row_heights.forEach((height,index)=>{table.rows[index].height=height;});
+      for(const m of node.merges||[]) table.merge({startRow:m.row,endRow:m.row+m.row_span-1,startColumn:m.column,endColumn:m.column+m.column_span-1});
+      for(const s of node.cell_styles||[]) table.cells.block({row:s.row,column:s.column,rowCount:1,columnCount:1})
+        .assign({...(s.fill!==undefined?{fill:'#'+s.fill}:{}),textStyle:{typeface:node.font.ea,fontSize:node.font.size_pt*96/72,
+          ...(s.color!==undefined?{color:'#'+s.color}:{}),...(s.bold!==undefined?{bold:s.bold}:{})}});
       continue;
     }
     if (node.type==='chart') {
@@ -64,7 +69,7 @@ export async function buildSlide(presentation, {ir, info}, pageLabel) {
     if (node.type==='text') {
       shape.text=node.runs ? [node.runs.map(r=>({run:r.text,style:{bold:r.bold??node.bold??false,color:'#'+(r.color||node.color)}}))] : node.text;
       shape.text.style={typeface:node.font.ea,fontSize:node.font.size_pt*96/72,bold:node.bold??false,
-        color:'#'+node.color,alignment:node.align||'left',verticalAlignment:'top',
+        color:'#'+node.color,alignment:node.align||'left',verticalAlignment:node.vertical_anchor||'top',
         wrap:node.wrap?'square':'none',autoFit:'none',insets:0,
         ...(node.line_spacing_pt?{lineSpacing:node.line_spacing_pt*96/72}:{})};
     }

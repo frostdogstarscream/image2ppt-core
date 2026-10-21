@@ -47,8 +47,13 @@ def adapt_slide(xml, ir):
             # margins on import, clipping dense restored text.
             body = item.find("p:txBody/a:bodyPr", NS)
             if body is not None:
-                for key in ("lIns", "rIns", "tIns", "bIns"):
-                    body.set(key, "0")
+                # IR insets are target pixels; OOXML bodyPr uses EMU at 96 dpi.
+                insets = node.get("insets", [0, 0, 0, 0])
+                for key, value in zip(("lIns", "rIns", "tIns", "bIns"), insets):
+                    body.set(key, str(round(value * 9525)))
+                if "vertical_anchor" in node:
+                    body.set("anchor", {"top": "t", "middle": "ctr",
+                                        "bottom": "b"}[node["vertical_anchor"]])
             if "line_spacing_pt" in node:
                 for paragraph in item.findall("p:txBody/a:p", NS):
                     props = paragraph.find("a:pPr", NS)
