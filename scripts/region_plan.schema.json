@@ -1,0 +1,357 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "region-plan/0.1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "regions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "region-plan/0.1"
+    },
+    "regions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/region"
+      }
+    },
+    "planner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "prompt_version"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "rules",
+            "llm"
+          ]
+        },
+        "prompt_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 256
+        },
+        "capabilities_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "jobs_root": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "partial": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "type": "string",
+          "maxLength": 80
+        }
+      }
+    }
+  },
+  "$defs": {
+    "bbox": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "number"
+      }
+    },
+    "features": {
+      "type": "object",
+      "required": [
+        "area_px",
+        "aspect",
+        "unique_colors",
+        "edge_density",
+        "dark_fraction",
+        "text_components",
+        "median_text_height_px"
+      ],
+      "properties": {
+        "area_px": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "aspect": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "unique_colors": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "edge_density": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "dark_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "text_components": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "median_text_height_px": {
+          "type": "number",
+          "minimum": 0
+        },
+        "microtext_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "dominant_color_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "agent_decision": {
+      "type": "object",
+      "required": [
+        "decision",
+        "confidence",
+        "can_rebuild",
+        "should_rebuild",
+        "native_parts",
+        "retained_parts",
+        "retain_reasons",
+        "evidence"
+      ],
+      "properties": {
+        "decision": {
+          "enum": [
+            "native",
+            "hybrid",
+            "retain_module"
+          ]
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "can_rebuild": {
+          "type": "object",
+          "required": [
+            "feasible",
+            "native_parts",
+            "blockers"
+          ],
+          "properties": {
+            "feasible": {
+              "type": "boolean"
+            },
+            "native_parts": {
+              "type": "array",
+              "maxItems": 24,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              }
+            },
+            "blockers": {
+              "type": "array",
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "should_rebuild": {
+          "type": "object",
+          "required": [
+            "editability_value",
+            "fidelity_risk",
+            "cost"
+          ],
+          "properties": {
+            "editability_value": {
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            "fidelity_risk": {
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            "cost": {
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "native_parts": {
+          "type": "array",
+          "maxItems": 24,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "retained_parts": {
+          "type": "array",
+          "maxItems": 24,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "retain_reasons": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "photo",
+              "map",
+              "ui_mockup",
+              "network",
+              "microtext",
+              "no_data",
+              "decorative",
+              "low_edit_value",
+              "non_native_geometry"
+            ]
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "human_decision": {
+      "type": "object",
+      "required": [
+        "decision",
+        "source",
+        "note"
+      ],
+      "properties": {
+        "decision": {
+          "enum": [
+            "native",
+            "hybrid",
+            "retain_module",
+            "pending"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "region": {
+      "type": "object",
+      "required": [
+        "region_id",
+        "page",
+        "ir",
+        "node_id",
+        "bbox",
+        "classification",
+        "features",
+        "agent",
+        "human"
+      ],
+      "properties": {
+        "region_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,80}$"
+        },
+        "page": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "node_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bbox": {
+          "$ref": "#/$defs/bbox"
+        },
+        "classification": {
+          "enum": [
+            "flow",
+            "step_cards",
+            "table",
+            "chart",
+            "ui_mockup",
+            "dashboard",
+            "network",
+            "photo_map",
+            "photo_diagram",
+            "decorative",
+            "mixed"
+          ]
+        },
+        "features": {
+          "$ref": "#/$defs/features"
+        },
+        "agent": {
+          "$ref": "#/$defs/agent_decision"
+        },
+        "human": {
+          "$ref": "#/$defs/human_decision"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
