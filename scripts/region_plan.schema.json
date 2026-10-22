@@ -266,6 +266,15 @@
       },
       "additionalProperties": false
     },
+    "part_list": {
+      "type": "array",
+      "maxItems": 24,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{0,40}$"
+      }
+    },
     "human_decision": {
       "type": "object",
       "required": [
@@ -288,6 +297,37 @@
         },
         "note": {
           "type": "string"
+        },
+        "annotation_level": {
+          "enum": [
+            "proxy",
+            "explicit",
+            "trial_veto",
+            "calibration"
+          ]
+        },
+        "retain_scope": {
+          "enum": [
+            "none",
+            "partial",
+            "whole_region"
+          ]
+        },
+        "fidelity_target": {
+          "enum": [
+            "pixel",
+            "balanced",
+            "editability"
+          ]
+        },
+        "required_edit_targets": {
+          "$ref": "#/$defs/part_list"
+        },
+        "allowed_native_parts": {
+          "$ref": "#/$defs/part_list"
+        },
+        "must_retain_parts": {
+          "$ref": "#/$defs/part_list"
         }
       },
       "additionalProperties": false

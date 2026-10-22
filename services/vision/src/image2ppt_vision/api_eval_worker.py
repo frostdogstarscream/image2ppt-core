@@ -10,16 +10,28 @@ from pathlib import Path
 import time
 from urllib import error, request
 
+from .job_binding import JobBindingError, verify_job
 from .model_provider import _NoRedirect, _endpoint, _read_response, ModelProviderError
-from .storage import read_json, write_json
+from .storage import write_json
 
 
 def exchange(request_file, settings_file, output):
     output=Path(output)
-    settings=read_json(settings_file)
+    try:
+        verified=verify_job(output,settings_file)
+        if Path(request_file).resolve()!=(output/'request.json').resolve():
+            raise JobBindingError('request_path_mismatch')
+    except JobBindingError as exc:
+        write_json(output/'transport.json',{'status':'FAILED','error_code':'job_binding_mismatch',
+                                            'binding_error':exc.code})
+        return
+    settings=verified['settings']
+    binding_fields={key:verified[key] for key in
+                    ('request_sha256','endpoint_sha256','job_binding_sha256','model','prompt_version')}
     key=os.environ.get('VISION_LLM_API_KEY','')
     if not key.strip() or any(ord(c)<32 or ord(c)>126 for c in key):
-        write_json(output/'transport.json',{'status':'FAILED','error_code':'model_configuration_required'})
+        write_json(output/'transport.json',{'status':'FAILED','error_code':'model_configuration_required',
+                                            **binding_fields})
         return
     started=time.monotonic(); raw=None; status=None;quota_headers={}
     def retain_quota_headers(headers):
@@ -29,7 +41,7 @@ def exchange(request_file, settings_file, output):
             if name=='retry-after' or 'ratelimit' in name or 'rate-limit' in name:
                 quota_headers[name]=str(value).replace(key,'[REDACTED]')[:256]
     try:
-        body=Path(request_file).read_bytes()
+        body=verified['request_bytes']
         req=request.Request(_endpoint(settings['base_url']),data=body,method='POST',headers={
             'Authorization':'Bearer '+key,'Content-Type':'application/json','Accept':'application/json'})
         opener=request.build_opener(_NoRedirect)
@@ -62,6 +74,7 @@ def exchange(request_file, settings_file, output):
                       response_redacted=redacted,response_bytes=len(raw))
         if redacted:
             status.update(status='FAILED',error_code='credential_echo_rejected')
+    status.update(binding_fields)
     status['elapsed_seconds']=round(time.monotonic()-started,4)
     if quota_headers:status['quota_headers']=quota_headers
     write_json(output/'transport.json',status)

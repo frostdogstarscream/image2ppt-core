@@ -18,6 +18,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from .job_binding import JobBindingError, verify_job
 from .model_provider import _endpoint
 from .storage import read_json, write_json
 
@@ -39,6 +40,13 @@ DECISIONS = ("native", "hybrid", "retain_module")
 EDITABILITY = ("high", "medium", "low")
 RISK = ("high", "medium", "low")
 COST = ("high", "medium", "low")
+ANNOTATION_LEVELS = ("proxy", "explicit", "trial_veto", "calibration")
+RETAIN_SCOPES = ("none", "partial", "whole_region")
+FIDELITY_TARGETS = ("pixel", "balanced", "editability")
+HUMAN_SCOPE_KEYS = {
+    "annotation_level", "retain_scope", "fidelity_target",
+    "required_edit_targets", "allowed_native_parts", "must_retain_parts",
+}
 
 CAPABILITIES = {
     "schema": "region-capabilities/1",
@@ -260,11 +268,15 @@ def parse_response(job_dir):
         envelope = _load_json_strict(raw.decode("utf-8-sig"))
     except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError("invalid response envelope") from exc
-    try:
-        choice = envelope["choices"][0]
-        message = choice["message"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise ValueError("invalid response envelope") from exc
+    if not isinstance(envelope, dict):
+        raise ValueError("invalid response envelope")
+    choices = envelope.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ValueError("invalid response envelope")
+    choice = choices[0]
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        raise ValueError("invalid response message")
     if choice.get("finish_reason") not in (None, "stop"):
         raise ValueError("incomplete response")
     if message.get("tool_calls") or message.get("function_call") or message.get("refusal"):
@@ -277,6 +289,27 @@ def parse_response(job_dir):
     except (json.JSONDecodeError, ValueError) as exc:
         raise ValueError("invalid decision JSON") from exc
     return validate_decision(decision)
+
+
+def _verify_saved_response(job, transport):
+    """Bind the saved response bytes to the transport record and this job."""
+    if transport.get("response_redacted") is not False:
+        raise JobBindingError("response_redaction_not_verified")
+    raw_sha = transport.get("response_sha256")
+    saved_sha = transport.get("saved_response_sha256")
+    if not all(isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value)
+               for value in (raw_sha, saved_sha)):
+        raise JobBindingError("response_hash_missing")
+    if raw_sha != saved_sha:
+        raise JobBindingError("response_hash_mismatch")
+    raw = (Path(job) / "response.body").read_bytes()
+    if len(raw) > MAX_RESPONSE_BYTES:
+        raise JobBindingError("response_too_large")
+    if _hash_bytes(raw) != saved_sha:
+        raise JobBindingError("response_hash_mismatch")
+    if "response_bytes" in transport and transport["response_bytes"] != len(raw):
+        raise JobBindingError("response_size_mismatch")
+    return saved_sha
 
 
 def prepare_region_job(row, crop_path, job_dir, *, model, base_url, inventory_sha256,
@@ -354,7 +387,9 @@ def prepare_region_job(row, crop_path, job_dir, *, model, base_url, inventory_sh
         "capabilities_sha256": capabilities_sha,
         "request_sha256": _hash_bytes(request_bytes),
         "prompt_version": PROMPT_VERSION,
+        "prompt_sha256": _hash_bytes(PROMPT.encode("utf-8")),
         "endpoint_sha256": endpoint_sha,
+        "model": model,
     }
     manifest = {
         "region_id": row["region_id"],
@@ -375,7 +410,7 @@ def prepare_region_job(row, crop_path, job_dir, *, model, base_url, inventory_sh
             same = all(existing.get(key) == binding.get(key) for key in (
                 "region_id", "node_id", "bbox", "inventory_sha256", "features_sha256",
                 "crop_sha256", "capabilities_sha256", "request_sha256", "prompt_version",
-                "endpoint_sha256"))
+                "prompt_sha256", "endpoint_sha256", "model"))
             if same and (job / "request.json").exists() and _file_hash(job / "request.json") == existing["request_sha256"]:
                 return {**manifest, "status": "CACHED"}
         except (OSError, ValueError, KeyError, TypeError):
@@ -391,16 +426,54 @@ def prepare_region_job(row, crop_path, job_dir, *, model, base_url, inventory_sh
     return manifest
 
 
-def _human(value):
+def validate_human_decision(value):
+    """Validate the authoritative human decision and optional scope annotation."""
     if not isinstance(value, dict) or not isinstance(value.get("decision"), str):
         raise ValueError("invalid human decision")
     if value["decision"] not in DECISIONS + ("pending",):
         raise ValueError("invalid human decision")
-    return {
+    result = {
         "decision": value["decision"],
         "source": str(value.get("source", "unknown"))[:200],
         "note": str(value.get("note", ""))[:500],
     }
+    present = HUMAN_SCOPE_KEYS & set(value)
+    if not present:
+        return result
+    if present != HUMAN_SCOPE_KEYS:
+        raise ValueError("incomplete human scope annotation")
+    if value["annotation_level"] not in ANNOTATION_LEVELS:
+        raise ValueError("invalid annotation_level")
+    if value["retain_scope"] not in RETAIN_SCOPES:
+        raise ValueError("invalid retain_scope")
+    if value["fidelity_target"] not in FIDELITY_TARGETS:
+        raise ValueError("invalid fidelity_target")
+    required = _parts(value["required_edit_targets"], CAPABILITIES["native_parts"], "required_edit_targets")
+    allowed = _parts(value["allowed_native_parts"], CAPABILITIES["native_parts"], "allowed_native_parts")
+    must_retain = _parts(value["must_retain_parts"], CAPABILITIES["retained_parts"], "must_retain_parts")
+    if not set(required) <= set(allowed):
+        raise ValueError("required_edit_targets must be allowed native parts")
+    kind = value["decision"]
+    if kind == "native":
+        if value["retain_scope"] != "none" or must_retain:
+            raise ValueError("native human decision cannot retain parts")
+        if not allowed:
+            raise ValueError("native human decision requires allowed native parts")
+    elif kind == "hybrid":
+        if value["retain_scope"] != "partial" or not allowed or not must_retain or not required:
+            raise ValueError("hybrid human decision requires allowed, required and retained parts")
+    elif kind == "retain_module":
+        if value["retain_scope"] != "whole_region" or allowed or required:
+            raise ValueError("retain_module human decision must retain the whole region")
+    result.update({
+        "annotation_level": value["annotation_level"],
+        "retain_scope": value["retain_scope"],
+        "fidelity_target": value["fidelity_target"],
+        "required_edit_targets": required,
+        "allowed_native_parts": allowed,
+        "must_retain_parts": must_retain,
+    })
+    return result
 
 
 def apply_jobs(rows, jobs_root, human_decisions, *, inventory_sha256, strict=True):
@@ -415,23 +488,26 @@ def apply_jobs(rows, jobs_root, human_decisions, *, inventory_sha256, strict=Tru
         entry = {"region_id": region_id, "status": "MISSING", "error_code": None}
         transport = {}
         try:
-            binding = read_json(job / "input.json")
-        except (OSError, ValueError, TypeError):
+            settings_file = job / "settings.json" if (job / "settings.json").exists() else jobs_root / "settings.json"
+            verified = verify_job(job, settings_file)
+        except (OSError, ValueError, TypeError) as exc:
+            entry.update(status="INVALID_BINDING", error_code=getattr(exc, "code", "binding_mismatch"))
             report_rows.append(entry)
-            provenance_rows.append(entry)
+            provenance_rows.append({**entry, "detail": type(exc).__name__})
             continue
+        binding = verified["binding"]
         try:
-            if (binding.get("region_id") != region_id or binding.get("node_id") != row.get("node_id")
+            if (binding.get("region_id") != region_id or binding.get("page") != row.get("page")
+                    or binding.get("node_id") != row.get("node_id")
+                    or binding.get("classification") != row.get("classification")
                     or binding.get("bbox") != list(row.get("bbox", []))
                     or binding.get("inventory_sha256") != inventory_sha256
-                    or binding.get("features_sha256") != _hash_json({key: _finite_number(row["features"][key], key) for key in FEATURE_KEYS})
-                    or _file_hash(job / "request.json") != binding.get("request_sha256")
-                    or _file_hash(job / "crop.png") != binding.get("crop_sha256")):
+                    or binding.get("features_sha256") != _hash_json({key: _finite_number(row["features"][key], key) for key in FEATURE_KEYS})):
                 raise ValueError("binding mismatch")
         except (OSError, ValueError, KeyError, TypeError) as exc:
             entry.update(status="INVALID_BINDING", error_code="binding_mismatch")
             report_rows.append(entry)
-            provenance_rows.append({**entry, "detail": str(exc)[:200]})
+            provenance_rows.append({**entry, "detail": type(exc).__name__})
             continue
         if not (job / "transport.json").exists() and not (job / "response.body").exists():
             entry.update(status="MISSING", error_code="no_response")
@@ -443,9 +519,9 @@ def apply_jobs(rows, jobs_root, human_decisions, *, inventory_sha256, strict=Tru
         except (OSError, ValueError, TypeError):
             transport = {}
         entry.update(
-            request_sha256=binding.get("request_sha256"),
+            request_sha256=verified["request_sha256"],
             crop_sha256=binding.get("crop_sha256"),
-            response_sha256=transport.get("response_sha256"),
+            response_sha256=transport.get("saved_response_sha256"),
             attempts=transport.get("attempts"),
             transport_status=transport.get("status"),
         )
@@ -455,14 +531,25 @@ def apply_jobs(rows, jobs_root, human_decisions, *, inventory_sha256, strict=Tru
             provenance_rows.append(entry)
             continue
         try:
-            agent = parse_response(job)
+            for key in ("request_sha256", "endpoint_sha256", "job_binding_sha256"):
+                if transport.get(key) != verified[key]:
+                    raise JobBindingError("transport_" + key + "_mismatch")
+            _verify_saved_response(job, transport)
         except (OSError, ValueError, TypeError) as exc:
-            entry.update(status="INVALID_RESPONSE", error_code="invalid_response", detail=str(exc)[:200])
+            entry.update(status="INVALID_RESPONSE", error_code=getattr(exc, "code", "response_evidence_mismatch"),
+                         detail=type(exc).__name__)
             report_rows.append(entry)
             provenance_rows.append(entry)
             continue
         try:
-            human = _human(human_decisions[region_id])
+            agent = parse_response(job)
+        except (OSError, ValueError, TypeError) as exc:
+            entry.update(status="INVALID_RESPONSE", error_code="invalid_response", detail=type(exc).__name__)
+            report_rows.append(entry)
+            provenance_rows.append(entry)
+            continue
+        try:
+            human = validate_human_decision(human_decisions[region_id])
         except (KeyError, ValueError, TypeError) as exc:
             entry.update(status="INVALID_HUMAN", error_code="missing_human", detail=str(exc)[:200])
             report_rows.append(entry)

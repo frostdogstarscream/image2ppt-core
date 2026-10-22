@@ -9,65 +9,287 @@
    "page": "P8",
    "agent": "hybrid",
    "human": "retain_module",
-   "agreement": false
+   "agreement": false,
+   "scope": {
+    "annotated": true,
+    "agreement": false,
+    "routing_agreement": false,
+    "annotation_level": "trial_veto",
+    "retain_scope": "whole_region",
+    "over_decomposition": [
+     "card",
+     "cell_text",
+     "labels",
+     "number_badge",
+     "panel",
+     "row_header",
+     "section_title",
+     "table",
+     "values"
+    ],
+    "under_decomposition": [],
+    "retain_violations": [],
+    "native_retained_overlap": [],
+    "required_retained_conflict": []
+   }
   }
  ],
+ "routing": {
+  "decided": 8,
+  "agreed": 7,
+  "agreement_rate": 0.875,
+  "always_retain_baseline": 0.75
+ },
+ "scope": {
+  "decided": 8,
+  "agreed": 6,
+  "agreement_rate": 0.75,
+  "over_decomposition": 2,
+  "under_decomposition": 0,
+  "retain_violations": 1,
+  "disagreements": [
+   {
+    "region_id": "P5-example-058-dashboard",
+    "page": "P5",
+    "agent": "hybrid",
+    "human": "hybrid",
+    "agreement": true,
+    "scope": {
+     "annotated": true,
+     "agreement": false,
+     "routing_agreement": true,
+     "annotation_level": "explicit",
+     "retain_scope": "partial",
+     "over_decomposition": [
+      "bars",
+      "card",
+      "category_labels",
+      "cell_text",
+      "kpi",
+      "labels",
+      "number_badge",
+      "panel",
+      "percentage_labels",
+      "row_header",
+      "table",
+      "values"
+     ],
+     "under_decomposition": [],
+     "retain_violations": [
+      "dashboard_body"
+     ],
+     "native_retained_overlap": [],
+     "required_retained_conflict": []
+    }
+   },
+   {
+    "region_id": "P8-petition-example",
+    "page": "P8",
+    "agent": "hybrid",
+    "human": "retain_module",
+    "agreement": false,
+    "scope": {
+     "annotated": true,
+     "agreement": false,
+     "routing_agreement": false,
+     "annotation_level": "trial_veto",
+     "retain_scope": "whole_region",
+     "over_decomposition": [
+      "card",
+      "cell_text",
+      "labels",
+      "number_badge",
+      "panel",
+      "row_header",
+      "section_title",
+      "table",
+      "values"
+     ],
+     "under_decomposition": [],
+     "retain_violations": [],
+     "native_retained_overlap": [],
+     "required_retained_conflict": []
+    }
+   }
+  ]
+ },
  "rows": [
   {
    "region_id": "P5-example-058-dashboard",
    "page": "P5",
    "agent": "hybrid",
    "human": "hybrid",
-   "agreement": true
+   "agreement": true,
+   "scope": {
+    "annotated": true,
+    "agreement": false,
+    "routing_agreement": true,
+    "annotation_level": "explicit",
+    "retain_scope": "partial",
+    "over_decomposition": [
+     "bars",
+     "card",
+     "category_labels",
+     "cell_text",
+     "kpi",
+     "labels",
+     "number_badge",
+     "panel",
+     "percentage_labels",
+     "row_header",
+     "table",
+     "values"
+    ],
+    "under_decomposition": [],
+    "retain_violations": [
+     "dashboard_body"
+    ],
+    "native_retained_overlap": [],
+    "required_retained_conflict": []
+   }
   },
   {
    "region_id": "P6-funds-analysis-chart",
    "page": "P6",
    "agent": "retain_module",
    "human": "retain_module",
-   "agreement": true
+   "agreement": true,
+   "scope": {
+    "annotated": true,
+    "agreement": true,
+    "routing_agreement": true,
+    "annotation_level": "proxy",
+    "retain_scope": "whole_region",
+    "over_decomposition": [],
+    "under_decomposition": [],
+    "retain_violations": [],
+    "native_retained_overlap": [],
+    "required_retained_conflict": []
+   }
   },
   {
    "region_id": "P7-clue-network",
    "page": "P7",
    "agent": "retain_module",
    "human": "retain_module",
-   "agreement": true
+   "agreement": true,
+   "scope": {
+    "annotated": true,
+    "agreement": true,
+    "routing_agreement": true,
+    "annotation_level": "proxy",
+    "retain_scope": "whole_region",
+    "over_decomposition": [],
+    "under_decomposition": [],
+    "retain_violations": [],
+    "native_retained_overlap": [],
+    "required_retained_conflict": []
+   }
   },
   {
    "region_id": "P8-petition-example",
    "page": "P8",
    "agent": "hybrid",
    "human": "retain_module",
-   "agreement": false
+   "agreement": false,
+   "scope": {
+    "annotated": true,
+    "agreement": false,
+    "routing_agreement": false,
+    "annotation_level": "trial_veto",
+    "retain_scope": "whole_region",
+    "over_decomposition": [
+     "card",
+     "cell_text",
+     "labels",
+     "number_badge",
+     "panel",
+     "row_header",
+     "section_title",
+     "table",
+     "values"
+    ],
+    "under_decomposition": [],
+    "retain_violations": [],
+    "native_retained_overlap": [],
+    "required_retained_conflict": []
+   }
   },
   {
    "region_id": "P9-image-020-report-ui",
    "page": "P9",
    "agent": "retain_module",
    "human": "retain_module",
-   "agreement": true
+   "agreement": true,
+   "scope": {
+    "annotated": true,
+    "agreement": true,
+    "routing_agreement": true,
+    "annotation_level": "proxy",
+    "retain_scope": "whole_region",
+    "over_decomposition": [],
+    "under_decomposition": [],
+    "retain_violations": [],
+    "native_retained_overlap": [],
+    "required_retained_conflict": []
+   }
   },
   {
    "region_id": "P10-vehicle-risk-example",
    "page": "P10",
    "agent": "retain_module",
    "human": "retain_module",
-   "agreement": true
+   "agreement": true,
+   "scope": {
+    "annotated": true,
+    "agreement": true,
+    "routing_agreement": true,
+    "annotation_level": "proxy",
+    "retain_scope": "whole_region",
+    "over_decomposition": [],
+    "under_decomposition": [],
+    "retain_violations": [],
+    "native_retained_overlap": [],
+    "required_retained_conflict": []
+   }
   },
   {
    "region_id": "P11-rural-three-assets",
    "page": "P11",
    "agent": "retain_module",
    "human": "retain_module",
-   "agreement": true
+   "agreement": true,
+   "scope": {
+    "annotated": true,
+    "agreement": true,
+    "routing_agreement": true,
+    "annotation_level": "proxy",
+    "retain_scope": "whole_region",
+    "over_decomposition": [],
+    "under_decomposition": [],
+    "retain_violations": [],
+    "native_retained_overlap": [],
+    "required_retained_conflict": []
+   }
   },
   {
    "region_id": "P12-industry-risk-bars",
    "page": "P12",
    "agent": "native",
    "human": "native",
-   "agreement": true
+   "agreement": true,
+   "scope": {
+    "annotated": true,
+    "agreement": true,
+    "routing_agreement": true,
+    "annotation_level": "explicit",
+    "retain_scope": "none",
+    "over_decomposition": [],
+    "under_decomposition": [],
+    "retain_violations": [],
+    "native_retained_overlap": [],
+    "required_retained_conflict": []
+   }
   }
  ]
 }

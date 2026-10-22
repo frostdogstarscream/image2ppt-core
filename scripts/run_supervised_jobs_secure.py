@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'services/vision/src'))
+from image2ppt_vision.job_binding import JobBindingError, verify_job
 from image2ppt_vision.storage import write_json
 
 
@@ -41,9 +42,13 @@ def main():
         if (path / 'transport.json').exists() or (path / 'response.body').exists():
             return {'job': job, 'status': 'EXISTS'}
         settings = path / 'settings.json' if (path / 'settings.json').exists() else root / 'settings.json'
-        timeout = json.loads(settings.read_text(encoding='utf8'))['timeout_seconds']
-        if not isinstance(timeout, (int, float)) or not 1 <= timeout <= 1200:
-            return {'job': job, 'status': 'INVALID_TIMEOUT'}
+        try:
+            verified = verify_job(path, settings)
+        except JobBindingError as exc:
+            write_json(path / 'transport.json', {
+                'status': 'FAILED', 'error_code': 'job_binding_mismatch', 'binding_error': exc.code})
+            return {'job': job, **json.loads((path / 'transport.json').read_text(encoding='utf8'))}
+        timeout = verified['settings']['timeout_seconds']
         try:
             process = subprocess.run(
                 [sys.executable, '-X', 'utf8', '-m', 'image2ppt_vision.api_eval_worker',
