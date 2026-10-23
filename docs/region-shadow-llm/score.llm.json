@@ -1,0 +1,73 @@
+{
+ "total": 8,
+ "decided": 8,
+ "agreed": 7,
+ "agreement_rate": 0.875,
+ "disagreements": [
+  {
+   "region_id": "P8-petition-example",
+   "page": "P8",
+   "agent": "hybrid",
+   "human": "retain_module",
+   "agreement": false
+  }
+ ],
+ "rows": [
+  {
+   "region_id": "P5-example-058-dashboard",
+   "page": "P5",
+   "agent": "hybrid",
+   "human": "hybrid",
+   "agreement": true
+  },
+  {
+   "region_id": "P6-funds-analysis-chart",
+   "page": "P6",
+   "agent": "retain_module",
+   "human": "retain_module",
+   "agreement": true
+  },
+  {
+   "region_id": "P7-clue-network",
+   "page": "P7",
+   "agent": "retain_module",
+   "human": "retain_module",
+   "agreement": true
+  },
+  {
+   "region_id": "P8-petition-example",
+   "page": "P8",
+   "agent": "hybrid",
+   "human": "retain_module",
+   "agreement": false
+  },
+  {
+   "region_id": "P9-image-020-report-ui",
+   "page": "P9",
+   "agent": "retain_module",
+   "human": "retain_module",
+   "agreement": true
+  },
+  {
+   "region_id": "P10-vehicle-risk-example",
+   "page": "P10",
+   "agent": "retain_module",
+   "human": "retain_module",
+   "agreement": true
+  },
+  {
+   "region_id": "P11-rural-three-assets",
+   "page": "P11",
+   "agent": "retain_module",
+   "human": "retain_module",
+   "agreement": true
+  },
+  {
+   "region_id": "P12-industry-risk-bars",
+   "page": "P12",
+   "agent": "native",
+   "human": "native",
+   "agreement": true
+  }
+ ]
+}

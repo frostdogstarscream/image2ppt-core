@@ -1,0 +1,138 @@
+{
+ "jobs_root": "D:\\Code\\image2PPT\\.build\\region-shadow\\llm-jobs-v2",
+ "dry_run": false,
+ "count": 8,
+ "statuses": {
+  "P5-example-058-dashboard": "PREPARED",
+  "P6-funds-analysis-chart": "PREPARED",
+  "P7-clue-network": "PREPARED",
+  "P8-petition-example": "PREPARED",
+  "P9-image-020-report-ui": "PREPARED",
+  "P10-vehicle-risk-example": "PREPARED",
+  "P11-rural-three-assets": "PREPARED",
+  "P12-industry-risk-bars": "CACHED"
+ },
+ "jobs": [
+  {
+   "region_id": "P5-example-058-dashboard",
+   "status": "PREPARED",
+   "model": "kimi/kimi-k2.6",
+   "prompt_version": "region-decision/1",
+   "crop_size": [
+    557,
+    401
+   ],
+   "request_sha256": "c9e5e8dc053d66e06aeec5d522227b020d9977180ea27321106eb36d005f118e",
+   "crop_sha256": "e7feeb339a97a30739257b8e4694219f5e87ce271e87dcb108fa379d55b1765c",
+   "features_sha256": "f273cbf42982df98d88e3f014be53e9f3d2e2ce6875702b6f5d199fd147ec4bd",
+   "capabilities_sha256": "88e09e23865ea83df7ba401021089aa4ae627e381c8af2e3250362bd87b7078e",
+   "api_called": false
+  },
+  {
+   "region_id": "P6-funds-analysis-chart",
+   "status": "PREPARED",
+   "model": "kimi/kimi-k2.6",
+   "prompt_version": "region-decision/1",
+   "crop_size": [
+    913,
+    432
+   ],
+   "request_sha256": "d7fb774c193c4ca5dc9362e7bc472de589760754a7449a89a2f69f0c0d857efb",
+   "crop_sha256": "24125f9ed3786c1b2a1e0feb93852c2a4208d7c23718935a1cd431adc820a458",
+   "features_sha256": "ca5de4fd208640d4f7ea9cbb7f95c3eb46c4c569f0527f95d144ebe982d27513",
+   "capabilities_sha256": "88e09e23865ea83df7ba401021089aa4ae627e381c8af2e3250362bd87b7078e",
+   "api_called": false
+  },
+  {
+   "region_id": "P7-clue-network",
+   "status": "PREPARED",
+   "model": "kimi/kimi-k2.6",
+   "prompt_version": "region-decision/1",
+   "crop_size": [
+    842,
+    596
+   ],
+   "request_sha256": "aa3c75fa4bd1ff13b5326f82cd232d4e14a6ab7914ee4d495698fd2bc63a589c",
+   "crop_sha256": "96fcd61faf56dc0aee28d0bf36ab3cf3904690562338028071c22c2c311ed43f",
+   "features_sha256": "8fe897516cccf42fb1cd0d4244744fb287c6bdcf1cbd81ee4d9bd0e4d56daf21",
+   "capabilities_sha256": "88e09e23865ea83df7ba401021089aa4ae627e381c8af2e3250362bd87b7078e",
+   "api_called": false
+  },
+  {
+   "region_id": "P8-petition-example",
+   "status": "PREPARED",
+   "model": "kimi/kimi-k2.6",
+   "prompt_version": "region-decision/1",
+   "crop_size": [
+    435,
+    385
+   ],
+   "request_sha256": "6d31b57abd0d5567347213dd5c4958fc35f59835bbf683e13c4d29ce5ffe900b",
+   "crop_sha256": "92c7b7c77a13e0505b3656995401d6f43fd786aff7d9159123773690b5acc90c",
+   "features_sha256": "c1c0839d1d57a912f79c8bcb4d470eb43f000c94d8eb08b0225f831c5c2f657a",
+   "capabilities_sha256": "88e09e23865ea83df7ba401021089aa4ae627e381c8af2e3250362bd87b7078e",
+   "api_called": false
+  },
+  {
+   "region_id": "P9-image-020-report-ui",
+   "status": "PREPARED",
+   "model": "kimi/kimi-k2.6",
+   "prompt_version": "region-decision/1",
+   "crop_size": [
+    531,
+    416
+   ],
+   "request_sha256": "7020b8bcad656c84d3151c601222127d4330495a782af565cc6cbe40f5c217a1",
+   "crop_sha256": "ccd56c9c4f15467cb2946543bb1ec870e43eaf2b7c09420880fb8e5618e219bc",
+   "features_sha256": "585db6ae02826f7e61dcc9d2450769cae81dd6c9b43fa0a4940d9ef2f4264f7b",
+   "capabilities_sha256": "88e09e23865ea83df7ba401021089aa4ae627e381c8af2e3250362bd87b7078e",
+   "api_called": false
+  },
+  {
+   "region_id": "P10-vehicle-risk-example",
+   "status": "PREPARED",
+   "model": "kimi/kimi-k2.6",
+   "prompt_version": "region-decision/1",
+   "crop_size": [
+    887,
+    281
+   ],
+   "request_sha256": "ca0e2236bf3ab1916220ee4014756f17a9d8a28a63fc796d0b36dd6c6b232e3f",
+   "crop_sha256": "e8a25e9c7b971fd61ea1dc418061b584f3b5eb8b02a6682653e9953ef56c15e1",
+   "features_sha256": "9c8f64e3f56019e4c423313afcd9a8b4d62b14c219c794cc169c82ec8460c002",
+   "capabilities_sha256": "88e09e23865ea83df7ba401021089aa4ae627e381c8af2e3250362bd87b7078e",
+   "api_called": false
+  },
+  {
+   "region_id": "P11-rural-three-assets",
+   "status": "PREPARED",
+   "model": "kimi/kimi-k2.6",
+   "prompt_version": "region-decision/1",
+   "crop_size": [
+    868,
+    665
+   ],
+   "request_sha256": "e3929df8a1f23fc421de3586e4e9ab9b3a17168d15bdfc900544da599e921009",
+   "crop_sha256": "58a11b25a551995a63549f3d658ff8fc4e78ab717605e1b7446509f31f425234",
+   "features_sha256": "278821395e5ab91c3d48881fbfb3f0290a96d415dd507a158f104b85b269ead1",
+   "capabilities_sha256": "88e09e23865ea83df7ba401021089aa4ae627e381c8af2e3250362bd87b7078e",
+   "api_called": false
+  },
+  {
+   "region_id": "P12-industry-risk-bars",
+   "status": "CACHED",
+   "model": "kimi/kimi-k2.6",
+   "prompt_version": "region-decision/1",
+   "crop_size": [
+    717,
+    260
+   ],
+   "request_sha256": "5cc9c7ea2a46102a86cd74ae3e92134648e6628efa0bde505fce43607ce99759",
+   "crop_sha256": "1f39ba5d214b1f545e734dd21fb56d4f7642eb70d8098824b2483bda1e42bc85",
+   "features_sha256": "4421cb57d1a381bbd361e761ee2fd2f5daf54b4c7979b143b0b1f6933767af30",
+   "capabilities_sha256": "88e09e23865ea83df7ba401021089aa4ae627e381c8af2e3250362bd87b7078e",
+   "api_called": false
+  }
+ ],
+ "api_called": false
+}
