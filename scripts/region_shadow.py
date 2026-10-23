@@ -21,7 +21,9 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = Path(__file__).with_name('region_plan.schema.json')
 sys.path.insert(0, str(ROOT / 'services/vision/src'))
-from image2ppt_vision.region_plan import apply_jobs, prepare_region_job, validate_decision
+from image2ppt_vision.region_plan import (
+    HUMAN_SCOPE_KEYS, apply_jobs, prepare_region_job, validate_decision, validate_human_decision,
+)
 
 
 def resolve(path):
@@ -38,7 +40,13 @@ def load_human_decisions(path):
     decisions = data.get('decisions', data) if isinstance(data, dict) else data
     if not isinstance(decisions, dict):
         raise ValueError('invalid human decisions')
-    return decisions
+    result = {}
+    for region_id, value in decisions.items():
+        try:
+            result[region_id] = validate_human_decision(value)
+        except ValueError as exc:
+            raise ValueError(f'{region_id}: {exc}') from exc
+    return result
 
 
 def write_json(path, value):
@@ -292,7 +300,8 @@ def semantic_errors(plans):
 
 
 def validate(plans, output, human_decisions=None):
-    plans = read_json(plans)
+    plans_path = resolve(plans)
+    plans = read_json(plans_path)
     schema = read_json(SCHEMA_PATH)
     validator = Draft202012Validator(schema)
     errors = [f'{list(error.path)}: {error.message}' for error in sorted(validator.iter_errors(plans), key=lambda e: list(e.path))]
@@ -303,17 +312,52 @@ def validate(plans, output, human_decisions=None):
                 validate_decision(row['agent'])
             except (ValueError, TypeError) as exc:
                 errors.append(f'{row["region_id"]}: strict LLM decision invalid: {exc}')
+    checked = {'plans_sha256': file_sha(plans_path)}
     if human_decisions:
-        decisions = load_human_decisions(human_decisions)
+        decisions_path = resolve(human_decisions)
+        checked['human_decisions_sha256'] = file_sha(decisions_path)
+        decisions = load_human_decisions(decisions_path)
         for row in plans['regions']:
             expected = decisions.get(row['region_id'])
             if expected is None:
                 errors.append(f'{row["region_id"]}: missing authoritative human decision')
             elif row.get('human') != {key: expected.get(key, '') for key in ('decision', 'source', 'note')}:
                 errors.append(f'{row["region_id"]}: human decision differs from authoritative file')
-    result = {'valid': not errors, 'errors': errors}
+    result = {'schema': 'RegionValidation/1', 'valid': not errors, 'errors': errors, 'checked': checked}
     write_json(output, result)
     return result
+
+
+def scope_score(row, human):
+    """Compare concrete native/retained scope, not only the routing label."""
+    if (not isinstance(human, dict) or human.get('decision') in (None, 'pending')
+            or not HUMAN_SCOPE_KEYS <= set(human)):
+        return {'annotated': False, 'agreement': None}
+    agent = row['agent']
+    native = set(agent['native_parts'])
+    retained = set(agent['retained_parts'])
+    allowed = set(human['allowed_native_parts'])
+    required = set(human['required_edit_targets'])
+    must_retain = set(human['must_retain_parts'])
+    over = sorted(native - allowed)
+    under = sorted(required - native)
+    retain_missing = sorted(must_retain - retained)
+    overlap = sorted(native & must_retain)
+    required_retained = sorted(required & retained)
+    routing = agent['decision'] == human['decision']
+    violations = bool(over or under or retain_missing or overlap or required_retained)
+    return {
+        'annotated': True,
+        'agreement': routing and not violations,
+        'routing_agreement': routing,
+        'annotation_level': human['annotation_level'],
+        'retain_scope': human['retain_scope'],
+        'over_decomposition': over,
+        'under_decomposition': under,
+        'retain_violations': retain_missing,
+        'native_retained_overlap': overlap,
+        'required_retained_conflict': required_retained,
+    }
 
 
 def score(plans, output, human_decisions=None):
@@ -325,16 +369,39 @@ def score(plans, output, human_decisions=None):
         human = (decisions.get(row['region_id'], {}).get('decision')
                  if decisions is not None else row['human']['decision'])
         agreement = None if human in (None, 'pending') else agent == human
+        annotation = decisions.get(row['region_id'], {}) if decisions is not None else row.get('human', {})
         rows.append({'region_id': row['region_id'], 'page': row['page'],
-                     'agent': agent, 'human': human, 'agreement': agreement})
+                     'agent': agent, 'human': human, 'agreement': agreement,
+                     'scope': scope_score(row, annotation)})
     decided = [row for row in rows if row['agreement'] is not None]
     agreed = [row for row in decided if row['agreement']]
+    routing = {
+        'decided': len(decided),
+        'agreed': len(agreed),
+        'agreement_rate': round(len(agreed) / len(decided), 4) if decided else None,
+        'always_retain_baseline': (
+            round(sum(1 for row in decided if row['human'] == 'retain_module') / len(decided), 4)
+            if decided else None),
+    }
+    scope_rows = [row for row in rows if row['scope']['annotated'] and row['scope']['agreement'] is not None]
+    scope_agreed = [row for row in scope_rows if row['scope']['agreement']]
+    scope = {
+        'decided': len(scope_rows),
+        'agreed': len(scope_agreed),
+        'agreement_rate': round(len(scope_agreed) / len(scope_rows), 4) if scope_rows else None,
+        'over_decomposition': sum(1 for row in scope_rows if row['scope']['over_decomposition']),
+        'under_decomposition': sum(1 for row in scope_rows if row['scope']['under_decomposition']),
+        'retain_violations': sum(1 for row in scope_rows if row['scope']['retain_violations']),
+        'disagreements': [row for row in scope_rows if not row['scope']['agreement']],
+    }
     result = {
         'total': len(rows),
         'decided': len(decided),
         'agreed': len(agreed),
-        'agreement_rate': round(len(agreed) / len(decided), 4) if decided else None,
+        'agreement_rate': routing['agreement_rate'],
         'disagreements': [row for row in decided if not row['agreement']],
+        'routing': routing,
+        'scope': scope,
         'rows': rows,
     }
     write_json(output, result)
@@ -348,12 +415,16 @@ def human_decisions(plans, output):
         human = row.get('human')
         if not isinstance(human, dict) or human.get('decision') not in ('native', 'hybrid', 'retain_module', 'pending'):
             raise ValueError('invalid human decision for ' + row['region_id'])
-        decisions[row['region_id']] = {
+        decision = {
             'decision': human['decision'],
             'source': human.get('source', 'accepted_deck (proxy)'),
             'note': human.get('note', ''),
         }
-    result = {'schema_version': 'region-human-decisions/0.1', 'decisions': decisions}
+        for key in HUMAN_SCOPE_KEYS:
+            if key in human:
+                decision[key] = human[key]
+        decisions[row['region_id']] = decision
+    result = {'schema_version': 'region-human-decisions/0.2', 'decisions': decisions}
     write_json(output, result)
     return result
 
@@ -413,29 +484,60 @@ def apply_llm(inventory, jobs, output, human_decisions, allow_partial=False, dry
 def report(plans, score, output, provenance=None, validation=None, apply_report=None):
     plans = read_json(plans)
     scored = read_json(score)
+    routing = scored.get('routing', {
+        'decided': scored['decided'], 'agreed': scored['agreed'],
+        'agreement_rate': scored['agreement_rate'], 'always_retain_baseline': None,
+    })
+    scope = scored.get('scope')
     lines = [
         '# Region rebuild shadow mode',
         '',
         f'- regions: {scored["total"]}',
-        f'- decided: {scored["decided"]}',
-        f'- agreement: {scored["agreed"]}/{scored["decided"]} = {scored["agreement_rate"]}',
+        f'- routing decided: {routing["decided"]}',
+        f'- routing agreement: {routing["agreed"]}/{routing["decided"]} = {routing["agreement_rate"]}',
+        f'- always-retain baseline: {routing["always_retain_baseline"]}',
+    ]
+    if scope:
+        lines += [
+            f'- scope annotated: {scope["decided"]}',
+            f'- scope agreement: {scope["agreed"]}/{scope["decided"]} = {scope["agreement_rate"]}',
+            f'- over / under / retain violations: {scope["over_decomposition"]} / '
+            f'{scope["under_decomposition"]} / {scope["retain_violations"]}',
+        ]
+    lines += [
         '',
-        '| Region | Page | Type | Agent | Human | Agree | Confidence | Evidence |',
-        '|---|---|---|---|---|---|---:|---|',
+        '| Region | Page | Type | Agent | Human | Route | Scope | Confidence | Evidence |',
+        '|---|---|---|---|---|---|---|---:|---|',
     ]
     for row in plans['regions']:
         match = next(item for item in scored['rows'] if item['region_id'] == row['region_id'])
         agree = 'pending' if match['agreement'] is None else ('yes' if match['agreement'] else 'no')
+        item_scope = match.get('scope', {})
+        scope_text = '-' if not item_scope.get('annotated') else (
+            'yes' if item_scope.get('agreement') else 'no')
         evidence = '; '.join(row['agent']['evidence']).replace('|', '/')[:180]
         lines.append(f'| {row["region_id"]} | {row["page"]} | {row["classification"]} | '
-                     f'{row["agent"]["decision"]} | {row["human"]["decision"]} | {agree} | '
+                     f'{row["agent"]["decision"]} | {row["human"]["decision"]} | {agree} | {scope_text} | '
                      f'{row["agent"]["confidence"]:.2f} | {evidence} |')
-    lines += ['', '## Disagreements', '']
+    lines += ['', '## Routing disagreements', '']
     if scored['disagreements']:
         for row in scored['disagreements']:
             lines.append(f'- {row["region_id"]}: agent={row["agent"]}, human={row["human"]}')
     else:
         lines.append('- none')
+    if scope:
+        lines += ['', '## Scope disagreements', '']
+        if scope['disagreements']:
+            for row in scope['disagreements']:
+                item = row['scope']
+                lines.append(
+                    f'- {row["region_id"]}: over={item["over_decomposition"]}, '
+                    f'under={item["under_decomposition"]}, '
+                    f'retain_missing={item["retain_violations"]}, '
+                    f'native/retained overlap={item["native_retained_overlap"]}, '
+                    f'required/retained conflict={item["required_retained_conflict"]}')
+        else:
+            lines.append('- none')
     lines += ['', '## Measured features', '',
               '| Region | Area px | Aspect | Colors | Edge density | Median text px | Microtext |',
               '|---|---:|---:|---:|---:|---:|---:|']

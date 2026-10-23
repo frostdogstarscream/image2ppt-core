@@ -267,6 +267,10 @@ def test_response_redaction_precedes_save(tmp_path,monkeypatch):
     from io import BytesIO
     request=tmp_path/'request.json';request.write_text('{}')
     settings=tmp_path/'settings.json';write_json(settings,{'base_url':'https://fixture.example/v1','timeout_seconds':120})
+    verified={'request_bytes':b'{}','settings':{'base_url':'https://fixture.example/v1','timeout_seconds':120},
+              'request_sha256':'a'*64,'endpoint_sha256':'b'*64,'job_binding_sha256':'c'*64,
+              'model':'fixture/model','prompt_version':'fixture/1'}
+    monkeypatch.setattr(worker,'verify_job',lambda *a:verified)
     monkeypatch.setenv('VISION_LLM_API_KEY','echo-fixture-secret')
     class Opener:
         def open(self,*a,**kw):return BytesIO(b'{"error":"echo-fixture-secret"}')

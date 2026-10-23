@@ -1,23 +1,32 @@
 # Region rebuild shadow mode
 
 - regions: 8
-- decided: 8
-- agreement: 7/8 = 0.875
+- routing decided: 8
+- routing agreement: 7/8 = 0.875
+- always-retain baseline: 0.75
+- scope annotated: 8
+- scope agreement: 6/8 = 0.75
+- over / under / retain violations: 2 / 0 / 1
 
-| Region | Page | Type | Agent | Human | Agree | Confidence | Evidence |
-|---|---|---|---|---|---|---:|---|
-| P5-example-058-dashboard | P5 | ui_mockup | hybrid | hybrid | yes | 0.85 | Dashboard UI mockup with rounded cards, soft shadows, and gradient-style status chips; Microtext fraction 0.26 with 231 text components and median height 12px; Custom icons (checkm |
-| P6-funds-analysis-chart | P6 | dashboard | retain_module | retain_module | yes | 0.92 | Central radial network diagram with 7 connected nodes and glowing connector lines forming non-native geometry; Median text height of 4px with 87.76% microtext fraction across 49 te |
-| P7-clue-network | P7 | network | retain_module | retain_module | yes | 0.95 | Complex radial network graph with 8 nodes connected by curved glowing edges to a central person icon; Numerous microtext labels including category names, relationship descriptions, |
-| P8-petition-example | P8 | table | hybrid | retain_module | no | 0.85 | Blue header bar with white Chinese title text '示例：信访智能分析结果'; White card panel containing six labeled rows with icons, text values, and orange '中风险' status badge; Row labels include |
-| P9-image-020-report-ui | P9 | ui_mockup | retain_module | retain_module | yes | 0.92 | Entire image is a UI mockup with sidebar navigation, document preview panel, and feature cards with icons; Contains 144 text components with 28.47% microtext fraction below readabl |
-| P10-vehicle-risk-example | P10 | photo_map | retain_module | retain_module | yes | 0.95 | Map background with street grid and location markers showing route from company to restaurant/hotel; Red alert popup with warning icon and timestamp contains microtext-sized elemen |
-| P11-rural-three-assets | P11 | photo_diagram | retain_module | retain_module | yes | 0.95 | Aerial photograph of rural village landscape fills entire background with continuous tonal imagery; Radial network diagram with six nodes connected by dashed and solid arrows to ce |
-| P12-industry-risk-bars | P12 | chart | native | native | yes | 0.92 | Horizontal bar chart with five category labels and percentage values aligned to bar ends; Uniform bar styling with gradient fills reconstructable as native bars; Title text in dark |
+| Region | Page | Type | Agent | Human | Route | Scope | Confidence | Evidence |
+|---|---|---|---|---|---|---|---:|---|
+| P5-example-058-dashboard | P5 | ui_mockup | hybrid | hybrid | yes | no | 0.85 | Dashboard UI mockup with rounded cards, soft shadows, and gradient-style status chips; Microtext fraction 0.26 with 231 text components and median height 12px; Custom icons (checkm |
+| P6-funds-analysis-chart | P6 | dashboard | retain_module | retain_module | yes | yes | 0.92 | Central radial network diagram with 7 connected nodes and glowing connector lines forming non-native geometry; Median text height of 4px with 87.76% microtext fraction across 49 te |
+| P7-clue-network | P7 | network | retain_module | retain_module | yes | yes | 0.95 | Complex radial network graph with 8 nodes connected by curved glowing edges to a central person icon; Numerous microtext labels including category names, relationship descriptions, |
+| P8-petition-example | P8 | table | hybrid | retain_module | no | no | 0.85 | Blue header bar with white Chinese title text '示例：信访智能分析结果'; White card panel containing six labeled rows with icons, text values, and orange '中风险' status badge; Row labels include |
+| P9-image-020-report-ui | P9 | ui_mockup | retain_module | retain_module | yes | yes | 0.92 | Entire image is a UI mockup with sidebar navigation, document preview panel, and feature cards with icons; Contains 144 text components with 28.47% microtext fraction below readabl |
+| P10-vehicle-risk-example | P10 | photo_map | retain_module | retain_module | yes | yes | 0.95 | Map background with street grid and location markers showing route from company to restaurant/hotel; Red alert popup with warning icon and timestamp contains microtext-sized elemen |
+| P11-rural-three-assets | P11 | photo_diagram | retain_module | retain_module | yes | yes | 0.95 | Aerial photograph of rural village landscape fills entire background with continuous tonal imagery; Radial network diagram with six nodes connected by dashed and solid arrows to ce |
+| P12-industry-risk-bars | P12 | chart | native | native | yes | yes | 0.92 | Horizontal bar chart with five category labels and percentage values aligned to bar ends; Uniform bar styling with gradient fills reconstructable as native bars; Title text in dark |
 
-## Disagreements
+## Routing disagreements
 
 - P8-petition-example: agent=hybrid, human=retain_module
+
+## Scope disagreements
+
+- P5-example-058-dashboard: over=['bars', 'card', 'category_labels', 'cell_text', 'kpi', 'labels', 'number_badge', 'panel', 'percentage_labels', 'row_header', 'table', 'values'], under=[], retain_missing=['dashboard_body'], native/retained overlap=[], required/retained conflict=[]
+- P8-petition-example: over=['card', 'cell_text', 'labels', 'number_badge', 'panel', 'row_header', 'section_title', 'table', 'values'], under=[], retain_missing=[], native/retained overlap=[], required/retained conflict=[]
 
 ## Measured features
 
