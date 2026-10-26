@@ -149,7 +149,16 @@ def author(session, source, inventory, defaults, layout, region, decision, direc
             except (ValueError,KeyError,TypeError):
                 report['crop_diagnostics']='Malformed crop fields; correct schema first.'
             return report
-        value=checked(session,phase,prompt,evidence,[source,crop],accept,feedback=feedback)
+        try:
+            value=checked(session,phase,prompt,evidence,[source,crop],accept,feedback=feedback)
+        except ValueError as exc:
+            message=legacy.safe_error(exc)
+            geometric_retry=(phase.startswith('initial/') and message.startswith('model_output_validation_exhausted:')
+                and any(part in message for part in ('native text box leaves region','object leaves region','unmapped element in region')))
+            if not geometric_retry: raise
+            # Replays the same first three request IDs from cache, then permits
+            # at most three more format/geometry fixes inside the original cap.
+            value=checked(session,phase,prompt,evidence,[source,crop],accept,feedback=feedback,attempts=6)
         value['model_response_sha256']=session.last_response_sha256
         return value
     value=step(directory/'elements.json',{'prompt':prompt,'evidence':evidence,'crop_sha256':digest(crop),

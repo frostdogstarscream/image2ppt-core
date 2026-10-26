@@ -144,6 +144,20 @@ def test_initial_incompatible_scope_requires_new_agent_decision_before_reauthor(
     assert workflow.routing_scope(confidence_only)==workflow.routing_scope(original)
 
 
+def test_initial_geometry_retry_extends_attempts_without_rewriting_the_proposal(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    inv,defaults,draft=fixture();layout=layout_from_draft(draft,inv);region=layout['regions'][0]
+    decision=bound(layout,region);source=tmp_path/'source.png';Image.new('RGB',(300,200),'white').save(source)
+    session=SimpleNamespace(root=tmp_path,model='fixture',last_response_sha256='e'*64);attempts=[]
+    def checked(session,phase,prompt,evidence,images,validator,**kwargs):
+        attempts.append(kwargs.get('attempts',3))
+        if len(attempts)==1: raise ValueError('model_output_validation_exhausted: native text box leaves region: t1')
+        return validator(native_draft(region,decision))
+    monkeypatch.setattr(workflow,'checked',checked);monkeypatch.setattr(workflow,'font_status',lambda:{'families':['Arial']})
+    result=workflow.author(session,source,inv,defaults,layout,region,decision,tmp_path/'author',phase='initial/author/r01')
+    assert attempts==[3,6] and result['text_decisions'][0]['text']=='Heading'
+
+
 def page(kind='retain_module'):
     inv,defaults,draft=fixture(); layout=layout_from_draft(draft,inv); ds={}; es={}
     for region in layout['regions']:
