@@ -121,6 +121,86 @@ def save(path, value):
     os.replace(temp, path)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def adapt_body(config, body):
+    """Provider-specific request fields, declared in the server config only."""
+    adapter = config.get('body_adapter') or {}
+    value = {k: v for k, v in body.items() if k not in set(adapter.get('drop', []))}
+    value.update(adapter.get('set', {}))
+    return value
+
+
+def stream_chat(endpoint, secret, body, timeout):
+    """Streamed OpenAI-compatible chat completion; the secret is redacted from output."""
+    body = dict(body, stream=True, stream_options={'include_usage': True})
+    request = urllib.request.Request(endpoint.rstrip('/')+'/chat/completions',
+        data=json.dumps(body, ensure_ascii=False, allow_nan=False).encode(),
+        headers={'Authorization': 'Bearer '+secret, 'Content-Type': 'application/json'})
+    start = time.monotonic()
+    pieces = []; usage = {}; finish = None; length = 0; done = False; model_name = body['model']; tools_seen = False
+    try:
+        with urllib.request.build_opener(_NoRedirect).open(request, timeout=min(60, timeout)) as response:
+            for raw in response:
+                if time.monotonic()-start > timeout:
+                    return {'ok': False, 'error': 'model_timeout'}
+                length += len(raw)
+                if length > MAX_OUTPUT:
+                    return {'ok': False, 'error': 'model_response_too_large'}
+                if not raw.startswith(b'data:'):
+                    continue
+                chunk = raw[5:].strip()
+                if chunk == b'[DONE]':
+                    done = True
+                    break
+                if not chunk:
+                    continue
+                event = json.loads(chunk)
+                usage = event.get('usage') or usage
+                model_name = event.get('model', model_name)
+                for choice in event.get('choices', []):
+                    delta = choice.get('delta', {})
+                    if delta.get('tool_calls') or delta.get('function_call') or delta.get('refusal'):
+                        tools_seen = True
+                    if delta.get('content'):
+                        pieces.append(delta['content'])
+                    if choice.get('finish_reason') is not None:
+                        finish = choice['finish_reason']
+    except urllib.error.HTTPError as exc:
+        result = {'ok': False, 'error': 'model_http_'+str(exc.code), 'http_status': exc.code}
+        try:
+            detail = exc.read(400).decode('utf-8', 'replace').replace(secret, '[REDACTED]')
+        except Exception:
+            detail = ''
+        if detail:
+            result['provider_message'] = detail
+        return result
+    except (TimeoutError, __import__('socket').timeout):
+        return {'ok': False, 'error': 'model_timeout'}
+    except urllib.error.URLError:
+        return {'ok': False, 'error': 'model_transport_failed'}
+    except ValueError:
+        return {'ok': False, 'error': 'invalid_model_response'}
+    content = ''.join(pieces).replace(secret, '[REDACTED]')
+    if not done or finish != 'stop':
+        return {'ok': False, 'error': 'model_response_incomplete', 'finish_reason': finish, 'usage': usage,
+                'partial_content': content}
+    if tools_seen:
+        return {'ok': False, 'error': 'invalid_model_message', 'usage': usage}
+    return {'ok': True, 'content': content, 'model': model_name, 'usage': usage,
+            'elapsed_seconds': round(time.monotonic()-start, 3)}
+
+
+def read_key(config):
+    path = Path(config['api_key_file'])
+    if path.stat().st_mode & 0o077:
+        raise PermissionError('api key file must not be group/world accessible')
+    return path.read_text().strip()
+
+
 def model_call(config, payload):
     model = payload['body']['model']
     if model not in config['allowed_models']:
@@ -128,8 +208,18 @@ def model_call(config, payload):
     body = payload['body']
     if set(body)-{'model', 'messages', 'temperature', 'max_tokens', 'response_format', 'enable_thinking'}:
         return {'ok': False, 'error': 'unsupported_model_request'}
+    timeout = min(480, max(1, int(payload.get('timeout', 180))))
+    if config.get('credential_mode') == 'key_file':
+        start = time.monotonic()
+        try:
+            secret = read_key(config)
+        except (OSError, PermissionError):
+            return {'ok': False, 'error': 'credential_file_unavailable'}
+        output = stream_chat(config['base_url'], secret, adapt_body(config, body), timeout)
+        output.update(requested_model=model, total_seconds=round(time.monotonic()-start, 3))
+        return output
     request = {k: config[k] for k in ('credential_provider', 'credential_model', 'base_url')}
-    request.update(body=body, timeout=min(480, max(1, int(payload.get('timeout', 180)))))
+    request.update(body=adapt_body(config, body), timeout=timeout)
     start = time.monotonic()
     try:
         result = subprocess.run(['docker', 'exec', '-i', config['dify_container'],
@@ -282,10 +372,14 @@ def dispatch(config, request):
             else:
                 result = analyze(config, request, directory)
         elif operation == 'catalog':
-            with urllib.request.urlopen(config['base_url'].rstrip('/')+'/models', timeout=20) as response:
+            headers = {}
+            if config.get('credential_mode') == 'key_file':
+                headers['Authorization'] = 'Bearer '+read_key(config)
+            catalog = urllib.request.Request(config['base_url'].rstrip('/')+'/models', headers=headers)
+            with urllib.request.urlopen(catalog, timeout=20) as response:
                 value = json.loads(response.read(MAX_OUTPUT))
-            result = {'ok': True, 'base_url': config['base_url'],
-                      'models': [x['id'] for x in value['data']], 'credential_source': 'server_dify'}
+            result = {'ok': True, 'base_url': config['base_url'], 'models': [x['id'] for x in value['data']],
+                      'credential_source': 'server_key_file' if headers else 'server_dify'}
         else:
             result = {'ok': False, 'error': 'unsupported_operation'}
     except urllib.error.HTTPError as exc:

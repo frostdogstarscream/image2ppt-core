@@ -84,6 +84,7 @@ def test_validation_feedback_is_an_explicit_followup_not_buried_in_source_data()
     assert 'validation_feedback' not in body['messages'][1]['content'][0]['text']
     assert body['messages'][2]['content'] == '{"draft":1}'
     assert 'invalid crop' in body['messages'][-1]['content'] and evidence == before
+    assert body['response_format'] == {'type': 'json_object'} and 'json' in body['messages'][0]['content']
 
 
 def test_compact_draft_preserves_defaults_and_checks_binding():
@@ -252,7 +253,7 @@ def test_invalid_json_retry_has_bounded_budget(tmp_path):
     remote = BadRemote(); session = PageSession(tmp_path, remote, 'fixture')
     with pytest.raises(ValueError, match='validation_exhausted'):
         checked_model_json(session, 'plan', 'test', {}, [], lambda x: x)
-    assert len(remote.calls) == 3
+    assert len(remote.calls) == 2  # the identical rejection repeats, so retrying further is skipped
 
 
 @pytest.fixture

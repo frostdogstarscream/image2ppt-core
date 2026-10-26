@@ -7,6 +7,9 @@ from .auto_protocol import inside, transform_model_boxes
 from .element_service import validate_payload
 from .region_plan import CAPABILITIES, CLASSIFICATIONS, validate_decision
 from .supervised_elements import validate_element_plan, GEOMETRIES, _intersection, _box, _color
+from .auto_repair import (repair_layout, align_decision, normalize_draft_colors, normalize_draft_structure,
+                          parts_from_mapping, derive_mapping, reconcile_audit, trim_rasters_off_native_text,
+                          grow_rasters_to_declared_text, normalize_draft_envelope, gradient_problem)
 
 
 VERSION = 2
@@ -46,28 +49,29 @@ AUTHOR_PROMPT = '''Reconstruct ONLY the supplied region, obeying its bound regio
 Image 1 is the full source page; image 2 is the exact region crop. Do not redesign.
 Return only {schema:"RegionElementsDraft/1",coordinate_space:"normalized_1000_xyxy",
 region_id:<given>,decision_binding:<given>,objects:[...],text_overrides:[...],
-mapping:{native:{<allowed native part>:[object IDs]},retained:{<required retained part>:[asset IDs]}},
+text_parts:{<native OCR ID>:<decision native part>} (optional),
 text_audit:[{id:<every region OCR ID>,status:"calibrated|confirmed|unresolved|retained",
 reason:<short source observation>,style_group:<short semantic group or empty>}],limitations:[]}.
 All boxes use FULL SOURCE PAGE [left,top,right,bottom] normalized 0..1000 on BOTH axes.
 Font sizes are SOURCE PIXEL em, never normalized or points. Use supplied font families.
-Native shape={id,kind:"native_shape",bbox,z,geometry,fill,line?}. geometry is a STRING
+Native shape={id,kind:"native_shape",part,bbox,z,geometry,fill,line?}. geometry is a STRING
 from allowed_geometries, never an object/dict. Example:
-{"id":"r01-panel","kind":"native_shape","bbox":[10,10,900,90],"z":1,"geometry":"rect","fill":"FFFFFF"}.
+{"id":"r01-panel","kind":"native_shape","part":"panel","bbox":[10,10,900,90],"z":1,"geometry":"rect","fill":"FFFFFF"}.
 Do not add geometry parameters such as cx,cy,rx,ry or nested kind fields.
 objects allows ONLY kind native_shape and raster_asset. There is NO native_text kind.
 Native text already exists in text_defaults: change it only through text_overrides,
-and reference its existing text-XXXX ID directly in mapping.native. Never create a
-second object for that text. Example mapping.native={"section_title":["text-0000"]}.
+and optionally name its decision part in text_parts, e.g. {"text-0000":"section_title"};
+untagged native text joins the main text part. Never create a second object for that text.
 fill is six hex or "none". Optional fill_gradient={angle_deg,stops:[{offset:0..1,color:hex}]}.
-line={color,width_pt}. roundRect may have corner_radius_px in source pixels.
-Raster={id,kind:"raster_asset",source_crop_bbox,dest_bbox,z,contains_text_ids,mask?}.
-Omit optional mask, or use "rect"/"ellipse"; never null. Raster IDs and native shape
-IDs must all appear in the mapping. Every decision part needs a nonempty list.
+line={color:six hex,width_pt}; omit line when there is no border. roundRect may have
+corner_radius_px in source pixels.
+Raster={id,kind:"raster_asset",part,source_crop_bbox,dest_bbox,z,contains_text_ids,mask?}.
+Omit optional mask, or use "rect"/"ellipse"; never null. Every object needs part: a
+decision native part for native shapes, a decision retained part for raster crops.
+The program derives the native/retained mapping from these tags; do not write mapping.
 Both crop and destination must stay within this region; keep their source geometry.
 Use region-prefixed IDs, e.g. r01-title-bg. Native text IDs stay exactly as supplied.
-Every object must be mapped to a decision part. Native mappings contain native shapes/text;
-retained mappings contain actual cropped images, NOT substitute native circles.
+Retained parts are actual cropped source images, NOT substitute native circles.
 Preserve images' internal source pixels. Native text must NEVER duplicate text still
 visible in ANY crop. Declare every fully included OCR ID in contains_text_ids; exclude
 neighboring/crossing text. A logo or tiny icon misrecognized by OCR may stay inside
@@ -119,8 +123,8 @@ This is a correction of the supplied previous region draft and bound visual revi
 Return a COMPLETE RegionElementsDraft/1, with only the reviewed objects/fields changed.
 Do not change any unmentioned object, text, source crop or region decision.
 New objects are permitted only inside explicitly missing-object issue boxes.
-Changes must be real; resubmitting the unchanged plan is rejected. Preserve the mapping
-and text audit, updating only affected items. A source crop can change only for a crop
+Changes must be real; resubmitting the unchanged plan is rejected. Preserve part tags,
+text_parts and the text audit, updating only affected items. A source crop can change only for a crop
 issue. Text content can change only for text/numeric/missing issues.
 If decision scope is unsuitable, the reviewer must request redecision; do not bypass it.'''
 
@@ -212,13 +216,25 @@ def layout_from_draft(draft, inventory):
     return result
 
 
+def layout_with_repair(draft, inventory):
+    repaired, record = repair_layout(draft, inventory)
+    layout = layout_from_draft(repaired, inventory)
+    if record['operations']:
+        layout['program_repair'] = record
+    return layout
+
+
 def decision_record(raw, *, region, layout, crop_sha256, capabilities, response_sha256):
-    decision = validate_decision(raw)
+    aligned, operations = align_decision(raw)
+    decision = validate_decision(aligned)
     record = {'schema': 'AutomaticRegionDecision/1', 'region_id': region['id'],
               'source_sha256': layout['source_sha256'], 'layout_binding': fingerprint(layout),
               'crop_sha256': crop_sha256, 'capabilities_sha256': fingerprint(capabilities),
               'response_sha256': response_sha256, 'decision_source': 'model',
               'human_acceptance': False, 'decision': decision}
+    if operations:
+        record['program_alignment'] = {'schema': 'AutomaticDecisionAlignment/1',
+                                       'model_decision_sha256': fingerprint(raw), 'operations': operations}
     record['binding'] = fingerprint(record)
     return record
 
@@ -247,8 +263,19 @@ def text_candidates(defaults, inventory, region):
     return result
 
 
+DRAFT_KEYS = {'schema','coordinate_space','region_id','decision_binding','objects','text_overrides','text_audit','limitations'}
+
+
+def prepare_draft(draft):
+    """Legacy mapping becomes part tags; notation slips are normalized and recorded."""
+    value, structure = normalize_draft_structure(parts_from_mapping(draft))
+    value, colors, problems = normalize_draft_colors(value)
+    return value, structure+colors, problems
+
+
 def element_diagnostics(draft, defaults, inventory, region, decision):
-    value=normalized(draft,inventory['image_size']); errors=[]
+    draft,_,color_problems=prepare_draft(draft)
+    value=normalized(draft,inventory['image_size']); errors=[{'color':p} for p in color_problems]
     texts={t['id']:deepcopy(t) for t in defaults['text_decisions'] if t['id'] in region['text_ids']}
     for update in value.get('text_overrides',[]):
         if update.get('id') in texts: texts[update['id']].update(update)
@@ -257,7 +284,7 @@ def element_diagnostics(draft, defaults, inventory, region, decision):
     retained=set()
     for obj in value.get('objects',[]):
         if obj.get('kind') not in ('native_shape','raster_asset'):
-            errors.append({'object':obj.get('id'),'error':'Remove this unsupported object kind. Existing OCR text belongs only in text_overrides and mapping.native by original text ID.'})
+            errors.append({'object':obj.get('id'),'error':'Remove this unsupported object kind. Existing OCR text is changed only through text_overrides by its original text ID.'})
         if obj.get('z',0)>=10000: errors.append({'object':obj.get('id'),'error':'Shape/image z must be below 10000; text is a separate default record.'})
         if obj.get('kind')=='native_shape' and (not isinstance(obj.get('geometry'),str) or obj['geometry'] not in GEOMETRIES):
             errors.append({'object':obj.get('id'),'error':'geometry must be one STRING, not an object.','allowed_geometries':sorted(GEOMETRIES)})
@@ -270,24 +297,43 @@ def element_diagnostics(draft, defaults, inventory, region, decision):
     for tid,text in texts.items():
         if tid not in retained and not inside(text['bbox'],region['bbox']):
             errors.append({'text_id':tid,'error':'Calibrate native bbox within region; existing candidate extends outside.','bbox':text['bbox']})
-    allowed={o.get('id') for o in value.get('objects',[]) if o.get('kind') in ('native_shape','raster_asset')}|set(texts)
-    for kind in ('native','retained'):
-        for part in decision['decision'][kind+'_parts']:
-            refs=value.get('mapping',{}).get(kind,{}).get(part,[])
-            if not refs: errors.append({'empty_mapping':kind+'/'+part,'error':'Every approved decision part requires at least one actual object ID.'})
-            elif set(refs)-allowed: errors.append({'mapping':kind+'/'+part,'invalid_ids':sorted(set(refs)-allowed)})
-    mapped={ref for groups in value.get('mapping',{}).values() for refs in groups.values() for ref in refs}
-    required={o.get('id') for o in value.get('objects',[])}|(set(texts)-retained)
-    if required-mapped: errors.append({'unmapped_ids':sorted(required-mapped),'error':'Map every shape/image and every native OCR text to an approved decision part.'})
-    return transform_model_boxes({'coordinate_space':'normalized_1000_xyxy','region':region,'violations':errors},inventory['image_size'],to_model=True)
+    ocr={t['id']:t['bbox'] for t in inventory['texts']}
+    for obj in value.get('objects',[]):
+        crop=obj.get('source_crop_bbox') if obj.get('kind')=='raster_asset' else None
+        if not (isinstance(crop,list) and len(crop)==4): continue
+        for tid in texts:
+            box=ocr[tid]
+            if tid in retained: continue
+            w=min(crop[0]+crop[2],box[0]+box[2])-max(crop[0],box[0]); h=min(crop[1]+crop[3],box[1]+box[3])-max(crop[1],box[1])
+            if w>0 and h>0 and w*h>box[2]*box[3]*.12:
+                errors.append({'object':obj.get('id'),'text_id':tid,'bbox':box,'source_crop_bbox':crop,
+                    'error':'This crop covers the OCR box of native text (bbox here is the OCR box, which may include '
+                            'neighbouring pixels). Either shrink/move the crop to cover at most 12% of that OCR box, '
+                            'or list the text in contains_text_ids with a crop covering at least 95% of the OCR box '
+                            'so it stays source pixels.'})
+    unknown=sorted(set(draft.get('text_parts') or {})-set(texts))
+    if unknown: errors.append({'text_parts_unknown_ids':unknown,'error':'text_parts keys must be OCR IDs of this region.'})
+    return transform_model_boxes({'coordinate_space':'normalized_1000_xyxy','region':region,'violations':errors,
+        'note':'The program derives mapping from each object part tag and text_parts; you do not write mapping.'},
+        inventory['image_size'],to_model=True)
 
 
 def expand_region(draft, defaults, inventory, region, decision, layout):
     routing = validate_decision_record(decision, region, layout)
-    require(set(draft) == {'schema','coordinate_space','region_id','decision_binding','objects','text_overrides','mapping','text_audit','limitations'}, 'invalid region draft fields')
+    draft, envelope_operations = normalize_draft_envelope(draft, 'RegionElementsDraft/1')
+    require(isinstance(draft, dict) and DRAFT_KEYS <= set(draft) <= DRAFT_KEYS|{'mapping','text_parts'},
+            'invalid region draft fields: required '+','.join(sorted(DRAFT_KEYS))+'; optional text_parts')
     require(draft['schema'] == 'RegionElementsDraft/1' and draft['coordinate_space'] == 'normalized_1000_xyxy', 'explicit region coordinates required')
     require(draft['region_id'] == region['id'] and draft['decision_binding'] == decision['binding'], 'draft decision mismatch')
     require(routing['decision'] != 'retain_module', 'retained modules use source pixels, not model redraws')
+    draft, repair_operations, color_problems = prepare_draft(draft)
+    repair_operations = envelope_operations + repair_operations
+    if color_problems:
+        problem = color_problems[0]
+        raise ValueError('invalid color at '+str(problem['field'])[:80]+' = '+repr(problem['value'])[:40]+'; use '+problem['allowed'])
+    text_parts = draft.pop('text_parts', None) or {}
+    require(isinstance(text_parts, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in text_parts.items()),
+            'text_parts must map OCR IDs to part names')
     value = normalized(draft, inventory['image_size'])
     texts = {t['id']: deepcopy(t) for t in defaults['text_decisions'] if t['id'] in region['text_ids']}
     seen = set()
@@ -295,13 +341,21 @@ def expand_region(draft, defaults, inventory, region, decision, layout):
         tid = update['id']; require(tid in texts and tid not in seen and 'action' not in update, 'invalid region text override')
         require(set(update)<={'id','text','bbox','font_size_px','font_family','font_latin','font_confidence','font_evidence','bold','color','align','z','runs'},
                 'text_overrides cannot contain status/reason/action or unsupported fields; use text_audit for status/reason')
-        seen.add(tid); texts[tid].update(update)
+        seen.add(tid)
+        stale = texts[tid].get('runs')
+        if 'text' in update and 'runs' not in update and stale and ''.join(r['text'] for r in stale) != update['text']:
+            texts[tid].pop('runs')
+            repair_operations.append({'op': 'drop_stale_runs', 'text': tid})
+        texts[tid].update(update)
     for obj in value['objects']:
         require(obj.get('kind') in ('native_shape','raster_asset'),
-                'objects only allows native_shape/raster_asset; native text is an existing OCR ID referenced directly in mapping.native, not an object')
+                'objects only allows native_shape/raster_asset; native text is an existing OCR ID changed through text_overrides, not an object')
         if obj['kind']=='native_shape':
             require(isinstance(obj.get('geometry'),str) and obj['geometry'] in GEOMETRIES,
                     'geometry must be a STRING from allowed_geometries, e.g. "rect", never a nested object')
+            if 'fill_gradient' in obj:
+                problem = gradient_problem(obj['fill_gradient'])
+                require(problem is None, f"invalid fill_gradient at {obj['id']}: {problem}; or omit fill_gradient")
         require(obj['id'].startswith(region['id']+'-'), 'object ID must be region-prefixed')
         require(obj['z'] < 10000, 'native backgrounds/images must stay below text')
         for key in ('bbox','source_crop_bbox','dest_bbox'):
@@ -310,12 +364,32 @@ def expand_region(draft, defaults, inventory, region, decision, layout):
             for tid in obj.get('contains_text_ids', []):
                 require(tid in texts, 'crop retains text from another region')
                 texts[tid]['action'] = 'retained_in_asset'
+    ocr = {t['id']: t['bbox'] for t in inventory['texts']}
     for t in texts.values():
+        if t['action'] == 'native' and not inside(t['bbox'],region['bbox']) and inside(ocr[t['id']],region['bbox']):
+            # The glyphs are inside the region by layout ownership; only the calibrated box overshoots.
+            b, r = t['bbox'], region['bbox']
+            x, y = max(b[0], r[0]), max(b[1], r[1]); w, h = min(b[0]+b[2], r[0]+r[2])-x, min(b[1]+b[3], r[1]+r[3])-y
+            if w > 0 and h > 0 and w*h >= b[2]*b[3]*.5:
+                repair_operations.append({'op': 'clip_text_box_to_region', 'text': t['id']})
+                t['bbox'] = [x, y, w, h]
         if t['action'] == 'native':
             require(inside(t['bbox'],region['bbox']), 'native text box leaves region: '+t['id'])
+    native_ocr = {tid: ocr[tid] for tid, t in texts.items() if t['action'] == 'native'}
+    retained_ocr = {tid: ocr[tid] for tid, t in texts.items() if t['action'] == 'retained_in_asset'}
+    repair_operations += grow_rasters_to_declared_text(value['objects'], retained_ocr, native_ocr, region['bbox'])
+    repair_operations += trim_rasters_off_native_text(value['objects'], native_ocr, retained_ocr)
+    require(set(text_parts) <= set(texts), 'text_parts keys must be OCR IDs of this region')
+    objects, mapping, scope, scope_operations = derive_mapping(value['objects'], texts, text_parts, routing)
+    audit, audit_operations = reconcile_audit(value['text_audit'], texts)
+    repair_operations += audit_operations
     result = {'schema':'AutomaticRegionElements/1','region_id':region['id'], 'decision_binding':decision['binding'],
-              'objects':value['objects'],'text_decisions':list(texts.values()),'mapping':value['mapping'],
-              'text_audit':value['text_audit'],'limitations':value['limitations']}
+              'objects':objects,'text_decisions':list(texts.values()),'mapping':mapping,
+              'text_audit':audit,'limitations':value['limitations']}
+    if scope_operations:
+        result['scope_adjustment'] = {**scope, 'operations': scope_operations}
+    if repair_operations:
+        result['program_repair'] = {'schema': 'AutomaticElementRepair/1', 'operations': repair_operations}
     validate_region(result, inventory, region, decision, layout)
     return result
 
@@ -340,7 +414,19 @@ def validate_region(value, inventory, region, decision, layout):
     require(value.get('decision_binding') == decision['binding'] and value.get('region_id') == region['id'], 'element routing binding mismatch')
     require({t['id'] for t in value['text_decisions']} == set(region['text_ids']), 'region OCR coverage mismatch')
     mapping = value['mapping']; require(set(mapping) == {'native','retained'}, 'native and retained mappings required')
-    require(set(mapping['native']) == set(routing['native_parts']) and set(mapping['retained']) == set(routing['retained_parts']), 'element parts differ from region decision')
+    native_parts, retained_parts = set(routing['native_parts']), set(routing['retained_parts'])
+    scope = value.get('scope_adjustment')
+    if scope is not None:
+        # Only recorded program adjustments may differ from the bound decision.
+        require(isinstance(scope, dict) and set(scope) == {'native_parts','retained_parts','operations'} and scope['operations'],
+                'invalid scope adjustment')
+        changed = (set(scope['native_parts']) ^ native_parts) | (set(scope['retained_parts']) ^ retained_parts)
+        require(changed <= {o.get('part') for o in scope['operations']}, 'scope adjustment is not fully recorded')
+        require(set(scope['native_parts']) <= set(CAPABILITIES['native_parts']) | native_parts, 'scope adjustment adds unknown native part')
+        require(set(scope['retained_parts']) <= set(CAPABILITIES['retained_parts']) | native_parts | retained_parts,
+                'scope adjustment adds unknown retained part')
+        native_parts, retained_parts = set(scope['native_parts']), set(scope['retained_parts'])
+    require(set(mapping['native']) == native_parts and set(mapping['retained']) == retained_parts, 'element parts differ from region decision')
     objects = {o['id']:o for o in value['objects']}
     texts = {t['id']:t for t in value['text_decisions']}
     native_ids = set(); retained_ids = set()
@@ -399,6 +485,31 @@ def assemble(layout, inventory, decisions, elements):
           'background_color':layout['background_color'],'objects':objects,'text_decisions':texts,'limitations':limitations}
     validate_payload(plan); plan=validate_element_plan(plan,inventory,raster_scopes=scopes)
     return plan, scopes, retained
+
+
+def confine_patch(previous, current, review):
+    """Restore objects and audits the review did not target; a patch only edits reviewed objects."""
+    value = deepcopy(current); operations = []
+    mutable = {oid for i in review['issues'] for oid in i['object_ids']}
+    for key in ('objects', 'text_decisions'):
+        old = {o['id']: o for o in previous[key]}
+        for index, item in enumerate(value[key]):
+            oid = item['id']
+            if oid in old and oid not in mutable and old[oid] != item:
+                value[key][index] = deepcopy(old[oid])
+                operations.append({'op': 'revert_unreviewed_change', 'object': oid})
+    old_audit = {a['id']: a for a in previous['text_audit']}
+    texts = {t['id']: t for t in value['text_decisions']}
+    old_texts = {t['id']: t for t in previous['text_decisions']}
+    for index, item in enumerate(value['text_audit']):
+        tid = item['id']
+        if tid in old_audit and texts.get(tid) == old_texts.get(tid) and item != old_audit[tid]:
+            value['text_audit'][index] = deepcopy(old_audit[tid])
+            operations.append({'op': 'revert_unreviewed_audit', 'text': tid})
+    if operations:
+        repair = value.setdefault('program_repair', {'schema': 'AutomaticElementRepair/1', 'operations': []})
+        repair['operations'] = repair['operations'] + operations
+    return value
 
 
 def validate_correction(previous, current, review, region):

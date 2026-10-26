@@ -1,0 +1,14 @@
+{
+  "data_root": "/data/workspaces/image2ppt-auto-new/requests",
+  "credential_mode": "key_file",
+  "api_key_file": "/data/workspaces/image2ppt-auto-new/deepseek.key",
+  "base_url": "https://api.deepseek.com",
+  "allowed_models": ["deepseek-flash"],
+  "body_adapter": {"drop": ["enable_thinking"], "set": {"thinking": {"type": "disabled"}}},
+  "vision_url": "http://127.0.0.1:18761",
+  "vision_token_file": "/data/image2ppt-vision/client-token",
+  "analysis_mode": "isolated_cli",
+  "vision_container": "image2ppt-vision-container",
+  "isolated_host_root": "/data/image2ppt-vision/data/auto-validation-new",
+  "isolated_container_root": "/data/auto-validation-new"
+}

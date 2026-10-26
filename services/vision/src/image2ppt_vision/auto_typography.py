@@ -10,6 +10,10 @@ from .renderer_calibration import origin_correction
 from .auto_protocol import validate_plan
 
 
+FALLBACK_RATIO = .8
+FALLBACK_MIN_FITS = 5
+
+
 def measure_text_defaults(source, inventory, *, renderer_version, deadline, progress=None):
     with Image.open(source) as image:
         pixels = np.asarray(image.convert('RGB'))
@@ -53,6 +57,18 @@ def measure_text_defaults(source, inventory, *, renderer_version, deadline, prog
         diagnostics.append({'id': text['id'], 'applied': bool(applied), 'diagnostics': diagnostic})
         if progress:
             progress(index+1, len(inventory['texts']))
+    # OCR boxes carry padding; scale unfitted texts by this page's measured font/box-height ratio.
+    ocr = {t['id']: t['bbox'] for t in inventory['texts']}
+    ratios = sorted(t['font_size_px']/ocr[t['id']][3] for t, d in zip(texts, diagnostics) if d['applied'] and ocr[t['id']][3] > 0)
+    ratio = ratios[len(ratios)//2] if len(ratios) >= FALLBACK_MIN_FITS else FALLBACK_RATIO
+    for text, diagnostic in zip(texts, diagnostics):
+        if diagnostic['applied']:
+            continue
+        x, y, bw, bh = ocr[text['id']]; size = max(1, min(400, bh*ratio))
+        text['font_size_px'] = round(size, 2)
+        text['bbox'][3] = min(h-text['bbox'][1], max(bh+4, size*1.5))
+        text['font_evidence'] = f'OCR-size fallback scaled by page-measured font/box ratio {ratio:.3f}; source font not identified.'
+        diagnostic['fallback_ratio'] = round(ratio, 4)
     return {'schema': 'AutomaticTextDefaults/1', 'source_sha256': inventory['source_sha256'],
             'renderer_version': renderer_version, 'text_decisions': texts, 'diagnostics': diagnostics,
             'human_acceptance': False}

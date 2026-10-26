@@ -60,7 +60,12 @@ def verify_v2_review(directory, revision, built_dir, built):
         rid=region['id']; is_page=rid=='page'
         path=built_dir/'reviews'/('page-visual.json' if is_page else rid+'-visual.json')
         review=read_json(path)
-        review.pop('inherited_from',None)
+        review.pop('inherited_from',None); review.pop('program_repair',None)
+        program=[i for i in review['issues'] if 'evidence_origin' in i]
+        if program:
+            # Program checks are appended after model validation and may only have failed a model pass.
+            review['issues']=[i for i in review['issues'] if 'evidence_origin' not in i]
+            if not review['issues'] and not review['redecision_required']: review['quality_passed']=True
         raw=transform_model_boxes(review,inventory['image_size'],to_model=True)
         raw.update(schema='RegionVisualReviewDraft/1',coordinate_space='normalized_1000_xyxy')
         decision_binding=(fingerprint(regions['decisions']) if is_page else regions['decisions'][rid]['binding'])
@@ -69,7 +74,7 @@ def verify_v2_review(directory, revision, built_dir, built):
         if not is_page:
             targets=[tid for tid in built['probe_targets'] if tid in region['text_ids']]
             if targets:
-                probe=read_json(built_dir/'reviews'/(rid+'-probe.json'));probe.pop('inherited_from',None)
+                probe=read_json(built_dir/'reviews'/(rid+'-probe.json'));probe.pop('inherited_from',None); probe.pop('program_repair',None)
                 validate_probe(probe,region_id=rid,binding=built['artifact_binding'],targets=targets)
     saved=read_json(aggregate)
     if saved['schema']!='AutomaticReview/2' or saved['artifact_binding']!=built['artifact_binding']:

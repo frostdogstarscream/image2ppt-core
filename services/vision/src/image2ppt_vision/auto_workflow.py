@@ -203,29 +203,64 @@ class PageSession:
                 'elapsed_seconds': round(self.clock()-self.budget['started_at'], 3)}
 
 
-def checked_model_json(session, phase, instruction, evidence, images, validator, max_tokens=24000, feedback_builder=None, max_attempts=3):
+TRANSIENT = re.compile(r'model_http_(429|5\d\d)|model_timeout|model_transport_failed|model_worker_timeout')
+BACKOFF_SECONDS = (15, 45, 120)
+
+
+def validator_error(exc):
+    """Structural, model-actionable message; never source text or secrets."""
+    if isinstance(exc, KeyError):
+        return 'missing required field '+repr(exc.args[0])[:80] if exc.args else 'missing required field'
+    if isinstance(exc, (TypeError, AttributeError)):
+        return 'wrong JSON value type ('+str(exc)[:160]+'); check field types against the schema'
+    return safe_error(exc)
+
+
+def call_with_backoff(session, phase, instruction, evidence, images, max_tokens, sleep=time.sleep):
+    """Retry provider throttling/outages with backoff inside the page deadline.
+
+    Each retry is a new, honestly counted request under a distinct phase label;
+    it does not use up the caller's validation attempts.
+    """
+    response = session.call(phase, instruction, evidence, images, max_tokens)
+    for retry, delay in enumerate(BACKOFF_SECONDS, 1):
+        if response.get('ok') or not TRANSIENT.fullmatch(str(response.get('error', ''))):
+            break
+        if session.remaining() <= delay+60:
+            break
+        sleep(delay)
+        response = session.call(f'{phase}-retry{retry}', instruction, evidence, images, max_tokens)
+    return response
+
+
+def checked_model_json(session, phase, instruction, evidence, images, validator, max_tokens=24000, feedback_builder=None,
+                       max_attempts=3, sleep=time.sleep):
     feedback = None
     for attempt in range(max_attempts):
         current = deepcopy(evidence)
         if feedback:
             current['validation_feedback'] = feedback
-        response = session.call(f'{phase}-{attempt}', instruction, current, images, max_tokens)
+        response = call_with_backoff(session, f'{phase}-{attempt}', instruction, current, images, max_tokens, sleep)
         if not response.get('ok'):
             code = response.get('error', 'model_call_failed')
             # Invalid credentials/permission are not transient; avoid repeated cost.
-            if code in ('model_http_401', 'model_http_403'):
+            if code in ('model_http_400', 'model_http_401', 'model_http_403'):
                 raise ValueError(code)
             feedback = {**(feedback or {}), 'transport_or_provider_error': code}
             continue
         try:
             value = parse_object(response['content'])
             return validator(value)
-        except (ValueError, KeyError, TypeError) as exc:
-            feedback = {'error': safe_error(exc), 'previous_output': response['content']}
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            previous_error = (feedback or {}).get('error')
+            feedback = {'error': validator_error(exc), 'previous_output': response['content']}
+            if previous_error == feedback['error']:
+                # The same rejection twice means feedback is not helping; stop spending budget.
+                raise ValueError('model_output_validation_exhausted: '+feedback['error'])
             if feedback_builder:
                 try:
                     feedback['source_constraint_diagnostics'] = feedback_builder(parse_object(response['content']))
-                except (ValueError, KeyError, TypeError):
+                except (ValueError, KeyError, TypeError, AttributeError):
                     pass
     reason = (feedback or {}).get('error') or (feedback or {}).get('transport_or_provider_error', 'unknown')
     raise ValueError('model_output_validation_exhausted: '+str(reason))

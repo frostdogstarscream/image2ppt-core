@@ -15,10 +15,11 @@ from .auto_protocol import transform_model_boxes
 from .auto_transport import SSHRemote
 from .auto_typography import draft_feedback
 from .auto_region_protocol import (POLICY, LAYOUT_PROMPT, AUTHOR_PROMPT, PATCH_PROMPT,
-    VISUAL_PROMPT, PROBE_PROMPT, layout_from_draft, layout_diagnostics, decision_record, text_candidates,
-    expand_region, element_diagnostics, retained_region, assemble, validate_region, validate_correction, require)
+    VISUAL_PROMPT, PROBE_PROMPT, layout_with_repair, layout_diagnostics, decision_record, text_candidates,
+    expand_region, element_diagnostics, retained_region, assemble, validate_region, validate_correction, confine_patch, require)
 from .auto_region_evidence import (crop_source, region_packets, verify_deletion,
     typography_checks, validate_visual, validate_probe, issue, check_transitions)
+from .auto_repair import repair_layout, tagged_view, normalize_visual_review, normalize_draft_envelope
 from .region_features import features
 from .region_plan import PROMPT as DECISION_PROMPT, CAPABILITIES, CLASSIFICATIONS
 from .supervised_elements import GEOMETRIES, _intersection
@@ -91,10 +92,20 @@ def get_layout(session, source, inventory, caps):
               'ocr':[{'id':t['id'],'text':t['text'],'bbox':t['bbox']} for t in inventory['texts']],
               'candidates':[{k:c[k] for k in ('id','bbox','geometry_hint')} for c in inventory.get('candidates',[])],
               'classifications':list(CLASSIFICATIONS)},size,to_model=True)
-    return step(session.root/'layout.json',{'prompt':LAYOUT_PROMPT,'evidence':evidence,'model':session.model},
+    def feedback(raw):
+        repaired,record=repair_layout(raw,inventory)
+        report=layout_diagnostics(repaired,inventory)
+        if record['operations']:
+            report['program_repairs_already_applied']=record['operations']
+            report['instruction']+=' The program already applied the listed geometric repairs; fix what remains.'
+        return report
+    layout=step(session.root/'layout.json',{'prompt':LAYOUT_PROMPT,'evidence':evidence,'model':session.model},
                 lambda:checked(session,'initial/layout',LAYOUT_PROMPT,evidence,[source],
-                               lambda v:layout_from_draft(v,inventory),
-                               feedback=lambda v:layout_diagnostics(v,inventory),attempts=6),session=session)
+                               lambda v:layout_with_repair(v,inventory),feedback=feedback,attempts=3),session=session)
+    repair=session.root/'layout-repair.json'
+    if layout.get('program_repair') and not repair.exists():
+        save_new(repair,{**layout['program_repair'],'layout_sha256':digest(session.root/'layout.json')})
+    return layout
 
 
 def decide(session, source, layout, region, caps, directory, *, phase, previous=None, review=None):
@@ -125,7 +136,7 @@ def author(session, source, inventory, defaults, layout, region, decision, direc
               'available_fonts':font_status()['families'],'allowed_geometries':sorted(GEOMETRIES)}
     prompt=AUTHOR_PROMPT
     if previous is not None:
-        evidence['previous_elements']=transform_model_boxes(previous,inventory['image_size'],to_model=True)
+        evidence['previous_elements']=transform_model_boxes(tagged_view(previous),inventory['image_size'],to_model=True)
         evidence['review']=transform_model_boxes(review,inventory['image_size'],to_model=True)
         prompt=PATCH_PROMPT
     def produce():
@@ -137,7 +148,10 @@ def author(session, source, inventory, defaults, layout, region, decision, direc
             value=expand_region(raw,defaults,inventory,region,decision,layout)
             for text in value['text_decisions']:
                 if text['action']=='native': resolve_font(text,available=evidence['available_fonts'])
-            if previous is not None: validate_correction(previous,value,review,region)
+            if previous is not None:
+                value=confine_patch(previous,value,review)
+                validate_region(value,inventory,region,decision,layout)
+                validate_correction(previous,value,review,region)
             return value
         def feedback(raw):
             # Reuse source OCR crop conflict diagnostics with explicit draft
@@ -146,7 +160,7 @@ def author(session, source, inventory, defaults, layout, region, decision, direc
             try:
                 report['crop_diagnostics']=draft_feedback({'schema':'ElementPlanDraft/2','coordinate_space':'normalized_1000_xyxy',
                                    'objects':raw.get('objects',[])},inventory)
-            except (ValueError,KeyError,TypeError):
+            except (ValueError,KeyError,TypeError,AttributeError):
                 report['crop_diagnostics']='Malformed crop fields; correct schema first.'
             return report
         try:
@@ -255,11 +269,25 @@ def visual_review(session, candidate, region, inventory, previous=None):
             return inherited
         raw=checked(session,'review/'+candidate['revision']+'/'+rid,VISUAL_PROMPT,evidence,
                     [packet['directory']/'source.png',packet['directory']/'preview.png'],
-                    lambda v:validate_visual(v,region=region,elements=element,binding=binding,
+                    lambda v:accepted_visual(v,region=region,elements=element,binding=binding,
                               decision_binding=decision['binding'],size=inventory['image_size']),tokens=7000)
         return append_checks(raw,checks)
     return step(path,{'prompt':VISUAL_PROMPT,'evidence':evidence,'images':packet['files'],
                      'previous_review':fingerprint(previous['reviews'].get(rid)) if previous else None},produce,session=session)
+
+
+def accepted_visual(raw,*,elements,**kwargs):
+    value,operations=normalize_visual_review(raw,{o['id'] for o in elements['objects']+elements['text_decisions']})
+    review=validate_visual(value,elements=elements,**kwargs)
+    if operations: review['program_repair']={'schema':'AutomaticReviewRepair/1','operations':operations}
+    return review
+
+
+def accepted_probe(raw,**kwargs):
+    value,operations=normalize_draft_envelope(raw,'RegionProbeReview/1')
+    probe=validate_probe(value,**kwargs)
+    if operations: probe['program_repair']={'schema':'AutomaticReviewRepair/1','operations':operations}
+    return probe
 
 
 def overview_review(session,candidate,layout,inventory):
@@ -273,7 +301,7 @@ def overview_review(session,candidate,layout,inventory):
     return step(directory/'reviews/page-visual.json',{'prompt':prompt,'evidence':evidence},
                 lambda:checked(session,'review/'+candidate['revision']+'/page',prompt,evidence,
                     [directory/'evidence/source.png',directory/'evidence/preview.png'],
-                    lambda raw:validate_visual(raw,region=region,elements=candidate['plan'],binding=binding,
+                    lambda raw:accepted_visual(raw,region=region,elements=candidate['plan'],binding=binding,
                          decision_binding=decision_binding,size=size),tokens=7000),session=session)
 
 
@@ -292,7 +320,7 @@ def probe_review(session,candidate,region,previous=None):
             return result
         return checked(session,'probe/'+candidate['revision']+'/'+rid,PROBE_PROMPT,evidence,
                        [packet['directory']/'preview.png',packet['directory']/'delete-probe.png'],
-                       lambda raw:validate_probe(raw,region_id=rid,binding=binding,targets=targets),tokens=3500)
+                       lambda raw:accepted_probe(raw,region_id=rid,binding=binding,targets=targets),tokens=3500)
     return step(directory/'reviews'/f'{rid}-probe.json',{'prompt':PROBE_PROMPT,'evidence':evidence,
                 'images':packet['files'],'previous':fingerprint(previous['probe_reviews'].get(rid)) if previous else None},produce,session=session)
 
@@ -382,6 +410,8 @@ def finish_page(session,candidates,errors,layout=None):
             result['regions'].append({'id':rid,'bbox':region['bbox'],'decision':decision['decision'],
                 'execution_status':'BUILT',
                 'decision_binding':decision['binding'],'mapping':chosen['elements'][rid]['mapping'],
+                'program_alignment':decision.get('program_alignment',{}).get('operations',[]),
+                'scope_adjustment':chosen['elements'][rid].get('scope_adjustment'),
                 'quality_status':'PASSED' if chosen['reviews'].get(rid,{}).get('quality_passed') else 'REVIEW_REQUIRED',
                 'issues':chosen['reviews'].get(rid,{}).get('issues',[]),
                 'native_text_ids':[t['id'] for t in chosen['elements'][rid]['text_decisions'] if t['action']=='native'],
@@ -399,7 +429,9 @@ def finish_page(session,candidates,errors,layout=None):
                 'decision':decision['decision'] if decision else {'decision':'PENDING'},
                 'decision_binding':decision['binding'] if decision else None,
                 'execution_status':'AUTHORED_NOT_BUILT' if element else 'DECIDED' if decision else 'PENDING',
-                'mapping':element['mapping'] if element else {},'quality_status':'INCOMPLETE','issues':[],
+                'mapping':element['mapping'] if element else {},
+                'program_alignment':(decision or {}).get('program_alignment',{}).get('operations',[]),
+                'scope_adjustment':(element or {}).get('scope_adjustment'),'quality_status':'INCOMPLETE','issues':[],
                 'native_text_ids':[],'retained_text_ids':[]})
     save_new(session.root/'result.json',result)
     return result
@@ -436,9 +468,16 @@ def run_page(directory,page,manifest,config,model,*,project_root,remote=None,bui
                     if review['quality_passed']: continue
                     path=directory/'corrections'/f'r{index:03d}'/rid
                     try:
+                        new_decision=None
                         if review['redecision_required']:
                             new_decision=decide(session,source,layout,region,caps,path/'routing',phase=f'redecision/{index}/{rid}',previous=decisions[rid],review=review)
-                            require(routing_scope(new_decision)!=routing_scope(decisions[rid]),'redecision did not change region scope')
+                            if routing_scope(new_decision)==routing_scope(decisions[rid]):
+                                # The model re-examined and kept the scope; the findings are then patched in place.
+                                kept={'schema':'AutomaticScopeKept/1','revision':index,'region_id':rid,
+                                      'decision_binding':decisions[rid]['binding'],'redecision_binding':new_decision['binding']}
+                                if not (path/'scope-kept.json').exists(): save_new(path/'scope-kept.json',kept)
+                                new_decision=None
+                        if new_decision is not None:
                             new_elements=author(session,source,inventory,defaults,layout,region,new_decision,path/'author',phase=f'reauthor/{index}/{rid}')
                             decisions[rid]=new_decision; elements[rid]=new_elements
                         else:

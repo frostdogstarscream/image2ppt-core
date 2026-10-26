@@ -55,6 +55,9 @@ def image_content(file):
 
 def model_body(model, instruction, evidence, images, max_tokens=24000):
     original = {k: v for k, v in evidence.items() if k != 'validation_feedback'}
+    # OpenAI-compatible json_object mode (DeepSeek) rejects prompts lacking the lowercase word.
+    if 'json' not in instruction:
+        instruction += '\nThe whole reply is parsed as json.'
     messages = [
         {'role': 'system', 'content': instruction},
         {'role': 'user', 'content': [{'type': 'text', 'text': json_bytes(original).decode('utf-8')},

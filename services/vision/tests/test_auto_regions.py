@@ -80,10 +80,15 @@ def test_author_diagnostics_exposes_duplicate_text_kind_and_invalid_overrides():
     proposal['text_overrides']=[{'id':'t1','status':'retained'}]
     proposal['mapping']['native']['labels']=[]; before=deepcopy(proposal)
     report=element_diagnostics(proposal,defaults,inv,region,decision)
-    assert proposal==before and len(report['violations'])>=4
-    assert any(i.get('unsupported_override_fields')==['status'] for i in report['violations'])
-    with pytest.raises(ValueError,match='text_overrides cannot contain'):
+    # Bookkeeping fields in overrides are dropped by the program, so only real problems remain.
+    assert proposal==before and len(report['violations'])>=2
+    assert not any('unsupported_override_fields' in i for i in report['violations'])
+    with pytest.raises(ValueError,match='objects only allows'):
         expand_region(proposal,defaults,inv,region,decision,layout)
+    proposal['objects']=[]; proposal['text_overrides']=[{'id':'t1','status':'retained','font_size_px':17}]
+    result=expand_region(proposal,defaults,inv,region,decision,layout)
+    assert result['text_decisions'][0]['action']=='native' and result['text_decisions'][0]['font_size_px']==17
+    assert {'op':'drop_override_bookkeeping','text':'t1','fields':['status']} in result['program_repair']['operations']
 
 
 def test_nested_geometry_gets_actionable_feedback_instead_of_discarding_all_diagnostics():
@@ -93,8 +98,11 @@ def test_nested_geometry_gets_actionable_feedback_instead_of_discarding_all_diag
     decision=bound(layout,region);proposal=native_draft(region,decision)
     proposal['objects']=[{'id':'r01-panel','kind':'native_shape','bbox':[0,0,1000,250],
                           'z':1,'geometry':{'kind':'rect'},'fill':'FFFFFF'}]
+    result=expand_region(proposal,defaults,inv,region,decision,layout)
+    assert result['objects'][0]['geometry']=='rect'
+    assert result['program_repair']['operations'][0]['op']=='normalize_geometry'
+    proposal['objects'][0]['geometry']={'rx':4,'ry':4}
     report=element_diagnostics(proposal,defaults,inv,region,decision)
-    assert any(i.get('unmapped_ids')==['r01-panel'] for i in report['violations'])
     assert any('allowed_geometries' in i for i in report['violations'])
     assert draft_feedback(proposal,inv)[0]['error']=='unsupported_geometry'
     with pytest.raises(ValueError,match='geometry must be a STRING'):
@@ -212,13 +220,17 @@ def test_layout_rejects_unowned_crossing_or_wrong_source(change):
     with pytest.raises(ValueError): layout_from_draft(draft,inv)
 
 
-def test_typography_confidence_is_preserved_and_every_text_requires_audit():
+def test_typography_confidence_is_preserved_and_missing_audit_is_unresolved():
     inv,defaults,layout,ds,es=page(); region=layout['regions'][0]
     candidate=text_candidates(defaults,inv,region)[0]
     assert candidate['fit_applied'] is False and candidate['font_confidence']==.25
     assert candidate['original_bbox']==[10*1000/300,50,160*1000/300,160]
     draft=native_draft(region,ds['r01']); draft['text_audit']=[]
-    with pytest.raises(ValueError,match='typography audit'):
+    result=expand_region(draft,defaults,inv,region,ds['r01'],layout)
+    assert [a['status'] for a in result['text_audit']]==['unresolved']
+    assert result['program_repair']['operations']==[{'op':'audit_missing','text':'t1','to':'unresolved'}]
+    draft['text_audit']=[{'id':'t1','status':'great','reason':'x','style_group':''}]
+    with pytest.raises(ValueError,match='typography evidence'):
         expand_region(draft,defaults,inv,region,ds['r01'],layout)
 
 

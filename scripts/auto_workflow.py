@@ -45,6 +45,7 @@ def main():
                          resume_pending=not args.no_resume_pending)
         uvicorn.run(app, host='127.0.0.1', port=args.port)
         return
+    sys.stdout.reconfigure(errors='backslashreplace')   # legacy consoles (GBK) cannot encode every OCR glyph
     print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
 
 
