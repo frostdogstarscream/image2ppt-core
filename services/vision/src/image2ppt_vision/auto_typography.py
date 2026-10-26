@@ -119,7 +119,7 @@ def draft_feedback(draft, inventory):
     issues = []; w, h = inventory['image_size']
     normalized = draft.get('schema') == 'ElementPlanDraft/2' and draft.get('coordinate_space') == 'normalized_1000_xyxy'
     for obj in draft.get('objects', []):
-        if obj.get('kind') == 'native_shape' and obj.get('geometry') not in GEOMETRIES:
+        if obj.get('kind') == 'native_shape' and (not isinstance(obj.get('geometry'), str) or obj['geometry'] not in GEOMETRIES):
             issues.append({'id': obj.get('id'), 'error': 'unsupported_geometry', 'allowed': sorted(GEOMETRIES),
                            'hint': 'Use a tightly bounded raster_asset for unsupported complex icons.'})
         if obj.get('kind') != 'raster_asset':

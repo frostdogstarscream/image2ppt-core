@@ -43,7 +43,8 @@ def safe_error(error):
     return type(error).__name__
 
 
-def create_job(inputs, output, config, *, gate_pages=None, preference='faithful_editable'):
+def create_job(inputs, output, config, *, gate_pages=None, preference='faithful_editable',
+               pipeline_version=1, policy=None, gate_only=False):
     if preference not in ('faithful_editable', 'fidelity_first'):
         raise ValueError('unsupported restoration preference')
     inputs = [Path(p).resolve(strict=True) for p in inputs]
@@ -68,9 +69,11 @@ def create_job(inputs, output, config, *, gate_pages=None, preference='faithful_
         pages.append({'page': i, 'id': f'P{i}', 'source_name': source.name,
                       'original_sha256': digest(page/'original.image'),
                       'source_sha256': digest(page/'source.png'), 'image_size': list(normalized.size)})
-    manifest = {'schema': 'AutomaticJob/1', 'job_id': root.name, 'created_at': time.time(),
+    manifest = {'schema': f'AutomaticJob/{pipeline_version}', 'job_id': root.name, 'created_at': time.time(),
                 'pages': pages, 'gate_pages': gate_pages, 'preference': preference,
-                'policy': POLICY, 'config_sha256': fingerprint(config)}
+                'policy': deepcopy(policy or POLICY), 'config_sha256': fingerprint(config)}
+    if pipeline_version != 1:
+        manifest.update(pipeline_version=pipeline_version, gate_only=bool(gate_only))
     save_new(root/'job.json', manifest)
     save_new(root/'connection.json', config)
     write_json(root/'state.json', {'status': 'QUEUED', 'stage': 'preflight', 'pages': {},
@@ -89,15 +92,21 @@ def verified_preflight(directory, config):
 
 
 class PageSession:
-    def __init__(self, directory, remote, model, *, clock=time.time):
+    def __init__(self, directory, remote, model, *, clock=time.time, policy=None):
         self.root = Path(directory)
         self.remote = remote
         self.model = model
         self.clock = clock
+        self.policy = deepcopy(policy or POLICY)
         if not (self.root/'budget.json').exists():
-            save_new(self.root/'budget.json', {'started_at': clock(), 'timeout_seconds': POLICY['page_timeout_seconds'],
-                                             'max_calls': POLICY['max_model_requests_per_page']})
+            save_new(self.root/'budget.json', {'started_at': clock(), 'timeout_seconds': self.policy['page_timeout_seconds'],
+                                             'max_calls': self.policy['max_model_requests_per_page'],
+                                             'initial_call_limit': self.policy.get('initial_call_limit')})
         self.budget = read_json(self.root/'budget.json')
+        if policy and (self.budget['timeout_seconds'] != policy['page_timeout_seconds'] or
+                       self.budget['max_calls'] != policy['max_model_requests_per_page'] or
+                       self.budget.get('initial_call_limit') != policy.get('initial_call_limit')):
+            raise ValueError('saved page budget differs from immutable job policy')
 
     @property
     def deadline(self):
@@ -132,6 +141,11 @@ class PageSession:
         remaining = self.remaining()
         if len(directories) >= self.budget['max_calls']:
             raise BudgetExhausted('page_model_request_budget_exhausted')
+        initial_limit = self.budget.get('initial_call_limit')
+        if phase.startswith('initial/') and initial_limit is not None:
+            initial_calls = sum(read_json(p/'request.json')['phase'].startswith('initial/') for p in directories)
+            if initial_calls >= initial_limit:
+                raise BudgetExhausted('initial_request_budget_exhausted_review_budget_reserved')
         directory = calls/f'c{len(directories):02d}'; directory.mkdir()
         request = {'request_id': uuid4().hex, 'operation': 'model',
                    'timeout': max(1, min(480, int(remaining)-60)), 'body': body}
@@ -189,9 +203,9 @@ class PageSession:
                 'elapsed_seconds': round(self.clock()-self.budget['started_at'], 3)}
 
 
-def checked_model_json(session, phase, instruction, evidence, images, validator, max_tokens=24000, feedback_builder=None):
+def checked_model_json(session, phase, instruction, evidence, images, validator, max_tokens=24000, feedback_builder=None, max_attempts=3):
     feedback = None
-    for attempt in range(3):
+    for attempt in range(max_attempts):
         current = deepcopy(evidence)
         if feedback:
             current['validation_feedback'] = feedback

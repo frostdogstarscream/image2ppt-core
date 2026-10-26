@@ -72,13 +72,14 @@ def comparison(source, preview, directory):
             'purpose': 'comparison_only_not_acceptance'}
 
 
-def build_revision(source, inventory, plan, directory, *, project_root, deadline, model_id, policy_binding, response_sha256):
+def build_revision(source, inventory, plan, directory, *, project_root, deadline, model_id, policy_binding, response_sha256,
+                   raster_scopes=None, allowed_retained_ids=()):
     """Each invocation creates a fresh directory, including failed build evidence."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     proposal = directory/'proposal'
     materialize_elements(source, inventory, plan, proposal, model_id=model_id,
-                         response_sha256=response_sha256)
+                         response_sha256=response_sha256, raster_scopes=raster_scopes)
     compiler = ArtifactCompiler(root=project_root)
     compiler.backend = DeadlineBackend(project_root, deadline)
     built = compiler.build(proposal/'slideir.json', directory/'compiled')
@@ -89,6 +90,8 @@ def build_revision(source, inventory, plan, directory, *, project_root, deadline
     issues = []
     for tid, text in expected.items():
         emitted = records.get(tid, {})
+        if text['action'] == 'retained_in_asset' and tid in allowed_retained_ids:
+            continue
         if text['action'] != 'native' or 'text' not in emitted:
             issues.append({'id': 'native-'+tid, 'kind': 'editable', 'object_ids': [tid],
                            'severity': 'blocking', 'bbox': text['bbox'],
@@ -133,7 +136,9 @@ def build_revision(source, inventory, plan, directory, *, project_root, deadline
                          'native_shapes': sum(o['kind'] == 'native_shape' for o in plan['objects']),
                          'raster_assets': sum(o['kind'] == 'raster_asset' for o in plan['objects']),
                          'retained_text': sum(t['action'] != 'native' for t in plan['text_decisions'])},
-              'human_acceptance': False, 'office_acceptance': False}
+              'human_acceptance': False, 'office_acceptance': False,
+              'retention_scope_sha256': fingerprint({'scopes': raster_scopes or {},
+                                                    'text_ids': sorted(allowed_retained_ids)})}
     result['artifact_binding'] = fingerprint({'directory': directory.name, **result})
     save_new(directory/'result.json', result)
     return result

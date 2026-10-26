@@ -12,10 +12,10 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from image2ppt.storage import read_json, digest
 from .auto_transport import load_config
-from .auto_workflow import create_job, run_job
+from .auto_v2 import create_job, run_job
 
 
-def create_app(root, config_file, project_root, *, runner=run_job, cached_preflight=None):
+def create_app(root, config_file, project_root, *, runner=run_job, cached_preflight=None, resume_pending=True):
     root = Path(root).resolve(); root.mkdir(parents=True, exist_ok=True)
     config = load_config(config_file)
     secret = secrets.token_urlsafe(32)
@@ -37,13 +37,15 @@ def create_app(root, config_file, project_root, *, runner=run_job, cached_prefli
     async def lifespan(app):
         nonlocal executor
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='image2ppt-auto')
-        for job in root.glob('auto-*'):
-            if (job/'state.json').is_file() and read_json(job/'state.json').get('status') in ('QUEUED', 'RUNNING'):
+        for job in root.glob('auto-*') if resume_pending else []:
+            if ((job/'state.json').is_file() and (job/'job.json').is_file()
+                and read_json(job/'job.json').get('pipeline_version') == 2
+                and read_json(job/'state.json').get('status') in ('QUEUED', 'RUNNING')):
                 submit(job)
         yield
         executor.shutdown(wait=False, cancel_futures=True)
 
-    app = FastAPI(title='image2PPT automatic validation', version='0.1.0', lifespan=lifespan)
+    app = FastAPI(title='image2PPT region-routed automatic validation', version='0.2.0', lifespan=lifespan)
 
     @app.middleware('http')
     async def local_only(request: Request, call_next):
@@ -74,7 +76,7 @@ def create_app(root, config_file, project_root, *, runner=run_job, cached_prefli
 
     @app.get('/health')
     def health():
-        return {'status': 'alive', 'execution': 'server_models_local_compiler'}
+        return {'status': 'alive', 'execution': 'server_models_local_compiler', 'pipeline_version': 2}
 
     @app.get('/v1/auto-jobs')
     def jobs(x_local_token: str = Header(default='')):

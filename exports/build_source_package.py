@@ -26,7 +26,7 @@ OWN_SOURCES = [
 # Only source trees are visited: no outputs, credentials or private fixtures.
 OWN_SOURCES = sorted(set(OWN_SOURCES + [
     'requirements-core.lock', 'requirements-review.lock', 'requirements-auto.lock', 'pyproject.toml',
-    'AGENTS.md', 'docs/automatic-workflow.md', 'services/vision/tools/auto_remote.py',
+    'AGENTS.md', 'docs/automatic-workflow.md', 'docs/automatic-region-routing-v2-verification.md', 'services/vision/tools/auto_remote.py',
     'services/vision/pyproject.toml', 'configs/auto-client.example.json', 'configs/auto-remote.example.json',
     '.github/workflows/ci.yml', 'docs/candidate-workflow.md', 'docs/candidate-workflow-verification.md',
     'services/vision/REGION_LLM_PLANNING.md',
@@ -38,7 +38,8 @@ OWN_SOURCES = sorted(set(OWN_SOURCES + [
      and '__pycache__' not in p.parts]
     + ['services/vision/tests/'+name for name in ['test_region_plan.py','test_region_candidates.py',
                                                 'test_supervised_elements.py','test_candidate_workflow.py',
-                                                'test_auto_workflow.py','test_auto_remote.py','test_element_service.py']]
+                                                'test_auto_workflow.py','test_auto_remote.py','test_element_service.py',
+                                                'test_auto_regions.py']]
     + [p.relative_to(ROOT).as_posix() for directory in ['docs/region-shadow-llm','docs/region-candidates']
        for p in (ROOT/directory).glob('*') if p.suffix in {'.json','.md'}]))
 

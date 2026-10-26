@@ -28,7 +28,7 @@ jobs:
       - name: install coordinator dependencies
         run: pip install -r requirements-auto.lock
       - name: bounded orchestration, recovery, reviews and admission
-        run: python -m pytest services/vision/tests/test_auto_workflow.py services/vision/tests/test_auto_remote.py services/vision/tests/test_element_service.py -q
+        run: python -m pytest services/vision/tests/test_auto_workflow.py services/vision/tests/test_auto_remote.py services/vision/tests/test_auto_regions.py services/vision/tests/test_element_service.py -q
       - name: tests must not mutate tracked files
         run: git diff --exit-code
   candidate-review:

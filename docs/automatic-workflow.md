@@ -1,4 +1,4 @@
-# 自动图片转 PPT：效果验证链路
+# 自动图片转 PPT：区域决策闭环 v2
 
 本入口自动调用视觉模型完成规划、复检和限定范围修正。用户不需要打开 Codex
 逐页操作，也不需要提交人工 ElementPlan。当前运行方式为**服务器模型与分析 +
@@ -8,7 +8,9 @@
 ## 组成与边界
 
 - `scripts/auto_workflow.py`：显式启动入口，支持 `preflight`、`run`、`resume`、`serve`。
-- `image2ppt_vision.auto_workflow`：任务协调器、阶段缓存、调用预算及代表页门槛。
+- `image2ppt_vision.auto_v2`：v2 协调器；复用 `auto_workflow` 的传输、阶段缓存和预算基础设施，保留旧版实现。
+- v2 顺序执行：OCR/字体候选 → 模型区域划分 → 既有决策 Agent → 按决策生成 → 实际文件编译 → 分离复检 → 限定修补。
+- 在独立工作树、配置、数据目录和端口运行。拒绝恢复 `AutomaticJob/1`；旧任务由原工作树继续处理。
 - `services/vision/tools/auto_remote.py`：通过 SSH 调用的服务器程序，没有监听端口。
   在服务器内通过 Dify 已有租户密钥机制读取指定凭据并调用对应 MoMA 端点。
   密钥不写入请求、结果、日志或本机配置；不修改 Dify 默认模型、凭据或应用。
@@ -67,11 +69,11 @@ python scripts/auto_workflow.py run `
 ```
 
 输入顺序就是最终页序。`--gate-pages` 为从 1 开始的页码，按给定顺序先运行。
-默认先运行前三页（不足三页则运行全部）。代表页存在阻塞问题时，后续页保持未执行。
+默认仅运行前三页（不足三页则运行全部），或指定的代表页。通过也不自动扩展；只有显式传入 `--expand-after-gate` 才会在所有代表页通过后处理其余页面。
 省略 `--preflight` 会为新任务重新验证模型；显式复用时校验连接配置和完整证据哈希。
-`--preference fidelity_first` 将视觉保真偏好传给模型，但不放宽关键文字可编辑性检查。
+保留 `--preference` 参数作为任务偏好记录；v2 的实际原生／图片范围由绑定的区域决策确定，两种偏好均执行同一套保真和编辑目标门槛。
 
-每页默认串行执行，最多 8 次模型请求（包括重试）、2 轮视觉修正和 1800 秒总时限。
+每页串行执行，最多 **48 次模型请求、90 分钟、每区域 2 轮修补**。初次划分、决策和生成合计最多 32 次，预留至少 16 次给复检与修补。失败、格式重试和重新决策都计入；模型预检单独记录。
 中断后可以恢复；预算包含中断经过的时间，不因重启而重置：
 
 ```powershell
@@ -79,7 +81,7 @@ python scripts/auto_workflow.py resume --job outputs/automatic/auto-0123456789ab
 ```
 
 在修复运行环境或程序错误后，可用 `resume --job <目录> --retry-failed` 恢复无有效产物的
-失败页。程序先保留旧结果到 `previous-results/`；只重试仍在原 1800 秒、8 次模型请求
+失败页。程序先保留旧结果到 `previous-results/`；只重试仍在原 5400 秒、48 次模型请求
 预算内的页面，已有效的方案和构建继续复用，预算不因恢复而增加。
 
 已经校验通过的分析、模型答复和构建产物不会重复执行。请求发送前保存 request_id；
@@ -94,10 +96,10 @@ SSH 传输失败时最多按原 request_id 取回一次服务器缓存，原传�
 
 ```powershell
 python scripts/auto_workflow.py serve `
-  --config configs/auto-client.local.json --data outputs/automatic --port 18765
+  --config configs/auto-client.local.json --data outputs/automatic-v2 --port 18766
 ```
 
-打开 `http://127.0.0.1:18765`。页面支持多图上传、调整页序、选择偏好、指定代表页、
+打开 `http://127.0.0.1:18766`。页面支持多图上传、调整页序、选择偏好、指定代表页、
 查看进度并下载产物。服务只监听回环地址，使用本次启动生成的本机会话令牌，
 拒绝跨来源请求。页面显示模型质量与人工验收的区别，不要求用户编辑方案。
 
@@ -111,11 +113,21 @@ python scripts/auto_workflow.py serve `
 这些接口需要 `X-Local-Token`；页面自动附加。生产 vision API 的既有接口不变。
 不要把本机验证页面直接暴露到公网。
 
+若同一数据目录中的任务已由命令行运行，启动查看页面时加 `--no-resume-pending`，避免服务再接管待恢复任务；新上传任务仍由页面正常执行。只有新配置、新数据目录和 18766 属于 v2，原 18765 服务不需要停止。
+
 ## 方案、复检与产物契约
 
-程序先依据 OCR 和源图像素测量生成文字候选默认值，保留测量诊断和渲染器版本。
-规划模型通过 `ElementPlanDraft/2` 返回完整图形对象和稀疏 `text_overrides`，避免对
-上百段文字重复输出未变字段；程序确定性展开为完整 `ElementPlan/3` 再校验。
+布局模型先输出 `RegionLayoutDraft/1`，包含语义区域、子区域和位置；程序检查 OCR 唯一归属、重叠及整页回退。检测候选只作建议。
+
+逐区域复用 `region_plan.py` 的提示词、特征和决策校验。保存 `AutomaticRegionDecision/1`，绑定源图、布局、区域裁剪、能力快照及模型答复。来源是模型自动决策，`human_acceptance=false`，不生成或改写人工批准。
+
+- `native`：生成允许的原生部分。
+- `hybrid`：原生部分与必须保留的源图部分分别映射到真实对象。
+- `retain_module`：依据有效决策确定性裁剪整个区域，并披露保留文字。
+
+`RegionElementsDraft/1` 提供对象、稀疏文字覆盖、逐项文字校准记录及决策部分到对象的映射；展开为区域元素，再组装 `ElementPlan/3`。所有对象必须有归属，必须保留部分必须映射到真实图片；禁止以圆点替代保留图标、重复文字、整页图片和全图片切片拼页。仅经过验证的区域范围可超出旧版 18% 裁剪限制；旧协议默认限制不变。
+
+文字候选同时提供原始框、`fit_applied`、`font_confidence`。模型显式确认、校准或标记未解决，保留图片中的文字另行声明。低置信度候选不能靠默认值自动通过。
 草案必须声明 `coordinate_space=normalized_1000_xyxy`：两个轴均为 0..1000，框为
 左、上、右、下。程序只依据这个明确声明转换为源图像素 xywh，不猜测模型坐标。
 提供给规划模型的文字候选框使用同一坐标体系，字体大小仍为源图像素 em。
@@ -130,14 +142,17 @@ python scripts/auto_workflow.py serve `
 原生形状和文本继续使用 `bbox`。HTTP 入口同时支持旧 /1、/2 方案，拒绝混合坐标。
 源图哈希、尺寸、OCR ID、文字归属和字体字段必须验证后才能进入编译。
 
-机器复检输出 `AutomaticReview/1`，绑定实际 PPTX、回渲染图、对象清单、编辑探针与
-方案版本。修正使用 `ElementPatch/1`，只能修改问题指向的对象与区域。未经指明的对象
-冻结；重新裁剪必须有 crop 问题，修改文字内容必须有 text/numeric/missing 问题。
-机器记录使用独立的自动策略来源，不生成或覆盖人工审批记录。
+复检分为三条证据链：程序检查实际原生对象、文字内容与删除结果；视觉模型只比较固定源区域和正常回渲染；残影模型只比较正常图和指定对象删除后的图。删除图绝不进入源图保真复检。另有整页正常预览复检，检查区域间缺失与整体关系。
 
-复检与修正的模型传输草案分别为 `AutomaticReviewDraft/1`、`ElementPatchDraft/1`，
-也必须声明 `normalized_1000_xyxy`，程序转换后保存标准 `AutomaticReview/1` 和
-`ElementPatch/1`。未经声明的坐标不会自动猜测转换。
+字体宽度溢出、对比度和同组字号检查是估计诊断，仍需模型查看实际渲染。已批准保留的图片文字不作为原生失败；原生目标仍受实际对象与编辑探针约束。
+
+修补返回完整区域草案，但只允许修改复检指向的对象。比较实际计划差异，拒绝仅改描述或无变化的补丁；重新裁剪必须有 crop 问题，改字必须有 text/numeric/missing 问题。改变处理方式必须重新调用决策 Agent 并生成新决策。冻结区域只有在元素、决策和实际渲染哈希都相同时才能继承复检。
+
+每轮保存已解决、未解决和新增问题；元素变化但渲染无变化不能记为有效修复。版本选择先看已验证问题和区域结果，像素差只用于同等条件比较。源图、答复、对象映射、决策和构建版本均以哈希绑定。
+
+初次生成若在有限格式重试后仍因原生几何、原生／图片映射或必需部分冲突受阻，可调用决策 Agent 重新决策一次，再生成该区域。新旧范围和失败响应分别保留；只有处理方式或原生／保留部分确实改变才进入重新生成，单改置信度与理由不算。所有调用仍属于初始 32 次上限，不借用复检预留额度。
+
+优化提示词后恢复任务时，已通过校验的区域可复用：必须从保存的请求中找回旧提示词，且除提示词外的源图、模型、裁剪及全部父级输入精确一致，输出哈希不变，并再次通过当前协议校验。另存提示词复用记录；其他证据错配仍拒绝。
 
 输出包括每页原始输入、规范化图片、OCR、模型请求/答复、IR、构建记录、版本复检、
 PPTX、预览、源图对照、差异图、实际文件删除探针以及 `delivery/report.json`。
@@ -146,7 +161,7 @@ PPTX、预览、源图对照、差异图、实际文件删除探针以及 `deliv
 执行状态与机器质量分开：有效文件不等于质量通过，质量通过也不等于人工接受。
 有有效 PPTX 但没有合法且绑定当前版本的模型复检时，执行状态为 `PARTIAL`，
 `pipeline_completed=false`；不能记为完整链路通过。
-文字、数值、缺失、重复、不可编辑和探针残留均为阻塞项。确定性的导出错误不能被
+文字、数值、缺失、重复、要求原生的目标不可编辑和探针残留均为阻塞项。确定性的导出错误不能被
 模型忽略。模型质量通过且无结构性阻塞项，代表页才允许扩展。像素差异仅辅助比较。
 报告始终保留 `human_acceptance=false` 和 `office_acceptance=false`，直到独立验收。
 
@@ -162,7 +177,8 @@ PPTX、预览、源图对照、差异图、实际文件删除探针以及 `deliv
 ```powershell
 $env:PYTHONPATH="$PWD\services\vision\src;$PWD\src"
 $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
-python -m pytest services/vision/tests/test_auto_workflow.py services/vision/tests/test_element_service.py -q
+New-Item -ItemType Directory -Path .build -Force | Out-Null
+python -m pytest services/vision/tests/test_auto_regions.py services/vision/tests/test_auto_workflow.py services/vision/tests/test_element_service.py -q --basetemp .build/pytest-auto-new
 .\image2ppt.ps1 test
 ```
 

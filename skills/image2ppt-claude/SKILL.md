@@ -5,7 +5,15 @@ description: Reconstruct slide screenshots as faithful editable PPTX files using
 
 # image2ppt
 
-Use the current vision-capable model for visual understanding and reconstruction decisions. The local scripts do not call a model API. Work from the user's source image, preserve its wording, numbers, proportions, colors and layout, and record uncertainty instead of filling in missing content.
+Use the current vision-capable model for visual understanding and reconstruction decisions in the conversation workflow. Its deterministic compiler does not call a model API. Work from the user's source image, preserve its wording, numbers, proportions, colors and layout, and record uncertainty instead of filling in missing content.
+
+## Optional automatic service
+
+Only when the user asks for automatic model processing, use `python scripts/auto_workflow.py` from bash and read `docs/automatic-workflow.md`. This entry invokes the configured remote model; normal Claude-authored restoration remains separate. Do not silently switch a conversation-authored task to remote inference.
+
+Version 2 uses regional layout, the existing native/hybrid/retain_module decision protocol, mapped element generation, actual-PPTX checks and at most two repair rounds per region. Use its own config/data and local port 18766, preserve historical jobs and reject v1 resume. The limit is 48 calls and 90 minutes per page, with no more than 32 initial calls; retries and elapsed interruption time remain counted. Only representative pages run unless `--expand-after-gate` is explicitly selected.
+
+Keep source crop and destination placement separate. Disclose approved retained text and never label it editable. Reject full-page or all-image tiled fallback. Supply font-fit confidence to authoring; inspect normal rendered crops separately from deletion tests. An unchanged patch is not a repair. Frozen regions must retain their rendered pixels; changing routing requires a new decision. Preserve all model responses and versions, and never hand-correct business IR or PPTX to manufacture a successful validation. Report unresolved issues and keep human/Office acceptance independent.
 
 ## Run the toolchain
 

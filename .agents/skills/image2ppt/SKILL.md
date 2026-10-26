@@ -5,7 +5,15 @@ description: Reconstruct slide screenshots as faithful editable PPTX files using
 
 # image2ppt
 
-Use Codex itself for visual understanding and reconstruction decisions. The local scripts do not call a model API. Work from the user's source image, preserve its wording, numbers, proportions, colors and layout, and record uncertainty instead of filling in missing content.
+Use Codex itself for visual understanding and reconstruction decisions in the default conversation workflow. Its deterministic compiler does not call a model API. Work from the user's source image, preserve its wording, numbers, proportions, colors and layout, and record uncertainty instead of filling in missing content.
+
+## Explicit automatic validation mode
+
+When the user requests the automatic service, follow `docs/automatic-workflow.md` and use the separate `scripts/auto_workflow.py` entry. This opt-in path calls the configured remote model for region layout, existing region decisions, element authoring, visual review and bounded corrections. Keep it separate from manual candidate approval and from historical automatic jobs.
+
+Use an isolated configuration/data directory and port 18766. Version 2 refuses version 1 jobs. Run representative pages only by default; expanding after a passing gate needs an explicit `--expand-after-gate`. Preserve the immutable 48-request / 90-minute page budget, including failures and restarts, and the 32-request initial-phase cap. Never replace saved business IR/PPTX by hand to make a model validation pass.
+
+Honor native/hybrid/retain_module decisions and object mappings. Approved regional image text is disclosed, not called native. Whole-page raster and all-raster tiling are rejected. Normal source-fidelity review and deletion-ghost review use separate image pairs. Reject no-op repairs, freeze verified regions and require a new decision before changing routing. Deliver actual-file evidence and unresolved findings; synthetic tests, file generation and pixel scores do not establish image fidelity or human/Office acceptance.
 
 ## Start
 

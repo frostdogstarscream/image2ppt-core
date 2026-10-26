@@ -92,7 +92,7 @@ def apply_element_patch(plan,patch):
     result['limitations']=[*result.get('limitations',[]),*patch.get('limitations',[])]
     return normalize_element_coordinates(result)
 
-def validate_element_plan(plan,inventory):
+def validate_element_plan(plan,inventory,*,raster_scopes=None):
     plan=normalize_element_coordinates(plan)
     if plan.get('schema') not in ('ElementPlan/1','ElementPlan/2','ElementPlan/3') or plan.get('source_sha256')!=inventory['source_sha256'] or plan.get('image_size')!=inventory['image_size']:raise ValueError('plan source binding mismatch')
     size=inventory['image_size'];_color(plan['background_color'])
@@ -121,7 +121,15 @@ def validate_element_plan(plan,inventory):
                 _color(obj['line']['color'])
                 if not 0<=obj['line']['width_pt']<=20:raise ValueError('invalid line width')
         elif obj['kind']=='raster_asset':
-            if obj['source_crop_bbox'][2]*obj['source_crop_bbox'][3]>size[0]*size[1]*.18:raise ValueError('large raster fallback rejected')
+            scope=(raster_scopes or {}).get(obj['id'])
+            if scope is not None:
+                _box(scope,size)
+                crop=obj['source_crop_bbox']
+                if (crop[0]<scope[0]-.01 or crop[1]<scope[1]-.01 or
+                    crop[0]+crop[2]>scope[0]+scope[2]+.01 or crop[1]+crop[3]>scope[1]+scope[3]+.01):
+                    raise ValueError('raster leaves its approved region')
+            elif obj['source_crop_bbox'][2]*obj['source_crop_bbox'][3]>size[0]*size[1]*.18:
+                raise ValueError('large raster fallback rejected')
             if obj.get('mask','rect') not in ('rect','ellipse'):raise ValueError('unsupported asset mask')
             for tid in obj.get('contains_text_ids',[]):
                 if tid not in ocr or tid in retained:raise ValueError('invalid raster text owner')
@@ -142,11 +150,11 @@ def validate_element_plan(plan,inventory):
     if conflicts:raise ValueError('native text duplicates raster pixels: '+conflicts[0]['text_id']+' / '+conflicts[0]['asset_id'])
     return deepcopy(plan)
 
-def materialize_elements(source,inventory,plan,output,*,model_id,response_sha256):
+def materialize_elements(source,inventory,plan,output,*,model_id,response_sha256,raster_scopes=None):
     source=Path(source);output=Path(output)
     if output.exists():raise FileExistsError('new output required')
     if digest(source)!=inventory['source_sha256']:raise ValueError('source changed')
-    plan=validate_element_plan(plan,inventory)
+    plan=validate_element_plan(plan,inventory,raster_scopes=raster_scopes)
     resolved_fonts={t['id']:resolve_font(t) for t in plan['text_decisions'] if t['action']=='native' and 'font_family' in t}
     with Image.open(source) as original:image=original.convert('RGBA')
     if list(image.size)!=inventory['image_size']:raise ValueError('source size mismatch')

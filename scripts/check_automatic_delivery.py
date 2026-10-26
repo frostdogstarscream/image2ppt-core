@@ -8,8 +8,49 @@ sys.path[:0] = [str(ROOT/'src'), str(ROOT/'services/vision/src')]
 from image2ppt.storage import read_json, digest
 from image2ppt.quality import inspect_pptx
 from image2ppt_vision.auto_artifacts import verify_hashes
-from image2ppt_vision.auto_provider import save_new
+from image2ppt_vision.auto_provider import save_new, fingerprint
 from image2ppt_vision.auto_protocol import validate_review
+
+
+def verify_v2_review(directory, revision, built_dir, built):
+    from image2ppt_vision.auto_region_protocol import assemble
+    from image2ppt_vision.auto_region_evidence import validate_visual, validate_probe
+    from image2ppt_vision.auto_protocol import transform_model_boxes
+    layout=read_json(directory/'layout.json')
+    inventory_binding=read_json(directory/'inventory-binding.json')
+    inventory=read_json(directory/inventory_binding['directory']/'inventory.json')
+    regions=read_json(revision/'regions.json')
+    plan,_,_=assemble(layout,inventory,regions['decisions'],regions['elements'])
+    if fingerprint(plan)!=fingerprint(read_json(revision/'plan.json')):
+        raise ValueError('v2 region execution differs from compiled plan')
+    for binding_file in directory.rglob('*.binding.json'):
+        binding=read_json(binding_file)
+        target=binding_file.with_name(binding_file.name.replace('.binding.json','.json'))
+        if binding.get('sha256') and digest(target)!=binding['sha256']:
+            raise ValueError('v2 saved evidence hash mismatch: '+str(target))
+    aggregate=built_dir/'reviews/aggregate.json'
+    if not aggregate.exists(): return False
+    for region in layout['regions']+[{'id':'page','bbox':[0,0,*inventory['image_size']]}]:
+        rid=region['id']; is_page=rid=='page'
+        path=built_dir/'reviews'/('page-visual.json' if is_page else rid+'-visual.json')
+        review=read_json(path)
+        review.pop('inherited_from',None)
+        raw=transform_model_boxes(review,inventory['image_size'],to_model=True)
+        raw.update(schema='RegionVisualReviewDraft/1',coordinate_space='normalized_1000_xyxy')
+        decision_binding=(fingerprint(regions['decisions']) if is_page else regions['decisions'][rid]['binding'])
+        validate_visual(raw,region=region,elements=plan if is_page else regions['elements'][rid],
+                        binding=built['artifact_binding'],decision_binding=decision_binding,size=inventory['image_size'])
+        if not is_page:
+            targets=[tid for tid in built['probe_targets'] if tid in region['text_ids']]
+            if targets:
+                probe=read_json(built_dir/'reviews'/(rid+'-probe.json'));probe.pop('inherited_from',None)
+                validate_probe(probe,region_id=rid,binding=built['artifact_binding'],targets=targets)
+    saved=read_json(aggregate)
+    if saved['schema']!='AutomaticReview/2' or saved['artifact_binding']!=built['artifact_binding']:
+        raise ValueError('v2 aggregate review binding mismatch')
+    if saved['quality_passed'] and (not saved['edit_probe_clear'] or any(i['severity']=='blocking' for i in saved['issues'])):
+        raise ValueError('v2 aggregate pass contradicts findings')
+    return True
 
 
 def main():
@@ -49,7 +90,10 @@ def main():
                 raise ValueError('actual-file edit probe did not preserve non-target objects')
             revision = directory/result['selected_revision']
             review_file = revision/'review.json'
-            if review_file.exists():
+            if manifest.get('pipeline_version')==2:
+                row['validated_model_review']=verify_v2_review(directory,revision,built_dir,built)
+                row['regions']=result.get('regions',[])
+            elif review_file.exists():
                 validate_review(read_json(review_file), built['artifact_binding'], read_json(revision/'plan.json'))
                 row['validated_model_review'] = True
             row.update(valid_pptx=True, selected_revision=result['selected_revision'],
@@ -67,14 +111,14 @@ def main():
     save_new(destination/'verified-summary.json', report)
     lines = ['# 实际文件核验结果', '',
              '本报告只读检查已保存的文件与模型记录，没有重新推理，也没有修改原方案或复检答复。',
-             '三页质量门槛未通过，未扩展全部 14 页；人工视觉验收及 PowerPoint/WPS 实机验收未完成。', '',
+             '质量与执行状态分别列示；人工视觉验收及 PowerPoint/WPS 实机验收未完成。', '',
              '| 页面 | 真实文件 / 链路 | 原生文字 / 形状 / 图片 | 模型请求 | 质量 |',
              '|---|---|---|---:|---|']
     for row in rows:
         counts = row.get('counts', {})
         lines.append(f"| {row['page']} | {row['pipeline_status']} | {counts.get('native_text',0)} / {counts.get('native_shapes',0)} / {counts.get('raster_assets',0)} | {row['model_requests']} | {row['machine_quality_status']} |")
     lines += ['', '`PARTIAL` 表示已生成实际 PPTX，但没有通过格式与版本绑定校验的模型复检。',
-              '本轮较早的原始机器记录把“有文件”记为 COMPLETED；上表依据实际复检文件存在性澄清链路状态，原记录保留。', '',
+              '上表依据实际复检文件及绑定校验确定链路状态，原记录保留。', '',
               '模型复检意见与 OOXML 检查分开看待。特别是“缺失／不可编辑／重影”的模型判断不能代替实际文件证据。']
     for row in rows:
         lines += ['', '## '+row['page']]
