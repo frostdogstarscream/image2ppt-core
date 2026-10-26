@@ -1,0 +1,565 @@
+{
+ "schema_version": "region-plan/0.1",
+ "planner": {
+  "kind": "llm",
+  "prompt_version": "region-decision/1",
+  "model": "kimi/kimi-k2.6",
+  "capabilities_sha256": "88e09e23865ea83df7ba401021089aa4ae627e381c8af2e3250362bd87b7078e",
+  "jobs_root": ".build/region-shadow/llm-jobs-v2",
+  "partial": false,
+  "created_at": "2026-10-22T07:36:45.474820+00:00"
+ },
+ "regions": [
+  {
+   "region_id": "P5-example-058-dashboard",
+   "page": "P5",
+   "ir": "outputs/native-decompose-20261021/slide5-example-whole-v3/slideir.json",
+   "node_id": "example-058-dashboard",
+   "bbox": [
+    1082,
+    331,
+    557,
+    401
+   ],
+   "classification": "ui_mockup",
+   "features": {
+    "area_px": 223357,
+    "aspect": 1.389,
+    "unique_colors": 536,
+    "edge_density": 0.06996,
+    "dark_fraction": 0.08858,
+    "text_components": 231,
+    "median_text_height_px": 12.0,
+    "microtext_fraction": 0.2597,
+    "dominant_color_fraction": 0.7501
+   },
+   "agent": {
+    "decision": "hybrid",
+    "confidence": 0.85,
+    "can_rebuild": {
+     "feasible": true,
+     "native_parts": [
+      "section_title",
+      "title_icon",
+      "panel",
+      "card",
+      "kpi",
+      "bars",
+      "category_labels",
+      "percentage_labels",
+      "labels",
+      "values",
+      "table",
+      "row_header",
+      "cell_text",
+      "number_badge"
+     ],
+     "blockers": [
+      "ui_mockup"
+     ]
+    },
+    "should_rebuild": {
+     "editability_value": "medium",
+     "fidelity_risk": "medium",
+     "cost": "medium"
+    },
+    "native_parts": [
+     "section_title",
+     "title_icon",
+     "panel",
+     "card",
+     "kpi",
+     "bars",
+     "category_labels",
+     "percentage_labels",
+     "labels",
+     "values",
+     "table",
+     "row_header",
+     "cell_text",
+     "number_badge"
+    ],
+    "retained_parts": [
+     "status_chips",
+     "icons"
+    ],
+    "retain_reasons": [
+     "ui_mockup",
+     "microtext"
+    ],
+    "evidence": [
+     "Dashboard UI mockup with rounded cards, soft shadows, and gradient-style status chips",
+     "Microtext fraction 0.26 with 231 text components and median height 12px",
+     "Custom icons (checkmark, clock, magnifier, document) with non-native styling in KPI headers"
+    ]
+   },
+   "human": {
+    "decision": "hybrid",
+    "source": "accepted_deck_2026-10-22 (proxy)",
+    "note": "标题原生 + 仪表盘整图；2026-10-22 已人工确认。"
+   }
+  },
+  {
+   "region_id": "P6-funds-analysis-chart",
+   "page": "P6",
+   "ir": "runs/20261014-103147-4cd2cc14/slideir.json",
+   "node_id": "funds-analysis-chart",
+   "bbox": [
+    381,
+    362,
+    913,
+    432
+   ],
+   "classification": "dashboard",
+   "features": {
+    "area_px": 394416,
+    "aspect": 2.1134,
+    "unique_colors": 749,
+    "edge_density": 0.07862,
+    "dark_fraction": 0.94707,
+    "text_components": 49,
+    "median_text_height_px": 4.0,
+    "microtext_fraction": 0.8776,
+    "dominant_color_fraction": 0.2685
+   },
+   "agent": {
+    "decision": "retain_module",
+    "confidence": 0.92,
+    "can_rebuild": {
+     "feasible": false,
+     "native_parts": [],
+     "blockers": [
+      "network",
+      "microtext",
+      "non_native_geometry"
+     ]
+    },
+    "should_rebuild": {
+     "editability_value": "low",
+     "fidelity_risk": "high",
+     "cost": "high"
+    },
+    "native_parts": [],
+    "retained_parts": [
+     "module_body",
+     "dashboard_body",
+     "chart_panel",
+     "table_panel",
+     "network",
+     "icons",
+     "text_block"
+    ],
+    "retain_reasons": [
+     "network",
+     "microtext",
+     "non_native_geometry"
+    ],
+    "evidence": [
+     "Central radial network diagram with 7 connected nodes and glowing connector lines forming non-native geometry",
+     "Median text height of 4px with 87.76% microtext fraction across 49 text components",
+     "Complex dashboard with dark gradient background, glow effects, and embedded bar chart and donut chart panels"
+    ]
+   },
+   "human": {
+    "decision": "retain_module",
+    "source": "accepted_deck_2026-10-22 (proxy)",
+    "note": "当前已验收 deck 的选择；正式人工复核可覆盖。"
+   }
+  },
+  {
+   "region_id": "P7-clue-network",
+   "page": "P7",
+   "ir": "runs/20261014-103147-286a9397/slideir.json",
+   "node_id": "clue-network",
+   "bbox": [
+    415,
+    188,
+    842,
+    596
+   ],
+   "classification": "network",
+   "features": {
+    "area_px": 501832,
+    "aspect": 1.4128,
+    "unique_colors": 917,
+    "edge_density": 0.06906,
+    "dark_fraction": 0.93029,
+    "text_components": 101,
+    "median_text_height_px": 5.0,
+    "microtext_fraction": 0.703,
+    "dominant_color_fraction": 0.2521
+   },
+   "agent": {
+    "decision": "retain_module",
+    "confidence": 0.95,
+    "can_rebuild": {
+     "feasible": false,
+     "native_parts": [],
+     "blockers": [
+      "network",
+      "microtext",
+      "non_native_geometry"
+     ]
+    },
+    "should_rebuild": {
+     "editability_value": "low",
+     "fidelity_risk": "high",
+     "cost": "high"
+    },
+    "native_parts": [],
+    "retained_parts": [
+     "network",
+     "module_body",
+     "dashboard_body",
+     "icons",
+     "text_block"
+    ],
+    "retain_reasons": [
+     "network",
+     "microtext",
+     "non_native_geometry"
+    ],
+    "evidence": [
+     "Complex radial network graph with 8 nodes connected by curved glowing edges to a central person icon",
+     "Numerous microtext labels including category names, relationship descriptions, and badge text at very small sizes",
+     "Decorative glowing effects, gradient circles, dotted connection lines, and background particle effects creating non-native geometry"
+    ]
+   },
+   "human": {
+    "decision": "retain_module",
+    "source": "accepted_deck_2026-10-22 (proxy)",
+    "note": "当前已验收 deck 的选择；正式人工复核可覆盖。"
+   }
+  },
+  {
+   "region_id": "P8-petition-example",
+   "page": "P8",
+   "ir": "outputs/native-decompose-20261021/slide8-full-v3/slideir.json",
+   "node_id": "petition-example",
+   "bbox": [
+    833,
+    430,
+    435,
+    385
+   ],
+   "classification": "table",
+   "features": {
+    "area_px": 167475,
+    "aspect": 1.1299,
+    "unique_colors": 321,
+    "edge_density": 0.08684,
+    "dark_fraction": 0.16443,
+    "text_components": 203,
+    "median_text_height_px": 14.0,
+    "microtext_fraction": 0.3744,
+    "dominant_color_fraction": 0.5889
+   },
+   "agent": {
+    "decision": "hybrid",
+    "confidence": 0.85,
+    "can_rebuild": {
+     "feasible": true,
+     "native_parts": [
+      "section_title",
+      "panel",
+      "card",
+      "labels",
+      "values",
+      "table",
+      "row_header",
+      "cell_text",
+      "number_badge"
+     ],
+     "blockers": []
+    },
+    "should_rebuild": {
+     "editability_value": "high",
+     "fidelity_risk": "low",
+     "cost": "medium"
+    },
+    "native_parts": [
+     "section_title",
+     "panel",
+     "card",
+     "labels",
+     "values",
+     "table",
+     "row_header",
+     "cell_text",
+     "number_badge"
+    ],
+    "retained_parts": [
+     "icons",
+     "status_chips"
+    ],
+    "retain_reasons": [
+     "decorative",
+     "non_native_geometry"
+    ],
+    "evidence": [
+     "Blue header bar with white Chinese title text '示例：信访智能分析结果'",
+     "White card panel containing six labeled rows with icons, text values, and orange '中风险' status badge",
+     "Row labels include 涉及人员, 涉及单位, 问题类型, 风险等级, 处置建议 with corresponding values in right column"
+    ]
+   },
+   "human": {
+    "decision": "retain_module",
+    "source": "user_review_2026-10-22_veto",
+    "note": "复核 P8 hybrid 单页样板后维持整图保留；区域 MAE 约 17.7，整图约 8.6，视觉保真优先。"
+   }
+  },
+  {
+   "region_id": "P9-image-020-report-ui",
+   "page": "P9",
+   "ir": "outputs/native-decompose-20261021/slide9-image-006/slideir.json",
+   "node_id": "image-020",
+   "bbox": [
+    572,
+    414,
+    531,
+    416
+   ],
+   "classification": "ui_mockup",
+   "features": {
+    "area_px": 220896,
+    "aspect": 1.2764,
+    "unique_colors": 350,
+    "edge_density": 0.04302,
+    "dark_fraction": 0.05212,
+    "text_components": 144,
+    "median_text_height_px": 13.0,
+    "microtext_fraction": 0.2847,
+    "dominant_color_fraction": 0.645
+   },
+   "agent": {
+    "decision": "retain_module",
+    "confidence": 0.92,
+    "can_rebuild": {
+     "feasible": false,
+     "native_parts": [],
+     "blockers": [
+      "ui_mockup"
+     ]
+    },
+    "should_rebuild": {
+     "editability_value": "low",
+     "fidelity_risk": "high",
+     "cost": "high"
+    },
+    "native_parts": [],
+    "retained_parts": [
+     "module_body",
+     "icons",
+     "text_block"
+    ],
+    "retain_reasons": [
+     "ui_mockup"
+    ],
+    "evidence": [
+     "Entire image is a UI mockup with sidebar navigation, document preview panel, and feature cards with icons",
+     "Contains 144 text components with 28.47% microtext fraction below readable threshold",
+     "350 unique colors and decorative icons (document, hierarchy, AI badge, person) with non-native styling"
+    ]
+   },
+   "human": {
+    "decision": "retain_module",
+    "source": "accepted_deck_2026-10-22 (proxy)",
+    "note": "当前已验收 deck 的选择；正式人工复核可覆盖。"
+   }
+  },
+  {
+   "region_id": "P10-vehicle-risk-example",
+   "page": "P10",
+   "ir": "runs/20261014-103148-b50a63ea/slideir.json",
+   "node_id": "vehicle-risk-example",
+   "bbox": [
+    31,
+    612,
+    887,
+    281
+   ],
+   "classification": "photo_map",
+   "features": {
+    "area_px": 249247,
+    "aspect": 3.1566,
+    "unique_colors": 1186,
+    "edge_density": 0.10395,
+    "dark_fraction": 0.94354,
+    "text_components": 63,
+    "median_text_height_px": 4.0,
+    "microtext_fraction": 0.8095,
+    "dominant_color_fraction": 0.2842
+   },
+   "agent": {
+    "decision": "retain_module",
+    "confidence": 0.95,
+    "can_rebuild": {
+     "feasible": false,
+     "native_parts": [],
+     "blockers": [
+      "map",
+      "microtext",
+      "non_native_geometry"
+     ]
+    },
+    "should_rebuild": {
+     "editability_value": "low",
+     "fidelity_risk": "high",
+     "cost": "high"
+    },
+    "native_parts": [],
+    "retained_parts": [
+     "module_body",
+     "map",
+     "dashboard_body",
+     "status_chips",
+     "icons",
+     "text_block"
+    ],
+    "retain_reasons": [
+     "map",
+     "microtext",
+     "non_native_geometry"
+    ],
+    "evidence": [
+     "Map background with street grid and location markers showing route from company to restaurant/hotel",
+     "Red alert popup with warning icon and timestamp contains microtext-sized elements",
+     "Curved route path with gradient coloring and custom marker pins (start/end/car) are non-native geometric shapes"
+    ]
+   },
+   "human": {
+    "decision": "retain_module",
+    "source": "accepted_deck_2026-10-22 (proxy)",
+    "note": "当前已验收 deck 的选择；正式人工复核可覆盖。"
+   }
+  },
+  {
+   "region_id": "P11-rural-three-assets",
+   "page": "P11",
+   "ir": "runs/20261014-103148-4e1b99db/slideir.json",
+   "node_id": "rural-three-assets-diagram",
+   "bbox": [
+    399,
+    220,
+    868,
+    665
+   ],
+   "classification": "photo_diagram",
+   "features": {
+    "area_px": 577220,
+    "aspect": 1.3053,
+    "unique_colors": 2098,
+    "edge_density": 0.19038,
+    "dark_fraction": 0.85008,
+    "text_components": 129,
+    "median_text_height_px": 5.0,
+    "microtext_fraction": 0.7597,
+    "dominant_color_fraction": 0.0357
+   },
+   "agent": {
+    "decision": "retain_module",
+    "confidence": 0.95,
+    "can_rebuild": {
+     "feasible": false,
+     "native_parts": [],
+     "blockers": [
+      "photo",
+      "network",
+      "microtext"
+     ]
+    },
+    "should_rebuild": {
+     "editability_value": "low",
+     "fidelity_risk": "high",
+     "cost": "high"
+    },
+    "native_parts": [],
+    "retained_parts": [
+     "module_body",
+     "network",
+     "photos",
+     "icons",
+     "text_block"
+    ],
+    "retain_reasons": [
+     "photo",
+     "network",
+     "microtext"
+    ],
+    "evidence": [
+     "Aerial photograph of rural village landscape fills entire background with continuous tonal imagery",
+     "Radial network diagram with six nodes connected by dashed and solid arrows to central '农村集体' node",
+     "Microtext labels on all nodes with median text height 5px and 75.97% microtext fraction"
+    ]
+   },
+   "human": {
+    "decision": "retain_module",
+    "source": "accepted_deck_2026-10-22 (proxy)",
+    "note": "当前已验收 deck 的选择；正式人工复核可覆盖。"
+   }
+  },
+  {
+   "region_id": "P12-industry-risk-bars",
+   "page": "P12",
+   "ir": "runs/20261014-103149-84e610d8/slideir.json",
+   "node_id": "industry-risk-bars",
+   "bbox": [
+    27,
+    634,
+    717,
+    260
+   ],
+   "classification": "chart",
+   "features": {
+    "area_px": 186420,
+    "aspect": 2.7577,
+    "unique_colors": 217,
+    "edge_density": 0.05287,
+    "dark_fraction": 0.22245,
+    "text_components": 68,
+    "median_text_height_px": 16.0,
+    "microtext_fraction": 0.3529,
+    "dominant_color_fraction": 0.6162
+   },
+   "agent": {
+    "decision": "native",
+    "confidence": 0.92,
+    "can_rebuild": {
+     "feasible": true,
+     "native_parts": [
+      "section_title",
+      "bars",
+      "category_labels",
+      "percentage_labels",
+      "panel"
+     ],
+     "blockers": []
+    },
+    "should_rebuild": {
+     "editability_value": "high",
+     "fidelity_risk": "low",
+     "cost": "low"
+    },
+    "native_parts": [
+     "section_title",
+     "bars",
+     "category_labels",
+     "percentage_labels",
+     "panel"
+    ],
+    "retained_parts": [],
+    "retain_reasons": [],
+    "evidence": [
+     "Horizontal bar chart with five category labels and percentage values aligned to bar ends",
+     "Uniform bar styling with gradient fills reconstructable as native bars",
+     "Title text in dark banner with clean sans-serif typography"
+    ]
+   },
+   "human": {
+    "decision": "native",
+    "source": "user_review_2026-10-22",
+    "note": "用户确认原生化并重新合成；P12 compare 16.097→17.190，视觉检查通过。"
+   }
+  }
+ ]
+}

@@ -1,0 +1,9 @@
+{
+ "schema": "RegionValidation/1",
+ "valid": true,
+ "errors": [],
+ "checked": {
+  "plans_sha256": "c5a2f467aa0ec9a347f3b53be48e31d07aa0b10891c6882ac0ced986dffb9eae",
+  "human_decisions_sha256": "d1f24bfce02a5fcdf84c1ba915fa38f279d4adb7d3186d2403f442b060db1ba1"
+ }
+}

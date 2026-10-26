@@ -1,0 +1,111 @@
+{
+ "schema_version": "region-human-decisions/0.2",
+ "decisions": {
+  "P5-example-058-dashboard": {
+   "decision": "hybrid",
+   "source": "accepted_deck_2026-10-22 (proxy)",
+   "note": "标题原生 + 仪表盘整图；2026-10-22 已人工确认。",
+   "annotation_level": "explicit",
+   "retain_scope": "partial",
+   "fidelity_target": "pixel",
+   "required_edit_targets": [
+    "section_title"
+   ],
+   "allowed_native_parts": [
+    "section_title",
+    "title_icon"
+   ],
+   "must_retain_parts": [
+    "dashboard_body"
+   ]
+  },
+  "P6-funds-analysis-chart": {
+   "decision": "retain_module",
+   "source": "accepted_deck_2026-10-22 (proxy)",
+   "note": "当前已验收 deck 的选择；正式人工复核可覆盖。",
+   "annotation_level": "proxy",
+   "retain_scope": "whole_region",
+   "fidelity_target": "pixel",
+   "required_edit_targets": [],
+   "allowed_native_parts": [],
+   "must_retain_parts": []
+  },
+  "P7-clue-network": {
+   "decision": "retain_module",
+   "source": "accepted_deck_2026-10-22 (proxy)",
+   "note": "当前已验收 deck 的选择；正式人工复核可覆盖。",
+   "annotation_level": "proxy",
+   "retain_scope": "whole_region",
+   "fidelity_target": "pixel",
+   "required_edit_targets": [],
+   "allowed_native_parts": [],
+   "must_retain_parts": []
+  },
+  "P8-petition-example": {
+   "decision": "retain_module",
+   "source": "user_review_2026-10-22_veto",
+   "note": "复核 P8 hybrid 单页样板后维持整图保留；区域 MAE 约 17.7，整图约 8.6，视觉保真优先。",
+   "annotation_level": "trial_veto",
+   "retain_scope": "whole_region",
+   "fidelity_target": "pixel",
+   "required_edit_targets": [],
+   "allowed_native_parts": [],
+   "must_retain_parts": []
+  },
+  "P9-image-020-report-ui": {
+   "decision": "retain_module",
+   "source": "accepted_deck_2026-10-22 (proxy)",
+   "note": "当前已验收 deck 的选择；正式人工复核可覆盖。",
+   "annotation_level": "proxy",
+   "retain_scope": "whole_region",
+   "fidelity_target": "pixel",
+   "required_edit_targets": [],
+   "allowed_native_parts": [],
+   "must_retain_parts": []
+  },
+  "P10-vehicle-risk-example": {
+   "decision": "retain_module",
+   "source": "accepted_deck_2026-10-22 (proxy)",
+   "note": "当前已验收 deck 的选择；正式人工复核可覆盖。",
+   "annotation_level": "proxy",
+   "retain_scope": "whole_region",
+   "fidelity_target": "pixel",
+   "required_edit_targets": [],
+   "allowed_native_parts": [],
+   "must_retain_parts": []
+  },
+  "P11-rural-three-assets": {
+   "decision": "retain_module",
+   "source": "accepted_deck_2026-10-22 (proxy)",
+   "note": "当前已验收 deck 的选择；正式人工复核可覆盖。",
+   "annotation_level": "proxy",
+   "retain_scope": "whole_region",
+   "fidelity_target": "pixel",
+   "required_edit_targets": [],
+   "allowed_native_parts": [],
+   "must_retain_parts": []
+  },
+  "P12-industry-risk-bars": {
+   "decision": "native",
+   "source": "user_review_2026-10-22",
+   "note": "用户确认原生化并重新合成；P12 compare 16.097→17.190，视觉检查通过。",
+   "annotation_level": "explicit",
+   "retain_scope": "none",
+   "fidelity_target": "balanced",
+   "required_edit_targets": [
+    "section_title",
+    "bars",
+    "category_labels",
+    "percentage_labels"
+   ],
+   "allowed_native_parts": [
+    "section_title",
+    "panel",
+    "bars",
+    "category_labels",
+    "percentage_labels"
+   ],
+   "must_retain_parts": []
+  }
+ }
+}

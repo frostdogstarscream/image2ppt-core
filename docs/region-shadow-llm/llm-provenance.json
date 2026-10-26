@@ -1,0 +1,88 @@
+{
+ "schema": "RegionLLMProvenance/1",
+ "prompt_version": "region-decision/1",
+ "capabilities_sha256": "88e09e23865ea83df7ba401021089aa4ae627e381c8af2e3250362bd87b7078e",
+ "rows": [
+  {
+   "region_id": "P5-example-058-dashboard",
+   "status": "VALIDATED",
+   "error_code": null,
+   "request_sha256": "c9e5e8dc053d66e06aeec5d522227b020d9977180ea27321106eb36d005f118e",
+   "crop_sha256": "e7feeb339a97a30739257b8e4694219f5e87ce271e87dcb108fa379d55b1765c",
+   "response_sha256": "c7b2564bc818157972009ae1bf21c74127c164086331a9cfb4c565578164f34e",
+   "attempts": null,
+   "transport_status": "RECEIVED"
+  },
+  {
+   "region_id": "P6-funds-analysis-chart",
+   "status": "VALIDATED",
+   "error_code": null,
+   "request_sha256": "d7fb774c193c4ca5dc9362e7bc472de589760754a7449a89a2f69f0c0d857efb",
+   "crop_sha256": "24125f9ed3786c1b2a1e0feb93852c2a4208d7c23718935a1cd431adc820a458",
+   "response_sha256": "ca59dc05a4342ea5fedcc54c071f0269b5f688fc07b5f3574b29dec22e7d9a39",
+   "attempts": null,
+   "transport_status": "RECEIVED"
+  },
+  {
+   "region_id": "P7-clue-network",
+   "status": "VALIDATED",
+   "error_code": null,
+   "request_sha256": "aa3c75fa4bd1ff13b5326f82cd232d4e14a6ab7914ee4d495698fd2bc63a589c",
+   "crop_sha256": "96fcd61faf56dc0aee28d0bf36ab3cf3904690562338028071c22c2c311ed43f",
+   "response_sha256": "2bc11575471561d1946abdf31d6fa3f89479a73cd6822ac6bea94e2d287c442c",
+   "attempts": null,
+   "transport_status": "RECEIVED"
+  },
+  {
+   "region_id": "P8-petition-example",
+   "status": "VALIDATED",
+   "error_code": null,
+   "request_sha256": "6d31b57abd0d5567347213dd5c4958fc35f59835bbf683e13c4d29ce5ffe900b",
+   "crop_sha256": "92c7b7c77a13e0505b3656995401d6f43fd786aff7d9159123773690b5acc90c",
+   "response_sha256": "6dc85f3ca2d9bf3e03a29bc6c37bc180cb6f291f412af5398f7cefcb74cf9b78",
+   "attempts": null,
+   "transport_status": "RECEIVED"
+  },
+  {
+   "region_id": "P9-image-020-report-ui",
+   "status": "VALIDATED",
+   "error_code": null,
+   "request_sha256": "7020b8bcad656c84d3151c601222127d4330495a782af565cc6cbe40f5c217a1",
+   "crop_sha256": "ccd56c9c4f15467cb2946543bb1ec870e43eaf2b7c09420880fb8e5618e219bc",
+   "response_sha256": "204561826a9d3390536d6af7890f693f050d2759cad930c73cc8a4158ca4a686",
+   "attempts": null,
+   "transport_status": "RECEIVED"
+  },
+  {
+   "region_id": "P10-vehicle-risk-example",
+   "status": "VALIDATED",
+   "error_code": null,
+   "request_sha256": "ca0e2236bf3ab1916220ee4014756f17a9d8a28a63fc796d0b36dd6c6b232e3f",
+   "crop_sha256": "e8a25e9c7b971fd61ea1dc418061b584f3b5eb8b02a6682653e9953ef56c15e1",
+   "response_sha256": "91e0a5a411942ee3cde640f8d2502729580cfe1d8718b283593cb14a95def6d0",
+   "attempts": null,
+   "transport_status": "RECEIVED"
+  },
+  {
+   "region_id": "P11-rural-three-assets",
+   "status": "VALIDATED",
+   "error_code": null,
+   "request_sha256": "e3929df8a1f23fc421de3586e4e9ab9b3a17168d15bdfc900544da599e921009",
+   "crop_sha256": "58a11b25a551995a63549f3d658ff8fc4e78ab717605e1b7446509f31f425234",
+   "response_sha256": "2cc4df86e4875b5e9de15be97d12cba98128f00e36ab72a8711bcf9fc54c1123",
+   "attempts": null,
+   "transport_status": "RECEIVED"
+  },
+  {
+   "region_id": "P12-industry-risk-bars",
+   "status": "VALIDATED",
+   "error_code": null,
+   "request_sha256": "5cc9c7ea2a46102a86cd74ae3e92134648e6628efa0bde505fce43607ce99759",
+   "crop_sha256": "1f39ba5d214b1f545e734dd21fb56d4f7642eb70d8098824b2483bda1e42bc85",
+   "response_sha256": "c587a9e14fc61865f2573fd9316cdc3d68ec0894ddf66cdd52654b276469dd48",
+   "attempts": null,
+   "transport_status": "RECEIVED"
+  }
+ ],
+ "human_acceptance": false
+}

@@ -1,0 +1,444 @@
+{
+ "schema_version": "region-candidates/0.1",
+ "candidates": [
+  {
+   "candidate_id": "p5-title-native-dashboard-module",
+   "region_id": "P5-example-058-dashboard",
+   "page": "P5",
+   "decision": "hybrid",
+   "state": "ACCEPTED",
+   "baseline": {
+    "label": "previous native KPI decomposition",
+    "note": "The whole dashboard was split into native KPI cards, table and chart. It had more editable objects but lost light borders and distorted icons, so it was not the visual baseline for acceptance.",
+    "artifacts": [
+     {
+      "label": "previous 14-page deck",
+      "path": "outputs/native-decompose-20261021/deck/2026-10-22T02-55-25-254Z-d3535691/deck.pptx",
+      "sha256": "4ba87e18557efdfd6bf45448692c1c477fb97b4bf94fad510bbc0a11b03a3863"
+     },
+     {
+      "label": "previous quality report",
+      "path": "outputs/native-decompose-20261021/deck/2026-10-22T02-55-25-254Z-d3535691/quality.json",
+      "sha256": "d962b833384f76607dec8d33786de3e92e87e5a10b42be3397d1d1785381b8d2"
+     },
+     {
+      "label": "previous P5 preview",
+      "path": "outputs/native-decompose-20261021/deck/2026-10-22T02-55-25-254Z-d3535691/preview/page-005.png",
+      "sha256": "86cf14feed4b483dc8f8c0921626f09400874b646edab1cc164da3d9cc3c9b04"
+     }
+    ],
+    "metrics": {
+     "page_mean_pixel_difference": 13.817005984674758,
+     "region_mean_pixel_difference": null,
+     "text_correctness": null,
+     "edit_target_coverage": null,
+     "elapsed_seconds": null
+    }
+   },
+   "candidate": {
+    "label": "native title + one dashboard module image",
+    "target_fidelity": "pixel",
+    "edit_goals": [
+     "section_title"
+    ],
+    "contamination": "The title strip was inpainted with background column interpolation. Manual review found no visible ghosting in the final preview.",
+    "artifacts": [
+     {
+      "label": "final 14-page deck",
+      "path": "outputs/native-decompose-20261021/deck-flowcharts-native-final.pptx",
+      "sha256": "145e6ba890990c9cad62898f55ffc94bab8b8691928703f5476de7f6600c162a"
+     },
+     {
+      "label": "final quality report",
+      "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/quality.json",
+      "sha256": "0053604028ac6a14bda31c0436cc01eadf25c90f986b7d2feab27346d0295206"
+     },
+     {
+      "label": "final P5 preview",
+      "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/preview/page-005.png",
+      "sha256": "65c90ae8e107061bc23ea2fe90349356a6820ee24f0e1e902fab53189b53e528"
+     },
+     {
+      "label": "P5 candidate IR",
+      "path": "outputs/native-decompose-20261021/slide5-example-whole-v3/slideir.json",
+      "sha256": "b5cd2e96817a4d1baa45a1ac14ec2c48a7c757d764f73711a759be70043b1f4a"
+     },
+     {
+      "label": "P5 compose spec",
+      "path": ".build/decompose-specs/slide5-example-whole.json",
+      "sha256": "745fd9c7fd36bb9f4ec8a4958fe774195402b040b35472f01a68f575e5366821"
+     },
+     {
+      "label": "P5 side-by-side",
+      "path": "outputs/native-decompose-20261021/p5-whole-v2-side-by-side.png",
+      "sha256": "4025b478548f0445b22efe3319bb7a917905b1e4d92481e8688637cefbfbbd16"
+     }
+    ],
+    "metrics": {
+     "page_mean_pixel_difference": 13.140721847367914,
+     "region_mean_pixel_difference": null,
+     "text_correctness": null,
+     "edit_target_coverage": 1.0,
+     "elapsed_seconds": null
+    }
+   },
+   "coverage": {
+    "section_title": {
+     "status": "covered",
+     "evidence": "Native title and title icon remain editable; calibrated to 14pt bold and the source ink box."
+    },
+    "dashboard_body": {
+     "status": "retained",
+     "evidence": "KPI cards, chart and table stay in one 557x401 module image, as requested by the human plan."
+    }
+   },
+   "budget": {
+    "nodes": 124,
+    "text_nodes": 56,
+    "images": 27,
+    "shapes": 96,
+    "limits": {
+     "nodes": 500,
+     "text_nodes_warn": 52,
+     "images_per_slide": 32
+    },
+    "warnings": [
+     "56 text nodes exceeds the 52-text-box warning threshold; the final slide still exported and rendered."
+    ]
+   },
+   "history": [
+    {
+     "state": "PROPOSED",
+     "date": "2026-10-22",
+     "basis": "LLM shadow proposal plus the human title-only edit goal."
+    },
+    {
+     "state": "VALIDATED_STRUCTURE",
+     "date": "2026-10-22",
+     "basis": "P5 compose spec and IR node geometry validated."
+    },
+    {
+     "state": "TRIAL_BUILT",
+     "date": "2026-10-22",
+     "basis": "Single-page composition, then folded into the final 14-page deck."
+    },
+    {
+     "state": "REVIEW_REQUIRED",
+     "date": "2026-10-22",
+     "basis": "Page MAE 13.141 ranked the candidate; visual review remained mandatory."
+    },
+    {
+     "state": "ACCEPTED",
+     "date": "2026-10-22",
+     "basis": "Human accepted the final deck after preview review."
+    }
+   ],
+   "outcome": {
+    "status": "ACCEPTED",
+    "human_acceptance": true,
+    "reason": "Title stays editable and the dashboard body keeps its original visual quality; the native KPI variant was rejected on fidelity."
+   }
+  },
+  {
+   "candidate_id": "p8-petition-hybrid-sample",
+   "region_id": "P8-petition-example",
+   "page": "P8",
+   "decision": "hybrid",
+   "state": "REJECTED",
+   "baseline": {
+    "label": "retained petition module in the final deck",
+    "note": "Current fidelity-first plan: the table, letter excerpt, icons and status pill remain one module image. Page MAE 13.501 is exact; region MAE 8.6 is the approximate region-crop comparison recorded in the archived report.",
+    "artifacts": [
+     {
+      "label": "final 14-page deck",
+      "path": "outputs/native-decompose-20261021/deck-flowcharts-native-final.pptx",
+      "sha256": "145e6ba890990c9cad62898f55ffc94bab8b8691928703f5476de7f6600c162a"
+     },
+     {
+      "label": "final quality report",
+      "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/quality.json",
+      "sha256": "0053604028ac6a14bda31c0436cc01eadf25c90f986b7d2feab27346d0295206"
+     },
+     {
+      "label": "final P8 preview",
+      "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/preview/page-008.png",
+      "sha256": "18261b1af98234cd287a3a1ea5dfa1e3ae0a5089131963dea16a2bd11228a61e"
+     }
+    ],
+    "metrics": {
+     "page_mean_pixel_difference": 13.50081566828868,
+     "region_mean_pixel_difference": 8.6,
+     "text_correctness": null,
+     "edit_target_coverage": null,
+     "elapsed_seconds": null
+    }
+   },
+   "candidate": {
+    "label": "hybrid single-page sample: native table and text, icon strip retained",
+    "target_fidelity": "pixel",
+    "note": "Page MAE 14.938 is exact from the single-page quality report; region MAE 17.7 is the approximate region-crop comparison recorded in the archived report.",
+    "edit_goals": [
+     "section_title",
+     "table",
+     "values",
+     "status_chips"
+    ],
+    "contamination": "No crop contamination observed; the table value area is flatter than the source, and separators/icons differ by roughly 1-2px.",
+    "artifacts": [
+     {
+      "label": "hybrid sample deck",
+      "path": "outputs/native-decompose-20261021/deck-p8-petition-hybrid.pptx",
+      "sha256": "fd3f3183892106dd8b913ab14b143f53ebe974f822640308d1a1f142b241bdc9"
+     },
+     {
+      "label": "hybrid sample quality report",
+      "path": ".build/p8-petition-test/2026-10-22T08-23-24-744Z-4df6e397/quality.json",
+      "sha256": "7789e3e2aca4584c71fef894f02e135b3f0d0768f9ac91c2939af52c6ba27556"
+     },
+     {
+      "label": "hybrid sample preview",
+      "path": ".build/p8-petition-test/2026-10-22T08-23-24-744Z-4df6e397/preview/page-001.png",
+      "sha256": "c2aadff47e540802a320ca94d9a76bc53b4569bbffb87cfc68cc764bcbd7575c"
+     },
+     {
+      "label": "hybrid sample IR",
+      "path": "outputs/native-decompose-20261021/slide8-petition-hybrid/slideir.json",
+      "sha256": "dc7913d06610a3fe80a9b5abdb37e9e9f0fc77c6f7356c1e4cdbc2946161a16b"
+     },
+     {
+      "label": "P8 hybrid spec",
+      "path": ".build/decompose-specs/slide8-petition-hybrid.json",
+      "sha256": "afe610045bc9933dbfe6fbecc049e40df302c8657abab7c4ec799f112eef44eb"
+     },
+     {
+      "label": "P8 side-by-side",
+      "path": "outputs/native-decompose-20261021/p8-petition-side-by-side.png",
+      "sha256": "4b2e022ed609ca38ebe3edc7e2f2313454c1f4aea302ca932571abb5f52e4d31"
+     }
+    ],
+    "metrics": {
+     "page_mean_pixel_difference": 14.938482721391443,
+     "region_mean_pixel_difference": 17.7,
+     "text_correctness": null,
+     "edit_target_coverage": null,
+     "elapsed_seconds": null
+    }
+   },
+   "coverage": {
+    "section_title": {
+     "status": "covered",
+     "evidence": "Native title, non-bold and repositioned to match the source."
+    },
+    "table": {
+     "status": "partial",
+     "evidence": "Rows and labels are editable, but the value area is flatter than the source and separator positions differ by 1-2px."
+    },
+    "values": {
+     "status": "partial",
+     "evidence": "Five label/value rows are editable; remaining visual differences are in backgrounds and separators."
+    },
+    "status_chips": {
+     "status": "covered",
+     "evidence": "The orange medium-risk pill is a native rounded rectangle and editable text."
+    }
+   },
+   "budget": {
+    "nodes": 164,
+    "text_nodes": 78,
+    "images": 32,
+    "shapes": 132,
+    "limits": {
+     "nodes": 500,
+     "text_nodes_warn": 52,
+     "images_per_slide": 32
+    },
+    "warnings": [
+     "78 text nodes exceeds the 52-text-box warning threshold.",
+     "32 images sits at the observed export limit; the candidate used one icon-strip asset to avoid 33."
+    ]
+   },
+   "history": [
+    {
+     "state": "PROPOSED",
+     "date": "2026-10-22",
+     "basis": "LLM proposed hybrid; the human requested a single-page sample."
+    },
+    {
+     "state": "VALIDATED_STRUCTURE",
+     "date": "2026-10-22",
+     "basis": "P8 hybrid spec and IR validated; six icons merged into one transparent strip."
+    },
+    {
+     "state": "TRIAL_BUILT",
+     "date": "2026-10-22",
+     "basis": "Single-page sample deck-p8-petition-hybrid.pptx exported and rendered."
+    },
+    {
+     "state": "REVIEW_REQUIRED",
+     "date": "2026-10-22",
+     "basis": "Region MAE 17.7 versus 8.6 for the retained module; visual review required."
+    },
+    {
+     "state": "REJECTED",
+     "date": "2026-10-22",
+     "basis": "Human review kept the whole-image module; the hybrid sample is archived."
+    }
+   ],
+   "outcome": {
+    "status": "REJECTED",
+    "human_acceptance": false,
+    "reason": "Fidelity-first goal: the module image is visually closer than the hybrid; the sample is kept for a future editability-first goal."
+   }
+  },
+  {
+   "candidate_id": "p12-native-risk-bars",
+   "region_id": "P12-industry-risk-bars",
+   "page": "P12",
+   "decision": "native",
+   "state": "ACCEPTED",
+   "baseline": {
+    "label": "retained horizontal-bar module image",
+    "note": "The bar chart remained a module image before the native trial.",
+    "artifacts": [
+     {
+      "label": "pre-native 14-page deck",
+      "path": "outputs/native-decompose-20261021/deck-p5-whole-v2/2026-10-22T03-20-53-048Z-67bab806/deck.pptx",
+      "sha256": "d795557d20a93339566dc099549f2f503894fec718ef334c93595240731e895a"
+     },
+     {
+      "label": "pre-native quality report",
+      "path": "outputs/native-decompose-20261021/deck-p5-whole-v2/2026-10-22T03-20-53-048Z-67bab806/quality.json",
+      "sha256": "874182069e242c550c428d128cb352160a2067e8fe2118034676e426aec0d457"
+     },
+     {
+      "label": "pre-native P12 preview",
+      "path": "outputs/native-decompose-20261021/deck-p5-whole-v2/2026-10-22T03-20-53-048Z-67bab806/preview/page-012.png",
+      "sha256": "ee7a145d9560bc0abeed3e5369f07ffbc3592e97c1d4d4be10bb1dbbaee8ab39"
+     }
+    ],
+    "metrics": {
+     "page_mean_pixel_difference": 16.097389522497192,
+     "region_mean_pixel_difference": null,
+     "text_correctness": null,
+     "edit_target_coverage": null,
+     "elapsed_seconds": null
+    }
+   },
+   "candidate": {
+    "label": "native title band, five gradient bars, labels and percentages",
+    "target_fidelity": "balanced",
+    "edit_goals": [
+     "section_title",
+     "bars",
+     "category_labels",
+     "percentage_labels"
+    ],
+    "contamination": "No module crop remains; bar lengths and five percentage values are native and can be checked against the source.",
+    "artifacts": [
+     {
+      "label": "final 14-page deck",
+      "path": "outputs/native-decompose-20261021/deck-flowcharts-native-final.pptx",
+      "sha256": "145e6ba890990c9cad62898f55ffc94bab8b8691928703f5476de7f6600c162a"
+     },
+     {
+      "label": "final quality report",
+      "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/quality.json",
+      "sha256": "0053604028ac6a14bda31c0436cc01eadf25c90f986b7d2feab27346d0295206"
+     },
+     {
+      "label": "final P12 preview",
+      "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/preview/page-012.png",
+      "sha256": "a3f4de5764c4b1a35203c1f9fa2ffb2768a47cc09671d30158a0b856c04dcacb"
+     },
+     {
+      "label": "P12 native IR",
+      "path": "outputs/native-decompose-20261021/slide12-bars-native/slideir.json",
+      "sha256": "16a29ac407dda3fb8651da824347f6219bf9b3db9519aa6d05897a927b0a3039"
+     },
+     {
+      "label": "P12 native spec",
+      "path": ".build/decompose-specs/slide12-industry-bars.json",
+      "sha256": "1b8571539d8dd74522c05cd778d49892718c4e09a17fbc35ea646d803296be4e"
+     },
+     {
+      "label": "P12 side-by-side",
+      "path": "outputs/native-decompose-20261021/p12-bars-side-by-side.png",
+      "sha256": "c800be29f674472c7add7e369a1e429d0d784824131314bc72beccbe64cc7eb5"
+     }
+    ],
+    "metrics": {
+     "page_mean_pixel_difference": 17.19031405559595,
+     "region_mean_pixel_difference": null,
+     "text_correctness": null,
+     "edit_target_coverage": 1.0,
+     "elapsed_seconds": null
+    }
+   },
+   "coverage": {
+    "section_title": {
+     "status": "covered",
+     "evidence": "Dark title band and title text are native gradient/shape and editable text."
+    },
+    "bars": {
+     "status": "covered",
+     "evidence": "Five horizontal bars are native rectangles with two-stop gradients; endpoints follow the source."
+    },
+    "category_labels": {
+     "status": "covered",
+     "evidence": "Five category labels are editable text."
+    },
+    "percentage_labels": {
+     "status": "covered",
+     "evidence": "Five percentage labels are editable text and can be checked against the source values."
+    }
+   },
+   "budget": {
+    "nodes": 121,
+    "text_nodes": 49,
+    "images": 33,
+    "shapes": 88,
+    "limits": {
+     "nodes": 500,
+     "text_nodes_warn": 52,
+     "images_per_slide": 32
+    },
+    "warnings": [
+     "Image count is 33, above the 32-image guidance; export and render succeeded for this page.",
+     "This is shape-level bar reconstruction, not a data-driven native chart with a workbook."
+    ]
+   },
+   "history": [
+    {
+     "state": "PROPOSED",
+     "date": "2026-10-22",
+     "basis": "LLM proposed native; the human confirmed the bar chart should become editable."
+    },
+    {
+     "state": "VALIDATED_STRUCTURE",
+     "date": "2026-10-22",
+     "basis": "P12 spec validated; gradient offsets corrected from 0/50/100 to the 0..100000 IR range."
+    },
+    {
+     "state": "TRIAL_BUILT",
+     "date": "2026-10-22",
+     "basis": "Native bars composed into the 14-page deck."
+    },
+    {
+     "state": "REVIEW_REQUIRED",
+     "date": "2026-10-22",
+     "basis": "Page MAE 17.190 versus 16.097; visual review required."
+    },
+    {
+     "state": "ACCEPTED",
+     "date": "2026-10-22",
+     "basis": "Human confirmed native bars despite the small fidelity cost."
+    }
+   ],
+   "outcome": {
+    "status": "ACCEPTED",
+    "human_acceptance": true,
+    "reason": "Titles, bars, categories and percentages are editable; values can be checked against the source at a small pixel-fidelity cost."
+   }
+  }
+ ]
+}

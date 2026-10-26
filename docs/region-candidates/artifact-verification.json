@@ -1,0 +1,222 @@
+{
+ "root": ".",
+ "ok": true,
+ "rows": [
+  {
+   "candidate_id": "p5-title-native-dashboard-module",
+   "section": "baseline",
+   "path": "outputs/native-decompose-20261021/deck/2026-10-22T02-55-25-254Z-d3535691/deck.pptx",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "4ba87e18557efdfd6bf45448692c1c477fb97b4bf94fad510bbc0a11b03a3863"
+  },
+  {
+   "candidate_id": "p5-title-native-dashboard-module",
+   "section": "baseline",
+   "path": "outputs/native-decompose-20261021/deck/2026-10-22T02-55-25-254Z-d3535691/quality.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "d962b833384f76607dec8d33786de3e92e87e5a10b42be3397d1d1785381b8d2"
+  },
+  {
+   "candidate_id": "p5-title-native-dashboard-module",
+   "section": "baseline",
+   "path": "outputs/native-decompose-20261021/deck/2026-10-22T02-55-25-254Z-d3535691/preview/page-005.png",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "86cf14feed4b483dc8f8c0921626f09400874b646edab1cc164da3d9cc3c9b04"
+  },
+  {
+   "candidate_id": "p5-title-native-dashboard-module",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/deck-flowcharts-native-final.pptx",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "145e6ba890990c9cad62898f55ffc94bab8b8691928703f5476de7f6600c162a"
+  },
+  {
+   "candidate_id": "p5-title-native-dashboard-module",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/quality.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "0053604028ac6a14bda31c0436cc01eadf25c90f986b7d2feab27346d0295206"
+  },
+  {
+   "candidate_id": "p5-title-native-dashboard-module",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/preview/page-005.png",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "65c90ae8e107061bc23ea2fe90349356a6820ee24f0e1e902fab53189b53e528"
+  },
+  {
+   "candidate_id": "p5-title-native-dashboard-module",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/slide5-example-whole-v3/slideir.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "b5cd2e96817a4d1baa45a1ac14ec2c48a7c757d764f73711a759be70043b1f4a"
+  },
+  {
+   "candidate_id": "p5-title-native-dashboard-module",
+   "section": "candidate",
+   "path": ".build/decompose-specs/slide5-example-whole.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "745fd9c7fd36bb9f4ec8a4958fe774195402b040b35472f01a68f575e5366821"
+  },
+  {
+   "candidate_id": "p5-title-native-dashboard-module",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/p5-whole-v2-side-by-side.png",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "4025b478548f0445b22efe3319bb7a917905b1e4d92481e8688637cefbfbbd16"
+  },
+  {
+   "candidate_id": "p8-petition-hybrid-sample",
+   "section": "baseline",
+   "path": "outputs/native-decompose-20261021/deck-flowcharts-native-final.pptx",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "145e6ba890990c9cad62898f55ffc94bab8b8691928703f5476de7f6600c162a"
+  },
+  {
+   "candidate_id": "p8-petition-hybrid-sample",
+   "section": "baseline",
+   "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/quality.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "0053604028ac6a14bda31c0436cc01eadf25c90f986b7d2feab27346d0295206"
+  },
+  {
+   "candidate_id": "p8-petition-hybrid-sample",
+   "section": "baseline",
+   "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/preview/page-008.png",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "18261b1af98234cd287a3a1ea5dfa1e3ae0a5089131963dea16a2bd11228a61e"
+  },
+  {
+   "candidate_id": "p8-petition-hybrid-sample",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/deck-p8-petition-hybrid.pptx",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "fd3f3183892106dd8b913ab14b143f53ebe974f822640308d1a1f142b241bdc9"
+  },
+  {
+   "candidate_id": "p8-petition-hybrid-sample",
+   "section": "candidate",
+   "path": ".build/p8-petition-test/2026-10-22T08-23-24-744Z-4df6e397/quality.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "7789e3e2aca4584c71fef894f02e135b3f0d0768f9ac91c2939af52c6ba27556"
+  },
+  {
+   "candidate_id": "p8-petition-hybrid-sample",
+   "section": "candidate",
+   "path": ".build/p8-petition-test/2026-10-22T08-23-24-744Z-4df6e397/preview/page-001.png",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "c2aadff47e540802a320ca94d9a76bc53b4569bbffb87cfc68cc764bcbd7575c"
+  },
+  {
+   "candidate_id": "p8-petition-hybrid-sample",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/slide8-petition-hybrid/slideir.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "dc7913d06610a3fe80a9b5abdb37e9e9f0fc77c6f7356c1e4cdbc2946161a16b"
+  },
+  {
+   "candidate_id": "p8-petition-hybrid-sample",
+   "section": "candidate",
+   "path": ".build/decompose-specs/slide8-petition-hybrid.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "afe610045bc9933dbfe6fbecc049e40df302c8657abab7c4ec799f112eef44eb"
+  },
+  {
+   "candidate_id": "p8-petition-hybrid-sample",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/p8-petition-side-by-side.png",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "4b2e022ed609ca38ebe3edc7e2f2313454c1f4aea302ca932571abb5f52e4d31"
+  },
+  {
+   "candidate_id": "p12-native-risk-bars",
+   "section": "baseline",
+   "path": "outputs/native-decompose-20261021/deck-p5-whole-v2/2026-10-22T03-20-53-048Z-67bab806/deck.pptx",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "d795557d20a93339566dc099549f2f503894fec718ef334c93595240731e895a"
+  },
+  {
+   "candidate_id": "p12-native-risk-bars",
+   "section": "baseline",
+   "path": "outputs/native-decompose-20261021/deck-p5-whole-v2/2026-10-22T03-20-53-048Z-67bab806/quality.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "874182069e242c550c428d128cb352160a2067e8fe2118034676e426aec0d457"
+  },
+  {
+   "candidate_id": "p12-native-risk-bars",
+   "section": "baseline",
+   "path": "outputs/native-decompose-20261021/deck-p5-whole-v2/2026-10-22T03-20-53-048Z-67bab806/preview/page-012.png",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "ee7a145d9560bc0abeed3e5369f07ffbc3592e97c1d4d4be10bb1dbbaee8ab39"
+  },
+  {
+   "candidate_id": "p12-native-risk-bars",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/deck-flowcharts-native-final.pptx",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "145e6ba890990c9cad62898f55ffc94bab8b8691928703f5476de7f6600c162a"
+  },
+  {
+   "candidate_id": "p12-native-risk-bars",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/quality.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "0053604028ac6a14bda31c0436cc01eadf25c90f986b7d2feab27346d0295206"
+  },
+  {
+   "candidate_id": "p12-native-risk-bars",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/deck-font-unified/2026-10-22T05-04-14-592Z-56702a43/preview/page-012.png",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "a3f4de5764c4b1a35203c1f9fa2ffb2768a47cc09671d30158a0b856c04dcacb"
+  },
+  {
+   "candidate_id": "p12-native-risk-bars",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/slide12-bars-native/slideir.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "16a29ac407dda3fb8651da824347f6219bf9b3db9519aa6d05897a927b0a3039"
+  },
+  {
+   "candidate_id": "p12-native-risk-bars",
+   "section": "candidate",
+   "path": ".build/decompose-specs/slide12-industry-bars.json",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "1b8571539d8dd74522c05cd778d49892718c4e09a17fbc35ea646d803296be4e"
+  },
+  {
+   "candidate_id": "p12-native-risk-bars",
+   "section": "candidate",
+   "path": "outputs/native-decompose-20261021/p12-bars-side-by-side.png",
+   "exists": true,
+   "sha256_match": true,
+   "actual_sha256": "c800be29f674472c7add7e369a1e429d0d784824131314bc72beccbe64cc7eb5"
+  }
+ ]
+}
