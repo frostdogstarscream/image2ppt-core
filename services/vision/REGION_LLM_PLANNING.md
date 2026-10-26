@@ -43,3 +43,48 @@ python scripts/region_shadow.py score --plans .build/region-shadow/plans.llm.jso
 
 响应只保留哈希和经过校验的 agent 决策；`response.body` 留在 gitignored 的 `.build`，不发布。
 密钥只注入 secure runner 的子进程环境，不写入 job、settings、报告或 git。
+
+## 人工标注与范围评分
+
+`human-decisions.json` 的版本为 `region-human-decisions/0.2`。除 `decision/source/note`
+外，可记录：
+
+- `annotation_level`: `proxy | explicit | trial_veto | calibration`；
+- `retain_scope`: `none | partial | whole_region`；
+- `fidelity_target`: `pixel | balanced | editability`；
+- `required_edit_targets`、`allowed_native_parts`、`must_retain_parts`。
+
+六个字段必须同时出现；`required_edit_targets` 必须是 `allowed_native_parts` 的子集。
+旧的只有三字段的人工决定仍然有效，但不参与范围评分。
+
+`score` 现在输出两层：
+
+- `routing`：三分类标签一致率，以及始终返回 `retain_module` 的基线；
+- `scope`：拆分范围一致率，并分别统计
+  `over_decomposition`、`under_decomposition` 和 `retain_violations`。
+
+`scope.agreement` 要求标签一致且没有范围冲突。P5 是固定反例：标签同为 `hybrid`，
+但模型把 KPI、图表和表格内部都列成原生，人工只允许标题和标题图标原生并要求保留
+`dashboard_body`，因此路由一致、范围不一致。
+
+## 完整性绑定
+
+`input.json` 的绑定包含 request/crop/features/capabilities/prompt/endpoint/model 哈希。
+发送前，secure runner 与 worker 都会调用 `job_binding.verify_job()`：
+
+- 重新计算 `request.json` 和 `crop.png` 的哈希；
+- 解析 request，确认 model、system prompt、classification、features、capabilities
+  和 base64 图片都与绑定一致；
+- 只允许 settings 中的 endpoint 生成绑定记录的那个端点。
+
+`transport.json` 记录实际 `request_sha256`、`endpoint_sha256`、`job_binding_sha256`、
+`model` 和 response 哈希。`apply-llm` 会：
+
+- 重新核验 job 绑定；
+- 要求 transport 的上述指纹与本 job 一致；
+- 重新计算 `response.body` 哈希并与 `saved_response_sha256` / `response_sha256` 比对；
+- 拒绝缺失哈希、跨 job 交换、凭据回显或脱敏后的响应。
+
+因为这些字段是新增的，旧 job 的 `transport.json` 不符合新要求；需要重新 `prepare-llm`
+到新的 jobs root 后再发送，不能复用旧证据。哈希只证明文件完整性及版本关联，不构成
+对可同时改写证据和清单者的签名认证。
