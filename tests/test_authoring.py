@@ -42,6 +42,15 @@ class AuthoringGateTests(unittest.TestCase):
         authoring = ManualDraftProvider().load(self.ir).authoring
         self.assertEqual((authoring.tool, authoring.model_id), ("codex", "gpt-x"))
 
+    def test_element_font_provenance_is_preserved_without_changing_ir_binding(self):
+        proposal = {'text-1': {'requested_family': 'Arial', 'confidence': .6,
+                              'status': 'visual_candidate_not_verified_original'}}
+        write_json(self.record_path, record(self.ir, model_typography=proposal))
+        self.assertEqual(ManualDraftProvider().load(self.ir).authoring.model_typography, proposal)
+        write_json(self.ir, {**ir_body(), 'review_notes': ['changed']})
+        with self.assertRaisesRegex(ValueError, 'does not describe this IR'):
+            ManualDraftProvider().load(self.ir)
+
     def test_record_that_no_longer_describes_the_ir_is_rejected(self):
         write_json(self.record_path, record(self.ir))
         write_json(self.ir, {**ir_body(), "review_notes": ["authored"]})

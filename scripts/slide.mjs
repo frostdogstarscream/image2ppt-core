@@ -67,9 +67,12 @@ export async function buildSlide(presentation, {ir, info}, pageLabel) {
       ...(node.corner_radius_px!==undefined?{borderRadius:node.corner_radius_px/w*tw}:{}),
       line:node.line?{style:'solid',fill:'#'+node.line.color,width:node.line.width_pt*96/72}:{fill:'none',width:0}});
     if (node.type==='text') {
-      shape.text=node.runs ? [node.runs.map(r=>({run:r.text,style:{bold:r.bold??node.bold??false,color:'#'+(r.color||node.color)}}))] : node.text;
-      shape.text.style={typeface:node.font.ea,fontSize:node.font.size_pt*96/72,bold:node.bold??false,
-        color:'#'+node.color,alignment:node.align||'left',verticalAlignment:node.vertical_anchor||'top',
+      shape.text=node.runs ? [node.runs.map(r=>({run:r.text,style:{bold:r.bold??node.bold??false,color:'#'+(r.color??node.color)}}))] : node.text;
+      // Setting global color/bold after rich runs flattens their explicit style.
+      // Resolve those defaults per run; only plain text needs global defaults.
+      shape.text.style={typeface:node.font.ea,fontSize:node.font.size_pt*96/72,
+        ...(!node.runs?{bold:node.bold??false,color:'#'+node.color}:{}),
+        alignment:node.align||'left',verticalAlignment:node.vertical_anchor||'top',
         wrap:node.wrap?'square':'none',autoFit:'none',insets:0,
         ...(node.line_spacing_pt?{lineSpacing:node.line_spacing_pt*96/72}:{})};
     }

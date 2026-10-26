@@ -21,6 +21,27 @@ OWN_SOURCES = [
     "examples/synthetic/assets/visual.png",
 ]
 
+# Include the actual local compiler/core/review dependency closure. The former
+# hand-picked subset omitted slide.mjs, core helpers and skill references.
+# Only source trees are visited: no outputs, credentials or private fixtures.
+OWN_SOURCES = sorted(set(OWN_SOURCES + [
+    'requirements-core.lock', 'requirements-review.lock', 'requirements-auto.lock', 'pyproject.toml',
+    'AGENTS.md', 'docs/automatic-workflow.md', 'services/vision/tools/auto_remote.py',
+    'services/vision/pyproject.toml', 'configs/auto-client.example.json', 'configs/auto-remote.example.json',
+    '.github/workflows/ci.yml', 'docs/candidate-workflow.md', 'docs/candidate-workflow-verification.md',
+    'services/vision/REGION_LLM_PLANNING.md',
+] + [p.relative_to(ROOT).as_posix()
+     for directory, suffixes in [('scripts',{'.py','.mjs','.json'}),('src',{'.py'}),
+                                ('services/vision/src',{'.py','.json','.html'}),('tests',{'.py','.mjs'}),
+                                ('skills/image2ppt',{'.md','.yaml'}),('skills/image2ppt-claude',{'.md'})]
+     for p in (ROOT/directory).rglob('*') if p.is_file() and p.suffix in suffixes
+     and '__pycache__' not in p.parts]
+    + ['services/vision/tests/'+name for name in ['test_region_plan.py','test_region_candidates.py',
+                                                'test_supervised_elements.py','test_candidate_workflow.py',
+                                                'test_auto_workflow.py','test_auto_remote.py','test_element_service.py']]
+    + [p.relative_to(ROOT).as_posix() for directory in ['docs/region-shadow-llm','docs/region-candidates']
+       for p in (ROOT/directory).glob('*') if p.suffix in {'.json','.md'}]))
+
 README = r"""# image2PPT 技能源码包与 Claude Code 入口
 
 本包导出 image2PPT v0.1 的项目自有源码，并提供 Claude Code 的项目级技能入口。
@@ -170,7 +191,14 @@ def main():
     claude = package / ".claude/skills/image2ppt"
     (claude / "references").mkdir(parents=True)
     (claude / "SKILL.md").write_bytes((claude_source / "SKILL.md").read_bytes())
-    (claude / "references/slideir.md").write_bytes((claude_source / "references/slideir.md").read_bytes())
+    for item in (claude_source/'references').glob('*.md'):
+        (claude/'references'/item.name).write_bytes(item.read_bytes())
+    # Project-local Codex mirror, generated from its own maintained source.
+    for item in (ROOT/'skills/image2ppt').rglob('*'):
+        if item.is_file():
+            target=package/'.agents/skills/image2ppt'/item.relative_to(ROOT/'skills/image2ppt')
+            target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_bytes(item.read_bytes())
     (package / "README.md").write_text(README, encoding="utf-8", newline="\n")
     example = {"node_modules": "C:/path/to/existing/node_modules",
                "python": "C:/path/to/python.exe",

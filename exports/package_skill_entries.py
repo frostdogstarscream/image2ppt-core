@@ -8,7 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 variants = {
-    "codex": (ROOT / "skills/image2ppt", ["SKILL.md", "references/slideir.md", "agents/openai.yaml"]),
+    "codex": (ROOT / "skills/image2ppt", ["SKILL.md", "references/slideir.md", "references/core.md", "agents/openai.yaml"]),
     "claude": (ROOT / "skills/image2ppt-claude", ["SKILL.md", "references/slideir.md"]),
 }
 
@@ -23,6 +23,11 @@ def main():
             item = source / relative
             item.resolve(strict=True).relative_to(ROOT.resolve())
             payload["image2ppt/" + relative] = item.read_bytes()
+            if name == 'codex':
+                # Refresh only this checkout's installed Codex mirror.
+                target=ROOT/'.agents/skills/image2ppt'/relative
+                target.parent.mkdir(parents=True,exist_ok=True)
+                target.write_bytes(item.read_bytes())
         with ZipFile(archive, "x", compression=ZIP_DEFLATED) as bundle:
             for relative, content in payload.items():
                 bundle.writestr(relative, content)

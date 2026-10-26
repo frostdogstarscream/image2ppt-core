@@ -1,8 +1,8 @@
 name: ci
 
-# Two tiers only: the protocol validator and the unit/fault suite. Both are
-# runtime-free by construction (tests/test_core.py injects a FakeBackend; the
-# protocol tier is pure JS). Real compilation and rendering need the
+# Protocol, core unit/fault, and candidate-review suites are runtime-free
+# (core and workflow tests inject fake compilers; protocol is pure JS).
+# Real compilation and rendering need the
 # proprietary @oai/artifact-tool runtime, which this project may not
 # redistribute and which therefore never runs on a public runner.
 
@@ -14,6 +14,40 @@ permissions:
   contents: read
 
 jobs:
+  automatic-workflow:
+    name: automatic workflow + HTTP contracts (no live model calls)
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: services/vision/src:src
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: install coordinator dependencies
+        run: pip install -r requirements-auto.lock
+      - name: bounded orchestration, recovery, reviews and admission
+        run: python -m pytest services/vision/tests/test_auto_workflow.py services/vision/tests/test_auto_remote.py services/vision/tests/test_element_service.py -q
+      - name: tests must not mutate tracked files
+        run: git diff --exit-code
+  candidate-review:
+    name: region planning + candidate workflow (runtime-free)
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: services/vision/src:src
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: install minimal review test dependencies
+        run: pip install -r requirements-review.lock
+      - name: planning, coordinates and workflow
+        run: python -m pytest services/vision/tests/test_region_plan.py services/vision/tests/test_region_candidates.py services/vision/tests/test_supervised_elements.py services/vision/tests/test_candidate_workflow.py -q
+      - name: tests must not mutate tracked files
+        run: git diff --exit-code
   runtime-free:
     name: protocol + unit tiers
     runs-on: ubuntu-latest

@@ -321,8 +321,15 @@ def validate(plans, output, human_decisions=None):
             expected = decisions.get(row['region_id'])
             if expected is None:
                 errors.append(f'{row["region_id"]}: missing authoritative human decision')
-            elif row.get('human') != {key: expected.get(key, '') for key in ('decision', 'source', 'note')}:
-                errors.append(f'{row["region_id"]}: human decision differs from authoritative file')
+            else:
+                try:
+                    actual = validate_human_decision(row.get('human'))
+                    if HUMAN_SCOPE_KEYS <= set(expected) and not HUMAN_SCOPE_KEYS <= set(actual):
+                        errors.append(f'{row["region_id"]}: human scope missing; reapply saved responses with current human decisions')
+                    elif actual != expected:
+                        errors.append(f'{row["region_id"]}: human decision differs from authoritative file')
+                except (ValueError, TypeError) as exc:
+                    errors.append(f'{row["region_id"]}: invalid human decision: {exc}')
     result = {'schema': 'RegionValidation/1', 'valid': not errors, 'errors': errors, 'checked': checked}
     write_json(output, result)
     return result

@@ -19,6 +19,11 @@ build/
 exports/*
 !exports/build_source_package.py
 !exports/package_skill_entries.py
+!exports/build_automatic_source_package.py
+
+# Automatic validation connections are deployment-specific (even without keys).
+configs/auto-*.local.json
+.venv-auto/
 
 # Private business input; must never enter VCS or a public CI checkout.
 /PPT图片/

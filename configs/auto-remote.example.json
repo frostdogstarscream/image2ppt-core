@@ -1,0 +1,12 @@
+{
+  "data_root": "/data/workspaces/image2ppt-auto-new/requests",
+  "dify_container": "dify-api-container",
+  "credential_provider": "langgenius/openai_api_compatible/openai_api_compatible",
+  "credential_model": "qwen/deepseek-v4-pro",
+  "base_url": "https://moma.cmecloud.cn/v1",
+  "allowed_models": ["qwen/qwen3-vl-plus", "hacm/qwen2.5-vl-32b-instruct"],
+  "analysis_mode": "isolated_cli",
+  "vision_container": "image2ppt-vision-container",
+  "isolated_host_root": "/data/image2ppt-vision/data/auto-validation-new",
+  "isolated_container_root": "/data/auto-validation-new"
+}

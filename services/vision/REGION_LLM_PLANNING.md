@@ -57,6 +57,14 @@ python scripts/region_shadow.py score --plans .build/region-shadow/plans.llm.jso
 六个字段必须同时出现；`required_edit_targets` 必须是 `allowed_native_parts` 的子集。
 旧的只有三字段的人工决定仍然有效，但不参与范围评分。
 
+`apply-llm` 与 `validate` 使用相同的人工决定规范化逻辑，比较全部范围字段。
+若权威文件已包含范围而旧计划仍只有三字段，校验会要求重新 apply 已保存响应；
+不应删除范围标注来绕过校验，也不需要因此重新调用模型。历史报告保持原样。
+
+保存的计划可进入本地候选工作流，详见 `docs/candidate-workflow.md`：当前会话编写
+候选 IR，工具编译并重导入最终 PPTX，再由会话按对象 ID 记录视觉问题。此流程
+不新增模型 API 调用，也不把视觉复检自动转成人工验收。
+
 `score` 现在输出两层：
 
 - `routing`：三分类标签一致率，以及始终返回 `retain_module` 的基线；

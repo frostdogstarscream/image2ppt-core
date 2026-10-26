@@ -453,3 +453,35 @@ def test_archived_plans_match_schema_and_validation_hash():
     validation = json.loads((root / "docs/region-shadow-llm/validation.llm.json").read_text(encoding="utf8"))
     assert validation["valid"] is True
     assert validation["checked"]["plans_sha256"] == hashlib.sha256(plans_path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize('scoped', [False, True])
+def test_apply_validate_score_complete_flow(tmp_path, scoped):
+    data, job, _ = prepare(tmp_path)
+    response(job, agent('native'))
+    human = human_scope('native') if scoped else {'decision': 'native', 'source': 'test', 'note': ''}
+    applied = region_plan.apply_jobs([data], tmp_path, {data['region_id']: human}, inventory_sha256='a' * 64)
+    assert applied['status'] == 'VALIDATED'
+    shadow = load_shadow()
+    # The semantic validator needs an inventory image node, not a compiler.
+    ir = tmp_path / 'source-ir.json'
+    shadow.write_json(ir, {'nodes': [{'id': data['node_id'], 'type': 'image', 'bbox': data['bbox']}]})
+    applied['plans']['regions'][0]['ir'] = str(ir)
+    plans, humans = tmp_path / 'plans.json', tmp_path / 'humans.json'
+    shadow.write_json(plans, applied['plans'])
+    shadow.write_json(humans, {'decisions': {data['region_id']: human}})
+    assert shadow.validate(plans, tmp_path / 'validation.json', humans)['valid']
+    scored = shadow.score(plans, tmp_path / 'score.json', humans)
+    assert scored['routing']['agreed'] == 1
+    assert scored['scope']['decided'] == int(scoped)
+    if scoped:
+        # Omitted scope must not be silently compared as a legacy decision.
+        applied['plans']['regions'][0]['human'] = {k: human[k] for k in ('decision', 'source', 'note')}
+        shadow.write_json(plans, applied['plans'])
+        result = shadow.validate(plans, tmp_path / 'missing.json', humans)
+        assert not result['valid'] and any('reapply' in error for error in result['errors'])
+        changed = dict(human, fidelity_target='balanced')
+        applied['plans']['regions'][0]['human'] = changed
+        shadow.write_json(plans, applied['plans'])
+        result = shadow.validate(plans, tmp_path / 'changed.json', humans)
+        assert not result['valid'] and any('differs' in error for error in result['errors'])

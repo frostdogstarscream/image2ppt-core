@@ -1,0 +1,6 @@
+{
+  "ssh_host": "user@server",
+  "remote_worker": "/data/workspaces/image2ppt-auto-new/auto_remote.py",
+  "remote_config": "/data/workspaces/image2ppt-auto-new/config.json",
+  "models": ["qwen/qwen3-vl-plus", "hacm/qwen2.5-vl-32b-instruct"]
+}

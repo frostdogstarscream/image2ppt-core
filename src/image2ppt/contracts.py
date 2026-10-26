@@ -36,6 +36,9 @@ class AuthoringRecord(Record):
     ir_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     node_decisions: dict[str, str] = Field(default_factory=dict)
     font_candidates: list[str] = Field(default_factory=list)
+    # Source-inferred font metadata emitted by the element authoring adapter.
+    # Provenance only: this does not establish font identity or acceptance.
+    model_typography: dict[str, dict[str, Any]] = Field(default_factory=dict)
     unresolved_ids: list[str] = Field(default_factory=list)
     review_notes: list[str] = Field(default_factory=list)
 

@@ -1,0 +1,14 @@
+# Runtime-free candidate/planning tests; no OCR models or proprietary renderer.
+-r requirements-core.lock
+pytest==8.3.4
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+jsonschema==4.23.0
+attrs==24.3.0
+jsonschema-specifications==2024.10.1
+referencing==0.35.1
+rpds-py==0.22.3
+iniconfig==2.3.1
+packaging==26.3
+pluggy==1.7.0
+colorama==0.4.6; sys_platform == 'win32'

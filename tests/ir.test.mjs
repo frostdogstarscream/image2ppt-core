@@ -244,9 +244,11 @@ test('the skill asks for per-sub-region decomposition, not whole-region crops',a
     assert.match(text,/[Dd]ecompos/,`${file} 应保留下拆解要求`);
     assert.match(text,/sub-region/,`${file} 应按子区域判定`);
     assert.match(text,/part native and part crop/,`${file} 应说明半原生半裁剪是正常结果`);
-    // Decomposition without the gate produced a deck measurably worse than the
-    // crops it replaced; the gate is what keeps a rebuild honest.
-    assert.match(text,/fidelity_gate/,`${file} 应要求用保真度闸门判定每一块重建`);
+    // Require source/actual-PPTX evidence and an explicit human goal. A fixed
+    // MAE cutoff must not silently overturn a human's editability decision.
+    assert.match(text,/candidate_workflow/,`${file} 应接入候选复检流程`);
+    assert.match(text,/human.*(?:fidelity|scope)|fidelity.*human/i,`${file} 应遵循人工保真和编辑范围`);
+    assert.doesNotMatch(text,/above that it goes back to a crop/,`${file} 不得按单一像素阈值自动回退`);
   }
 });
 

@@ -19,4 +19,4 @@ image2ppt-vision = "image2ppt_vision.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-image2ppt_vision = ["renderer-origin-profile.json"]
+image2ppt_vision = ["renderer-origin-profile.json", "auto_ui.html"]

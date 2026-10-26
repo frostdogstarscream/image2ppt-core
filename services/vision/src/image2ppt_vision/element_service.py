@@ -22,9 +22,18 @@ def validate_payload(plan):
         if not 1 <= len(plan["objects"]) <= 400 or len(plan["objects"])+len(plan["text_decisions"]) > 500:
             raise ValueError("element count exceeds limit")
         for obj in plan["objects"]:
-            _keys(obj, ("id", "kind", "bbox", "z", "candidate_id", "label", "geometry",
+            _keys(obj, ("id", "kind", "bbox", "source_crop_bbox", "dest_bbox", "z", "candidate_id", "label", "geometry",
                         "fill", "line", "corner_radius_px", "fill_gradient", "mask", "contains_text_ids", "rationale"),
-                  ("id", "kind", "bbox", "z"))
+                  ("id", "kind", "z"))
+            if obj["kind"] == "raster_asset":
+                explicit = ("source_crop_bbox" in obj, "dest_bbox" in obj)
+                if any(explicit):
+                    if not all(explicit) or "bbox" in obj:
+                        raise ValueError("ambiguous raster coordinates")
+                elif plan.get("schema") == "ElementPlan/3" or "bbox" not in obj:
+                    raise ValueError("raster coordinates required")
+            elif "bbox" not in obj or "source_crop_bbox" in obj or "dest_bbox" in obj:
+                raise ValueError("native objects require bbox only")
             for field in ("label", "rationale"):
                 if field in obj and (not isinstance(obj[field],str) or len(obj[field])>4000):
                     raise ValueError("invalid element annotation")

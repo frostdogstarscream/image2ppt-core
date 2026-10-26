@@ -1,0 +1,13 @@
+# Local automatic coordinator and offline tests. OCR/model runtimes stay on server.
+-r requirements-review.lock
+fastapi==0.115.6
+starlette==0.41.3
+uvicorn==0.32.1
+python-multipart==0.0.20
+httpx==0.28.1
+httpcore==1.0.9
+anyio==4.13.0
+h11==0.16.0
+idna==3.18
+certifi==2026.5.20
+click==8.4.1

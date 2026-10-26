@@ -26,6 +26,27 @@ def _intersection(a,b):
 def _color(value,none=False):
     if not (none and value=='none') and (not isinstance(value,str) or not re.fullmatch('[0-9a-fA-F]{6}',value)):raise ValueError('invalid color')
 
+def normalize_element_coordinates(plan):
+    """Freeze legacy crop coordinates before any destination-only patch.
+
+    Keep the input schema's font contract. Migrated /1 and /2 records are saved
+    in a new artifact with explicit coordinates; newly authored /3 requires
+    both boxes and inherits /2's font requirements.
+    """
+    result=deepcopy(plan)
+    for obj in result.get('objects',[]):
+        if obj.get('kind')!='raster_asset':continue
+        explicit=('source_crop_bbox' in obj,'dest_bbox' in obj)
+        if any(explicit):
+            if not all(explicit) or 'bbox' in obj:raise ValueError('ambiguous raster coordinates')
+        elif result.get('schema')=='ElementPlan/3':
+            raise ValueError('ElementPlan/3 requires source_crop_bbox and dest_bbox')
+        else:
+            box=obj.pop('bbox',None)
+            if box is None:raise ValueError('missing raster coordinates')
+            obj['source_crop_bbox']=deepcopy(box);obj['dest_bbox']=deepcopy(box)
+    return result
+
 def parse_response(path):
     response=json.loads(Path(path).read_text(encoding='utf8'))
     choice=response['choices'][0]
@@ -36,18 +57,19 @@ def parse_response(path):
     return json.loads(content)
 
 def raster_text_conflicts(plan,inventory):
+    plan=normalize_element_coordinates(plan)
     ocr={t['id']:t for t in inventory['texts']};conflicts=[]
     for t in plan['text_decisions']:
         if t['action']!='native':continue
         original=ocr[t['id']]['bbox']
         for obj in plan['objects']:
-            if obj['kind']=='raster_asset' and _intersection(original,obj['bbox'])>original[2]*original[3]*.12:
-                conflicts.append({'text_id':t['id'],'ocr_text':ocr[t['id']]['text'],'text_bbox':original,'asset_id':obj['id'],'asset_bbox':obj['bbox']})
+            if obj['kind']=='raster_asset' and _intersection(original,obj['source_crop_bbox'])>original[2]*original[3]*.12:
+                conflicts.append({'text_id':t['id'],'ocr_text':ocr[t['id']]['text'],'text_bbox':original,'asset_id':obj['id'],'asset_bbox':obj['source_crop_bbox']})
     return conflicts
 
 def apply_element_patch(plan,patch):
     if patch.get('schema')!='ElementPatch/1' or patch.get('source_sha256')!=plan['source_sha256']:raise ValueError('patch source mismatch')
-    result=deepcopy(plan)
+    result=normalize_element_coordinates(plan)
     remove=patch.get('remove_object_ids',[])
     if len(remove)!=len(set(remove)) or any(i not in {o['id'] for o in plan['objects']} for i in remove):raise ValueError('invalid patch deletion')
     result['objects']=[o for o in result['objects'] if o['id'] not in remove]
@@ -56,18 +78,23 @@ def apply_element_patch(plan,patch):
         if len(updates)!=len({o['id'] for o in updates}):raise ValueError('duplicate patch id')
         mapping={o['id']:o for o in result[key]}
         for update in updates:
+            update=deepcopy(update)
             if key=='text_decisions' and update['id'] not in mapping:raise ValueError('unknown patched text id')
+            if key=='objects' and mapping.get(update['id'],{}).get('kind')=='raster_asset' and 'bbox' in update:
+                if plan.get('schema')=='ElementPlan/3' or 'dest_bbox' in update:raise ValueError('ambiguous raster patch')
+                # A legacy bbox patch moves the image, never changes its pixels.
+                update['dest_bbox']=update.pop('bbox')
             # A field patch retains unspecified source-bound properties. New
             # objects still need every required field during full validation.
             merged={**mapping.get(update['id'],{}),**deepcopy(update)}
             mapping[update['id']]={k:v for k,v in merged.items() if v is not None}
         result[key]=list(mapping.values())
     result['limitations']=[*result.get('limitations',[]),*patch.get('limitations',[])]
-    return result
+    return normalize_element_coordinates(result)
 
 def validate_element_plan(plan,inventory):
-    plan=deepcopy(plan)
-    if plan.get('schema') not in ('ElementPlan/1','ElementPlan/2') or plan.get('source_sha256')!=inventory['source_sha256'] or plan.get('image_size')!=inventory['image_size']:raise ValueError('plan source binding mismatch')
+    plan=normalize_element_coordinates(plan)
+    if plan.get('schema') not in ('ElementPlan/1','ElementPlan/2','ElementPlan/3') or plan.get('source_sha256')!=inventory['source_sha256'] or plan.get('image_size')!=inventory['image_size']:raise ValueError('plan source binding mismatch')
     size=inventory['image_size'];_color(plan['background_color'])
     objects=plan['objects'];texts=plan['text_decisions'];ocr={t['id']:t for t in inventory['texts']}
     if not isinstance(objects,list) or not 1<=len(objects)<=400 or len(objects)+len(texts)>500:raise ValueError('object bound exceeded')
@@ -76,11 +103,15 @@ def validate_element_plan(plan,inventory):
     if len(ids)!=len(set(ids)) or any(not re.fullmatch('[A-Za-z0-9_-]{1,70}',s) for s in ids):raise ValueError('invalid or duplicate object id')
     retained={};candidates={c['id'] for c in inventory.get('candidates',[])}
     for obj in objects:
-        _box(obj['bbox'],size)
+        if obj['kind']=='raster_asset':
+            _box(obj['source_crop_bbox'],size);_box(obj['dest_bbox'],size)
+        else:_box(obj['bbox'],size)
         if isinstance(obj['z'],bool) or not isinstance(obj['z'],int):raise ValueError('z must be integer')
         if obj.get('candidate_id') and obj['candidate_id'] not in candidates:raise ValueError('unknown CV candidate')
         if obj['kind']=='native_shape':
-            if obj['geometry'] not in GEOMETRIES:raise ValueError('unsupported native geometry')
+            if obj['geometry'] not in GEOMETRIES:
+                raise ValueError('unsupported native geometry: '+obj['id']+' / '+str(obj['geometry'])+
+                                 '; allowed: '+','.join(sorted(GEOMETRIES)))
             if obj.get('fill') is None and obj.get('fill_gradient'):
                 obj['fill']=obj['fill_gradient']['stops'][0]['color']
             if obj.get('fill') is None and obj['geometry']=='line':obj['fill']='none'
@@ -90,11 +121,13 @@ def validate_element_plan(plan,inventory):
                 _color(obj['line']['color'])
                 if not 0<=obj['line']['width_pt']<=20:raise ValueError('invalid line width')
         elif obj['kind']=='raster_asset':
-            if obj['bbox'][2]*obj['bbox'][3]>size[0]*size[1]*.18:raise ValueError('large raster fallback rejected')
+            if obj['source_crop_bbox'][2]*obj['source_crop_bbox'][3]>size[0]*size[1]*.18:raise ValueError('large raster fallback rejected')
             if obj.get('mask','rect') not in ('rect','ellipse'):raise ValueError('unsupported asset mask')
             for tid in obj.get('contains_text_ids',[]):
                 if tid not in ocr or tid in retained:raise ValueError('invalid raster text owner')
-                if _intersection(obj['bbox'],ocr[tid]['bbox'])<ocr[tid]['bbox'][2]*ocr[tid]['bbox'][3]*.95:raise ValueError('raster does not contain declared text')
+                if _intersection(obj['source_crop_bbox'],ocr[tid]['bbox'])<ocr[tid]['bbox'][2]*ocr[tid]['bbox'][3]*.95:
+                    raise ValueError('raster does not contain declared text: '+obj['id']+' / '+tid+
+                                     '; crop='+str(obj['source_crop_bbox'])+'; text='+str(ocr[tid]['bbox']))
                 retained[tid]=obj['id']
         else:raise ValueError('invalid object kind')
     for t in texts:
@@ -103,7 +136,7 @@ def validate_element_plan(plan,inventory):
         if t['action'] not in ('native','retained_in_asset') or (t['action']=='retained_in_asset')!=(t['id'] in retained):raise ValueError('text retention mismatch')
         if not isinstance(t['bold'],bool) or not isinstance(t['z'],int) or not 1<=t['font_size_px']<=400:raise ValueError('invalid typography')
         if type(t['font_size_px']) not in (int,float) or not math.isfinite(t['font_size_px']):raise ValueError('invalid typography')
-        if t['action']=='native':validate_font_proposal(t,required=plan['schema']=='ElementPlan/2')
+        if t['action']=='native':validate_font_proposal(t,required=plan['schema'] in ('ElementPlan/2','ElementPlan/3'))
         if t.get('runs') and ''.join(r['text'] for r in t['runs'])!=t['text']:raise ValueError('run text mismatch')
     conflicts=raster_text_conflicts(plan,inventory)
     if conflicts:raise ValueError('native text duplicates raster pixels: '+conflicts[0]['text_id']+' / '+conflicts[0]['asset_id'])
@@ -120,13 +153,16 @@ def materialize_elements(source,inventory,plan,output,*,model_id,response_sha256
     output.mkdir(parents=True);(output/'assets').mkdir();(output/'source').mkdir();shutil.copyfile(source,output/'source/page.png')
     scale=1280/image.width;nodes=[];evidence=[];assets=[];decisions={};corrections=[];font_proposals={}
     for obj in plan['objects']:
-        eid='ev-'+obj['id'];evidence.append({'id':eid,'kind':'shape' if obj['kind']=='native_shape' else 'image','bbox':obj['bbox'],'description':obj.get('label',obj['id'])})
-        node={'id':obj['id'],'type':'shape' if obj['kind']=='native_shape' else 'image','bbox':obj['bbox'],'z':obj['z'],'evidence_ids':[eid]}
+        raster=obj['kind']=='raster_asset'
+        source_box=obj['source_crop_bbox'] if raster else obj['bbox']
+        dest_box=obj['dest_bbox'] if raster else obj['bbox']
+        eid='ev-'+obj['id'];evidence.append({'id':eid,'kind':'shape' if obj['kind']=='native_shape' else 'image','bbox':source_box,'description':obj.get('label',obj['id'])})
+        node={'id':obj['id'],'type':'shape' if obj['kind']=='native_shape' else 'image','bbox':dest_box,'z':obj['z'],'evidence_ids':[eid]}
         if obj['kind']=='native_shape':
             for k in ('geometry','fill','line','corner_radius_px','fill_gradient'):
                 if k in obj:node[k]=obj[k]
         else:
-            x,y,w,h=obj['bbox'];bounds=(math.floor(x),math.floor(y),math.ceil(x+w),math.ceil(y+h));crop=image.crop(bounds)
+            x,y,w,h=obj['source_crop_bbox'];bounds=(math.floor(x),math.floor(y),math.ceil(x+w),math.ceil(y+h));crop=image.crop(bounds)
             # Preserve interior white glyphs. No global color key / text erasure.
             if obj.get('mask')=='ellipse':
                 mask=Image.new('L',crop.size,0);ImageDraw.Draw(mask).ellipse((0,0,crop.width-1,crop.height-1),fill=255);crop.putalpha(mask)

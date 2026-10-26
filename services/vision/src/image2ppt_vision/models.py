@@ -24,7 +24,7 @@ def capabilities():
     result = {"version": __version__, "geometry": True, "ocr": False, "segmentation": False,
               "reconstruction": True, "reconstruction_requires_plan": True, "pptx_compilation": False,
               "element_reconstruction": {"operation":"reconstruct_elements",
-                  "requires":"successful analyze with element_inventory; source-bound ElementPlan/1 or /2",
+                  "requires":"successful analyze with element_inventory; source-bound ElementPlan/1, /2 or /3",
                   "source_typography_calibration":True,"quality_status":"REVIEW_REQUIRED"},
               "network_inference": False, "models": None,
               "model_plan_provider": {"available": True, "automatic": False, "invocation": "explicit_cli_plan",
