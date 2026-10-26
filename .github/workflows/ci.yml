@@ -17,6 +17,8 @@ jobs:
   runtime-free:
     name: protocol + unit tiers
     runs-on: ubuntu-latest
+    env:
+      IMAGE2PPT_NODE: node
     steps:
       - uses: actions/checkout@v4
 
