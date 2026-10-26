@@ -12,6 +12,32 @@ from image2ppt_vision.auto_provider import save_new, fingerprint
 from image2ppt_vision.auto_protocol import validate_review
 
 
+def verify_page_calls(directory,page,result,policy):
+    if digest(directory/'source.png')!=page['source_sha256'] or digest(directory/'original.image')!=page['original_sha256']:
+        raise ValueError('page source binding changed')
+    calls=sorted((directory/'calls').glob('c[0-9][0-9]')); pending=[]; initial=0
+    for call in calls:
+        request=read_json(call/'request.json'); initial+=request['phase'].startswith('initial/')
+        if not (call/'response.json').exists():
+            pending.append(request['request']['request_id']);continue
+        receipt=read_json(call/'receipt.json')
+        if receipt['request_sha256']!=digest(call/'request.json') or receipt['response_sha256']!=digest(call/'response.json'):
+            raise ValueError('model request/response receipt changed')
+        if (call/'recovered-response.json').exists():
+            recovered=read_json(call/'recovered-receipt.json')
+            if (recovered['original_response_sha256']!=digest(call/'response.json') or
+                recovered['request_sha256']!=digest(call/'request.json') or
+                recovered['response_sha256']!=digest(call/'recovered-response.json')):
+                raise ValueError('recovered response receipt changed')
+    if len(calls)!=result['model_requests'] or len(calls)>policy['max_model_requests_per_page']:
+        raise ValueError('page model-call budget/accounting mismatch')
+    if policy.get('initial_call_limit') is not None and initial>policy['initial_call_limit']:
+        raise ValueError('initial calls borrowed reserved review budget')
+    return {'request_reservations':len(calls),'initial_requests':initial,'unreturned_request_ids':pending,
+            'usage_disclosure':'Only received provider usage is summed; unavailable usage is not estimated.',
+            'source_and_receipt_hashes_valid':True,'call_budget_valid':True}
+
+
 def verify_v2_review(directory, revision, built_dir, built):
     from image2ppt_vision.auto_region_protocol import assemble
     from image2ppt_vision.auto_region_evidence import validate_visual, validate_probe
@@ -63,12 +89,14 @@ def main():
         if not result_file.exists():
             continue
         result = read_json(result_file)
+        call_proof=verify_page_calls(directory,page,result,manifest['policy'])
         row = {'page': page['id'], 'source_name': page['source_name'],
                'recorded_execution_status': result['execution_status'],
                'machine_quality_status': result['machine_quality_status'],
                'model_requests': result['model_requests'], 'usage': result['usage'],
                'valid_pptx': False, 'validated_model_review': False,
-               'human_acceptance': False, 'office_acceptance': False, 'errors': result['errors']}
+               'human_acceptance': False, 'office_acceptance': False, 'errors': result['errors'],
+               'call_verification':call_proof}
         if result.get('build_directory'):
             built_dir = directory/result['build_directory']; built = read_json(built_dir/'result.json')
             verify_hashes(built_dir, built['files'])
