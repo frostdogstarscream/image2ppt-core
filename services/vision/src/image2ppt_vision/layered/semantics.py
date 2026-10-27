@@ -15,8 +15,10 @@ INSTRUCTION = (
     '(id, text, box [x,y,w,h] in pixels, size_px, color, bold) and containers (native shape boxes). '
     'Return json only: {"paragraphs":[{"ids":[...],"align":"left|center|right","role":"title|heading|body|label|number|list"}]}. '
     'Merge consecutive lines of the same text block — a wrapped sentence, a bullet list in one column, '
-    'same-card body lines of one font size, or pieces of one visual line split mid-word — into one paragraph. '
+    'same-card body lines of one font size, a title with the caption stacked under it, or pieces of one '
+    'visual line split mid-word — into one paragraph. '
     'Edges, sizes and colours that differ only by measurement noise are still the same block. '
+    'A title and its caption in the same card or column are one paragraph even when bold or colour differ. '
     'Pieces of one line join even when fitted size or colour disagree. '
     'Never merge lines from different cards, columns or table cells, and never merge a label with its value. '
     'Every id must appear exactly once. Do not change any text. Order paragraphs in natural reading order.')
@@ -30,14 +32,17 @@ def _center(b):
     return b[0]+b[2]/2
 
 
-# Wrapped lines of one card share a size, ink colour and edge, but the ink box
-# jitters by about an em, sampled colours drift by a few dozen levels, and
-# width-limiting can shrink one line toward 75% of its fitted size. A different
-# card or column is still a hard stop.
+# Wrapped lines of one card share a size and an edge, but the ink box jitters
+# by about an em, sampled colours drift by a few dozen levels, and
+# width-limiting can shrink one line toward 75% of its fitted size. A title
+# stacked on its caption is bold and a bluer ink (channel gap about 75–111);
+# that pair still joins when it shares a card or a column. A different card
+# or column is still a hard stop.
 _ALIGN_EM = 1.35
 _SIZE_RATIO = .22
 _COLOR_GAP = 56
 _SAME_INK = 18
+_STACK_COLOR_GAP = 120
 # OCR sometimes cuts one baseline in two (依|托). The gap is about a character,
 # not a column gutter. Measured size and colour on the two pieces often disagree.
 _SAME_LINE_GAP_EM = 1.25
@@ -184,13 +189,20 @@ def compatible(a, b, containers):
         return None
     if not _size_close(a, b):
         return None
-    color_gap = _lab_distance(a['color'], b['color'])
-    if color_gap > _COLOR_GAP or (a['bold'] != b['bold'] and color_gap > _SAME_INK):
-        return None
     gap = bb[1]-(ba[1]+ba[3])
     if not -.2*h <= gap <= 1.2*h:
         return None
-    if _container(ba, containers) != _container(bb, containers):
+    ca, cb = _container(ba, containers), _container(bb, containers)
+    # Different cards stay apart even when the column lines up.
+    if ca != cb:
+        return None
+    color_gap = _lab_distance(a['color'], b['color'])
+    # Shared card, or the same column when neither line sits in a card.
+    # Bold is the title weight, not a second block; ink may differ by ~75–111.
+    if ca is not None or _same_column(a, b):
+        if color_gap > _STACK_COLOR_GAP:
+            return None
+    elif color_gap > _COLOR_GAP or (a['bold'] != b['bold'] and color_gap > _SAME_INK):
         return None
     return _alignment(a, b)
 

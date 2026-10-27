@@ -150,7 +150,7 @@ def test_same_card_wrapped_lines_merge_across_measurement_jitter():
     """Architecture-card body: one sentence wrapped onto lines whose ink, size and colour jitter."""
     h = 18
     card = [40, 60, 240, 180]
-    # Same card, but a bluer bold title stays its own box.
+    # Bold blue title stacked on the grey caption is the same card's text block.
     title = style('title', 58, 78, '线索研判', size=18, color='0956D7', bold=True, w=120, h=h)
     body = style('body', 58, 112, '数据碰撞', size=16, color='536B8C', w=150, h=h)
     # Left edge shifts by one em, sampled grey is ~50 levels off, and width-limiting
@@ -163,23 +163,24 @@ def test_same_card_wrapped_lines_merge_across_measurement_jitter():
     short = style('short', 122, 160+h+3, '专项监督', size=16, color='122C68', bold=True, w=88, h=h)
     styles = {s['id']: s for s in (title, body, wrap, head, short)}
     assert 40 < semantics._lab_distance(body['color'], wrap['color']) <= 56
-    assert semantics._lab_distance(title['color'], body['color']) > 56
+    assert semantics._COLOR_GAP < semantics._lab_distance(title['color'], body['color']) <= semantics._STACK_COLOR_GAP
     groups = semantics.deterministic(styles, [card])
-    assert _ids(groups) == [['title'], ['body', 'wrap'], ['head', 'short']]
+    assert _ids(groups) == [['title', 'body', 'wrap'], ['head', 'short']]
     assert next(g for g in groups if g['ids']==['head', 'short'])['align'] == 'center'
-    proposal = {'paragraphs': [{'ids': ['body', 'wrap'], 'align': 'left'},
-                               {'ids': ['head', 'short'], 'align': 'center'},
-                               {'ids': ['title'], 'align': 'left'}]}
+    proposal = {'paragraphs': [{'ids': ['title', 'body', 'wrap'], 'align': 'left'},
+                               {'ids': ['head', 'short'], 'align': 'center'}]}
     accepted, issues = semantics.apply_model(proposal, styles, [card], groups)
-    assert issues == [] and _ids(accepted) == [['body', 'wrap'], ['head', 'short'], ['title']]
-    # Same ink with a bold flicker (stroke-ratio noise) still joins; a real weight change does not.
+    assert issues == [] and _ids(accepted) == [['title', 'body', 'wrap'], ['head', 'short']]
+    # Same ink with a bold flicker (stroke-ratio noise) still joins, and so does a
+    # real weight change inside the card. The same pair split across two cards does not.
     flicker = {s['id']: s for s in (style('a', 58, 112, size=16, color='536B8C', bold=True, w=140, h=h),
                                      style('b', 58, 112+h+4, size=16, color='5A7394', bold=False, w=140, h=h))}
     assert semantics._lab_distance('536B8C', '5A7394') <= 18
     assert _ids(semantics.deterministic(flicker, [card])) == [['a', 'b']]
     distinct = {s['id']: s for s in (style('a', 58, 112, size=16, color='536B8C', bold=True, w=140, h=h),
                                       style('b', 58, 112+h+4, size=16, color='889FB8', bold=False, w=140, h=h))}
-    assert _ids(semantics.deterministic(distinct, [card])) == [['a'], ['b']]
+    assert _ids(semantics.deterministic(distinct, [card])) == [['a', 'b']]
+    assert _ids(semantics.deterministic(distinct, [[40, 100, 200, 40], [40, 130, 200, 40]])) == [['a'], ['b']]
 
 
 def test_same_line_midword_wrap_merges_despite_color_and_size():
@@ -218,6 +219,49 @@ def test_same_line_midword_wrap_merges_despite_color_and_size():
         right['ink_bbox'], [card_l, card_r])
     assert semantics.compatible(left, right, [card_l, card_r]) is None
     assert _ids(semantics.deterministic(styles, [card_l, card_r])) == [['t004'], ['t003']]
+
+
+def test_stacked_title_caption_merges_when_bold_and_color_disagree():
+    """02 slide 3 title+caption stacks: bold blue over grey body, same card or column."""
+    h = 32
+    card = [60, 180, 240, 160]
+    # Channel gaps sampled from the page: 75 (0956D7/536B8C), 102, and 111.
+    captions = (('t046', '536B8C', 75), ('t070', '536B71', 102), ('t085', '536B68', 111))
+    for cid, color, gap in captions:
+        title = style('t038', 80, 200, '智能问答', size=28, color='0956D7', bold=True, w=150, h=h)
+        caption = style(cid, 80, 200+h+36, '业务咨询', size=26, color=color, bold=False, w=170, h=h)
+        assert semantics._lab_distance(title['color'], caption['color']) == gap
+        assert semantics._SAME_INK < gap <= semantics._STACK_COLOR_GAP
+        styles = {s['id']: s for s in (title, caption)}
+        assert semantics.compatible(title, caption, [card]) == 'left'
+        assert _ids(semantics.deterministic(styles, [card])) == [['t038', cid]]
+        # No card at all: the shared column is enough.
+        assert _ids(semantics.deterministic(styles, [])) == [['t038', cid]]
+        accepted, issues = semantics.apply_model(
+            {'paragraphs': [{'ids': ['t038', cid], 'align': 'left'}]}, styles, [card],
+            semantics.deterministic(styles, [card]))
+        assert issues == [] and accepted[0]['ids'] == ['t038', cid]
+    title = style('t038', 80, 200, '智能问答', size=28, color='0956D7', bold=True, w=150, h=h)
+    caption = style('t046', 80, 200+h+36, '业务咨询', size=26, color='536B8C', bold=False, w=170, h=h)
+    # Same row, other card: a neighbour beside the title stays its own box.
+    side = style('side', 420, 200, '知识检索', size=28, color='0956D7', bold=True, w=140, h=h)
+    other = [400, 180, 200, 80]
+    styles = {s['id']: s for s in (title, caption, side)}
+    assert _ids(semantics.deterministic(styles, [card, other])) == [['t038', 't046'], ['side']]
+    assert semantics.compatible(title, side, [card, other]) is None
+    # The same stack split into two cards does not merge.
+    upper, lower = [60, 180, 240, 70], [60, 250, 240, 80]
+    split = {s['id']: s for s in (title, caption)}
+    assert semantics._container(title['ink_bbox'], [upper, lower]) != semantics._container(
+        caption['ink_bbox'], [upper, lower])
+    assert _ids(semantics.deterministic(split, [upper, lower])) == [['t038'], ['t046']]
+    # Ink further apart than the stack allowance stays two boxes, even in one card.
+    loud = style('loud', 80, 420, '大模型', size=28, color='1170C0', bold=True, w=150, h=h)
+    pale = style('pale', 80, 420+h+8, '通用能力', size=28, color='111111', bold=False, w=150, h=h)
+    ink_card = [60, 400, 240, 120]
+    assert semantics._lab_distance(loud['color'], pale['color']) > semantics._STACK_COLOR_GAP
+    assert semantics.compatible(loud, pale, [ink_card]) is None
+    assert _ids(semantics.deterministic({s['id']: s for s in (loud, pale)}, [ink_card])) == [['loud'], ['pale']]
 
 
 def test_cross_column_and_cross_card_lines_do_not_merge():
