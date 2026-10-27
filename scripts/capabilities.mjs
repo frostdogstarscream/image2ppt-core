@@ -63,11 +63,23 @@ const BASE_MISSING = Object.freeze([
   'automatic_ocr', 'pdf_ingestion', 'automatic_inpainting', 'automatic_screenshot_paste',
 ]);
 
+// The layered v3 pipeline (services/vision layered/) runs OCR and LaMa on its
+// GPU worker and puts the inpainted result in as a cleaned background layer.
+// That is true of that pipeline only; the conversation-authored replay path
+// still has neither, so the default lists do not change.
+const PIPELINE_PROVIDES = Object.freeze({
+  layered: Object.freeze(['automatic_ocr', 'automatic_inpainting']),
+});
+
 // The two lists a caller reads. Every native flag lands in exactly one of them,
 // so they cannot both or neither mention it.
-export function capabilities() {
-  const supported = [...BASE_SUPPORTED];
-  const not_implemented = [...BASE_MISSING];
+export function capabilities({ pipeline } = {}) {
+  if (pipeline !== undefined && !Object.hasOwn(PIPELINE_PROVIDES, pipeline)) {
+    throw new Error(`unknown pipeline: ${pipeline}`);
+  }
+  const provided = pipeline ? PIPELINE_PROVIDES[pipeline] : [];
+  const supported = [...BASE_SUPPORTED, ...provided];
+  const not_implemented = BASE_MISSING.filter(item => !provided.includes(item));
   for (const flag of NATIVE) {
     (COMPILER[flag] ? supported : not_implemented).push(flag);
   }

@@ -15,6 +15,12 @@ Use an isolated configuration/data directory and port 18766. Version 2 refuses v
 
 Honor native/hybrid/retain_module decisions and object mappings. Approved regional image text is disclosed, not called native. Whole-page raster and all-raster tiling are rejected. Normal source-fidelity review and deletion-ghost review use separate image pairs. Reject no-op repairs, freeze verified regions and require a new decision before changing routing. Deliver actual-file evidence and unresolved findings; synthetic tests, file generation and pixel scores do not establish image fidelity or human/Office acceptance.
 
+## Explicit layered v3 mode
+
+Only when the user asks for the layered pipeline, run `./image2ppt.ps1 layered -InputPath <page.png>[,<page.png>...] [-OutputPath <dir>]` and read `docs/layered-v3-verification.md`. It is the one path with automatic OCR and inpainting: the dev GPU worker (`IMAGE2PPT_LAYERED_WORKER`, never the production containers) runs OCR, SAM2 and LaMa, and the page becomes an inpainted `cleaned_background` with native text, native shapes and RGBA cutouts above it. `IMAGE2PPT_MODEL_CONFIG` opts into one text-only DeepSeek call per page that may only regroup lines into paragraphs; omit it for deterministic grouping. Set `IMAGE2PPT_PYTHON` to an interpreter with numpy, OpenCV and Pillow. Doctor's default capability lists describe the conversation workflow; `capabilities({pipeline:'layered'})` describes this one.
+
+A page is `FAILED` when re-OCR finds text left on the background or an OCR line has no owner; otherwise it is `REVIEW_REQUIRED` at best. Verify a job read-only with `python scripts/check_automatic_delivery.py --job <job>`, then inspect the comparison images yourself. SSIM and OCR recall locate problems; they are not acceptance.
+
 ## Start
 
 Find the project root containing `image2ppt.ps1`; commands below run there. Read [SlideIR](references/slideir.md) before writing the page structure. The scripts are shared by the local and installed copies of this skill.

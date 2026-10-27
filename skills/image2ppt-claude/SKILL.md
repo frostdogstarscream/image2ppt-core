@@ -15,6 +15,12 @@ Version 2 uses regional layout, the existing native/hybrid/retain_module decisio
 
 Keep source crop and destination placement separate. Disclose approved retained text and never label it editable. Reject full-page or all-image tiled fallback. Supply font-fit confidence to authoring; inspect normal rendered crops separately from deletion tests. An unchanged patch is not a repair. Frozen regions must retain their rendered pixels; changing routing requires a new decision. Preserve all model responses and versions, and never hand-correct business IR or PPTX to manufacture a successful validation. Report unresolved issues and keep human/Office acceptance independent.
 
+## Optional layered v3 pipeline
+
+Only when the user asks for the layered pipeline, run `./image2ppt.sh layered -InputPath <page.png>[,<page.png>...] [-OutputPath <dir>]` from bash and read `docs/layered-v3-verification.md`. This is the one path with automatic OCR and inpainting. The dev GPU worker runs OCR, SAM2 and LaMa; it is set by `IMAGE2PPT_LAYERED_WORKER` and is never a production container. Each page becomes an inpainted `cleaned_background` under separate native text, native shapes and RGBA cutouts. Setting `IMAGE2PPT_MODEL_CONFIG` adds one text-only DeepSeek call per page, which may only regroup lines into paragraphs; without it grouping is deterministic. `IMAGE2PPT_PYTHON` must point at a Python with numpy, OpenCV and Pillow. The default doctor lists describe Claude-authored restoration, while `capabilities({pipeline:'layered'})` describes this pipeline.
+
+Re-OCR text left on the background, or an OCR line nobody owns, makes the page `FAILED`; the best status is `REVIEW_REQUIRED`. Check a finished job read-only with `python scripts/check_automatic_delivery.py --job <job>` and look at the comparison images before reporting. SSIM and OCR recall point at problems; they do not accept a page.
+
 ## Run the toolchain
 
 The toolchain is a Windows PowerShell script, but Claude Code's shell is bash, where `./image2ppt.ps1 <cmd>` is a syntax error. Always invoke the bash shim instead:

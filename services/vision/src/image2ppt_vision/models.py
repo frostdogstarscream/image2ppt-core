@@ -64,8 +64,9 @@ def ocr_engine(root):
     return engine
 
 
-def recognize(rgb):
-    result = ocr_engine(str(model_root()))(rgb[:, :, ::-1].copy())
+def recognize(rgb, *, use_cls=None):
+    options = {} if use_cls is None else {"use_cls": use_cls}
+    result = ocr_engine(str(model_root()))(rgb[:, :, ::-1].copy(), **options)
     objects = []
     rows = zip(result.boxes, result.txts, result.scores) if result.boxes is not None else []
     for i, (poly, text, score) in enumerate(rows):
@@ -87,6 +88,26 @@ def sam_model(root):
     torch.set_num_threads(4)
     torch.cuda.set_per_process_memory_fraction(0.5, 0)
     return build_sam2("configs/sam2.1/sam2.1_hiera_s.yaml", str(Path(root)/"sam2.1_hiera_small.pt"), device="cuda:0")
+
+
+LAMA_SHA256 = "344c77bbcb158f17dd143070d1e789f38a66c04202311ae3a258ef66667a9ea9"
+
+
+def lama_path():
+    value = os.environ.get("VISION_LAMA_MODEL")
+    return Path(value).resolve() if value else None
+
+
+@lru_cache(maxsize=1)
+def lama_model(path):
+    """TorchScript big-lama (Apache-2.0); the file is pinned by SHA-256, never downloaded."""
+    import torch
+    if digest(Path(path)) != LAMA_SHA256:
+        raise ValueError("LaMa model integrity failure")
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    model = torch.jit.load(str(path), map_location=device)
+    model.eval()
+    return model, device
 
 
 def segment(rgb, request):

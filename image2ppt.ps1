@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
   [Parameter(Position=0, Mandatory=$true)]
-  [ValidateSet('doctor','demo','prepare','compile','validate','inspect','perturb','test','replay','regress','resume','compose')]
+  [ValidateSet('doctor','demo','prepare','compile','validate','inspect','perturb','test','replay','regress','resume','compose','layered')]
   [string]$Command,
   [string[]]$InputPath,
   [string]$NodeId,
@@ -30,6 +30,13 @@ if ($Command -in @('replay','regress','resume')) {
   & $pythonExecutable -X utf8 (Join-Path $PSScriptRoot 'scripts\prepare.py') prepare $InputPath
 } elseif ($Command -eq 'test') {
   & $nodeExecutable --test (Join-Path $PSScriptRoot 'tests\ir.test.mjs')
+} elseif ($Command -eq 'layered') {
+  if (-not $InputPath) { throw 'layered 需要 -InputPath，传入一张或多张页面图片。' }
+  $layeredArgs = @((Join-Path $PSScriptRoot 'scripts\layered.py'), '--inputs') + @($InputPath | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+  if ($OutputPath) { $layeredArgs += @('--output', $OutputPath) }
+  if ($env:IMAGE2PPT_LAYERED_WORKER) { $layeredArgs += @('--worker-config', $env:IMAGE2PPT_LAYERED_WORKER) }
+  if ($env:IMAGE2PPT_MODEL_CONFIG) { $layeredArgs += @('--model-config', $env:IMAGE2PPT_MODEL_CONFIG) }
+  & $pythonExecutable -X utf8 @layeredArgs
 } elseif ($Command -eq 'compose') {
   if (-not $InputPath) { throw 'compose 需要 -InputPath，按页序传入一个或多个 IR。' }
   $irPaths = @($InputPath | ForEach-Object { $_ -split ',' } | Where-Object { $_ })

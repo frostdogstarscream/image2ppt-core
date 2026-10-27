@@ -231,6 +231,17 @@ test('every native capability lands in exactly one doctor list',()=>{
   assert.equal(new Set(not_implemented).size,not_implemented.length,'not_implemented 不应重复');
 });
 
+test('only the layered pipeline claims automatic OCR and inpainting',()=>{
+  const replay=capabilities();
+  const layered=capabilities({pipeline:'layered'});
+  for(const item of ['automatic_ocr','automatic_inpainting']){
+    assert.ok(replay.not_implemented.includes(item)&&!replay.supported.includes(item),`${item} 在默认流程中仍未实现`);
+    assert.ok(layered.supported.includes(item)&&!layered.not_implemented.includes(item),`${item} 属于 layered 流程`);
+  }
+  assert.ok(layered.not_implemented.includes('pdf_ingestion'));
+  assert.throws(()=>capabilities({pipeline:'unknown'}),/unknown pipeline/);
+});
+
 // The policy must not silently revert to cropping whole complex regions. Two
 // wordings have caused that, and both must stay gone: the original
 // unconditioned instruction, and the escape hatch that let one resisting

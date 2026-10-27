@@ -30,6 +30,7 @@ OWN_SOURCES = sorted(set(OWN_SOURCES + [
     'services/vision/pyproject.toml', 'configs/auto-client.example.json', 'configs/auto-remote.example.json',
     '.github/workflows/ci.yml', 'docs/candidate-workflow.md', 'docs/candidate-workflow-verification.md',
     'services/vision/REGION_LLM_PLANNING.md',
+    'docs/layered-v3-verification.md', 'deploy/layered-worker/compose.yaml',
 ] + [p.relative_to(ROOT).as_posix()
      for directory, suffixes in [('scripts',{'.py','.mjs','.json'}),('src',{'.py'}),
                                 ('services/vision/src',{'.py','.json','.html'}),('tests',{'.py','.mjs'}),
@@ -39,7 +40,7 @@ OWN_SOURCES = sorted(set(OWN_SOURCES + [
     + ['services/vision/tests/'+name for name in ['test_region_plan.py','test_region_candidates.py',
                                                 'test_supervised_elements.py','test_candidate_workflow.py',
                                                 'test_auto_workflow.py','test_auto_remote.py','test_element_service.py',
-                                                'test_auto_regions.py']]
+                                                'test_auto_regions.py','test_layered.py']]
     + [p.relative_to(ROOT).as_posix() for directory in ['docs/region-shadow-llm','docs/region-candidates']
        for p in (ROOT/directory).glob('*') if p.suffix in {'.json','.md'}]))
 

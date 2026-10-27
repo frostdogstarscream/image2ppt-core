@@ -1,0 +1,29 @@
+# Development perception worker for the layered v3 pipeline.
+# A separate compose project: it reuses the vision image read-only and never
+# touches the production image2ppt-vision-v1 containers or their data volume.
+name: image2ppt-v3-dev
+services:
+  worker:
+    image: image2ppt-vision:0.2.1
+    entrypoint: ["python", "-m", "image2ppt_vision.layered.perceive"]
+    working_dir: /src
+    network_mode: none
+    environment:
+      PYTHONPATH: /src
+      VISION_MODELS: /models
+      VISION_FONT_MANIFEST: /fonts/manifest.json
+      VISION_LAMA_MODEL: /lama/big-lama.pt
+      OMP_NUM_THREADS: "4"
+    volumes:
+      - /data/image2ppt-vision/models-ready:/models:ro
+      - /data/image2ppt-vision/fonts-v0.2.0:/fonts:ro
+      - ${V3_ROOT:?}/models:/lama:ro
+      - ${V3_SRC:?}:/src:ro
+      - ${V3_JOB:?}:/job
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]

@@ -84,11 +84,79 @@ def verify_v2_review(directory, revision, built_dir, built):
     return True
 
 
+def verify_layered_page(root, name, page):
+    """Re-derive a layered v3 page's claims from its saved files only."""
+    import hashlib
+    from image2ppt_vision.layered.pipeline import ocr_coverage_gaps
+    from image2ppt_vision.layered.qa import residual_violations
+    perception_dir, page_dir = root/'perception'/name, root/'pages'/name
+    perception = read_json(perception_dir/'perception.json')
+    if digest(perception_dir/'source.png') != perception['source_sha256'] or digest(root/'input'/(name+'.png')) != perception['input_sha256']:
+        raise ValueError(name+': perception is not bound to the preserved input')
+    ir = read_json(page_dir/'proposal'/'slideir.json')
+    retained = {i for a in ir['assets'] for i in a['contains_evidence_ids']} | set(ir.get('unresolved_evidence_ids', []))
+    uncovered, violations = ocr_coverage_gaps(perception, ir), residual_violations(perception, retained)
+    semantics = read_json(page_dir/'semantics.json')
+    if semantics.get('model_used'):
+        response = read_json(page_dir/'semantics-response.json')
+        if hashlib.sha256(response['content'].encode('utf-8')).hexdigest() != semantics['response_sha256']:
+            raise ValueError(name+': semantics response hash mismatch')
+        if digest_json(read_json(page_dir/'semantics-request.json')) != semantics['request_sha256']:
+            raise ValueError(name+': semantics request hash mismatch')
+    row = {'page': name, 'recorded_status': page['status'], 'valid_pptx': False, 'uncovered_ocr_ids': uncovered,
+           'residual_text_violations': len(violations), 'semantics_model_used': bool(semantics.get('model_used')),
+           'usage': semantics.get('usage', {}), 'human_acceptance': False, 'office_acceptance': False}
+    if page.get('pptx'):
+        pptx = page_dir/page['pptx']
+        if digest(pptx) != page['pptx_sha256']:
+            raise ValueError(name+': PPTX differs from the recorded build')
+        objects = inspect_pptx(pptx)['slides'][0]['objects']
+        native = {o['name'] for o in objects if 'text' in o}
+        expected = {n['id'] for n in ir['nodes'] if n['type'] == 'text'}
+        row.update(valid_pptx=True, pptx_sha256=page['pptx_sha256'], native_text_in_file=len(native & expected),
+                   native_text_in_ir=len(expected), missing_native_text=sorted(expected-native),
+                   metrics=page.get('metrics', {}))
+    row['pipeline_status'] = ('FAILED' if not row['valid_pptx'] or uncovered or violations or row.get('missing_native_text')
+                              else 'REVIEW_REQUIRED')
+    return row
+
+
+def digest_json(value):
+    import hashlib, json
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def verify_layered(root, manifest):
+    for relative, expected in manifest['files'].items():
+        if relative != 'job.json' and digest(root/relative) != expected:
+            raise ValueError('layered job file changed: '+relative)
+    rows = [verify_layered_page(root, name, page) for name, page in manifest['pages'].items()]
+    report = {'schema': 'LayeredEvidenceVerification/1', 'job_id': root.name, 'pages': rows,
+              'total_model_tokens': manifest['total_model_tokens'], 'new_model_requests': 0,
+              'modified_page_records': False, 'human_acceptance': False, 'office_acceptance': False,
+              'caution': 'SSIM and OCR recall are comparison measurements, not visual acceptance.'}
+    destination = root/'verification'
+    save_new(destination/'verified-summary.json', report)
+    lines = ['# 分层 v3 实际文件核验', '',
+             '只读检查已保存的输入、感知结果、SlideIR、模型记录与实际 PPTX；没有重新推理。',
+             '人工视觉验收及 PowerPoint/WPS 实机验收未完成。', '',
+             '| 页面 | 状态 | 原生文字（文件/IR） | 未覆盖 OCR | 背景残留文字 | SSIM | OCR 字符召回 |',
+             '|---|---|---:|---:|---:|---:|---:|']
+    for row in rows:
+        m = row.get('metrics', {})
+        lines.append(f"| {row['page']} | {row['pipeline_status']} | {row.get('native_text_in_file', 0)}/{row.get('native_text_in_ir', 0)} | "
+                     f"{len(row['uncovered_ocr_ids'])} | {row['residual_text_violations']} | {m.get('ssim', '')} | {m.get('ocr_char_recall', '')} |")
+    (destination/'VERIFIED-RESULTS.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
+    print(destination/'VERIFIED-RESULTS.md')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--job', required=True)
     args = parser.parse_args(); root = Path(args.job).resolve(strict=True)
     manifest = read_json(root/'job.json'); rows = []
+    if manifest.get('schema') == 'LayeredJob/1':
+        return verify_layered(root, manifest)
     for page in manifest['pages']:
         directory = root/page['id']; result_file = directory/'result.json'
         if not result_file.exists():
