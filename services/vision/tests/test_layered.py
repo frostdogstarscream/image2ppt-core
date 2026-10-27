@@ -126,8 +126,8 @@ def test_ruled_grid_becomes_table_with_cells():
     assert rows[0][0] == 'A1' and rows[2][2] == 'C3' and owned == ['t0', 't1'] and len(styles) == 9
 
 
-def style(i, x, y, text='line', size=20., color='222222', bold=False):
-    return {'id': i, 'text': text, 'ink_bbox': [x, y, 160, 20], 'size_px': size, 'color': color,
+def style(i, x, y, text='line', size=20., color='222222', bold=False, w=160, h=20):
+    return {'id': i, 'text': text, 'ink_bbox': [x, y, w, h], 'size_px': size, 'color': color,
             'bold': bold, 'origin': [x-1, y-4], 'family': '微软雅黑', 'fitted': True}
 
 
@@ -140,6 +140,76 @@ def test_paragraphs_merge_compatible_lines_only():
     proposal = {'paragraphs': [{'ids': ['a', 'b', 'c'], 'align': 'left'}, {'ids': ['d', 'e']}]}
     accepted, issues = semantics.apply_model(proposal, styles, [], groups)
     assert len(issues) == 2 and sorted(i for g in accepted for i in g['ids']) == sorted(styles)
+
+
+def _ids(groups):
+    return [g['ids'] for g in groups]
+
+
+def test_same_card_wrapped_lines_merge_across_measurement_jitter():
+    """Architecture-card body: one sentence wrapped onto lines whose ink, size and colour jitter."""
+    h = 18
+    card = [40, 60, 240, 180]
+    # Same card, but a bluer bold title stays its own box.
+    title = style('title', 58, 78, '线索研判', size=18, color='0956D7', bold=True, w=120, h=h)
+    body = style('body', 58, 112, '数据碰撞', size=16, color='536B8C', w=150, h=h)
+    # Left edge shifts by one em, sampled grey is ~50 levels off, and width-limiting
+    # shrunk this line from the same 16px size to 75%.
+    wrap = style('wrap', 58+h, 112+h+4, '关联分析', size=12, color='889FB8', w=150, h=h)
+    wrap['width_limited_from_px'] = 16
+    # Centered short last line whose center misses the old 0.6em band but stays inside one em.
+    head = style('head', 70, 160, '校园餐监督', size=16, color='0E2760', bold=True, w=160, h=h)
+    # Center is 16px off (inside 1.35em, outside the old 0.6em band); the left edge is not shared.
+    short = style('short', 122, 160+h+3, '专项监督', size=16, color='122C68', bold=True, w=88, h=h)
+    styles = {s['id']: s for s in (title, body, wrap, head, short)}
+    assert 40 < semantics._lab_distance(body['color'], wrap['color']) <= 56
+    assert semantics._lab_distance(title['color'], body['color']) > 56
+    groups = semantics.deterministic(styles, [card])
+    assert _ids(groups) == [['title'], ['body', 'wrap'], ['head', 'short']]
+    assert next(g for g in groups if g['ids']==['head', 'short'])['align'] == 'center'
+    proposal = {'paragraphs': [{'ids': ['body', 'wrap'], 'align': 'left'},
+                               {'ids': ['head', 'short'], 'align': 'center'},
+                               {'ids': ['title'], 'align': 'left'}]}
+    accepted, issues = semantics.apply_model(proposal, styles, [card], groups)
+    assert issues == [] and _ids(accepted) == [['body', 'wrap'], ['head', 'short'], ['title']]
+    # Same ink with a bold flicker (stroke-ratio noise) still joins; a real weight change does not.
+    flicker = {s['id']: s for s in (style('a', 58, 112, size=16, color='536B8C', bold=True, w=140, h=h),
+                                     style('b', 58, 112+h+4, size=16, color='5A7394', bold=False, w=140, h=h))}
+    assert semantics._lab_distance('536B8C', '5A7394') <= 18
+    assert _ids(semantics.deterministic(flicker, [card])) == [['a', 'b']]
+    distinct = {s['id']: s for s in (style('a', 58, 112, size=16, color='536B8C', bold=True, w=140, h=h),
+                                      style('b', 58, 112+h+4, size=16, color='889FB8', bold=False, w=140, h=h))}
+    assert _ids(semantics.deterministic(distinct, [card])) == [['a'], ['b']]
+
+
+def test_cross_column_and_cross_card_lines_do_not_merge():
+    h = 18
+    # Stacked cards share an x position and a one-line gap. Only the card boundary separates them.
+    above = [40, 40, 200, 100]
+    below = [40, 136, 200, 90]
+    top = style('top', 58, 112, '整改跟踪', size=16, color='536B8C', w=140, h=h)
+    bottom = style('bottom', 58, 140, '闭环管理', size=16, color='536B8C', w=140, h=h)
+    stacked = {s['id']: s for s in (top, bottom)}
+    assert _ids(semantics.deterministic(stacked, [above, below])) == [['top'], ['bottom']]
+    # One band, two columns. The right column starts a hair lower and barely overlaps the left line,
+    # which must not swallow the left column's wrapped second line.
+    band = [20, 40, 700, 200]
+    left = style('left', 50, 80, '证据梳理', size=16, color='536B8C', w=170, h=h)
+    wrap = style('wrap', 50+h, 80+h+6, '调查取证', size=16, color='5E7596', w=170, h=h)
+    graze = style('graze', 205, 88, '审查调查', size=16, color='536B8C', w=100, h=h)
+    right = style('right', 480, 86, '案件审理', size=16, color='536B8C', w=140, h=h)
+    columns = {s['id']: s for s in (left, wrap, graze, right)}
+    groups = semantics.deterministic(columns, [band])
+    assert _ids(groups) == [['left', 'wrap'], ['right'], ['graze']]
+    rejected, issues = semantics.apply_model(
+        {'paragraphs': [{'ids': ['left', 'right'], 'align': 'left'}, {'ids': ['wrap', 'graze']}]},
+        columns, [band], groups)
+    assert any(i.startswith('incompatible_paragraph:') for i in issues)
+    assert {tuple(g['ids']) for g in rejected} == {('left', 'wrap'), ('graze',), ('right',)}
+    # A clearly different size directly underneath still ends the paragraph.
+    heading = style('h', 50, 80, size=16, w=170, h=h)
+    other = style('o', 50, 80+h+4, size=28, w=170, h=h)
+    assert _ids(semantics.deterministic({s['id']: s for s in (heading, other)}, [band])) == [['h'], ['o']]
 
 
 def test_residual_violation_ignores_retained_text():

@@ -14,10 +14,11 @@ INSTRUCTION = (
     'You group OCR lines of one presentation slide into paragraphs. Input json: lines '
     '(id, text, box [x,y,w,h] in pixels, size_px, color, bold) and containers (native shape boxes). '
     'Return json only: {"paragraphs":[{"ids":[...],"align":"left|center|right","role":"title|heading|body|label|number|list"}]}. '
-    'Merge consecutive lines of the same text block (a wrapped sentence, a bullet list in one column) '
-    'into one paragraph in top-to-bottom order. Never merge lines from different cards, columns, table cells '
-    'or of different size/colour, and never merge a label with its value. Every id must appear exactly once. '
-    'Do not change any text. Order paragraphs in natural reading order.')
+    'Merge consecutive lines of the same text block — a wrapped sentence, a bullet list in one column, '
+    'or same-card body lines of one font size — into one paragraph in top-to-bottom order. '
+    'Edges, sizes and colours that differ only by measurement noise are still the same block. '
+    'Never merge lines from different cards, columns or table cells, and never merge a label with its value. '
+    'Every id must appear exactly once. Do not change any text. Order paragraphs in natural reading order.')
 
 
 def _digest(value):
@@ -28,9 +29,29 @@ def _center(b):
     return b[0]+b[2]/2
 
 
+# Wrapped lines of one card share a size, ink colour and edge, but the ink box
+# jitters by about an em, sampled colours drift by a few dozen levels, and
+# width-limiting can shrink one line toward 75% of its fitted size. A different
+# card or column is still a hard stop.
+_ALIGN_EM = 1.35
+_SIZE_RATIO = .22
+_COLOR_GAP = 56
+_SAME_INK = 18
+
+
+def _pad(box):
+    return min(12., max(4., .45*box[3]))
+
+
+def _inside(box, container, pad):
+    return (container[0] <= box[0]+pad and container[1] <= box[1]+pad and
+            box[0]+box[2] <= container[0]+container[2]+pad and
+            box[1]+box[3] <= container[1]+container[3]+pad)
+
+
 def _container(box, containers):
-    inside = [c for c in containers if c[0] <= box[0]+1 and c[1] <= box[1]+1 and
-              box[0]+box[2] <= c[0]+c[2]+1 and box[1]+box[3] <= c[1]+c[3]+1]
+    pad = _pad(box)
+    inside = [c for c in containers if _inside(box, c, pad)]
     return min(inside, key=lambda c: c[2]*c[3], default=None)
 
 
@@ -40,28 +61,62 @@ def _lab_distance(a, b):
     return max(abs(p-q) for p, q in zip(a, b))
 
 
+def _overlap_width(a, b):
+    ba, bb = a['ink_bbox'], b['ink_bbox']
+    return max(0., min(ba[0]+ba[2], bb[0]+bb[2]) - max(ba[0], bb[0]))
+
+
+def _same_column(a, b):
+    """b sits under a, rather than grazing a neighbouring column."""
+    narrow = min(a['ink_bbox'][2], b['ink_bbox'][2])
+    return _overlap_width(a, b) >= .45*max(narrow, 1.)
+
+
+def _size_close(a, b):
+    direct = abs(a['size_px']-b['size_px']) / max(a['size_px'], b['size_px'])
+    if direct <= _SIZE_RATIO:
+        return True
+    # Compare the pre-shrink sizes when width-limiting moved only one line.
+    ra = a.get('width_limited_from_px', a['size_px'])
+    rb = b.get('width_limited_from_px', b['size_px'])
+    return abs(ra-rb) / max(ra, rb) <= .12
+
+
+def _align_errors(a, b):
+    ba, bb = a['ink_bbox'], b['ink_bbox']
+    return {'left': abs(ba[0]-bb[0]),
+            'center': abs(_center(ba)-_center(bb)),
+            'right': abs((ba[0]+ba[2])-(bb[0]+bb[2]))}
+
+
+def _alignment(a, b):
+    """Shared edge. A tight match keeps the previous priority; otherwise the closest edge within one em."""
+    h = max(a['ink_bbox'][3], b['ink_bbox'][3], 1.)
+    errors = _align_errors(a, b)
+    for mode in ('left', 'center', 'right'):
+        if errors[mode] <= .6*h:
+            return mode
+    mode = min(errors, key=errors.get)
+    return mode if errors[mode] <= _ALIGN_EM*h else None
+
+
 def compatible(a, b, containers):
     """Can line b continue the paragraph whose last line is a (a above b)?"""
     ba, bb = a['ink_bbox'], b['ink_bbox']
-    h = max(ba[3], bb[3])
+    h = max(ba[3], bb[3], 1.)
     if a.get('runs') or b.get('runs'):
         return None
-    if abs(a['size_px']-b['size_px']) > .12*max(a['size_px'], b['size_px']):
+    if not _size_close(a, b):
         return None
-    if a['bold'] != b['bold'] or _lab_distance(a['color'], b['color']) > 40:
+    color_gap = _lab_distance(a['color'], b['color'])
+    if color_gap > _COLOR_GAP or (a['bold'] != b['bold'] and color_gap > _SAME_INK):
         return None
     gap = bb[1]-(ba[1]+ba[3])
-    if not -.1*h <= gap <= .95*h:
+    if not -.2*h <= gap <= 1.2*h:
         return None
     if _container(ba, containers) != _container(bb, containers):
         return None
-    if abs(ba[0]-bb[0]) <= .6*h:
-        return 'left'
-    if abs(_center(ba)-_center(bb)) <= .6*h:
-        return 'center'
-    if abs(ba[0]+ba[2]-bb[0]-bb[2]) <= .6*h:
-        return 'right'
-    return None
+    return _alignment(a, b)
 
 
 def deterministic(styles, containers):
@@ -74,17 +129,29 @@ def deterministic(styles, containers):
         used.add(line['id'])
         while True:
             last = group[-1]
-            nexts = [s for s in lines if s['id'] not in used and s['ink_bbox'][1] > last['ink_bbox'][1]]
-            below = [s for s in nexts if max(0, min(s['ink_bbox'][0]+s['ink_bbox'][2], last['ink_bbox'][0]+last['ink_bbox'][2])
-                                         - max(s['ink_bbox'][0], last['ink_bbox'][0])) > 0]
+            below = [s for s in lines if s['id'] not in used and s['ink_bbox'][1] > last['ink_bbox'][1]
+                     and _overlap_width(last, s) > 0]
             if not below:
                 break
-            candidate = min(below, key=lambda s: s['ink_bbox'][1])
-            mode = compatible(last, candidate, containers)
-            if mode is None or (align and mode != align):
+            extended = False
+            for candidate in sorted(below, key=lambda s: (s['ink_bbox'][1], s['ink_bbox'][0])):
+                mode = compatible(last, candidate, containers)
+                if align and mode not in (None, align):
+                    h = max(last['ink_bbox'][3], candidate['ink_bbox'][3], 1.)
+                    if _align_errors(last, candidate)[align] <= _ALIGN_EM*h:
+                        mode = align
+                if mode is None or (align and mode != align):
+                    # A real next line in this column ends the paragraph. A neighbour
+                    # that only grazes the ink can be stepped over.
+                    if _same_column(last, candidate):
+                        break
+                    continue
+                align = mode
+                group.append(candidate); used.add(candidate['id'])
+                extended = True
                 break
-            align = mode
-            group.append(candidate); used.add(candidate['id'])
+            if not extended:
+                break
         paragraphs.append({'ids': [s['id'] for s in group], 'align': align or 'left', 'source': 'deterministic'})
     return paragraphs
 
