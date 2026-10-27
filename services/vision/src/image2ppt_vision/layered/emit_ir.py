@@ -11,6 +11,7 @@ from pathlib import Path
 from PIL import Image
 
 from ..storage import digest, write_json
+from .semantics import _same_baseline
 
 
 def _inside(box, outer):
@@ -24,6 +25,15 @@ def _clip(box, W, H):
     return [round(x, 3), round(y, 3), round(max(1., min(w, W-x)), 3), round(max(1., min(h, H-y)), 3)]
 
 
+def _paragraph_text(lines):
+    """Same-baseline OCR pieces are one visual line (依|托), not a wrapped break."""
+    parts = [lines[0]['text']]
+    for prev, line in zip(lines, lines[1:]):
+        parts.append('' if _same_baseline(prev, line) else '\n')
+        parts.append(line['text'])
+    return ''.join(parts)
+
+
 def _paragraph_node(pid, styles, ids, align, W, H, scale):
     lines = [styles[i] for i in ids]
     first = lines[0]
@@ -31,9 +41,10 @@ def _paragraph_node(pid, styles, ids, align, W, H, scale):
     ox = first['ink_bbox'][0]-first['origin'][0]
     left = min(s['ink_bbox'][0] for s in lines)-ox
     right = max(s['ink_bbox'][0]+s['ink_bbox'][2] for s in lines)+ox
-    tops = [s['ink_bbox'][1] for s in lines]
-    pitch = statistics.median(b-a for a, b in zip(tops, tops[1:])) if len(lines) > 1 else None
-    height = (pitch*(len(lines)-1) if pitch else 0)+size_px*1.45
+    steps = [line['ink_bbox'][1]-prev['ink_bbox'][1] for prev, line in zip(lines, lines[1:])
+             if not _same_baseline(prev, line)]
+    pitch = statistics.median(steps) if steps else None
+    height = (pitch*len(steps) if pitch else 0)+size_px*1.45
     slack = max(4., size_px*.6)
     if align == 'center':
         cx = (left+right)/2
@@ -43,7 +54,7 @@ def _paragraph_node(pid, styles, ids, align, W, H, scale):
     else:
         box = [first['origin'][0], first['origin'][1], right-first['origin'][0]+slack, height]
     node = {'id': pid, 'type': 'text', 'bbox': _clip(box, W, H), 'evidence_ids': list(ids),
-            'text': '\n'.join(s['text'] for s in lines),
+            'text': _paragraph_text(lines),
             'font': {'latin': first['family'], 'ea': first['family'], 'size_pt': round(size_px*scale*.75, 3)},
             'bold': bool(first['bold']), 'color': first['color'].upper(), 'align': align, 'wrap': False}
     if pitch:

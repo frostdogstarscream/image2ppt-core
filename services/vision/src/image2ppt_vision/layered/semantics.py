@@ -15,8 +15,9 @@ INSTRUCTION = (
     '(id, text, box [x,y,w,h] in pixels, size_px, color, bold) and containers (native shape boxes). '
     'Return json only: {"paragraphs":[{"ids":[...],"align":"left|center|right","role":"title|heading|body|label|number|list"}]}. '
     'Merge consecutive lines of the same text block — a wrapped sentence, a bullet list in one column, '
-    'or same-card body lines of one font size — into one paragraph in top-to-bottom order. '
+    'same-card body lines of one font size, or pieces of one visual line split mid-word — into one paragraph. '
     'Edges, sizes and colours that differ only by measurement noise are still the same block. '
+    'Pieces of one line join even when fitted size or colour disagree. '
     'Never merge lines from different cards, columns or table cells, and never merge a label with its value. '
     'Every id must appear exactly once. Do not change any text. Order paragraphs in natural reading order.')
 
@@ -37,6 +38,10 @@ _ALIGN_EM = 1.35
 _SIZE_RATIO = .22
 _COLOR_GAP = 56
 _SAME_INK = 18
+# OCR sometimes cuts one baseline in two (依|托). The gap is about a character,
+# not a column gutter. Measured size and colour on the two pieces often disagree.
+_SAME_LINE_GAP_EM = 1.25
+_SAME_LINE_OVERLAP = .55
 
 
 def _pad(box):
@@ -100,8 +105,79 @@ def _alignment(a, b):
     return mode if errors[mode] <= _ALIGN_EM*h else None
 
 
+def _same_baseline(a, b):
+    """True when the ink bands belong to one visual row, not a line wrapped underneath."""
+    ba, bb = a['ink_bbox'], b['ink_bbox']
+    overlap = min(ba[1]+ba[3], bb[1]+bb[3]) - max(ba[1], bb[1])
+    return overlap >= _SAME_LINE_OVERLAP*min(ba[3], bb[3], 1.)
+
+
+def _same_line_continuation(a, b, containers):
+    """b is the next piece of a's baseline (a word split across two OCR boxes)."""
+    if a.get('runs') or b.get('runs'):
+        return False
+    ba, bb = a['ink_bbox'], b['ink_bbox']
+    if not _same_baseline(a, b):
+        return False
+    if abs(ba[3]-bb[3]) > .45*max(ba[3], bb[3], 1.):
+        return False
+    if _container(ba, containers) != _container(bb, containers):
+        return False
+    h = max(ba[3], bb[3], 1.)
+    gap = bb[0]-(ba[0]+ba[2])
+    return -.25*h <= gap <= _SAME_LINE_GAP_EM*h
+
+
+def _reading_sort(group):
+    """Top to bottom, and left to right within one baseline."""
+    ordered = sorted(group, key=lambda s: (s['ink_bbox'][1]+s['ink_bbox'][3]/2, s['ink_bbox'][0]))
+    i = 1
+    while i < len(ordered):
+        if _same_baseline(ordered[i-1], ordered[i]) and ordered[i]['ink_bbox'][0] < ordered[i-1]['ink_bbox'][0]:
+            ordered[i-1], ordered[i] = ordered[i], ordered[i-1]
+            i = max(1, i-1)
+            continue
+        i += 1
+    return ordered
+
+
+def _attach_same_line(group, used, lines, containers):
+    changed = True
+    while changed:
+        changed = False
+        for candidate in lines:
+            if candidate['id'] in used:
+                continue
+            if any(_same_line_continuation(member, candidate, containers)
+                   or _same_line_continuation(candidate, member, containers) for member in group):
+                group.append(candidate)
+                used.add(candidate['id'])
+                changed = True
+                break
+
+
+def _row_proxy(group):
+    """Style of the left piece, bbox covering every fragment of this baseline."""
+    row = [s for s in group if _same_baseline(s, group[-1])] or [group[-1]]
+    row.sort(key=lambda s: s['ink_bbox'][0])
+    if len(row) == 1:
+        return row[0]
+    x0 = min(s['ink_bbox'][0] for s in row)
+    y0 = min(s['ink_bbox'][1] for s in row)
+    x1 = max(s['ink_bbox'][0]+s['ink_bbox'][2] for s in row)
+    y1 = max(s['ink_bbox'][1]+s['ink_bbox'][3] for s in row)
+    proxy = dict(row[0])
+    proxy['ink_bbox'] = [x0, y0, x1-x0, y1-y0]
+    return proxy
+
+
 def compatible(a, b, containers):
-    """Can line b continue the paragraph whose last line is a (a above b)?"""
+    """Can line b continue the paragraph that currently ends at a?
+
+    b may be the next piece of a's baseline, or the next wrapped line below it.
+    """
+    if _same_line_continuation(a, b, containers):
+        return 'left'
     ba, bb = a['ink_bbox'], b['ink_bbox']
     h = max(ba[3], bb[3], 1.)
     if a.get('runs') or b.get('runs'):
@@ -127,31 +203,34 @@ def deterministic(styles, containers):
             continue
         group, align = [line], None
         used.add(line['id'])
+        _attach_same_line(group, used, lines, containers)
         while True:
-            last = group[-1]
-            below = [s for s in lines if s['id'] not in used and s['ink_bbox'][1] > last['ink_bbox'][1]
-                     and _overlap_width(last, s) > 0]
+            head = _row_proxy(group)
+            below = [s for s in lines if s['id'] not in used and s['ink_bbox'][1] > head['ink_bbox'][1]
+                     and _overlap_width(head, s) > 0]
             if not below:
                 break
             extended = False
             for candidate in sorted(below, key=lambda s: (s['ink_bbox'][1], s['ink_bbox'][0])):
-                mode = compatible(last, candidate, containers)
+                mode = compatible(head, candidate, containers)
                 if align and mode not in (None, align):
-                    h = max(last['ink_bbox'][3], candidate['ink_bbox'][3], 1.)
-                    if _align_errors(last, candidate)[align] <= _ALIGN_EM*h:
+                    h = max(head['ink_bbox'][3], candidate['ink_bbox'][3], 1.)
+                    if _align_errors(head, candidate)[align] <= _ALIGN_EM*h:
                         mode = align
                 if mode is None or (align and mode != align):
                     # A real next line in this column ends the paragraph. A neighbour
                     # that only grazes the ink can be stepped over.
-                    if _same_column(last, candidate):
+                    if _same_column(head, candidate):
                         break
                     continue
                 align = mode
                 group.append(candidate); used.add(candidate['id'])
+                _attach_same_line(group, used, lines, containers)
                 extended = True
                 break
             if not extended:
                 break
+        group = _reading_sort(group)
         paragraphs.append({'ids': [s['id'] for s in group], 'align': align or 'left', 'source': 'deterministic'})
     return paragraphs
 
@@ -174,7 +253,7 @@ def apply_model(proposal, styles, containers, fallback):
         if not isinstance(ids, list) or not ids or any(i not in styles or i in seen for i in ids):
             issues.append('invalid_or_duplicate_ids')
             continue
-        group = sorted((styles[i] for i in ids), key=lambda s: s['ink_bbox'][1])
+        group = _reading_sort([styles[i] for i in ids])
         modes = [compatible(a, b, containers) for a, b in zip(group, group[1:])]
         if any(m is None for m in modes):
             issues.append('incompatible_paragraph:'+','.join(ids))

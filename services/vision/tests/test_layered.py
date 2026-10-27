@@ -182,6 +182,40 @@ def test_same_card_wrapped_lines_merge_across_measurement_jitter():
     assert _ids(semantics.deterministic(distinct, [card])) == [['a'], ['b']]
 
 
+def test_same_line_midword_wrap_merges_despite_color_and_size():
+    """02 slide 3 intro: 依|托 is one baseline split into two OCR boxes."""
+    h = 34
+    # Right piece sits 2px higher, so y-order would see it first. Colour, bold and
+    # fitted size all disagree with the vertical merge rules.
+    left = style('t003', 400, 178, '面向监督检查与审查调查两大业务方向，依',
+                 size=30.3, color='1170C0', bold=False, w=520, h=h)
+    right = style('t004', 942, 176, '托数据治理、纪检知识库、大模型及专业智能体，',
+                  size=46, color='111111', bold=True, w=480, h=h)
+    assert semantics._lab_distance(left['color'], right['color']) > semantics._COLOR_GAP
+    assert abs(left['size_px']-right['size_px'])/right['size_px'] > semantics._SIZE_RATIO
+    band = [0, 140, 1800, 120]
+    styles = {s['id']: s for s in (left, right)}
+    assert semantics.compatible(left, right, [band]) == 'left'
+    groups = semantics.deterministic(styles, [band])
+    assert _ids(groups) == [['t003', 't004']]
+    accepted, issues = semantics.apply_model(
+        {'paragraphs': [{'ids': ['t004', 't003'], 'align': 'left'}]}, styles, [band], groups)
+    assert issues == [] and accepted[0]['ids'] == ['t003', 't004']
+    node = emit_ir._paragraph_node('p000', styles, ['t003', 't004'], 'left', 1920, 1080, 1280/1920)
+    assert node['text'] == left['text']+right['text']
+    # A column on the same baseline, one gutter away, stays its own box.
+    column = style('col', 1422+120, 178, '审查调查', size=30.3, color='1170C0', w=160, h=h)
+    wide = {**styles, column['id']: column}
+    assert _ids(semantics.deterministic(wide, [band])) == [['t003', 't004'], ['col']]
+    assert semantics.compatible(right, column, [band]) is None
+    # The same 22px gap across two cards does not merge.
+    card_l, card_r = [390, 160, 540, 70], [930, 160, 520, 70]
+    assert semantics._container(left['ink_bbox'], [card_l, card_r]) != semantics._container(
+        right['ink_bbox'], [card_l, card_r])
+    assert semantics.compatible(left, right, [card_l, card_r]) is None
+    assert _ids(semantics.deterministic(styles, [card_l, card_r])) == [['t004'], ['t003']]
+
+
 def test_cross_column_and_cross_card_lines_do_not_merge():
     h = 18
     # Stacked cards share an x position and a one-line gap. Only the card boundary separates them.
