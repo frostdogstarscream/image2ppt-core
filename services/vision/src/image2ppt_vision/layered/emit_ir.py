@@ -53,10 +53,14 @@ def _paragraph_node(pid, styles, ids, align, W, H, scale):
         box = [left-slack, first['origin'][1], right-left+slack, height]
     else:
         box = [first['origin'][0], first['origin'][1], right-first['origin'][0]+slack, height]
+    text = _paragraph_text(lines)
     node = {'id': pid, 'type': 'text', 'bbox': _clip(box, W, H), 'evidence_ids': list(ids),
-            'text': _paragraph_text(lines),
+            'text': text,
             'font': {'latin': first['family'], 'ea': first['family'], 'size_pt': round(size_px*scale*.75, 3)},
             'bold': bool(first['bold']), 'color': first['color'].upper(), 'align': align, 'wrap': False}
+    # ir.mjs requires a reason whenever text is not evidence lines joined by newlines.
+    if text != '\n'.join(line['text'] for line in lines):
+        node['text_override_reason'] = 'Same-baseline OCR fragments joined without a line break.'
     if pitch:
         node['line_spacing_pt'] = round(pitch*scale*.75, 3)
     if len(lines) == 1 and first.get('runs'):

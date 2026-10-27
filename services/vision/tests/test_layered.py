@@ -203,6 +203,10 @@ def test_same_line_midword_wrap_merges_despite_color_and_size():
     assert issues == [] and accepted[0]['ids'] == ['t003', 't004']
     node = emit_ir._paragraph_node('p000', styles, ['t003', 't004'], 'left', 1920, 1080, 1280/1920)
     assert node['text'] == left['text']+right['text']
+    assert node['text_override_reason'] == 'Same-baseline OCR fragments joined without a line break.'
+    wrapped = emit_ir._paragraph_node('p001', {s['id']: s for s in (
+        style('a', 40, 40, '上一行', h=20), style('b', 40, 70, '下一行', h=20))}, ['a', 'b'], 'left', 1920, 1080, 1)
+    assert wrapped['text'] == '上一行\n下一行' and 'text_override_reason' not in wrapped
     # A column on the same baseline, one gutter away, stays its own box.
     column = style('col', 1422+120, 178, '审查调查', size=30.3, color='1170C0', w=160, h=h)
     wide = {**styles, column['id']: column}
