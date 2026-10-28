@@ -74,6 +74,21 @@ def test_inpaint_changes_only_masked_pixels_and_detects_solid():
     assert inpaint.solid_color(rgb) is None
 
 
+def test_calm_holes_are_filled_smoothly_and_never_by_the_model(monkeypatch):
+    rgb = page()
+    rgb[:, 320:] = (200, 220, 240)
+    rgb[200:260, 400:460] = np.random.default_rng(1).integers(0, 255, (60, 60, 3), dtype=np.uint8)
+    mask = np.zeros(rgb.shape[:2], bool)
+    mask[60:160, 60:260] = True
+    mask[215:245, 415:445] = True
+    monkeypatch.setattr(inpaint, 'lama', lambda image, hole, model: np.zeros_like(image))
+    out, method = inpaint.inpaint(rgb, mask, model=object())
+    assert method == 'lama'
+    assert np.abs(out[60:160, 60:260].astype(int)-(246, 248, 252)).max() <= 2
+    assert (out[220:240, 420:440] == 0).all()
+    assert (out[~mask] == rgb[~mask]).all()
+
+
 def test_segment_classifies_flat_card_gradient_and_icon():
     rgb = page()
     card = np.zeros(rgb.shape[:2], np.uint8)
@@ -108,12 +123,12 @@ def _panel_page():
     rgb = page()
     rng = np.random.default_rng(7)
     rgb[60:240, 100:400] = rng.integers(0, 255, (180, 300, 3), dtype=np.uint8)
-    pieces = []
-    for x0, y0, x1, y1 in ((100, 60, 262, 240), (258, 60, 400, 152), (258, 148, 400, 240)):
-        piece = np.zeros(rgb.shape[:2], np.uint8)
-        cv2.ellipse(piece, ((x0+x1)//2, (y0+y1)//2), ((x1-x0)//2, (y1-y0)//2), 0, 0, 360, 1, -1)
-        piece[y0:y1, x0:x1] |= (rng.random((y1-y0, x1-x0)) < .3).astype(np.uint8)
-        pieces.append((piece > 0, {'source': 'sam2'}))
+    yy, xx = np.mgrid[:rgb.shape[0], :rgb.shape[1]]
+    panel = (yy >= 60) & (yy < 240) & (xx >= 100) & (xx < 400)
+    left = xx < 258+12*np.sin(yy/9.)
+    upper = yy < 150+10*np.sin(xx/11.)
+    pieces = [(panel & left, {'source': 'sam2'}), (panel & ~left & upper, {'source': 'sam2'}),
+              (panel & ~left & ~upper, {'source': 'sam2'})]
     cv2.rectangle(rgb, (450, 260), (620, 340), (255, 255, 255), -1)
     card = np.zeros(rgb.shape[:2], bool); card[260:341, 450:621] = True
     icon = np.zeros(rgb.shape[:2], np.uint8)
@@ -124,23 +139,28 @@ def _panel_page():
     return rgb, pieces+[(card, {'source': 'sam2'})], detector
 
 
-def test_textured_pieces_become_one_rectangular_block_and_flat_card_stays_a_shape():
+def test_textured_pieces_become_one_object_and_erase_equals_alpha():
     rgb, masks, detector = _panel_page()
+    detected = detector['area']
     empty = np.zeros(rgb.shape[:2], bool)
     elements, _ = segment.classify(rgb, masks, text_mask=empty, icon_mask=empty)
     H, W = rgb.shape[:2]
-    elements, erase = segment.blockify(elements+[detector], W, H)
+    elements, erase = segment.blockify(elements+[detector], W, H, grad=segment.gradient(rgb))
     blocks = [e for e in elements if e.get('role') == 'block']
-    assert len(blocks) == 1
+    assert len(blocks) == 1 and blocks[0]['members'] == 3
     x, y, w, h = blocks[0]['bbox']
     assert abs(x-100) <= 2 and abs(y-60) <= 2 and abs(x+w-400) <= 2 and abs(y+h-240) <= 2
     rgba = segment.cutout(rgb, blocks[0])
     assert int(rgba[:, :, 3].min()) == 255
     assert any(e['kind'] == 'native_shape' and e['bbox'][0] == 450 for e in elements)
-    icon = cv2.dilate(detector['mask'].astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
-    block_only = np.zeros(erase.shape, bool); block_only[y:y+h, x:x+w] = True
-    assert not (erase & block_only & ~icon).any()
-    assert erase[icon].all() and erase[260:341, 450:621].all()
+    alpha = np.zeros(erase.shape, bool)
+    for e in elements:
+        alpha |= e['mask']
+    rim = cv2.dilate(alpha.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+    assert (erase == rim).all()
+    icon = next(e for e in elements if e.get('role') == 'icon')
+    assert icon['level'] == 1 and blocks[0]['level'] == 0
+    assert icon['mask'].sum() > detected
 
 
 def test_shaded_card_stays_pixels_and_flat_card_stays_a_shape():
@@ -159,10 +179,11 @@ def test_shaded_card_stays_pixels_and_flat_card_stays_a_shape():
     elements, _ = segment.classify(rgb, [(shaded > 0, {'source': 'sam2'}), (flat > 0, {'source': 'sam2'})],
                                    text_mask=empty, icon_mask=empty)
     H, W = rgb.shape[:2]
-    elements, erase = segment.blockify(elements, W, H)
+    elements, erase = segment.blockify(elements, W, H, grad=segment.gradient(rgb))
     assert not any(e['kind'] == 'native_shape' and e['bbox'][0] == 40 for e in elements)
     assert any(e['kind'] == 'native_shape' and e['bbox'][0] == 340 for e in elements)
-    assert not erase[60:200, 60:260].any()
+    assert any(e['kind'] == 'raster' and e['bbox'][0] == 40 for e in elements)
+    assert erase[60:200, 60:260].all()
 
 
 def test_icon_on_a_card_is_lifted_with_its_pale_badge():
@@ -180,48 +201,156 @@ def test_icon_on_a_card_is_lifted_with_its_pale_badge():
     assert w >= 30 and h >= 30 and x <= 85 and y <= 85
 
 
-def test_a_band_does_not_pull_separate_cards_into_one_block():
-    """Merging needs the pieces to fill the merged rectangle, so cards under a band stay apart."""
+def _piece(x, y, w, h, H, W, mask=None):
+    m = np.zeros((H, W), bool)
+    if mask is None:
+        m[y:y+h, x:x+w] = True
+    else:
+        m[y:y+h, x:x+w] = mask
+    return {'kind': 'raster', 'source': 'sam2', 'bbox': [x, y, w, h], 'area': int(m.sum()), 'mask': m}
+
+
+def test_seams_split_objects_and_join_one_colour_block():
+    """Pieces join only across a calm seam: a band does not pull in the cards under it,
+    two chevrons with an edge stay two, and one surface cut in two becomes one."""
     H, W = 400, 800
-    def piece(x, y, w, h):
-        m = np.zeros((H, W), bool); m[y:y+h, x:x+w] = True
-        return {'kind': 'raster', 'source': 'sam2', 'bbox': [x, y, w, h], 'area': w*h, 'mask': m}
+    rgb = page(W, H)
+    piece = lambda *box, mask=None: _piece(*box, H, W, mask)
     band = piece(20, 20, 760, 40)
     cards = [piece(20+190*k, 62, 170, 120) for k in range(4)]
-    halves = [piece(40, 220, 100, 120), piece(142, 220, 100, 120)]
-    sparse = piece(300, 220, 200, 120)
-    sparse['mask'][:] = False; sparse['mask'][230:330:4, 310:490] = True
-    inner = piece(330, 240, 120, 80)
-    groups = segment.merge_blocks([band, *cards, *halves, sparse, inner], W, H)
+    halves = [piece(40, 220, 100, 120), piece(140, 220, 100, 120)]
+    a, b = segment._chevron(120, 40, 14), segment._chevron(120, 40, 14)
+    chevrons = [piece(300, 220, 120, 40, mask=a), piece(406, 220, 120, 40, mask=b)]
+    sparse = piece(560, 220, 200, 120)
+    sparse['mask'][:] = False; sparse['mask'][230:330:4, 570:750] = True; sparse['area'] = int(sparse['mask'].sum())
+    inner = piece(590, 240, 120, 80)
+    rgb[band['mask']] = (200, 220, 240)
+    for card in cards:
+        rgb[card['mask']] = (255, 255, 255)
+    for half in halves:
+        rgb[half['mask']] = (230, 180, 120)
+    rgb[chevrons[0]['mask']] = (30, 90, 200)
+    rgb[chevrons[1]['mask'] & ~chevrons[0]['mask']] = (60, 140, 230)
+    rgb[inner['mask']] = (100, 160, 90)
+    groups = segment.merge_blocks([band, *cards, *halves, *chevrons, sparse, inner], W, H,
+                                  grad=segment.gradient(rgb))
     sizes = sorted(len(items) for _, items in groups)
-    assert sizes == [1, 1, 1, 1, 1, 2, 2]
-    frame = piece(540, 200, 240, 180)
-    frame['mask'][210:370, 550:770] = False
-    frame['area'] = int(frame['mask'].sum())
-    tile = piece(600, 240, 100, 80)
-    assert len(segment.merge_blocks([frame, tile], W, H)) == 1
+    assert sizes == [1]*7+[2, 2]
+    assert any(len(items) == 2 and items[0]['bbox'][1] == 220 and items[0]['bbox'][0] in (40, 140) for _, items in groups)
+    photo = page(W, H)
+    rng = np.random.default_rng(11)
+    photo[100:300, 100:400] = rng.integers(0, 255, (200, 300, 3), dtype=np.uint8)
+    yy, xx = np.mgrid[:H, :W]
+    sky = (yy >= 100) & (yy < 300) & (xx >= 100) & (xx < 400) & (yy < 170+20*np.sin(xx/15.))
+    photo[sky] = (150, 190, 235)
+    header = piece(100, 60, 300, 40)
+    photo[header['mask']] = (20, 110, 200)
+    upper = _piece(100, 100, 300, 120, H, W, sky[100:220, 100:400])
+    lower_photo = piece(100, 100, 300, 200)
+    lower_photo['mask'] &= ~sky; lower_photo['area'] = int(lower_photo['mask'].sum())
+    grad = segment.gradient(photo)
+    assert len(segment.merge_blocks([upper, lower_photo], W, H, grad=grad)) == 1
+    assert len(segment.merge_blocks([header, upper, lower_photo], W, H, grad=grad)) == 2
+    over = page(W, H)
     lower = piece(20, 50, 300, 60)
-    assert len(segment.merge_blocks([band, lower], W, H)) == 2
+    over[band['mask']] = (200, 220, 240)
+    over[lower['mask']] = (90, 90, 90)
+    assert len(segment.merge_blocks([band, lower], W, H, grad=segment.gradient(over))) == 2
 
 
-def test_icon_on_a_block_stays_separate_and_the_block_under_it_is_repaired():
-    rgb, masks, detector = _panel_page()
-    empty = np.zeros(rgb.shape[:2], bool)
-    elements, _ = segment.classify(rgb, masks, text_mask=empty, icon_mask=empty)
+def test_stray_specks_do_not_stretch_a_chevron_over_its_neighbours():
+    H, W = 300, 900
+    rgb = page(W, H)
+    shape = segment._chevron(200, 60, 20)
+    chevrons = [_piece(40+186*k, 100, 200, 60, H, W, shape) for k in range(3)]
+    for k, c in enumerate(chevrons):
+        rgb[c['mask']] = (30, 90, 200) if k % 2 == 0 else (40, 170, 150)
+    speckled = {**chevrons[1], 'mask': chevrons[1]['mask'].copy()}
+    speckled['mask'][120:123, 620:623] = True
+    speckled['mask'][110:112, 60:62] = True
+    speckled.update(bbox=segment._bbox(speckled['mask']), area=int(speckled['mask'].sum()))
+    objects, _ = segment.blockify([chevrons[0], speckled, chevrons[2]], W, H, grad=segment.gradient(rgb))
+    boxes = sorted(o['bbox'] for o in objects if o['kind'] == 'raster')
+    assert [b[0] for b in boxes] == [40, 226, 412] and all(b[2] == 200 for b in boxes)
+    assert all(o['geometry'] == 'chevron' for o in objects if o['kind'] == 'raster')
+
+
+def test_a_photo_piece_grows_over_its_calm_sky_and_stops_at_the_header():
+    rgb = page(1280, 720)
     H, W = rgb.shape[:2]
-    elements, _ = segment.blockify(elements+[detector], W, H)
-    icons = [e for e in elements if e.get('role') == 'icon']
-    assert len(icons) == 1 and icons[0]['source'] == 'textmask_icon'
-    assert [e.get('role') for e in elements].index('icon') > [e.get('role') for e in elements].index('block')
-    under = segment.icon_erase(elements)
-    assert under is not None and under[150, 180]
-    panels, _ = inpaint.inpaint(rgb, under, None)
-    block = next(e for e in elements if e.get('role') == 'block')
-    bx, by = block['bbox'][:2]
-    rgba = segment.cutout(panels, block)
-    assert tuple(int(v) for v in rgba[150-by, 180-bx, :3]) != (220, 30, 30)
-    icon = segment.cutout(rgb, icons[0])
-    assert set(np.unique(icon[:, :, 3])).issubset({0, 255})
+    rgb[40:330, 40:340] = (255, 255, 255)
+    rgb[50:90, 50:330] = (20, 110, 200)
+    sky = np.linspace(150, 210, 70)[:, None, None]*np.ones((1, 280, 3))
+    rgb[90:160, 50:330] = sky.astype(np.uint8)
+    rgb[160:230, 50:330] = np.random.default_rng(2).integers(0, 255, (70, 280, 3), dtype=np.uint8)
+    found = _piece(60, 160, 260, 70, H, W)
+    header = np.zeros((H, W), bool); header[50:90, 50:330] = True
+    grad = segment.gradient(rgb)
+    objects = segment.complete_pictures([found], header, grad, H, W)
+    assert len(objects) == 1 and objects[0].get('completed')
+    x, y, w, h = objects[0]['bbox']
+    assert abs(x-50) <= 3 and abs(y-90) <= 3 and abs(x+w-330) <= 3 and abs(y+h-230) <= 3
+    assert not (objects[0]['mask'] & header).any()
+    yy, xx = np.mgrid[:H, :W]
+    hill = (yy >= 720-120*np.exp(-((xx-80)/90.)**2)) & (xx < 300)
+    noise = np.random.default_rng(4).integers(0, 255, (H, W, 3), dtype=np.uint8)
+    rgb[hill] = noise[hill]
+    edge = _piece(0, 640, 200, 80, H, W, hill[640:720, 0:200])
+    assert segment.complete_pictures([edge], header, segment.gradient(rgb), H, W) == []
+
+
+def test_three_levels_lift_to_a_repaired_layer_beneath():
+    """Card, header on the card, icon on the header: each layer is repaired where the
+    level above it sits, so moving the header shows the card and not a second header."""
+    rgb = page()
+    H, W = rgb.shape[:2]
+    rng = np.random.default_rng(3)
+    rgb[40:240, 60:300] = rng.integers(60, 200, (200, 240, 3), dtype=np.uint8)
+    rgb[60:90, 80:240] = (20, 90, 200)
+    icon = np.zeros((H, W), np.uint8)
+    cv2.circle(icon, (100, 75), 8, 1, -1)
+    rgb[icon > 0] = (230, 40, 40)
+    card = np.zeros((H, W), bool); card[40:240, 60:300] = True
+    header = np.zeros((H, W), bool); header[60:90, 80:240] = True
+    detector = {'id': '', 'kind': 'raster', 'source': 'textmask_icon', 'alpha': 'mask', 'absorbed': 0,
+                'mask': icon > 0, 'bbox': segment._bbox(icon > 0), 'area': int(icon.sum())}
+    empty = np.zeros((H, W), bool)
+    elements, _ = segment.classify(rgb, [(card, {'source': 'sam2'}), (header, {'source': 'sam2'})],
+                                   text_mask=empty, icon_mask=empty)
+    elements, erase = segment.blockify(elements+[detector], W, H, grad=segment.gradient(rgb))
+    level = lambda pred: {e['level'] for e in elements if pred(e)}
+    assert level(lambda e: e.get('role') == 'block') == {0}
+    assert level(lambda e: e['kind'] == 'native_shape') == {1}
+    assert 2 in level(lambda e: e.get('role') == 'icon')
+    assert erase[card].all()
+    beneath_header, _ = inpaint.inpaint(rgb, segment.layer_erase(elements, 0, H, W), None)
+    assert np.abs(beneath_header[75, 200].astype(int)-(20, 90, 200)).sum() > 60
+    beneath_icon, _ = inpaint.inpaint(rgb, segment.layer_erase(elements, 1, H, W), None)
+    assert np.abs(beneath_icon[75, 100].astype(int)-(20, 90, 200)).sum() < 30
+    assert (beneath_icon[100:230, 70:290] == rgb[100:230, 70:290]).all()
+
+
+def test_duplicate_under_objects_flags_unrepaired_layers(tmp_path):
+    rng = np.random.default_rng(5)
+    under = np.full((100, 100, 3), 240, np.uint8)
+    under[20:60, 20:60] = rng.integers(0, 255, (40, 40, 3), dtype=np.uint8)
+    Image.fromarray(under).save(tmp_path/'background.png')
+    repaired = np.full((100, 100, 3), 240, np.uint8)
+    Image.fromarray(repaired).save(tmp_path/'repaired.png')
+    faded = (240+(under.astype(float)-240)*.5).astype(np.uint8)
+    Image.fromarray(faded).save(tmp_path/'faded.png')
+    rgba = np.dstack([under[20:60, 20:60], np.full((40, 40), 255, np.uint8)])
+    (tmp_path/'assets').mkdir()
+    Image.fromarray(rgba, 'RGBA').save(tmp_path/'assets/a.png')
+    flat = np.dstack([np.full((40, 40, 3), 240, np.uint8), np.full((40, 40), 255, np.uint8)])
+    Image.fromarray(flat, 'RGBA').save(tmp_path/'assets/f.png')
+    element = lambda i, asset, beneath: {'id': i, 'kind': 'raster', 'bbox': [20, 20, 40, 40],
+                                         'asset': asset, 'beneath': beneath}
+    perception = {'elements': [element('dup', 'assets/a.png', 'background.png'),
+                               element('ok', 'assets/a.png', 'repaired.png'),
+                               element('faded', 'assets/a.png', 'faded.png'),
+                               element('flat', 'assets/f.png', 'repaired.png')]}
+    assert [d['id'] for d in qa.duplicate_under_objects(tmp_path, perception)] == ['dup', 'faded']
 
 
 def test_filled_picture_edge_is_hard():

@@ -20,11 +20,12 @@ from PIL import Image
 
 from . import inpaint as repair
 from .segment import (ICON_MAX, blockify, classify, circle_candidates, contrast_candidates,
-                      cutout, flat_region_candidates, icon_erase, icon_fallbacks)
+                      cutout, flat_region_candidates, gradient, icon_fallbacks, layer_erase)
 from .tables import detect_tables, fill_cells
 from .textmask import analyze_line, analyze_page, split_wide_gaps
 
 OCR_MIN_SCORE = .5
+SMALL_HOLE = 64
 SCHEMA = 'LayeredPerception/1'
 
 
@@ -144,12 +145,20 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
     small = [e for e in elements if e['kind'] == 'raster' and max(e['bbox'][2:]) <= ICON_MAX*W]
     elements += icon_fallbacks(notext, icons, small)
     elements = [e for e in elements if not _overlaps(e['bbox'], table_mask, .5)]
-    elements, erase = blockify(elements, W, H)
+    pieces = elements
+    elements, erase = blockify(elements, W, H, grad=gradient(notext))
     timings['segment'] = time.time()-clock; clock = time.time()
-    under_icons = icon_erase(elements)
-    panels = repair.inpaint(notext, under_icons, model)[0] if under_icons is not None else notext
-    timings['inpaint_icons'] = time.time()-clock; clock = time.time()
-    background, bg_method = repair.inpaint(notext, erase | table_mask, model)
+    # Layer k is the page with every object above level k repaired: a level-k
+    # raster is cropped from it, and it is what shows when a level-k+1 object moves.
+    top = max((e['level'] for e in elements), default=0)
+    raster_levels = {e['level'] for e in elements if e['kind'] == 'raster'}
+    layers = {}
+    for k in range(top+1):
+        if k in raster_levels or k+1 in raster_levels:
+            above = layer_erase(elements, k, H, W)
+            layers[k] = repair.inpaint(notext, above, model, small_smooth=SMALL_HOLE)[0] if above.any() else notext
+    timings['inpaint_layers'] = time.time()-clock; clock = time.time()
+    background, bg_method = repair.inpaint(notext, erase | table_mask, model, small_smooth=SMALL_HOLE)
     timings['inpaint_elements'] = time.time()-clock; clock = time.time()
     # Residual OCR: text the first pass missed is recovered once; ghosts are reported.
     recovered = []
@@ -174,6 +183,11 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
     _save_mask(out/'masks/text.png', text_mask)
     _save_mask(out/'masks/icon.png', icon_mask)
     _save_mask(out/'masks/erase.png', erase | table_mask)
+    np.savez_compressed(out/'masks/pieces.npz', masks=np.stack([p['mask'] for p in pieces]) if pieces else np.zeros((0, H, W), bool),
+                        meta=json.dumps([{k: v for k, v in p.items() if k != 'mask'} for p in pieces], default=str))
+    (out/'layers').mkdir()
+    for k, layer in layers.items():
+        Image.fromarray(layer).save(out/f'layers/level-{k}.png')
     overlay = rgb.copy()
     public = []
     for e in elements:
@@ -181,7 +195,8 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
         cv2.rectangle(overlay, (x, y), (x+w-1, y+h-1), (230, 30, 30) if e['kind'] == 'native_shape' else (20, 160, 40), 1)
         if e['kind'] == 'raster':
             path = f'assets/{e["id"]}.png'
-            Image.fromarray(cutout(panels if e.get('role') == 'block' else notext, e), 'RGBA').save(out/path)
+            Image.fromarray(cutout(layers[e['level']], e), 'RGBA').save(out/path)
+            e['beneath'] = f'layers/level-{e["level"]-1}.png' if e['level'] else 'background.png'
         item = {k: v for k, v in e.items() if k != 'mask'}
         if e['kind'] == 'raster':
             item.update(asset=path, asset_sha256=_sha(out/path))
@@ -206,6 +221,7 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
                          'rasters': sum(e['kind'] == 'raster' for e in public),
                          'blocks': sum(e.get('role') == 'block' for e in public),
                          'icons': sum(e.get('role') == 'icon' for e in public), 'tables': len(tables),
+                         'levels': top+1,
                          'erased_fraction': round(float((erase | table_mask).mean()), 4)},
               'timings_s': {k: round(v, 3) for k, v in timings.items()}}
     result['files'] = {p.relative_to(out).as_posix(): _sha(p) for p in sorted(out.rglob('*')) if p.is_file()}

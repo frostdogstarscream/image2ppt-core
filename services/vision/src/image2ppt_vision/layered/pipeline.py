@@ -87,7 +87,11 @@ def build_page(name, perception_dir, page_dir, *, project_root, remote=None, mod
     result.update(pptx=str(Path(built['pptx']).relative_to(page_dir)), preview=str(Path(built['preview']).relative_to(page_dir)),
                   pptx_sha256=digest(built['pptx']))
     result['metrics'] = qa.measure(perception_dir/'source.png', built['preview'], ir, directory=page_dir)
-    result['status'] = 'FAILED' if violations or uncovered else 'REVIEW_REQUIRED'
+    duplicates = qa.duplicate_under_objects(perception_dir, perception)
+    result['duplicates_under_objects'] = duplicates
+    qa.lift_probe(perception_dir, perception, page_dir/'lift-probe.png')
+    result['lift_probe'] = 'lift-probe.png'
+    result['status'] = 'FAILED' if violations or uncovered or duplicates else 'REVIEW_REQUIRED'
     return result
 
 

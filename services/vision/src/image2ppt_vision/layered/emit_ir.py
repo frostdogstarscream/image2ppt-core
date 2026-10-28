@@ -80,9 +80,8 @@ def emit(perception_dir, perception, styles, paragraphs, output, *, notes=(), so
     retained = [i for i in ocr if i not in native_ids and i not in table_ids and i not in source_crops]+icon_parts
     nodes, assets, z = [], [], 0
     claimed = set()
-    # Shapes, then blocks, then icons: a later card must not paint over an icon
-    # that an earlier card already lifted out, and a panel must not hide its icons.
-    rank = lambda e: 0 if e['kind'] == 'native_shape' else 1 if e.get('role') == 'block' else 2
+    # Containers before what they contain; at one level, larger objects first.
+    rank = lambda e: (e.get('level', 0), -e['bbox'][2]*e['bbox'][3])
     ordered = sorted(perception['elements'], key=rank)
     for element in ordered:
         eid = element['id']

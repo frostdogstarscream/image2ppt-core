@@ -10,9 +10,9 @@ top-down by area as:
   and photos; it absorbs every candidate nested inside it;
 * nothing -- large irregular or textured areas stay in the repaired background.
 
-``blockify`` then regroups the rasters: touching texture rasters become one
-rectangular ``block`` whose alpha is a rect or roundRect, and small or
-detector-found rasters stay separate ``icon`` cutouts above the blocks.
+``blockify`` then regroups the rasters into whole visual objects: pieces of
+one object become one raster with a hard outline, icons stay separate, and
+every element gets a containment ``level``.
 """
 import math
 
@@ -33,8 +33,22 @@ ICON_SOURCES = ('textmask_icon', 'contrast_component', 'shape_residual')
 BLOCK_GAP = 6
 BLOCK_MAX_AREA = .45
 BLOCK_MIN_DENSITY = .6
-BLOCK_FILL = .7
-BLOCK_NESTED = .9
+SEAM_CALM = 18.
+SEAM_SHARE = .2
+OBJECT_SMOOTH = 5
+OUTLINE_SNAP = .9
+NEST_SHARE = .9
+ICON_MARGIN = 5
+OBJECT_RIM = 3
+RECT_SNAP = .97
+SPECK = .05
+PICTURE_FRAME = .03
+PICTURE_GROWTH = 2.
+PICTURE_SOLID = .95
+SLIVER = 3
+STRIP = 12
+PICTURE_MAX_GROWTH = 4.
+PICTURE_IOU = .85
 
 
 def _hex(rgb):
@@ -164,16 +178,20 @@ def contrast_candidates(rgb, exclude, *, max_side=120, kernel=61, threshold=26.)
     return out
 
 
+def gradient(rgb):
+    blur = cv2.GaussianBlur(rgb, (3, 3), 0)
+    gx = cv2.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)
+    return np.sqrt((gx**2).sum(2)+(gy**2).sum(2))
+
+
 def flat_region_candidates(rgb, *, grad_max=16., min_side=18, min_area=450):
     """Filled cards, ribbons and bars whose interior is flat enough to be a preset shape.
 
     SAM often returns the photo or the icon instead of the card. Low-gradient
     connected regions, with holes closed, are the card silhouettes.
     """
-    blur = cv2.GaussianBlur(rgb, (3, 3), 0)
-    gx = cv2.Sobel(blur, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)
-    mag = np.sqrt((gx**2).sum(2)+(gy**2).sum(2))
+    mag = gradient(rgb)
     edge = cv2.dilate((mag > grad_max).astype(np.uint8), np.ones((3, 3), np.uint8))
     n, labels, stats, _ = cv2.connectedComponentsWithStats((edge == 0).astype(np.uint8), 4)
     H, W = rgb.shape[:2]
@@ -319,11 +337,14 @@ def _predict(fill, xs, ys, bbox):
     return c0[None]+np.clip(t, 0, 1)[:, None]*(c1-c0)[None]
 
 
-def residual_blobs(rgb, region, fill, bbox, *, threshold=38., min_area=25, badge=10., badge_growth=4.):
+def residual_blobs(rgb, region, fill, bbox, *, extent=None, threshold=38., min_area=25, badge=10.,
+                   badge_growth=4.):
     """Off-fill blobs inside a native shape that no candidate described.
 
     A blob grows into the faint badge around it (a pale disc behind a glyph), so
     the icon is lifted whole instead of leaving its badge under the shape fill.
+    Blobs are found in ``region`` and may grow over all of ``extent``: a badge at
+    the shape's edge is not cut where the search region was eroded.
     """
     ys, xs = np.where(region)
     if not len(xs):
@@ -332,6 +353,9 @@ def residual_blobs(rgb, region, fill, bbox, *, threshold=38., min_area=25, badge
     off = np.zeros(region.shape, np.uint8)
     off[ys[deviation > threshold], xs[deviation > threshold]] = 1
     off = cv2.morphologyEx(off, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    if extent is not None:
+        ys, xs = np.where(extent | region)
+        deviation = np.abs(rgb[ys, xs].astype(float)-_predict(fill, xs, ys, bbox)).max(1)
     soft = np.zeros(region.shape, np.uint8)
     soft[ys[deviation > badge], xs[deviation > badge]] = 1
     H, W = region.shape
@@ -503,7 +527,8 @@ def classify(rgb, sam_masks, *, text_mask, icon_mask, extra=()):
         absorbed.update(other_children)
         if c['thin']:
             return
-        for blob in residual_blobs(rgb, inner, fill, c['bbox']):
+        extent = mask & ~protect & ~shape_union & (cv2.erode(mask.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
+        for blob in residual_blobs(rgb, inner, fill, c['bbox'], extent=extent):
             add_raster(blob, {'source': 'shape_residual', 'parent': record['id']})
 
     for index, c in enumerate(cands):
@@ -584,14 +609,75 @@ def _union(a, b):
     return [x0, y0, x1-x0, y1-y0]
 
 
-def merge_blocks(members, W, H, *, gap=BLOCK_GAP, max_area=BLOCK_MAX_AREA, fill=BLOCK_FILL):
-    """Group texture rasters whose boxes touch into rectangles: [(box, members)].
+def _ring(mask):
+    return mask & ~(cv2.erode(mask.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
 
-    Two groups merge if their pixels fill ``fill`` of the merged rectangle, if half
-    of the smaller one's pixels are also the larger one's, or if the smaller box
-    lies almost entirely inside the larger (sky and buildings of one photo). A wide
-    band touching a row of separate cards does none of these.
+
+def same_object(ma, mb, grad):
+    """Whether two touching pieces (same-size local crops) are one visual object.
+
+    One colour block that SAM cut in two has no edge along the cut: where each
+    piece's boundary runs on or beside the other piece, the pixels are calm. Two
+    chevrons side by side are separated by a gap or a real edge, and a header bar
+    overlapping a card has the card's colour change along its own boundary. A
+    photo cut into sky and buildings does have an edge there, so pieces also
+    join when one is textured and they share a long boundary that follows the
+    content. Designed objects (a header on its photo, a band over a picture)
+    meet along a straight line instead.
     """
+    if float((ma & mb).sum()) >= .5*min(int(ma.sum()), int(mb.sum())):
+        return True
+    near = np.ones((5, 5), np.uint8)
+    da, db = cv2.dilate(ma.astype(np.uint8), near) > 0, cv2.dilate(mb.astype(np.uint8), near) > 0
+    sides = [s for s in (_ring(ma) & db, _ring(mb) & da) if int(s.sum()) >= 4]
+    if not sides:
+        return False
+    if all(float(np.median(grad[s])) <= SEAM_CALM for s in sides):
+        return True
+    textured = lambda m: float((grad[m] <= SEAM_CALM).mean()) < .5
+    if not (textured(ma) or textured(mb)):
+        return False
+    small, other = (ma, db) if ma.sum() <= mb.sum() else (mb, da)
+    ring = _ring(small)
+    shared = ring & other
+    if float(shared.sum()) < SEAM_SHARE*max(int(ring.sum()), 1):
+        return False
+    return not _straight(shared)
+
+
+def _straight(seam, width=5, share=.8):
+    """Whether most of a seam lies along one row band or one column band."""
+    ys, xs = np.nonzero(seam)
+    if not len(ys):
+        return True
+    for coord in (ys, xs):
+        counts = np.bincount(coord-coord.min())
+        window = np.convolve(counts, np.ones(width), 'valid') if len(counts) >= width else [counts.sum()]
+        if float(np.max(window)) >= share*len(coord):
+            return True
+    return False
+
+
+def drop_specks(pieces):
+    """SAM masks carry stray specks far from the object; they stretch the box
+    over the neighbours. Parts under SPECK of the mask are dropped."""
+    out = []
+    for m in pieces:
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(m['mask'].astype(np.uint8), connectivity=8)
+        keep = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= SPECK*m['area']]
+        if n-1 == len(keep):
+            out.append(m)
+            continue
+        mask = np.isin(labels, keep)
+        if mask.any():
+            out.append({**m, 'mask': mask, 'bbox': _bbox(mask), 'area': int(mask.sum())})
+    return out
+
+
+def merge_blocks(members, W, H, *, grad=None, gap=BLOCK_GAP, max_area=BLOCK_MAX_AREA):
+    """Group texture rasters into visual objects: [(box, members)]. See ``same_object``."""
+    if grad is None:
+        grad = np.zeros((H, W), np.float32)
     groups = [(list(m['bbox']), [m], m['mask'].copy()) for m in sorted(members, key=lambda m: -m['area'])]
     merged = True
     while merged:
@@ -605,20 +691,40 @@ def merge_blocks(members, W, H, *, gap=BLOCK_GAP, max_area=BLOCK_MAX_AREA, fill=
                     continue
                 x, y, w, h = box
                 ma, mb = groups[i][2][y:y+h, x:x+w], groups[j][2][y:y+h, x:x+w]
-                union = groups[i][2] | groups[j][2]
-                a, b = groups[i][0], groups[j][0]
-                small, large = (a, b) if a[2]*a[3] <= b[2]*b[3] else (b, a)
-                overlapping = (float((ma & mb).sum()) >= .5*min(int(ma.sum()), int(mb.sum()))
-                               or _contains(large, small, BLOCK_NESTED))
-                if not overlapping and float((ma | mb).sum()) < fill*w*h:
+                if not same_object(ma, mb, grad[y:y+h, x:x+w]):
                     continue
-                groups[i] = (box, groups[i][1]+groups[j][1], union)
+                groups[i] = (box, groups[i][1]+groups[j][1], groups[i][2] | groups[j][2])
                 del groups[j]
                 merged = True
                 break
             if merged:
                 break
     return [(box, items) for box, items, _ in groups]
+
+
+def object_outline(local):
+    """Hard silhouette of one object: holes filled, texture wiggles smoothed, and
+    snapped to a preset when one fits. Returns (outline, geometry_fit)."""
+    filled = fill_holes(local)
+    k = np.ones((OBJECT_SMOOTH, OBJECT_SMOOTH), np.uint8)
+    smooth = cv2.morphologyEx(filled.astype(np.uint8), cv2.MORPH_CLOSE, k)
+    smooth = cv2.morphologyEx(smooth, cv2.MORPH_OPEN, k) > 0
+    if not smooth.any():
+        smooth = filled
+    fit = fit_geometry(smooth)
+    h, w = local.shape
+    if fit['iou'] >= OUTLINE_SNAP:
+        if fit['geometry'] == 'rect' and fit['iou'] >= RECT_SNAP:
+            return np.ones((h, w), bool), fit
+        if fit['geometry'] == 'roundRect':
+            return _rounded(w, h, fit['corner_radius_px']), fit
+        if fit['geometry'] == 'chevron':
+            return _chevron(w, h, fit['corner_radius_px']), fit
+        if fit['geometry'] == 'ellipse':
+            e = np.zeros((h, w), np.uint8)
+            cv2.ellipse(e, (((w-1)/2, (h-1)/2), (float(w), float(h)), 0.), 1, -1)
+            return e > 0, fit
+    return fill_holes(smooth), fit
 
 
 def _contains(outer, box, share=.9):
@@ -628,64 +734,219 @@ def _contains(outer, box, share=.9):
     return inter >= share*box[2]*box[3]
 
 
-def blockify(elements, W, H):
-    """Texture rasters become rectangular blocks; icons stay separate cutouts.
+def complete_pictures(objects, others, grad, H, W):
+    """Grow a textured object over the rest of its picture.
 
-    A block's alpha is its fitted rect or roundRect, never the texture outline. A
-    native shape or a non-detector icon lying inside a block is part of its pixels.
-    Returns (elements, erase). Erase covers kept shapes and dilated icons only: a
-    block is a crop of the base, and the base keeps its original pixels under it.
+    SAM often returns the buildings of a photo and not its sky. The picture is
+    everything enclosed by large calm surfaces (the card body, the page) and by
+    the other objects (its header); it is taken only when that region is a
+    rectangle or rounded rectangle not much larger than the piece's box.
+    Objects that stay partial and run off the page are dropped: they are page
+    decoration and stay in the background.
+    """
+    calm = (grad <= SEAM_CALM).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(calm, connectivity=4)
+    large = np.zeros(n, bool)
+    large[1:] = stats[1:, cv2.CC_STAT_AREA] >= PICTURE_FRAME*H*W
+    blocked = cv2.dilate(others.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+    open_ = ~large[labels] & ~blocked
+    # Shadows and borders between two cards are thin lines that would join their pictures.
+    open_ = cv2.morphologyEx(open_.astype(np.uint8), cv2.MORPH_OPEN, np.ones((7, 7), np.uint8)) > 0
+    for o in objects:
+        if float((grad[o['mask']] <= SEAM_CALM).mean()) >= .5:
+            continue
+        seed = o['mask'] & open_
+        if not seed.any():
+            o['completion'] = 'no open pixels'
+            continue
+        x, y, w, h = o['bbox']
+        gx, gy = int(w*PICTURE_GROWTH), int(h*PICTURE_GROWTH)
+        x0, y0, x1, y1 = max(0, x-gx), max(0, y-gy), min(W, x+w+gx), min(H, y+h+gy)
+        # Other textured objects bound the picture too, except pieces lying
+        # mostly inside it (the sky and buildings of one photo).
+        apart, pieces = np.zeros((y1-y0, x1-x0), np.uint8), []
+        for k in objects:
+            if k is not o and not _contains(o['bbox'], k['bbox'], .5):
+                local_k = k['mask'][y0:y1, x0:x1]
+                apart |= local_k.astype(np.uint8)
+                if float((grad[k['mask']] <= SEAM_CALM).mean()) < .5:
+                    pieces.append(local_k)
+        apart = cv2.dilate(apart, np.ones((5, 5), np.uint8)) > 0
+        window = ((open_[y0:y1, x0:x1] & ~apart) | o['mask'][y0:y1, x0:x1]).astype(np.uint8)
+        _, comp = cv2.connectedComponents(window, connectivity=4)
+        ids = np.unique(comp[seed[y0:y1, x0:x1]])
+        grown = np.isin(comp, ids[ids > 0]) | o['mask'][y0:y1, x0:x1]
+        # Textured pieces it touches may be more of the same picture: try with them first.
+        reach = cv2.dilate(grown.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
+        touching = [p for p in pieces if (p & reach).any()]
+        attempts = [grown | np.logical_or.reduce(touching)] if touching else []
+        reason = 'empty region'
+        for attempt in attempts+[grown]:
+            region = fill_holes(attempt) & ~others[y0:y1, x0:x1]
+            region = cv2.morphologyEx(region.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8)) > 0
+            if not region.any():
+                continue
+            bx, by, bw, bh = _bbox(region)
+            if bx == 0 and x0 > 0 or by == 0 and y0 > 0 or bx+bw == x1-x0 and x1 < W or by+bh == y1-y0 and y1 < H:
+                reason = f'leaks out of {[x0, y0, x1-x0, y1-y0]}'
+                continue
+            # A shape lying on the picture (a disc on a badge) bites into the
+            # grown region; the picture still runs underneath it.
+            n, labels, stats, _ = cv2.connectedComponentsWithStats(others[y0:y1, x0:x1].astype(np.uint8), connectivity=8)
+            for i in range(1, n):
+                sx, sy, sw, sh, area = stats[i]
+                if (area < .25*region.sum() and sx >= bx-2 and sy >= by-2 and
+                        sx+sw <= bx+bw+2 and sy+sh <= by+bh+2):
+                    region |= labels == i
+            local = region[by:by+bh, bx:bx+bw]
+            if int(local.sum()) > PICTURE_MAX_GROWTH*w*h or bw*bh > BLOCK_MAX_AREA*H*W:
+                reason = f'too large {[x0+bx, y0+by, bw, bh]}'
+                continue
+            raw = fit_geometry(local)
+            boxy = raw['geometry'] in ('rect', 'roundRect') and raw['iou'] >= PICTURE_IOU
+            if not boxy and _solidity(local) < PICTURE_SOLID:
+                reason = f'not a picture {[x0+bx, y0+by, bw, bh]} {raw["geometry"]} {raw["iou"]}'
+                continue
+            reason = None
+            break
+        if reason:
+            o['completion'] = reason
+            continue
+        outline, fit = object_outline(local)
+        mask = np.zeros((H, W), bool)
+        mask[y0+by:y0+by+bh, x0+bx:x0+bx+bw] = outline
+        o.update(mask=mask, bbox=[x0+bx, y0+by, bw, bh], area=int(outline.sum()),
+                 geometry=fit['geometry'] if fit['iou'] >= OUTLINE_SNAP and not (fit['geometry'] == 'rect' and not outline.all()) else 'outline',
+                 geometry_iou=fit['iou'], completed=True, alpha='rect' if outline.all() else 'mask')
+        if fit['geometry'] == 'roundRect':
+            o['corner_radius_px'] = fit['corner_radius_px']
+    kept = []
+    for o in sorted(objects, key=lambda o: -o['area']):
+        if any(_near(k['bbox'], o['bbox'], 0) and _inside_share(o, k) >= .5 for k in kept if k.get('completed')):
+            continue
+        x, y, w, h = o['bbox']
+        # Part of a picture running off the page (a skyline, a wave) is page
+        # decoration: lifting the part would leave the rest behind. So is a
+        # strip a few pixels thick cut from a band.
+        if not o.get('completed') and (x <= 1 or y <= 1 or x+w >= W-1 or y+h >= H-1 or min(w, h) <= STRIP):
+            continue
+        kept.append(o)
+    return kept
+
+
+def _hull(local):
+    out = np.zeros(local.shape, np.uint8)
+    contours, _ = cv2.findContours(local.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+        cv2.fillPoly(out, [cv2.convexHull(np.vstack(contours))], 1)
+    return out > 0
+
+
+def _solidity(local):
+    """Area over convex-hull area: a tab or badge is near 1, a leak into the
+    page around other objects is not."""
+    return float(local.sum())/max(int((_hull(local) | local).sum()), 1)
+
+
+def _inside_share(a, b):
+    """Share of mask ``a`` covered by mask ``b`` (full-page masks with bboxes)."""
+    box = _union(a['bbox'], b['bbox'])
+    x, y, w, h = box
+    ma, mb = a['mask'][y:y+h, x:x+w], b['mask'][y:y+h, x:x+w]
+    return float((ma & mb).sum())/max(int(ma.sum()), 1)
+
+
+def assign_levels(objects):
+    """Nesting depth: an object with most of its outline inside another sits one
+    level above the smallest such container. Sets ``level`` and ``parent``."""
+    order = sorted(objects, key=lambda e: -int(e['mask'].sum()))
+    for i, e in enumerate(order):
+        parent = None
+        for c in reversed(order[:i]):
+            if _near(c['bbox'], e['bbox'], 0) and _inside_share(e, c) >= NEST_SHARE:
+                parent = c
+                break
+        e['level'] = parent['level']+1 if parent else 0
+        e['parent'] = parent['id'] if parent and 'id' in parent else None
+    return objects
+
+
+def blockify(elements, W, H, grad=None):
+    """Regroup rasters into whole visual objects stacked by containment.
+
+    Touching texture pieces that are one object (``same_object``) become one
+    raster whose alpha is the object's hard outline. Icons stay separate with a
+    small margin. Native shapes and icons inside an object are kept above it.
+    A small non-detector raster inside an object is part of the object's pixels.
+    Returns (elements, erase): erase covers the level-0 outlines; everything above
+    lies inside them.
     """
     icons, texture = split_icons(elements, W)
-    blocks = []
-    for box, items in merge_blocks(texture, W, H):
+    texture = drop_specks(texture)
+    objects = []
+    for box, items in merge_blocks(texture, W, H, grad=grad):
         x, y, w, h = box
-        union = np.zeros((H, W), bool)
+        union = np.zeros((h, w), bool)
         for item in items:
-            union |= item['mask']
-        fit = fit_geometry(fill_holes(union[y:y+h, x:x+w]))
+            union |= item['mask'][y:y+h, x:x+w]
+        outline, fit = object_outline(union)
         mask = np.zeros((H, W), bool)
-        record = {'kind': 'raster', 'role': 'block', 'source': 'block', 'bbox': box, 'area': int(w*h),
-                  'members': len(items), 'absorbed': sum(i.get('absorbed', 0) for i in items)+len(items)-1}
-        if fit['geometry'] == 'roundRect' and fit['iou'] >= .9:
-            mask[y:y+h, x:x+w] = _rounded(w, h, fit['corner_radius_px'])
-            record.update(geometry='roundRect', corner_radius_px=fit['corner_radius_px'], alpha='mask')
-        else:
-            mask[y:y+h, x:x+w] = True
-            record.update(geometry='rect', alpha='rect')
-        record['mask'] = mask
-        blocks.append(record)
-    inside = lambda e: any(_contains(b['bbox'], e['bbox']) for b in blocks)
+        mask[y:y+h, x:x+w] = outline
+        record = {'kind': 'raster', 'role': 'block', 'source': 'block', 'bbox': box, 'area': int(outline.sum()),
+                  'members': len(items), 'absorbed': sum(i.get('absorbed', 0) for i in items)+len(items)-1,
+                  'geometry': fit['geometry'] if fit['iou'] >= OUTLINE_SNAP and not (fit['geometry'] == 'rect' and not outline.all()) else 'outline',
+                  'geometry_iou': fit['iou'], 'alpha': 'rect' if outline.all() else 'mask', 'mask': mask}
+        if record['geometry'] in ('roundRect', 'chevron'):
+            record['corner_radius_px'] = fit['corner_radius_px']
+        objects.append(record)
+    shapes = [e for e in elements if e['kind'] == 'native_shape']
+    for e in shapes:
+        e['mask'] = fill_holes(e['mask'])
+    if grad is not None:
+        others = np.zeros((H, W), bool)
+        for e in shapes:
+            others |= e['mask']
+        for o in objects:
+            if float((grad[o['mask']] <= SEAM_CALM).mean()) >= .5:
+                others |= o['mask']
+        objects = complete_pictures(objects, others, grad, H, W)
+    margin = np.ones((ICON_MARGIN, ICON_MARGIN), np.uint8)
     kept_icons = []
     for e in icons:
-        if inside(e) and e.get('source') not in ICON_SOURCES:
+        inside = any(_near(o['bbox'], e['bbox'], 0) and _inside_share(e, o) >= NEST_SHARE for o in objects)
+        if inside and e.get('source') not in ICON_SOURCES:
             continue
+        # A sliver along the rim of a disc in a lifted picture is part of the
+        # picture: lifted alone it leaves the disc behind.
+        iw, ih = e['bbox'][2:]
+        if inside and max(iw, ih) > SLIVER*min(iw, ih):
+            continue
+        # Holes are where native text sits on the icon; the icon still owns them.
+        e['mask'] = fill_holes(cv2.dilate(e['mask'].astype(np.uint8), margin) > 0)
+        e['bbox'], e['area'] = _bbox(e['mask']), int(e['mask'].sum())
+        e['alpha'] = 'mask'
         e['role'] = 'icon'
         kept_icons.append(e)
-    shapes = [e for e in elements if e['kind'] == 'native_shape' and not inside(e)]
-    out = shapes+blocks+kept_icons
+    # A glyph piece inside an icon disc is part of that icon: lifted alone it
+    # leaves the rest of the glyph behind on the disc.
+    kept_icons.sort(key=lambda e: -e['area'])
+    kept_icons = [e for k, e in enumerate(kept_icons)
+                  if not any(_inside_share(e, outer) >= NEST_SHARE for outer in kept_icons[:k])]
+    out = shapes+objects+kept_icons
     for k, e in enumerate(out):
         e['id'] = f'el-{k:03d}'
+    assign_levels(out)
+    return out, layer_erase(out, -1, H, W)
+
+
+def layer_erase(elements, level, H, W):
+    """Union of the outlines above ``level``, plus the anti-aliased rim just outside
+    them: what is repaired in that layer."""
     erase = np.zeros((H, W), bool)
-    for e in shapes:
-        erase |= e['mask']
-    for e in kept_icons:
-        erase |= cv2.dilate(e['mask'].astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
-    return out, erase
-
-
-def icon_erase(elements):
-    """Dilated icon masks that fall inside a block: the block is cropped with them repaired."""
-    blocks = [e['mask'] for e in elements if e.get('role') == 'block']
-    if not blocks:
-        return None
-    within = np.logical_or.reduce(blocks)
-    erase = np.zeros_like(within)
     for e in elements:
-        if e.get('role') == 'icon':
-            erase |= cv2.dilate(e['mask'].astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
-    erase &= within
-    return erase if erase.any() else None
+        if e.get('level', 0) > level:
+            erase |= e['mask']
+    return cv2.dilate(erase.astype(np.uint8), np.ones((OBJECT_RIM, OBJECT_RIM), np.uint8)) > 0
 
 
 def harden(crop, mask):

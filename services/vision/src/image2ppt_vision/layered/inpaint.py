@@ -18,8 +18,9 @@ def lama(rgb, mask, model):
     import torch
     net, device = model
     h, w = mask.shape
-    image = _pad8(rgb).astype(np.float32)/255.
     hole = _pad8(mask.astype(np.float32))
+    # The hole must carry no trace of what was there, or the object comes back faded.
+    image = _pad8(rgb).astype(np.float32)/255.*(1.-hole[..., None])
     with torch.inference_mode():
         a = torch.from_numpy(image.transpose(2, 0, 1)).unsqueeze(0).to(device)
         b = torch.from_numpy((hole > 0).astype(np.float32)).unsqueeze(0).unsqueeze(0).to(device)
@@ -52,8 +53,75 @@ def _regions(mask, margin):
     return boxes
 
 
-def inpaint(rgb, mask, model=None, *, margin=48):
-    """Return (repaired RGB, method). ``mask`` is bool HxW; True means remove."""
+def pull_push(values, hole):
+    """Smooth membrane fill of ``hole`` from the known pixels only (HxW or HxWxC)."""
+    img = values.astype(np.float32)
+    flat = img.ndim == 2
+    if flat:
+        img = img[..., None]
+    known = (~hole).astype(np.float32)
+    stack = []
+    while min(img.shape[:2]) > 2 and (known == 0).any():
+        stack.append((img, known))
+        size = ((img.shape[1]+1)//2, (img.shape[0]+1)//2)
+        den = cv2.resize(known, size, interpolation=cv2.INTER_AREA)
+        num = cv2.resize(img*known[..., None], size, interpolation=cv2.INTER_AREA).reshape(size[1], size[0], -1)
+        img = num/np.maximum(den, 1e-6)[..., None]
+        known = (den > 1e-6).astype(np.float32)
+    for fine, fine_known in reversed(stack):
+        up = cv2.resize(img, (fine.shape[1], fine.shape[0]), interpolation=cv2.INTER_LINEAR).reshape(fine.shape)
+        img = np.where(fine_known[..., None] > 0, fine, up)
+    return img[..., 0] if flat else img
+
+
+def calm_holes(rgb, mask, *, calm_grad=18., share=.8, skip=11):
+    """Hole pixels whose surroundings are plain or a smooth gradient. LaMa
+    invents structure in a large hole even there (a second header, a ghost
+    card); a smooth fill from the surroundings cannot. Calmness of the known
+    pixels is spread into the hole, so one hole can be smooth in one part and
+    textured in another. The removed object's own shadow and border, just
+    outside the hole, are not its surroundings and are skipped."""
+    from .segment import gradient
+    calm = (gradient(rgb) <= calm_grad).astype(np.float32)
+    far = cv2.dilate(mask.astype(np.uint8), np.ones((skip, skip), np.uint8)) > 0
+    return mask & (pull_push(calm, far) >= share)
+
+
+def smooth_fill(rgb, mask, smooth, result, *, pad=32, outlier=40., large=80):
+    """Fill each calm hole from the surface it lies on. A large hole (a chart
+    panel ending under a navy title bar) also borders a second colour, and
+    blending both smears it in; there only known pixels near the dominant
+    colour of a window around the hole are used, and the object's own shadow
+    and border, just outside the hole, do not vote. A small hole (a text
+    stroke, an icon) takes its nearest pixels: its window is mostly the
+    page around the bar or tab it sits on."""
+    from .segment import fill_holes
+    H, W = mask.shape
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(smooth.astype(np.uint8), connectivity=8)
+    for i in range(1, n):
+        x, y, w, h = stats[i, :4]
+        x0, y0, x1, y1 = max(0, x-pad), max(0, y-pad), min(W, x+w+pad), min(H, y+h+pad)
+        hole = mask[y0:y1, x0:x1]
+        part = labels[y0:y1, x0:x1] == i
+        crop = rgb[y0:y1, x0:x1].astype(np.float32)
+        unknown = hole
+        if min(w, h) >= large:
+            # Islands inside the hole (under native text on the object) belong
+            # to the object, not to the surface it lies on.
+            part = fill_holes(part)
+            unknown = hole | part
+            around = ~unknown & ~(cv2.dilate(part.astype(np.uint8), np.ones((11, 11), np.uint8)) > 0)
+            if around.sum() >= 8:
+                far = np.linalg.norm(crop-np.median(crop[around], 0), axis=2) > outlier
+                if (~(unknown | far)).any():
+                    unknown = unknown | far
+        filled = np.clip(np.rint(pull_push(crop, unknown)), 0, 255).astype(np.uint8)
+        result[y0:y1, x0:x1][part] = filled[part]
+
+
+def inpaint(rgb, mask, model=None, *, margin=48, small_smooth=0):
+    """Return (repaired RGB, method). ``mask`` is bool HxW; True means remove.
+    Holes no larger than ``small_smooth`` pixels are always filled smoothly."""
     mask = mask.astype(bool)
     if not mask.any():
         return rgb.copy(), 'none'
@@ -62,6 +130,16 @@ def inpaint(rgb, mask, model=None, *, margin=48):
         filled = cv2.inpaint(rgb, mask.astype(np.uint8)*255, 5, cv2.INPAINT_TELEA)
         result[mask] = filled[mask]
         return result, 'opencv_telea'
+    smooth = calm_holes(rgb, mask)
+    if small_smooth:
+        # Under a lifted badge or icon LaMa redraws a faint copy of it from the
+        # copies nearby; a blur of the surroundings shows nothing when dragged.
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+        small = np.nonzero(np.maximum(stats[1:, cv2.CC_STAT_WIDTH], stats[1:, cv2.CC_STAT_HEIGHT]) <= small_smooth)[0]+1
+        smooth |= np.isin(labels, small)
+    if smooth.any():
+        smooth_fill(rgb, mask, smooth, result)
+        mask = mask & ~smooth
     for x0, y0, x1, y1 in _regions(mask, margin):
         window = mask[y0:y1, x0:x1]
         if not window.any():
