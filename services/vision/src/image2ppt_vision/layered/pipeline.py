@@ -2,8 +2,10 @@
 
 1. Preserve inputs; run GPU perception on the dev worker (OCR, ink masks,
    LaMa, SAM2 cutouts, tables, residual OCR).
-2. Locally: page-calibrated typography, paragraph semantics (one optional
-   text-only model call), SlideIR emission, fixed Artifact Tool compile.
+2. Locally: one optional vision call that may only demote a measured shape to a
+   picture or add a piece inside a candidate window, then page-calibrated
+   typography, paragraph semantics (one optional text-only model call), SlideIR
+   emission, fixed Artifact Tool compile.
 3. Re-OCR the rendered previews on the worker and record QA metrics.
 
 Every stage writes new files; nothing is overwritten. Results are
@@ -44,13 +46,15 @@ def validate_ir(project_root, ir_file):
     return process.returncode == 0, (process.stderr or process.stdout).strip()
 
 
-def build_page(name, perception_dir, page_dir, *, project_root, remote=None, model=None):
+def build_page(name, perception_dir, page_dir, *, project_root, remote=None, model=None, vision_model=None):
     perception = _read(perception_dir/'perception.json')
     with Image.open(perception_dir/'source.png') as image:
         rgb = np.asarray(image.convert('RGB')).copy()
     if digest(perception_dir/'source.png') != perception['source_sha256']:
         raise ValueError('perception source hash mismatch')
     page_dir.mkdir(parents=True)
+    from .review import review
+    perception, reviewed = review(perception_dir, perception, remote=remote, model=vision_model, record_dir=page_dir)
     styles, calibration = typography.measure(rgb, perception)
     table_ids = {i for t in perception['tables'] for i in t['owned_text_ids']}
     crops = doubtful_lines(perception, styles)
@@ -71,6 +75,8 @@ def build_page(name, perception_dir, page_dir, *, project_root, remote=None, mod
     result = {'page': name, 'ir_valid': ok, 'ir_message': message if not ok else '',
               'uncovered_ocr_ids': uncovered,
               'semantics': {'model_used': report['model_used'], 'issues': report['issues'], 'usage': report['usage']},
+              'review': {'model_used': reviewed['model_used'], 'issues': reviewed['issues'], 'usage': reviewed['usage'],
+                         'applied': reviewed['applied']},
               'typography': calibration, 'residual_text_violations': violations,
               'counts': {'native_text_nodes': sum(n['type'] == 'text' for n in ir['nodes']),
                          'native_text_lines': sum(len(n['evidence_ids']) for n in ir['nodes'] if n['type'] == 'text'),
@@ -115,7 +121,7 @@ def ocr_coverage_gaps(perception, ir):
     return sorted(t['id'] for t in perception['ocr'] if t['id'] not in owned)
 
 
-def run(inputs, output, *, worker_config, project_root, remote=None, model=None, job=None):
+def run(inputs, output, *, worker_config, project_root, remote=None, model=None, vision_model=None, job=None):
     job = job or 'lv3-'+uuid4().hex[:10]
     root = Path(output)/job
     (root/'input').mkdir(parents=True, exist_ok=False)
@@ -136,7 +142,7 @@ def run(inputs, output, *, worker_config, project_root, remote=None, model=None,
     for name in names:
         try:
             pages[name] = build_page(name, root/'perception'/name, root/'pages'/name, project_root=project_root,
-                                     remote=remote, model=model)
+                                     remote=remote, model=model, vision_model=vision_model)
         except Exception as error:  # recorded, the remaining pages still run
             pages[name] = {'page': name, 'status': 'FAILED', 'error': f'{type(error).__name__}: {error}'}
     previews = [root/'pages'/n/p['preview'] for n, p in pages.items() if p.get('preview')]
@@ -154,7 +160,8 @@ def run(inputs, output, *, worker_config, project_root, remote=None, model=None,
             if page.get('preview'):
                 perception = _read(root/'perception'/name/'perception.json')
                 page['metrics']['ocr_char_recall'] = qa.text_recall(perception['ocr'], rendered.get(f'{name}.png', []))
-    tokens = sum(p.get('semantics', {}).get('usage', {}).get('total_tokens', 0) for p in pages.values())
+    tokens = sum(p.get('semantics', {}).get('usage', {}).get('total_tokens', 0)
+                 + p.get('review', {}).get('usage', {}).get('total_tokens', 0) for p in pages.values())
     summary = {'schema': SCHEMA, 'job': job, 'model': model, 'worker_source_sha256': source_digest,
                'perception_seconds': round(perception_seconds, 1), 'perception_log': log.strip().splitlines()[-20:],
                'total_model_tokens': tokens, 'pages': pages, 'human_acceptance': False, 'office_acceptance': False}

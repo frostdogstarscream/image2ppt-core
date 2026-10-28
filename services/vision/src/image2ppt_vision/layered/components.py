@@ -40,6 +40,13 @@ GROW_RGB = 12.
 SQUARE_RADIUS = 2
 ICON_INK = 20
 ICON_GAP = 7
+SEE_THROUGH = .65
+SEE_THROUGH_STD = 1.5
+FRINGE = 5
+FRINGE_MARGIN = 18.
+BUSY = 28.
+PHOTO_AREA = 5000
+PHOTO_SIDE = 48
 
 
 def _geometry_ok(mask, floor):
@@ -258,6 +265,8 @@ def rebuild(rgb, objects, W, H, grad, *, text_mask, icon_mask):
 
     for c in comps:
         record = measure(rgb, c, lying_on(c), protect, calm)
+        if record and page_shows_through(rgb, record['mask']):
+            record = None
         if record:
             shapes.append(record)
         else:
@@ -271,7 +280,7 @@ def rebuild(rgb, objects, W, H, grad, *, text_mask, icon_mask):
         if float(calm[p['mask']].mean()) >= SAM_CALM:
             record = measure(rgb, {'mask': p['mask'], 'bbox': p['bbox'], 'area': int(p['mask'].sum()),
                                    'source': 'sam_block'}, lying_on(p, p), protect, calm)
-            if record:
+            if record and not page_shows_through(rgb, record['mask']):
                 shapes.append(record)
                 continue
         kept.append(p)
@@ -292,11 +301,99 @@ def rebuild(rgb, objects, W, H, grad, *, text_mask, icon_mask):
             icons.append({'kind': 'raster', 'role': 'icon', 'source': 'shape_residual', 'bbox': _bbox(blob),
                           'area': int(blob.sum()), 'mask': blob, 'alpha': 'mask', 'absorbed': 0})
     icons += uncovered_icons(shapes, pictures+icons, icon_mask & ~text_mask, H, W)
+    pictures += embedded_pictures(rgb, grad, shapes+pictures+icons, H, W)
     out = shapes+pictures+icons
     for k, e in enumerate(out):
         e['id'] = f'el-{k:03d}'
     assign_levels(out)
+    claim_fringe(rgb, out)
     return out, layer_erase(out, -1, H, W)
+
+
+def page_shows_through(rgb, mask):
+    """A large component whose broad shading still carries the page under it.
+
+    Comparison is on a heavy blur, so icons and text holes on the component do
+    not hide a wave that runs through it. A flat tint, or a designed gradient
+    on a flat page, does not vary together with that surface."""
+    H, W = mask.shape
+    if int(mask.sum()) < LARGE*H*W:
+        return False
+    inner = cv2.erode(mask.astype(np.uint8), np.ones((15, 15), np.uint8)) > 0
+    if int(inner.sum()) < 400:
+        return False
+    surface = smooth_under(rgb, mask)
+    actual = cv2.GaussianBlur(rgb, (0, 0), 14)[inner].astype(np.float32).mean(1)
+    under = cv2.GaussianBlur(surface, (0, 0), 14)[inner].astype(np.float32).mean(1)
+    if float(actual.std()) < SEE_THROUGH_STD or float(under.std()) < SEE_THROUGH_STD:
+        return False
+    actual -= float(actual.mean())
+    under -= float(under.mean())
+    return float(np.corrcoef(actual, under)[0, 1]) >= SEE_THROUGH
+
+
+def claim_fringe(rgb, elements, *, band=FRINGE):
+    """Pixels of a child left just outside its mask (an anti-aliased edge, a
+    notch the contour missed) join the child, so the parent crop is filled
+    with the parent surface there instead of keeping a sliver of the child."""
+    by_id = {e['id']: e for e in elements if 'id' in e}
+    for child in elements:
+        parent = by_id.get(child.get('parent'))
+        if parent is None:
+            continue
+        others = np.zeros(child['mask'].shape, bool)
+        for e in elements:
+            if e is not child and e is not parent:
+                others |= e['mask']
+        ring = (cv2.dilate(child['mask'].astype(np.uint8), np.ones((2*band+1, 2*band+1), np.uint8)) > 0)
+        ring &= ~child['mask'] & parent['mask'] & ~others
+        if int(ring.sum()) < 8 or int(child['mask'].sum()) < 8:
+            continue
+        host = parent['mask'] & ~child['mask'] & ~others
+        if int(host.sum()) < 8:
+            continue
+        child_color = np.median(rgb[child['mask']], 0)
+        parent_color = np.median(rgb[host], 0)
+        ys, xs = np.where(ring)
+        pixels = rgb[ys, xs].astype(float)
+        dist_child = np.linalg.norm(pixels-child_color, axis=1)
+        dist_parent = np.linalg.norm(pixels-parent_color, axis=1)
+        # The same colour as the child, and not the parent's own colour.
+        closer = (dist_child <= FRINGE_MARGIN) & (dist_child+FRINGE_MARGIN < dist_parent)
+        if int(closer.sum()) < 8:
+            continue
+        grow = np.zeros(child['mask'].shape, bool)
+        grow[ys[closer], xs[closer]] = True
+        child['mask'] = child['mask'] | grow
+        child['bbox'], child['area'] = _bbox(child['mask']), int(child['mask'].sum())
+
+
+def embedded_pictures(rgb, grad, elements, H, W):
+    """A busy block inside a large component that no child covers (a photo the
+    contour pass merged into the card) becomes its own picture."""
+    added = []
+    for host in elements:
+        if host['area'] < LARGE*H*W:
+            continue
+        covered = np.zeros((H, W), bool)
+        for other in elements:
+            if other is not host and other['area'] < host['area'] and _share(other, host) >= .5:
+                covered |= other['mask']
+        busy = host['mask'] & ~covered & (grad > BUSY)
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(busy.astype(np.uint8), connectivity=8)
+        for i in range(1, n):
+            core = int(stats[i, cv2.CC_STAT_AREA])
+            x, y, w, h = (int(v) for v in stats[i, :4])
+            if core < PHOTO_AREA or min(w, h) < PHOTO_SIDE or core < .15*w*h:
+                continue
+            mask = np.zeros((H, W), bool)
+            mask[y:y+h, x:x+w] = host['mask'][y:y+h, x:x+w] & ~covered[y:y+h, x:x+w]
+            if int(mask.sum()) < PHOTO_AREA or any(_iou(mask, e['mask']) >= .5 for e in elements+added):
+                continue
+            added.append({'kind': 'raster', 'role': 'block', 'source': 'embedded_texture', 'bbox': _bbox(mask),
+                          'area': int(mask.sum()), 'mask': mask, 'alpha': 'mask', 'members': 1, 'absorbed': 0,
+                          'geometry': 'rect', 'fallback': True})
+    return added
 
 
 def uncovered_icons(shapes, lifted, icon_mask, H, W):

@@ -407,6 +407,97 @@ def test_rebuild_background_is_original_outside_components_and_smooth_under_them
     assert np.abs(under-rgb[20:21, 90:310].astype(int)).max() <= 3
 
 
+def test_rebuild_demotes_a_panel_that_still_shows_the_page_wave():
+    """A mild wave still fits a flat fill, but it is the page showing through."""
+    rgb = page()
+    wave = np.rint(5*np.sin(np.linspace(0, 6*np.pi, 640))).astype(np.int16)
+    rgb = np.clip(rgb.astype(np.int16)+wave[None, :, None], 0, 255).astype(np.uint8)
+    rgb[40:240, 40:400] = np.clip(rgb[40:240, 40:400].astype(np.int16)+(8, 4, 0), 0, 255).astype(np.uint8)
+    cv2.rectangle(rgb, (40, 40), (399, 239), (30, 40, 60), 2)
+    elements, _ = _rebuilt(rgb)
+    panel = max(elements, key=lambda e: e['area'])
+    assert panel['kind'] == 'raster' and panel['fallback']
+    solid = rgb.copy()
+    solid[40:240, 40:400] = (20, 90, 200)
+    cv2.rectangle(solid, (40, 40), (399, 239), (20, 90, 200), 2)
+    kept, _ = _rebuilt(solid)
+    assert any(e['kind'] == 'native_shape' and e['bbox'][2] > 300 for e in kept)
+
+
+def test_child_fringe_joins_the_child_not_the_parent():
+    rgb = np.full((200, 300, 3), 240, np.uint8)
+    rgb[40:160, 40:260] = (230, 240, 250)
+    rgb[70:120, 80:180] = (20, 160, 90)
+    parent = np.zeros((200, 300), bool)
+    parent[40:160, 40:260] = True
+    child = np.zeros((200, 300), bool)
+    child[78:112, 88:172] = True
+    elements = [{'id': 'p', 'mask': parent, 'bbox': [40, 40, 220, 120], 'area': int(parent.sum())},
+                {'id': 'c', 'mask': child, 'bbox': [88, 78, 84, 34], 'area': int(child.sum()), 'parent': 'p'}]
+    components.claim_fringe(rgb, elements)
+    assert elements[1]['mask'][74, 84]
+    assert not elements[1]['mask'][50, 50]
+
+
+def test_embedded_texture_becomes_its_own_picture():
+    rgb = page()
+    rng = np.random.default_rng(2)
+    rgb[80:220, 80:300] = rng.integers(0, 255, (140, 220, 3), dtype=np.uint8)
+    H, W = rgb.shape[:2]
+    host = np.zeros((H, W), bool)
+    host[40:300, 40:420] = True
+    elements = [{'mask': host, 'bbox': [40, 40, 380, 260], 'area': int(host.sum())}]
+    added = components.embedded_pictures(rgb, segment.gradient(rgb), elements, H, W)
+    assert len(added) == 1 and added[0]['source'] == 'embedded_texture'
+    assert added[0]['mask'][150, 180]
+
+
+def test_review_applies_only_a_window_that_snaps(tmp_path):
+    """The model names a rough window; a closed card inside it is kept, a window of the page is not."""
+    from image2ppt_vision.layered import review
+    rgb = page()
+    cv2.rectangle(rgb, (40, 40), (400, 300), (255, 255, 255), -1)
+    cv2.rectangle(rgb, (40, 40), (400, 300), (180, 190, 205), 2)
+    cv2.rectangle(rgb, (70, 80), (220, 200), (255, 255, 255), -1)
+    cv2.rectangle(rgb, (70, 80), (220, 200), (40, 90, 180), 2)
+    out = tmp_path/'perception'
+    (out/'masks').mkdir(parents=True)
+    (out/'assets').mkdir()
+    (out/'layers').mkdir()
+    Image.fromarray(rgb).save(out/'source.png')
+    Image.fromarray(rgb).save(out/'notext.png')
+    Image.fromarray(rgb).save(out/'background.png')
+    mask = np.zeros(rgb.shape[:2], bool)
+    mask[40:301, 40:401] = True
+    np.savez_compressed(out/'masks/elements.npz', masks=np.stack([mask]), ids=np.array(['el-000']))
+    perception = {'elements': [{'id': 'el-000', 'kind': 'native_shape', 'source': 'calm_region', 'bbox': [40, 40, 361, 261],
+                                'area': int(mask.sum()), 'geometry': 'rect', 'fill': 'FFFFFF', 'level': 0}],
+                  'tables': [], 'image_size': [640, 360],
+                  'background': {'path': 'background.png', 'sha256': '0', 'element_method': 'smooth_under_components'},
+                  'counts': {}}
+
+    class Remote:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def request(self, request, timeout=240):
+            return {'ok': True, 'request_id': request['request_id'], 'usage': {'total_tokens': 11},
+                    'content': json.dumps(self.payload)}
+
+    accepted, report = review.review(out, perception, remote=Remote(
+        {'decisions': [{'id': 'el-000', 'action': 'split', 'windows': [[70, 80, 151, 121]]},
+                       {'id': 'el-000', 'action': 'split', 'windows': [[0, 0, 30, 30]]}]}), model='vision')
+    assert report['model_used'] and any(a['action'] == 'split' and a['kind'] == 'native_shape' for a in report['applied'])
+    assert any('window:el-000' in i for i in report['issues'])
+    added = next(e for e in accepted['elements'] if e['source'] == 'review')
+    assert added['fill'] and (out/'assets').exists()
+    picture, pictured = review.review(out, accepted, remote=Remote(
+        {'decisions': [{'id': 'el-000', 'action': 'picture'}]}), model='vision')
+    host = next(e for e in picture['elements'] if e['id'] == 'el-000')
+    assert host['kind'] == 'raster' and pictured['applied'] == [{'id': 'el-000', 'action': 'picture'}]
+    assert (out/'assets/el-000.png').is_file()
+
+
 def test_duplicate_under_objects_flags_unrepaired_layers(tmp_path):
     rng = np.random.default_rng(5)
     under = np.full((100, 100, 3), 240, np.uint8)

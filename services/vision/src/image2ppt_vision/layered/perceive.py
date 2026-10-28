@@ -203,6 +203,9 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None):
     _save_mask(out/'masks/erase.png', erase | table_mask)
     np.savez_compressed(out/'masks/pieces.npz', masks=np.stack([p['mask'] for p in pieces]) if pieces else np.zeros((0, H, W), bool),
                         meta=json.dumps([{k: v for k, v in p.items() if k != 'mask'} for p in pieces], default=str))
+    np.savez_compressed(out/'masks/elements.npz',
+                        masks=np.stack([e['mask'] for e in elements]) if elements else np.zeros((0, H, W), bool),
+                        ids=np.array([e['id'] for e in elements]))
     (out/'layers').mkdir()
     for k, layer in layers.items():
         Image.fromarray(layer).save(out/f'layers/level-{k}.png')

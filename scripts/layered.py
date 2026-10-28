@@ -22,14 +22,18 @@ def main():
                         help='{"ssh_host", "remote_root"} of the GPU dev worker')
     parser.add_argument('--model-config', help='auto_transport client config; omit for deterministic grouping')
     parser.add_argument('--model', default='deepseek-flash')
+    parser.add_argument('--vision-model', default=None,
+                        help='model that accepts images for the component review; default IMAGE2PPT_VISION_MODEL or --model')
     args = parser.parse_args()
-    remote = model = None
+    remote = model = vision = None
     if args.model_config:
+        import os
         from image2ppt_vision.auto_transport import SSHRemote, load_config as load_client
         remote, model = SSHRemote(load_client(args.model_config)), args.model
+        vision = args.vision_model or os.environ.get('IMAGE2PPT_VISION_MODEL') or model
     inputs = [str(Path(p).resolve(strict=True)) for p in args.inputs]
     summary = run(inputs, args.output, worker_config=load_config(args.worker_config), project_root=ROOT,
-                  remote=remote, model=model)
+                  remote=remote, model=model, vision_model=vision)
     brief = {'job': summary['job'], 'output': str(Path(args.output)/summary['job']),
              'total_model_tokens': summary['total_model_tokens'],
              'pages': {k: {'status': v['status'], 'ssim': v.get('metrics', {}).get('ssim'),
