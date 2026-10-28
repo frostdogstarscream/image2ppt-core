@@ -205,7 +205,8 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
                          'native_shapes': sum(e['kind'] == 'native_shape' for e in public),
                          'rasters': sum(e['kind'] == 'raster' for e in public),
                          'blocks': sum(e.get('role') == 'block' for e in public),
-                         'icons': sum(e.get('role') == 'icon' for e in public), 'tables': len(tables)},
+                         'icons': sum(e.get('role') == 'icon' for e in public), 'tables': len(tables),
+                         'erased_fraction': round(float((erase | table_mask).mean()), 4)},
               'timings_s': {k: round(v, 3) for k, v in timings.items()}}
     result['files'] = {p.relative_to(out).as_posix(): _sha(p) for p in sorted(out.rglob('*')) if p.is_file()}
     _write(out/'perception.json', result)

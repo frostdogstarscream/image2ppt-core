@@ -21,6 +21,7 @@ import numpy as np
 
 SOLID_TOLERANCE = 7.
 LINEAR_TOLERANCE = 8.
+SHAPE_FULL_TOLERANCE = 6.
 GEOMETRY_IOU = .95
 FLAT_IOU = .84
 CHEVRON_IOU = .86
@@ -392,6 +393,28 @@ def classify(rgb, sam_masks, *, text_mask, icon_mask, extra=()):
     gy = cv2.Sobel(blur, cv2.CV_32F, 0, 1, ksize=3)
     calm = np.sqrt((gx**2).sum(2)+(gy**2).sum(2)) <= 18
 
+    def faithful(c, mask, child_union, fill):
+        # The calm-pixel fit ignores shading and soft rims. A flat fill over those
+        # reads as a washed-out card, so judge the whole body once the icons that
+        # will be lifted off it are set aside.
+        body = mask & ~child_union & ~protect
+        body &= cv2.erode(mask.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0
+        if int(body.sum()) < 60:
+            return True
+        blobs = residual_blobs(rgb, body & ~text_mask, fill, c['bbox'])
+        lifted = np.zeros((H, W), bool)
+        for blob in blobs:
+            lifted |= blob
+        ys, xs = np.where(body & ~lifted)
+        if not len(xs):
+            return True
+        deviation = np.abs(rgb[ys, xs].astype(float)-_predict(fill, xs, ys, c['bbox'])).max(1)
+        limit = SHAPE_FULL_TOLERANCE if fill['kind'] == 'solid' else LINEAR_TOLERANCE
+        if float(np.percentile(deviation, 90)) <= limit:
+            return True
+        c['icons'] = blobs
+        return False
+
     def add_raster(mask, record, children=()):
         if int(mask.sum()) < 25:
             return
@@ -442,6 +465,8 @@ def classify(rgb, sam_masks, *, text_mask, icon_mask, extra=()):
             limit = 8. if w > .75*W else 25.
             if full is None or full['residual'] > limit:
                 fits = False
+        if fits and clean and not thin and not faithful(c, mask, child_union, fill):
+            clean = False
         nested_ok = all(cands[j]['area'] <= RASTER_MAX_AREA*page for j in children)
         c.update(children=children, child_union=child_union, geometry_fit=geometry, fill_fit=fill,
                  thin=thin, source=source,
@@ -492,6 +517,9 @@ def classify(rgb, sam_masks, *, text_mask, icon_mask, extra=()):
             mask, (x, y, w, h) = c['mask'], c['bbox']
             if float((mask & taken).sum())/max(c['area'], 1) > .15:
                 continue
+            # A card that failed only the fidelity gate stays pixels; its icons still lift.
+            for blob in c.get('icons', ()):
+                add_raster(blob, {'source': 'shape_residual'})
             if max(w, h) <= SMALL_ON_BACKGROUND and float((mask & erase).sum()) < .35*c['area']:
                 continue
             rasterable = c['area'] <= RASTER_MAX_AREA*page and max(w, h) <= RASTER_MAX_SIDE*max(W, H)
@@ -605,9 +633,8 @@ def blockify(elements, W, H):
 
     A block's alpha is its fitted rect or roundRect, never the texture outline. A
     native shape or a non-detector icon lying inside a block is part of its pixels.
-    Returns (elements, erase). Erase covers kept shapes, the pieces each block was
-    built from (not its whole rectangle, which may clip something left on the
-    background) and dilated icons.
+    Returns (elements, erase). Erase covers kept shapes and dilated icons only: a
+    block is a crop of the base, and the base keeps its original pixels under it.
     """
     icons, texture = split_icons(elements, W)
     blocks = []
@@ -627,7 +654,6 @@ def blockify(elements, W, H):
             mask[y:y+h, x:x+w] = True
             record.update(geometry='rect', alpha='rect')
         record['mask'] = mask
-        record['pixels'] = union
         blocks.append(record)
     inside = lambda e: any(_contains(b['bbox'], e['bbox']) for b in blocks)
     kept_icons = []
@@ -643,8 +669,6 @@ def blockify(elements, W, H):
     erase = np.zeros((H, W), bool)
     for e in shapes:
         erase |= e['mask']
-    for e in blocks:
-        erase |= (cv2.dilate(e.pop('pixels').astype(np.uint8), np.ones((7, 7), np.uint8)) > 0) & e['mask']
     for e in kept_icons:
         erase |= cv2.dilate(e['mask'].astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
     return out, erase

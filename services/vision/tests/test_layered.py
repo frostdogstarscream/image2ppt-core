@@ -137,11 +137,32 @@ def test_textured_pieces_become_one_rectangular_block_and_flat_card_stays_a_shap
     rgba = segment.cutout(rgb, blocks[0])
     assert int(rgba[:, :, 3].min()) == 255
     assert any(e['kind'] == 'native_shape' and e['bbox'][0] == 450 for e in elements)
-    pieces = np.logical_or.reduce([m for m, _ in masks[:3]])
-    assert erase[pieces].all()
-    outside = np.ones(erase.shape, bool); outside[y:y+h, x:x+w] = False
-    outside[260:341, 450:621] = False
-    assert not (erase & outside).any()
+    icon = cv2.dilate(detector['mask'].astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+    block_only = np.zeros(erase.shape, bool); block_only[y:y+h, x:x+w] = True
+    assert not (erase & block_only & ~icon).any()
+    assert erase[icon].all() and erase[260:341, 450:621].all()
+
+
+def test_shaded_card_stays_pixels_and_flat_card_stays_a_shape():
+    """A flat centre with a soft shadow rim is not repainted as one flat fill."""
+    rgb = page()
+    shaded = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.rectangle(shaded, (40, 40), (280, 220), 1, -1)
+    dist = cv2.distanceTransform(shaded, cv2.DIST_L2, 5)
+    shade = np.clip(1-dist/14, 0, 1)
+    tone = (255-40*shade)[..., None]*np.ones(3)
+    rgb[shaded > 0] = tone[shaded > 0].astype(np.uint8)
+    flat = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.rectangle(flat, (340, 60), (600, 220), 1, -1)
+    rgb[flat > 0] = (255, 255, 255)
+    empty = np.zeros(shaded.shape, bool)
+    elements, _ = segment.classify(rgb, [(shaded > 0, {'source': 'sam2'}), (flat > 0, {'source': 'sam2'})],
+                                   text_mask=empty, icon_mask=empty)
+    H, W = rgb.shape[:2]
+    elements, erase = segment.blockify(elements, W, H)
+    assert not any(e['kind'] == 'native_shape' and e['bbox'][0] == 40 for e in elements)
+    assert any(e['kind'] == 'native_shape' and e['bbox'][0] == 340 for e in elements)
+    assert not erase[60:200, 60:260].any()
 
 
 def test_icon_on_a_card_is_lifted_with_its_pale_badge():
