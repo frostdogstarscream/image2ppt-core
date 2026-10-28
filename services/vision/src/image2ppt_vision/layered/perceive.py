@@ -19,8 +19,8 @@ import numpy as np
 from PIL import Image
 
 from . import inpaint as repair
-from .segment import (SMALL_ON_BACKGROUND, classify, circle_candidates, contrast_candidates,
-                      cutout, flat_region_candidates, icon_fallbacks)
+from .segment import (ICON_MAX, blockify, classify, circle_candidates, contrast_candidates,
+                      cutout, flat_region_candidates, icon_erase, icon_fallbacks)
 from .tables import detect_tables, fill_cells
 from .textmask import analyze_line, analyze_page, split_wide_gaps
 
@@ -136,17 +136,19 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
     flats = [item for item in flat_region_candidates(notext)+circle_candidates(notext)
              if not _overlaps(_box(item[0]), table_mask, .5)]
     extra = contrast+flats
-    elements, erase = classify(notext, [m for m in masks if not _overlaps(_box(m[0]), table_mask, .5)],
-                               text_mask=text_mask, icon_mask=icon_mask, extra=extra)
+    elements, _ = classify(notext, [m for m in masks if not _overlaps(_box(m[0]), table_mask, .5)],
+                           text_mask=text_mask, icon_mask=icon_mask, extra=extra)
     icons = [b for r in records for b in r['icon_candidates']]
-    for fallback in icon_fallbacks(notext, icons, elements):
-        if max(fallback['bbox'][2:]) <= SMALL_ON_BACKGROUND:
-            continue
-        fallback['id'] = f'el-{len(elements):03d}'
-        elements.append(fallback)
-        erase |= cv2.dilate(fallback['mask'].astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+    # Only an icon-sized cutout already covers a detector icon; a texture panel
+    # around it does not, so the icon is still lifted out of the panel.
+    small = [e for e in elements if e['kind'] == 'raster' and max(e['bbox'][2:]) <= ICON_MAX*W]
+    elements += icon_fallbacks(notext, icons, small)
     elements = [e for e in elements if not _overlaps(e['bbox'], table_mask, .5)]
+    elements, erase = blockify(elements, W, H)
     timings['segment'] = time.time()-clock; clock = time.time()
+    under_icons = icon_erase(elements)
+    panels = repair.inpaint(notext, under_icons, model)[0] if under_icons is not None else notext
+    timings['inpaint_icons'] = time.time()-clock; clock = time.time()
     background, bg_method = repair.inpaint(notext, erase | table_mask, model)
     timings['inpaint_elements'] = time.time()-clock; clock = time.time()
     # Residual OCR: text the first pass missed is recovered once; ghosts are reported.
@@ -179,7 +181,7 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
         cv2.rectangle(overlay, (x, y), (x+w-1, y+h-1), (230, 30, 30) if e['kind'] == 'native_shape' else (20, 160, 40), 1)
         if e['kind'] == 'raster':
             path = f'assets/{e["id"]}.png'
-            Image.fromarray(cutout(notext, e), 'RGBA').save(out/path)
+            Image.fromarray(cutout(panels if e.get('role') == 'block' else notext, e), 'RGBA').save(out/path)
         item = {k: v for k, v in e.items() if k != 'mask'}
         if e['kind'] == 'raster':
             item.update(asset=path, asset_sha256=_sha(out/path))
@@ -201,7 +203,9 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
                          'sam_masks': len(masks), 'contrast_candidates': len(contrast),
                          'flat_regions': len(flats),
                          'native_shapes': sum(e['kind'] == 'native_shape' for e in public),
-                         'rasters': sum(e['kind'] == 'raster' for e in public), 'tables': len(tables)},
+                         'rasters': sum(e['kind'] == 'raster' for e in public),
+                         'blocks': sum(e.get('role') == 'block' for e in public),
+                         'icons': sum(e.get('role') == 'icon' for e in public), 'tables': len(tables)},
               'timings_s': {k: round(v, 3) for k, v in timings.items()}}
     result['files'] = {p.relative_to(out).as_posix(): _sha(p) for p in sorted(out.rglob('*')) if p.is_file()}
     _write(out/'perception.json', result)

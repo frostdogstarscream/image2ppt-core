@@ -103,6 +103,106 @@ def test_segment_classifies_flat_card_gradient_and_icon():
     assert set(np.unique(rgba[:, :, 3])).issubset({0, 255})
 
 
+def _panel_page():
+    """A textured photo panel split into three SAM pieces, a detector icon on it, and a flat card."""
+    rgb = page()
+    rng = np.random.default_rng(7)
+    rgb[60:240, 100:400] = rng.integers(0, 255, (180, 300, 3), dtype=np.uint8)
+    pieces = []
+    for x0, y0, x1, y1 in ((100, 60, 262, 240), (258, 60, 400, 152), (258, 148, 400, 240)):
+        piece = np.zeros(rgb.shape[:2], np.uint8)
+        cv2.ellipse(piece, ((x0+x1)//2, (y0+y1)//2), ((x1-x0)//2, (y1-y0)//2), 0, 0, 360, 1, -1)
+        piece[y0:y1, x0:x1] |= (rng.random((y1-y0, x1-x0)) < .3).astype(np.uint8)
+        pieces.append((piece > 0, {'source': 'sam2'}))
+    cv2.rectangle(rgb, (450, 260), (620, 340), (255, 255, 255), -1)
+    card = np.zeros(rgb.shape[:2], bool); card[260:341, 450:621] = True
+    icon = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.circle(icon, (180, 150), 12, 1, -1)
+    rgb[icon > 0] = (220, 30, 30)
+    detector = {'id': '', 'kind': 'raster', 'source': 'textmask_icon', 'alpha': 'mask', 'absorbed': 0,
+                'mask': icon > 0, 'bbox': segment._bbox(icon > 0), 'area': int(icon.sum())}
+    return rgb, pieces+[(card, {'source': 'sam2'})], detector
+
+
+def test_textured_pieces_become_one_rectangular_block_and_flat_card_stays_a_shape():
+    rgb, masks, detector = _panel_page()
+    empty = np.zeros(rgb.shape[:2], bool)
+    elements, _ = segment.classify(rgb, masks, text_mask=empty, icon_mask=empty)
+    H, W = rgb.shape[:2]
+    elements, erase = segment.blockify(elements+[detector], W, H)
+    blocks = [e for e in elements if e.get('role') == 'block']
+    assert len(blocks) == 1
+    x, y, w, h = blocks[0]['bbox']
+    assert abs(x-100) <= 2 and abs(y-60) <= 2 and abs(x+w-400) <= 2 and abs(y+h-240) <= 2
+    rgba = segment.cutout(rgb, blocks[0])
+    assert int(rgba[:, :, 3].min()) == 255
+    assert any(e['kind'] == 'native_shape' and e['bbox'][0] == 450 for e in elements)
+    pieces = np.logical_or.reduce([m for m, _ in masks[:3]])
+    assert erase[pieces].all()
+    outside = np.ones(erase.shape, bool); outside[y:y+h, x:x+w] = False
+    outside[260:341, 450:621] = False
+    assert not (erase & outside).any()
+
+
+def test_icon_on_a_card_is_lifted_with_its_pale_badge():
+    rgb = page()
+    card = np.zeros(rgb.shape[:2], np.uint8)
+    cv2.rectangle(card, (40, 40), (300, 200), 1, -1)
+    rgb[card > 0] = (255, 255, 255)
+    cv2.circle(rgb, (100, 100), 16, (225, 236, 252), -1)
+    cv2.rectangle(rgb, (90, 90), (110, 110), (20, 90, 220), -1)
+    empty = np.zeros(card.shape, bool)
+    elements, _ = segment.classify(rgb, [(card > 0, {'source': 'sam2'})], text_mask=empty, icon_mask=empty)
+    icons = [e for e in elements if e.get('source') == 'shape_residual']
+    assert len(icons) == 1
+    x, y, w, h = icons[0]['bbox']
+    assert w >= 30 and h >= 30 and x <= 85 and y <= 85
+
+
+def test_a_band_does_not_pull_separate_cards_into_one_block():
+    """Merging needs the pieces to fill the merged rectangle, so cards under a band stay apart."""
+    H, W = 400, 800
+    def piece(x, y, w, h):
+        m = np.zeros((H, W), bool); m[y:y+h, x:x+w] = True
+        return {'kind': 'raster', 'source': 'sam2', 'bbox': [x, y, w, h], 'area': w*h, 'mask': m}
+    band = piece(20, 20, 760, 40)
+    cards = [piece(20+190*k, 62, 170, 120) for k in range(4)]
+    halves = [piece(40, 220, 100, 120), piece(142, 220, 100, 120)]
+    sparse = piece(300, 220, 200, 120)
+    sparse['mask'][:] = False; sparse['mask'][230:330:4, 310:490] = True
+    inner = piece(330, 240, 120, 80)
+    groups = segment.merge_blocks([band, *cards, *halves, sparse, inner], W, H)
+    sizes = sorted(len(items) for _, items in groups)
+    assert sizes == [1, 1, 1, 1, 1, 2, 2]
+    frame = piece(540, 200, 240, 180)
+    frame['mask'][210:370, 550:770] = False
+    frame['area'] = int(frame['mask'].sum())
+    tile = piece(600, 240, 100, 80)
+    assert len(segment.merge_blocks([frame, tile], W, H)) == 1
+    lower = piece(20, 50, 300, 60)
+    assert len(segment.merge_blocks([band, lower], W, H)) == 2
+
+
+def test_icon_on_a_block_stays_separate_and_the_block_under_it_is_repaired():
+    rgb, masks, detector = _panel_page()
+    empty = np.zeros(rgb.shape[:2], bool)
+    elements, _ = segment.classify(rgb, masks, text_mask=empty, icon_mask=empty)
+    H, W = rgb.shape[:2]
+    elements, _ = segment.blockify(elements+[detector], W, H)
+    icons = [e for e in elements if e.get('role') == 'icon']
+    assert len(icons) == 1 and icons[0]['source'] == 'textmask_icon'
+    assert [e.get('role') for e in elements].index('icon') > [e.get('role') for e in elements].index('block')
+    under = segment.icon_erase(elements)
+    assert under is not None and under[150, 180]
+    panels, _ = inpaint.inpaint(rgb, under, None)
+    block = next(e for e in elements if e.get('role') == 'block')
+    bx, by = block['bbox'][:2]
+    rgba = segment.cutout(panels, block)
+    assert tuple(int(v) for v in rgba[150-by, 180-bx, :3]) != (220, 30, 30)
+    icon = segment.cutout(rgb, icons[0])
+    assert set(np.unique(icon[:, :, 3])).issubset({0, 255})
+
+
 def test_filled_picture_edge_is_hard():
     """The outer pixel of a filled picture is replaced by the pixel inside it."""
     rgb = np.full((80, 120, 3), 240, np.uint8)

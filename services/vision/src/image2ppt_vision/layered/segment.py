@@ -9,6 +9,10 @@ top-down by area as:
 * ``raster`` -- an RGBA cutout (alpha from the mask) for icons, illustrations
   and photos; it absorbs every candidate nested inside it;
 * nothing -- large irregular or textured areas stay in the repaired background.
+
+``blockify`` then regroups the rasters: touching texture rasters become one
+rectangular ``block`` whose alpha is a rect or roundRect, and small or
+detector-found rasters stay separate ``icon`` cutouts above the blocks.
 """
 import math
 
@@ -23,6 +27,13 @@ CHEVRON_IOU = .86
 RASTER_MAX_AREA = .05
 RASTER_MAX_SIDE = .3
 SMALL_ON_BACKGROUND = 100
+ICON_MAX = .05
+ICON_SOURCES = ('textmask_icon', 'contrast_component', 'shape_residual')
+BLOCK_GAP = 6
+BLOCK_MAX_AREA = .45
+BLOCK_MIN_DENSITY = .6
+BLOCK_FILL = .7
+BLOCK_NESTED = .9
 
 
 def _hex(rgb):
@@ -307,8 +318,12 @@ def _predict(fill, xs, ys, bbox):
     return c0[None]+np.clip(t, 0, 1)[:, None]*(c1-c0)[None]
 
 
-def residual_blobs(rgb, region, fill, bbox, *, threshold=38., min_area=25):
-    """Off-fill blobs inside a native shape that no candidate described."""
+def residual_blobs(rgb, region, fill, bbox, *, threshold=38., min_area=25, badge=10., badge_growth=4.):
+    """Off-fill blobs inside a native shape that no candidate described.
+
+    A blob grows into the faint badge around it (a pale disc behind a glyph), so
+    the icon is lifted whole instead of leaving its badge under the shape fill.
+    """
     ys, xs = np.where(region)
     if not len(xs):
         return []
@@ -316,9 +331,35 @@ def residual_blobs(rgb, region, fill, bbox, *, threshold=38., min_area=25):
     off = np.zeros(region.shape, np.uint8)
     off[ys[deviation > threshold], xs[deviation > threshold]] = 1
     off = cv2.morphologyEx(off, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    soft = np.zeros(region.shape, np.uint8)
+    soft[ys[deviation > badge], xs[deviation > badge]] = 1
+    H, W = region.shape
     n, labels, stats, _ = cv2.connectedComponentsWithStats(off, 8)
-    return [cv2.dilate((labels == i).astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
-            for i in range(1, n) if stats[i][4] >= min_area]
+    out = []
+    for i in range(1, n):
+        if stats[i][4] < min_area:
+            continue
+        blob = labels == i
+        if any(float((blob & m).sum()) >= .8*stats[i][4] for m in out):
+            continue
+        bx, by, bw, bh = stats[i][:4]
+        # Badges in a column often touch; look only near this glyph.
+        m = int(round(.5*max(bw, bh)))
+        x0, y0, x1, y1 = max(0, bx-m), max(0, by-m), min(W, bx+bw+m), min(H, by+bh+m)
+        local = soft[y0:y1, x0:x1] | blob[y0:y1, x0:x1].astype(np.uint8)
+        local = cv2.morphologyEx(local, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)) | blob[y0:y1, x0:x1].astype(np.uint8)
+        _, local_labels = cv2.connectedComponents(local, connectivity=8)
+        ids = np.unique(local_labels[blob[y0:y1, x0:x1]])
+        ids = ids[ids > 0]
+        grown = np.zeros_like(blob)
+        grown[y0:y1, x0:x1] = np.isin(local_labels, ids)
+        grown = fill_holes(grown | blob)
+        gx, gy, gw, gh = _bbox(grown)
+        touches = gx <= x0 or gy <= y0 or gx+gw >= x1 or gy+gh >= y1
+        if not touches and gw*gh <= badge_growth*bw*bh:
+            blob = grown
+        out.append(cv2.dilate(blob.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0)
+    return out
 
 
 def _iou_floor(geometry, source):
@@ -430,6 +471,7 @@ def classify(rgb, sam_masks, *, text_mask, icon_mask, extra=()):
         border = None if c['thin'] else _border(rgb, mask, fill)
         if border:
             record['line'] = {'color': border, 'width_px': 1}
+        record['mask'] = mask
         elements.append(record)
         taken[:] |= mask & ~shape_union
         erase[:] |= mask
@@ -453,7 +495,10 @@ def classify(rgb, sam_masks, *, text_mask, icon_mask, extra=()):
             if max(w, h) <= SMALL_ON_BACKGROUND and float((mask & erase).sum()) < .35*c['area']:
                 continue
             rasterable = c['area'] <= RASTER_MAX_AREA*page and max(w, h) <= RASTER_MAX_SIDE*max(W, H)
-            if not rasterable:
+            # A large compact panel (a photo, a textured banner) becomes one block
+            # later; a large sparse mask is page background and stays there.
+            panel = c['area'] <= BLOCK_MAX_AREA*page and c['area'] >= BLOCK_MIN_DENSITY*w*h
+            if not (rasterable or panel):
                 continue
             record = {'bbox': [x, y, w, h], 'area': c['area'], 'source': c['source'],
                       'geometry_fit': c['geometry_fit'], 'fill_fit': c['fill_fit']}
@@ -487,6 +532,136 @@ def icon_fallbacks(rgb, candidates, elements):
                     'kind': 'raster', 'alpha': 'mask', 'absorbed': 0, 'mask': mask})
         covered[y0:y1, x0:x1] = True
     return out
+
+
+def split_icons(elements, W):
+    """(icons, texture) among raster elements. Icons are small, or come from an icon detector."""
+    icons, texture = [], []
+    for e in elements:
+        if e['kind'] != 'raster':
+            continue
+        small = max(e['bbox'][2:]) <= ICON_MAX*W
+        (icons if small or e.get('source') == 'textmask_icon' else texture).append(e)
+    return icons, texture
+
+
+def _near(a, b, gap):
+    return (a[0] <= b[0]+b[2]+gap and b[0] <= a[0]+a[2]+gap and
+            a[1] <= b[1]+b[3]+gap and b[1] <= a[1]+a[3]+gap)
+
+
+def _union(a, b):
+    x0, y0 = min(a[0], b[0]), min(a[1], b[1])
+    x1, y1 = max(a[0]+a[2], b[0]+b[2]), max(a[1]+a[3], b[1]+b[3])
+    return [x0, y0, x1-x0, y1-y0]
+
+
+def merge_blocks(members, W, H, *, gap=BLOCK_GAP, max_area=BLOCK_MAX_AREA, fill=BLOCK_FILL):
+    """Group texture rasters whose boxes touch into rectangles: [(box, members)].
+
+    Two groups merge if their pixels fill ``fill`` of the merged rectangle, if half
+    of the smaller one's pixels are also the larger one's, or if the smaller box
+    lies almost entirely inside the larger (sky and buildings of one photo). A wide
+    band touching a row of separate cards does none of these.
+    """
+    groups = [(list(m['bbox']), [m], m['mask'].copy()) for m in sorted(members, key=lambda m: -m['area'])]
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(groups)):
+            for j in range(i+1, len(groups)):
+                if not _near(groups[i][0], groups[j][0], gap):
+                    continue
+                box = _union(groups[i][0], groups[j][0])
+                if box[2]*box[3] > max_area*W*H:
+                    continue
+                x, y, w, h = box
+                ma, mb = groups[i][2][y:y+h, x:x+w], groups[j][2][y:y+h, x:x+w]
+                union = groups[i][2] | groups[j][2]
+                a, b = groups[i][0], groups[j][0]
+                small, large = (a, b) if a[2]*a[3] <= b[2]*b[3] else (b, a)
+                overlapping = (float((ma & mb).sum()) >= .5*min(int(ma.sum()), int(mb.sum()))
+                               or _contains(large, small, BLOCK_NESTED))
+                if not overlapping and float((ma | mb).sum()) < fill*w*h:
+                    continue
+                groups[i] = (box, groups[i][1]+groups[j][1], union)
+                del groups[j]
+                merged = True
+                break
+            if merged:
+                break
+    return [(box, items) for box, items, _ in groups]
+
+
+def _contains(outer, box, share=.9):
+    x0, y0 = max(outer[0], box[0]), max(outer[1], box[1])
+    x1, y1 = min(outer[0]+outer[2], box[0]+box[2]), min(outer[1]+outer[3], box[1]+box[3])
+    inter = max(0, x1-x0)*max(0, y1-y0)
+    return inter >= share*box[2]*box[3]
+
+
+def blockify(elements, W, H):
+    """Texture rasters become rectangular blocks; icons stay separate cutouts.
+
+    A block's alpha is its fitted rect or roundRect, never the texture outline. A
+    native shape or a non-detector icon lying inside a block is part of its pixels.
+    Returns (elements, erase). Erase covers kept shapes, the pieces each block was
+    built from (not its whole rectangle, which may clip something left on the
+    background) and dilated icons.
+    """
+    icons, texture = split_icons(elements, W)
+    blocks = []
+    for box, items in merge_blocks(texture, W, H):
+        x, y, w, h = box
+        union = np.zeros((H, W), bool)
+        for item in items:
+            union |= item['mask']
+        fit = fit_geometry(fill_holes(union[y:y+h, x:x+w]))
+        mask = np.zeros((H, W), bool)
+        record = {'kind': 'raster', 'role': 'block', 'source': 'block', 'bbox': box, 'area': int(w*h),
+                  'members': len(items), 'absorbed': sum(i.get('absorbed', 0) for i in items)+len(items)-1}
+        if fit['geometry'] == 'roundRect' and fit['iou'] >= .9:
+            mask[y:y+h, x:x+w] = _rounded(w, h, fit['corner_radius_px'])
+            record.update(geometry='roundRect', corner_radius_px=fit['corner_radius_px'], alpha='mask')
+        else:
+            mask[y:y+h, x:x+w] = True
+            record.update(geometry='rect', alpha='rect')
+        record['mask'] = mask
+        record['pixels'] = union
+        blocks.append(record)
+    inside = lambda e: any(_contains(b['bbox'], e['bbox']) for b in blocks)
+    kept_icons = []
+    for e in icons:
+        if inside(e) and e.get('source') not in ICON_SOURCES:
+            continue
+        e['role'] = 'icon'
+        kept_icons.append(e)
+    shapes = [e for e in elements if e['kind'] == 'native_shape' and not inside(e)]
+    out = shapes+blocks+kept_icons
+    for k, e in enumerate(out):
+        e['id'] = f'el-{k:03d}'
+    erase = np.zeros((H, W), bool)
+    for e in shapes:
+        erase |= e['mask']
+    for e in blocks:
+        erase |= (cv2.dilate(e.pop('pixels').astype(np.uint8), np.ones((7, 7), np.uint8)) > 0) & e['mask']
+    for e in kept_icons:
+        erase |= cv2.dilate(e['mask'].astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+    return out, erase
+
+
+def icon_erase(elements):
+    """Dilated icon masks that fall inside a block: the block is cropped with them repaired."""
+    blocks = [e['mask'] for e in elements if e.get('role') == 'block']
+    if not blocks:
+        return None
+    within = np.logical_or.reduce(blocks)
+    erase = np.zeros_like(within)
+    for e in elements:
+        if e.get('role') == 'icon':
+            erase |= cv2.dilate(e['mask'].astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+    erase &= within
+    return erase if erase.any() else None
 
 
 def harden(crop, mask):
