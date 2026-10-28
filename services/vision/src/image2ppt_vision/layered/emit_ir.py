@@ -80,7 +80,11 @@ def emit(perception_dir, perception, styles, paragraphs, output, *, notes=(), so
     retained = [i for i in ocr if i not in native_ids and i not in table_ids and i not in source_crops]+icon_parts
     nodes, assets, z = [], [], 0
     claimed = set()
-    for element in perception['elements']:
+    # Cutouts stay above every shape. A later card must not paint over an icon
+    # that an earlier card already lifted out.
+    ordered = [e for e in perception['elements'] if e['kind'] == 'native_shape']
+    ordered += [e for e in perception['elements'] if e['kind'] != 'native_shape']
+    for element in ordered:
         eid = element['id']
         kind = 'shape' if element['kind'] == 'native_shape' else 'image'
         evidence.append({'id': 'ev-'+eid, 'kind': kind, 'bbox': _clip(element['bbox'], W, H),

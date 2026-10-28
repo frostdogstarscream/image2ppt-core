@@ -35,3 +35,6 @@ configs/auto-*.local.json
 # Staging dirs the finalizer leaves in the workspace when it snapshots
 # literal chart data into an embedded workbook.
 .chart-data-*/
+
+# OFL font binaries for layered fitting. scripts/fetch_layered_fonts.py downloads them.
+/fonts/layered/

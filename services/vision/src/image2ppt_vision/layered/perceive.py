@@ -19,7 +19,8 @@ import numpy as np
 from PIL import Image
 
 from . import inpaint as repair
-from .segment import classify, contrast_candidates, cutout, icon_fallbacks
+from .segment import (SMALL_ON_BACKGROUND, classify, circle_candidates, contrast_candidates,
+                      cutout, flat_region_candidates, icon_fallbacks)
 from .tables import detect_tables, fill_cells
 from .textmask import analyze_line, analyze_page, split_wide_gaps
 
@@ -131,11 +132,16 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
         table['rows'], table['owned_text_ids'], table['cell_styles'] = fill_cells(notext, table, lines, by_id)
     masks = sam(notext) if sam else []
     timings['sam'] = time.time()-clock; clock = time.time()
-    extra = contrast_candidates(notext, exclude=table_mask)
+    contrast = contrast_candidates(notext, exclude=table_mask)
+    flats = [item for item in flat_region_candidates(notext)+circle_candidates(notext)
+             if not _overlaps(_box(item[0]), table_mask, .5)]
+    extra = contrast+flats
     elements, erase = classify(notext, [m for m in masks if not _overlaps(_box(m[0]), table_mask, .5)],
                                text_mask=text_mask, icon_mask=icon_mask, extra=extra)
     icons = [b for r in records for b in r['icon_candidates']]
     for fallback in icon_fallbacks(notext, icons, elements):
+        if max(fallback['bbox'][2:]) <= SMALL_ON_BACKGROUND:
+            continue
         fallback['id'] = f'el-{len(elements):03d}'
         elements.append(fallback)
         erase |= cv2.dilate(fallback['mask'].astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
@@ -171,10 +177,11 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
     for e in elements:
         x, y, w, h = e['bbox']
         cv2.rectangle(overlay, (x, y), (x+w-1, y+h-1), (230, 30, 30) if e['kind'] == 'native_shape' else (20, 160, 40), 1)
-        item = {k: v for k, v in e.items() if k != 'mask'}
         if e['kind'] == 'raster':
             path = f'assets/{e["id"]}.png'
             Image.fromarray(cutout(notext, e), 'RGBA').save(out/path)
+        item = {k: v for k, v in e.items() if k != 'mask'}
+        if e['kind'] == 'raster':
             item.update(asset=path, asset_sha256=_sha(out/path))
         public.append(item)
     for t in tables:
@@ -191,7 +198,8 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
                              'text_method': text_method, 'element_method': bg_method},
               'residual_ocr': residual, 'recovered_text_ids': recovered,
               'counts': {'ocr_lines': len(lines), 'ink_ok': sum(r['status'] == 'ok' for r in records),
-                         'sam_masks': len(masks), 'contrast_candidates': len(extra),
+                         'sam_masks': len(masks), 'contrast_candidates': len(contrast),
+                         'flat_regions': len(flats),
                          'native_shapes': sum(e['kind'] == 'native_shape' for e in public),
                          'rasters': sum(e['kind'] == 'raster' for e in public), 'tables': len(tables)},
               'timings_s': {k: round(v, 3) for k, v in timings.items()}}

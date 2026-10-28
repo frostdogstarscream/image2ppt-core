@@ -294,6 +294,15 @@ def _fit_font(text, ink, candidates):
     best = fits[0]
     different_family = next((f for f in fits if f["family"] != best["family"]), None)
     best["family_margin"] = (different_family["loss"] - best["loss"]) if different_family else None
+    ranked, seen = [], set()
+    for item in fits:
+        if item["family"] in seen:
+            continue
+        seen.add(item["family"])
+        ranked.append({"family": item["family"], "bold": bool(item["bold"]), "loss": round(float(item["loss"]), 4)})
+        if len(ranked) == 6:
+            break
+    best["ranked_families"] = ranked
     return best
 
 
@@ -453,6 +462,7 @@ def estimate_text(rgb, ocr, font_candidates=None, *, isolate_ocr_window=False):
                     "family_margin": None if fit["family_margin"] is None else round(fit["family_margin"], 4),
                     "glyph_bbox": list(fit["glyph_bbox"]),
                     "font_path": fit["path"],
+                    "ranked_families": fit["ranked_families"],
                     "render_origin": [x0+ix0+fit["dx"]-fit["glyph_bbox"][0],
                                       y0+iy0+fit["dy"]-fit["glyph_bbox"][1]]}
     # Unmatched ink can be a chart line, picture, wrong OCR, or missing glyph.

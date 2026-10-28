@@ -3,14 +3,18 @@
 Fitted lines use the installed-font raster fit (``estimate_text``); unfitted
 lines borrow this page's measured font-size/ink-height ratio and origin offsets,
 so nothing falls back to a fixed constant when the page itself has evidence.
+An optional Source Han catalog (``fonts/layered/manifest.json``) joins the fit.
+The emitted family is always one the local preview can draw.
 """
 import statistics
+from collections import Counter
+from pathlib import Path
 
 import numpy as np
 
 from ..font_contract import family_name
 from ..renderer_calibration import origin_correction
-from ..typography import estimate_text, font_status
+from ..typography import _candidates, _manifest_fonts, estimate_text, font_status
 
 DEFAULT_RATIO = 1.18
 DEFAULT_OFFSET = (.02, .2)
@@ -25,11 +29,61 @@ def _family(available):
     return available[0]
 
 
+def layered_font_catalog(manifest=None):
+    """Installed preview fonts, plus the downloaded Source Han manifest when present."""
+    installed = _candidates(None)
+    path = Path(manifest) if manifest else Path(__file__).resolve().parents[5]/'fonts'/'layered'/'manifest.json'
+    extra = _manifest_fonts(str(path)) if path.is_file() else []
+    seen = {item['path'] for item in installed}
+    return installed+[item for item in extra if item['path'] not in seen], {item['family'] for item in installed}
+
+
+def office_family(ranked, installed):
+    """Family the preview can draw. A downloaded font may win the ink fit and still not be emitted."""
+    for item in ranked or []:
+        if item.get('family') in installed:
+            return item['family']
+    return None
+
+
+def page_family(fitted_families, fallback, *, share=.6):
+    """One family for unfitted lines when a single family already explains most of the page."""
+    if not fitted_families:
+        return fallback
+    family, count = Counter(fitted_families).most_common(1)[0]
+    if count >= share*len(fitted_families):
+        return family
+    return fallback
+
+
+def _estimate_drawable(rgb, probe, catalog, installed):
+    """Score the whole catalog, then measure the line in a font the preview can draw.
+
+    Source Han can win the ink ranking without being installed. The size and
+    origin that get emitted are always from the installed face, so a YaHei
+    glyph is not placed at a Source Han advance.
+    """
+    estimate = estimate_text(rgb, probe, catalog, isolate_ocr_window=True)
+    ranked = ((estimate.get('diagnostics') or {}).get('font') or {}).get('ranked_families') or []
+    winner = estimate.get('font_family')
+    if not winner or winner in installed:
+        return estimate, ranked
+    installed_catalog = [item for item in catalog if item['family'] in installed]
+    if not installed_catalog:
+        return estimate, ranked
+    fallback = estimate_text(rgb, probe, installed_catalog, isolate_ocr_window=True)
+    font = fallback.setdefault('diagnostics', {}).setdefault('font', {})
+    font['ranked_families'] = ranked
+    font['ink_winner'] = winner
+    return fallback, ranked
+
+
 def measure(rgb, perception, *, renderer_version=None):
     W, H = perception['image_size']
     scale = 1280/W
-    available = font_status()['families']
-    default_family = _family(available)
+    catalog, installed = layered_font_catalog()
+    names = sorted(installed) or font_status()['families']
+    default_family = _family(names)
     ocr = {t['id']: t for t in perception['ocr']}
     styles, fits = {}, []
     for record in perception['text']:
@@ -39,12 +93,15 @@ def measure(rgb, perception, *, renderer_version=None):
         text = record.get('icon_text_split', {}).get('native', line['text'])
         x, y, w, h = record['ink_bbox']
         probe = {'text': text, 'bbox': [max(0, x-2), max(0, y-2), min(W-x+2, w+4), min(H-y+2, h+4)]}
-        estimate = estimate_text(rgb, probe, isolate_ocr_window=True)
+        estimate, ranked = _estimate_drawable(rgb, probe, catalog, installed)
         fit = estimate.get('diagnostics', {}).get('font', {})
         style = {'id': record['id'], 'text': text, 'ink_bbox': record['ink_bbox'],
                  'color': record['color'], 'bold_ratio': record['bold_ratio'], 'fitted': False}
+        family = estimate.get('font_family') if estimate.get('font_family') in installed else None
+        family = family or office_family(ranked, installed)
+        ink_winner = (fit.get('ink_winner') or (ranked[0]['family'] if ranked else family))
         if (estimate.get('native_eligible') and fit.get('dimension_error', 1) <= .12
-                and fit.get('shape_overlap', 0) >= .58 and estimate.get('font_family') in available):
+                and fit.get('shape_overlap', 0) >= .58 and family):
             origin = list(fit['render_origin'])
             glyph = fit.get('glyph_bbox')
             a, b = estimate['bbox'][:2]
@@ -52,7 +109,8 @@ def measure(rgb, perception, *, renderer_version=None):
                 origin = [a-glyph[0], b-glyph[1]]
             correction = origin_correction(estimate, [W, H], [1280, round(H*scale)], renderer_version=renderer_version)
             size = float(estimate['font_size_px'])
-            style.update(fitted=True, size_px=size, family=estimate['font_family'], bold=bool(estimate['bold']),
+            style.update(fitted=True, size_px=size, family=family, fitted_family=ink_winner,
+                         bold=bool(estimate['bold']),
                          origin=[float(origin[0]), float(origin[1])+correction['dy']],
                          color=estimate['color'].lstrip('#'), shape_overlap=fit['shape_overlap'],
                          evidence='installed-font raster fit to source ink; candidate, not identified original')
@@ -64,6 +122,7 @@ def measure(rgb, perception, *, renderer_version=None):
     ox = statistics.median((f['ink_bbox'][0]-f['origin'][0])/f['size_px'] for f in fits) if len(fits) >= MIN_FITS else DEFAULT_OFFSET[0]
     oy = statistics.median((f['ink_bbox'][1]-f['origin'][1])/f['size_px'] for f in fits) if len(fits) >= MIN_FITS else DEFAULT_OFFSET[1]
     bold_threshold = _bold_threshold(fits)
+    default_family = page_family([s['family'] for s in fits], default_family)
     for style in styles.values():
         if style['fitted']:
             continue
@@ -84,8 +143,8 @@ def measure(rgb, perception, *, renderer_version=None):
 
 
 def _font_path(family, bold):
-    from ..typography import _candidates
-    pool = [c for c in _candidates(None) if family_name(c['family']) == family_name(family)]
+    catalog, _ = layered_font_catalog()
+    pool = [c for c in catalog if family_name(c['family']) == family_name(family)]
     match = [c for c in pool if c['bold'] == bold] or pool
     return (match[0]['path'], match[0].get('index', 0)) if match else (None, 0)
 

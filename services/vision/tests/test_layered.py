@@ -98,7 +98,28 @@ def test_segment_classifies_flat_card_gradient_and_icon():
     assert abs(gradient['fill_gradient']['angle_deg']) < 5 or abs(gradient['fill_gradient']['angle_deg']-360) < 5
     assert erase[card > 0].all()
     raster = next(e for e in elements if e['kind'] == 'raster')
-    assert segment.cutout(rgb, raster).shape[2] == 4
+    rgba = segment.cutout(rgb, raster)
+    assert rgba.shape[2] == 4
+    assert set(np.unique(rgba[:, :, 3])).issubset({0, 255})
+
+
+def test_filled_picture_edge_is_hard():
+    """The outer pixel of a filled picture is replaced by the pixel inside it."""
+    rgb = np.full((80, 120, 3), 240, np.uint8)
+    rgb[10:70, 10:110] = (20, 80, 160)
+    rgb[10, 10:110] = (240, 240, 240)
+    rgb[69, 10:110] = (240, 240, 240)
+    rgb[10:70, 10] = (240, 240, 240)
+    rgb[10:70, 109] = (240, 240, 240)
+    mask = np.zeros((80, 120), bool)
+    mask[10:70, 10:110] = True
+    element = {'bbox': [10, 10, 100, 60], 'alpha': 'mask', 'mask': mask}
+    rgba = segment.cutout(rgb, element)
+    assert element['bbox'] == [10, 10, 100, 60]
+    assert set(np.unique(rgba[:, :, 3])).issubset({0, 255})
+    assert tuple(int(v) for v in rgba[0, 5, :3]) == (20, 80, 160)
+    assert int(rgba[0, 5, 3]) == 255
+    assert tuple(int(v) for v in rgba[30, 50, :3]) == (20, 80, 160)
 
 
 def test_card_hides_nothing_unaccounted():
@@ -241,3 +262,80 @@ def test_shape_around_text_is_left_in_place():
     records, text_mask, _ = textmask.analyze_page(rgb, [line])
     assert records[0]['status'] == 'ink_exceeds_box'
     assert not text_mask.any()
+
+
+def test_chevron_ribbon_fits_as_a_chevron():
+    ribbon = segment._chevron(120, 36, 14)
+    fit = segment.fit_geometry(ribbon)
+    assert fit['geometry'] == 'chevron' and fit['iou'] >= .95
+
+
+def test_tiny_same_color_fragments_merge_and_icons_are_not_sliced():
+    rgb = page()
+    left = np.zeros(rgb.shape[:2], bool)
+    right = np.zeros_like(left)
+    left[40:52, 40:52] = True
+    right[40:52, 56:68] = True
+    rgb[left | right] = (10, 40, 180)
+    merged = segment.merge_fragments(rgb, [
+        {'mask': left, 'bbox': segment._bbox(left), 'area': int(left.sum()), 'meta': {'source': 'sam2'}},
+        {'mask': right, 'bbox': segment._bbox(right), 'area': int(right.sum()), 'meta': {'source': 'sam2'}},
+    ])
+    assert len(merged) == 1 and merged[0]['meta']['source'] == 'merged_fragment'
+    icon = np.zeros_like(left)
+    icon[80:120, 80:120] = True
+    rgb[icon] = (200, 30, 30)
+    half = icon.copy()
+    half[:, 100:] = False
+    elements, _ = segment.classify(rgb, [(half, {'source': 'sam2'}), (icon & ~half, {'source': 'sam2'})],
+                                   text_mask=np.zeros_like(left), icon_mask=icon)
+    assert not any(e['source'] == 'sam2' and (e['mask'] & icon).any() for e in elements)
+    assert len(segment.icon_fallbacks(rgb, [[80, 80, 40, 40]], elements)) == 1
+
+
+def test_solid_icon_disc_promotes_to_an_ellipse():
+    rgb = page()
+    cv2.circle(rgb, (120, 120), 22, (20, 120, 220), -1, cv2.LINE_AA)
+    cv2.circle(rgb, (120, 120), 6, (255, 255, 255), -1, cv2.LINE_AA)
+    empty = np.zeros(rgb.shape[:2], bool)
+    elements, _ = segment.classify(rgb, [], text_mask=empty, icon_mask=empty,
+                                   extra=segment.circle_candidates(rgb))
+    disc = next(e for e in elements if e['kind'] == 'native_shape')
+    assert disc['geometry'] == 'ellipse' or (
+        disc['geometry'] == 'roundRect' and disc['corner_radius_px'] >= .4*min(disc['bbox'][2:]))
+
+
+def test_flat_regions_promote_a_card_and_keep_the_inner_card():
+    rgb = page()
+    cv2.rectangle(rgb, (40, 40), (360, 250), (255, 255, 255), -1)
+    cv2.rectangle(rgb, (60, 70), (180, 150), (225, 236, 252), -1)
+    empty = np.zeros(rgb.shape[:2], bool)
+    extra = segment.flat_region_candidates(rgb)
+    elements, _ = segment.classify(rgb, [], text_mask=empty, icon_mask=empty, extra=extra)
+    shapes = [e for e in elements if e['kind'] == 'native_shape']
+    assert len(shapes) >= 2
+    assert all(e['source'] == 'flat_region' for e in shapes)
+
+
+def test_emitted_family_is_one_the_preview_can_draw():
+    from image2ppt_vision.layered.typography import layered_font_catalog, measure
+    rgb = page()
+    write(rgb, 'REPORT', (40, 80))
+    perception = {'image_size': [rgb.shape[1], rgb.shape[0]],
+                  'ocr': [{'id': 't0', 'text': 'REPORT', 'bbox': [36, 52, 180, 40], 'score': .99}],
+                  'text': [{'id': 't0', 'status': 'ok', 'ink_bbox': [40, 58, 140, 28],
+                            'color': '1E283C', 'bold_ratio': .08}]}
+    styles, _ = measure(rgb, perception)
+    _, installed = layered_font_catalog()
+    assert styles['t0']['family'] in installed
+    assert styles['t0']['family'] != 'Source Han Sans SC'
+
+
+def test_missing_font_manifest_keeps_installed_families():
+    from image2ppt_vision.layered.typography import layered_font_catalog, office_family, page_family
+    catalog, installed = layered_font_catalog(r'C:\no\such\layered-fonts\manifest.json')
+    assert catalog and all(item['family'] != 'Source Han Sans SC' for item in catalog)
+    assert office_family([{'family': 'Source Han Sans SC'}, {'family': '微软雅黑'}], {'微软雅黑'}) == '微软雅黑'
+    assert office_family([{'family': 'Source Han Sans SC'}], installed) is None or 'Source Han Sans SC' not in installed
+    assert page_family(['微软雅黑']*3+['黑体'], '宋体') == '微软雅黑'
+    assert page_family(['微软雅黑', '黑体'], '宋体') == '宋体'
