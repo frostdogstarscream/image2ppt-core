@@ -10,6 +10,7 @@ called here.
 """
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -19,6 +20,7 @@ import numpy as np
 from PIL import Image
 
 from . import inpaint as repair
+from .components import rebuild, smooth_under
 from .segment import (ICON_MAX, blockify, classify, circle_candidates, contrast_candidates,
                       cutout, flat_region_candidates, gradient, icon_fallbacks, layer_erase)
 from .tables import detect_tables, fill_cells
@@ -106,7 +108,12 @@ def _overlaps(box, mask, fraction):
     return window.size and window.mean() >= fraction
 
 
-def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
+def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None):
+    """``mode`` 'rebuild' (default) measures components and never repairs under
+    them with the model; 'objects' is the erase-and-repair path it replaces."""
+    mode = mode or os.environ.get('IMAGE2PPT_LAYERED_MODE', 'rebuild')
+    if mode not in ('rebuild', 'objects'):
+        raise ValueError('layered mode must be rebuild or objects')
     out = Path(out)
     (out/'assets').mkdir(parents=True, exist_ok=False)
     (out/'masks').mkdir()
@@ -146,19 +153,30 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
     elements += icon_fallbacks(notext, icons, small)
     elements = [e for e in elements if not _overlaps(e['bbox'], table_mask, .5)]
     pieces = elements
-    elements, erase = blockify(elements, W, H, grad=gradient(notext))
+    grad = gradient(notext)
+    elements, erase = blockify(elements, W, H, grad=grad)
+    rebuilt = mode == 'rebuild'
+    if rebuilt:
+        elements, erase = rebuild(notext, elements, W, H, grad, text_mask=text_mask, icon_mask=icon_mask)
     timings['segment'] = time.time()-clock; clock = time.time()
     # Layer k is the page with every object above level k repaired: a level-k
     # raster is cropped from it, and it is what shows when a level-k+1 object moves.
+    # A rebuilt page is never repaired by the model: under a component there is
+    # only the surface around it.
+    fill_under = (lambda hole: smooth_under(notext, hole)) if rebuilt else \
+        (lambda hole: repair.inpaint(notext, hole, model, small_smooth=SMALL_HOLE)[0])
     top = max((e['level'] for e in elements), default=0)
     raster_levels = {e['level'] for e in elements if e['kind'] == 'raster'}
     layers = {}
     for k in range(top+1):
         if k in raster_levels or k+1 in raster_levels:
             above = layer_erase(elements, k, H, W)
-            layers[k] = repair.inpaint(notext, above, model, small_smooth=SMALL_HOLE)[0] if above.any() else notext
+            layers[k] = fill_under(above) if above.any() else notext
     timings['inpaint_layers'] = time.time()-clock; clock = time.time()
-    background, bg_method = repair.inpaint(notext, erase | table_mask, model, small_smooth=SMALL_HOLE)
+    if rebuilt:
+        background, bg_method = fill_under(erase | table_mask), 'smooth_under_components'
+    else:
+        background, bg_method = repair.inpaint(notext, erase | table_mask, model, small_smooth=SMALL_HOLE)
     timings['inpaint_elements'] = time.time()-clock; clock = time.time()
     # Residual OCR: text the first pass missed is recovered once; ghosts are reported.
     recovered = []
@@ -221,7 +239,8 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None):
                          'rasters': sum(e['kind'] == 'raster' for e in public),
                          'blocks': sum(e.get('role') == 'block' for e in public),
                          'icons': sum(e.get('role') == 'icon' for e in public), 'tables': len(tables),
-                         'levels': top+1,
+                         'levels': top+1, 'mode': mode,
+                         'native_share': round(sum(e['kind'] == 'native_shape' for e in public)/max(len(public), 1), 3),
                          'erased_fraction': round(float((erase | table_mask).mean()), 4)},
               'timings_s': {k: round(v, 3) for k, v in timings.items()}}
     result['files'] = {p.relative_to(out).as_posix(): _sha(p) for p in sorted(out.rglob('*')) if p.is_file()}

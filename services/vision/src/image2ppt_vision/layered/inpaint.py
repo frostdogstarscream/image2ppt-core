@@ -68,6 +68,8 @@ def pull_push(values, hole):
         num = cv2.resize(img*known[..., None], size, interpolation=cv2.INTER_AREA).reshape(size[1], size[0], -1)
         img = num/np.maximum(den, 1e-6)[..., None]
         known = (den > 1e-6).astype(np.float32)
+    if (known == 0).any() and known.any():
+        img = np.where(known[..., None] > 0, img, img[known > 0].mean(0))
     for fine, fine_known in reversed(stack):
         up = cv2.resize(img, (fine.shape[1], fine.shape[0]), interpolation=cv2.INTER_LINEAR).reshape(fine.shape)
         img = np.where(fine_known[..., None] > 0, fine, up)

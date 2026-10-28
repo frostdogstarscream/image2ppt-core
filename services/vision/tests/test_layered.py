@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from image2ppt_vision.layered import emit_ir, inpaint, qa, segment, semantics, tables, textmask
+from image2ppt_vision.layered import components, emit_ir, inpaint, qa, segment, semantics, tables, textmask
 from image2ppt_vision.layered.perceive import bullet_icon, perceive, plausible_text
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -328,6 +328,83 @@ def test_three_levels_lift_to_a_repaired_layer_beneath():
     beneath_icon, _ = inpaint.inpaint(rgb, segment.layer_erase(elements, 1, H, W), None)
     assert np.abs(beneath_icon[75, 100].astype(int)-(20, 90, 200)).sum() < 30
     assert (beneath_icon[100:230, 70:290] == rgb[100:230, 70:290]).all()
+
+
+def _rebuilt(rgb, objects=()):
+    H, W = rgb.shape[:2]
+    empty = np.zeros((H, W), bool)
+    return components.rebuild(rgb, list(objects), W, H, segment.gradient(rgb), text_mask=empty, icon_mask=empty)
+
+
+def test_rebuild_nests_card_header_and_badge_as_three_native_levels():
+    rgb = page()
+    cv2.rectangle(rgb, (40, 40), (400, 300), (255, 255, 255), -1)
+    cv2.rectangle(rgb, (40, 40), (400, 300), (200, 210, 225), 1)
+    rgb[60:120, 60:380] = (20, 90, 200)
+    rgb[75:105, 80:110] = (240, 150, 30)
+    elements, _ = _rebuilt(rgb)
+    assert [e['kind'] for e in elements] == ['native_shape']*3
+    by_level = {e['level']: e for e in elements}
+    assert sorted(by_level) == [0, 1, 2]
+    assert by_level[0]['bbox'] == [40, 40, 361, 261] and by_level[0]['fill'] == 'FFFFFF'
+    assert by_level[0]['line']['color'] == 'C8D2E1'
+    assert by_level[1]['bbox'] == [60, 60, 320, 60] and by_level[1]['geometry'] == 'rect'
+    assert by_level[2]['bbox'] == [80, 75, 30, 30] and by_level[2]['fill'] == 'F0961E'
+
+
+def test_rebuild_fits_a_gradient_band():
+    rgb = page()
+    t = np.linspace(0, 1, 300)[None, :, None]
+    rgb[100:180, 100:400] = np.rint((1-t)*np.array([20, 90, 200])+t*np.array([40, 180, 230])).astype(np.uint8)
+    elements, _ = _rebuilt(rgb)
+    assert len(elements) == 1
+    band = elements[0]
+    assert band['kind'] == 'native_shape' and band['bbox'] == [100, 100, 300, 80]
+    stops = band['fill_gradient']['stops']
+    hexrgb = lambda h: np.array([int(h[i:i+2], 16) for i in (0, 2, 4)])
+    assert np.abs(hexrgb(stops[0]['color'])-(20, 90, 200)).max() <= 4
+    assert np.abs(hexrgb(stops[-1]['color'])-(40, 180, 230)).max() <= 4
+
+
+def test_rebuild_finds_a_white_card_on_a_white_page_by_its_border():
+    rgb = np.full((360, 640, 3), 255, np.uint8)
+    cv2.rectangle(rgb, (60, 60), (360, 260), (225, 230, 238), 1)
+    elements, _ = _rebuilt(rgb)
+    assert len(elements) == 1
+    card = elements[0]
+    assert card['kind'] == 'native_shape' and card['source'] == 'contour'
+    assert card['bbox'] == [60, 60, 301, 201] and card['line']['color'] == 'E1E6EE'
+
+
+def test_rebuild_textured_card_falls_back_to_a_picture_with_a_smooth_hole():
+    """The picture under a native header shows no second header when the header moves."""
+    rgb = page()
+    rng = np.random.default_rng(1)
+    rgb[40:300, 40:400] = rng.integers(60, 200, (260, 360, 3), dtype=np.uint8)
+    rgb[80:140, 80:300] = (20, 90, 200)
+    elements, _ = _rebuilt(rgb)
+    picture = next(e for e in elements if e['kind'] == 'raster')
+    header = next(e for e in elements if e['kind'] == 'native_shape')
+    assert picture['fallback'] and picture['bbox'] == [40, 40, 360, 260] and picture['level'] == 0
+    assert header['bbox'] == [80, 80, 220, 60] and header['level'] == 1
+    H, W = rgb.shape[:2]
+    beneath = components.smooth_under(rgb, segment.layer_erase(elements, 0, H, W))
+    hole = beneath[90:130, 90:290].astype(int)
+    assert np.abs(hole.mean((0, 1))-(130, 130, 130)).max() < 25
+    assert np.abs(hole-(20, 90, 200)).sum(2).min() > 60
+    assert (beneath[200:290, 50:390] == rgb[200:290, 50:390]).all()
+
+
+def test_rebuild_background_is_original_outside_components_and_smooth_under_them():
+    rgb = page()
+    rgb[:, :, 2] = np.linspace(230, 252, 640).astype(np.uint8)[None, :]
+    rgb[60:200, 80:320] = (20, 90, 200)
+    elements, erase = _rebuilt(rgb)
+    assert [e['kind'] for e in elements] == ['native_shape']
+    background = components.smooth_under(rgb, erase)
+    assert (background[~erase] == rgb[~erase]).all()
+    under = background[70:190, 90:310].astype(int)
+    assert np.abs(under-rgb[20:21, 90:310].astype(int)).max() <= 3
 
 
 def test_duplicate_under_objects_flags_unrepaired_layers(tmp_path):
