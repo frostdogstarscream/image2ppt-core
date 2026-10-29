@@ -2,10 +2,13 @@
 
 1. Preserve inputs; run GPU perception on the dev worker (OCR, ink masks,
    LaMa, SAM2 cutouts, tables, residual OCR).
-2. Locally: one optional vision call that may only demote a measured shape to a
-   picture or add a piece inside a candidate window, then page-calibrated
-   typography, paragraph semantics (one optional text-only model call), SlideIR
-   emission, fixed Artifact Tool compile.
+2. Locally: one optional vision call that names hard rectangles. Measurement
+   keeps a native shape only when it reproduces the box; every other accepted
+   box is a hard rectangular crop that replaces a covered fuzzy mask. Leftover
+   unnamed ink is lifted the same way. The slide fill is a solid colour; cutouts
+   still come from the text-free page. Then page-calibrated typography,
+   paragraph semantics (one optional text-only model call), SlideIR emission,
+   fixed Artifact Tool compile.
 3. Re-OCR the rendered previews on the worker and record QA metrics.
 
 Every stage writes new files; nothing is overwritten. Results are

@@ -1,8 +1,8 @@
 """SlideIR emission for the layered pipeline.
 
-Layer order: cleaned background < native shapes / tables / cutouts (perception
+Layer order: solid slide fill < native shapes / tables / cutouts (perception
 order, larger first) < native text. Every OCR line has exactly one owner: a
-text or table node, a cutout that still shows it, or the cleaned background.
+text or table node, or a cutout that still shows it.
 """
 import shutil
 import statistics
@@ -161,7 +161,7 @@ def emit(perception_dir, perception, styles, paragraphs, output, *, notes=(), so
     ir = {'schema_version': '0.1', 'source_image': 'source/page.png', 'source_sha256': digest(output/'source/page.png'),
           'canvas': {'source_px': [W, H], 'target_px': [1280, round(H*scale)]}, 'background': background,
           'review_status': 'needs_review',
-          'review_notes': ['Layered v3 reconstruction: cleaned background, native text/shapes, RGBA cutouts.',
+          'review_notes': ['Layered v3 reconstruction: solid slide fill, native text/shapes, RGBA cutouts.',
                            'Fonts are installed candidates fitted to source ink, not identified originals.', *notes],
           'evidence': evidence, 'nodes': nodes, 'assets': assets, 'groups': []}
     if unresolved:

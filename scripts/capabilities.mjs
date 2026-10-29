@@ -64,7 +64,7 @@ const BASE_MISSING = Object.freeze([
 ]);
 
 // The layered v3 pipeline (services/vision layered/) runs OCR and LaMa on its
-// GPU worker and puts the inpainted result in as a cleaned background layer.
+// GPU worker so cutouts are text-free. The slide fill is a solid colour.
 // That is true of that pipeline only; the conversation-authored replay path
 // still has neither, so the default lists do not change.
 const PIPELINE_PROVIDES = Object.freeze({

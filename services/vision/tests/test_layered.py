@@ -452,14 +452,26 @@ def test_embedded_texture_becomes_its_own_picture():
     assert added[0]['mask'][150, 180]
 
 
-def test_review_applies_only_a_window_that_snaps(tmp_path):
-    """The model names a rough window; a closed card inside it is kept, a window of the page is not."""
+class _Remote:
+    def __init__(self, payload=None, *, ok=True, error='', content=None, partial=None):
+        self.payload = payload
+        self.ok = ok
+        self.error = error
+        self.content = content
+        self.partial = partial
+
+    def request(self, request, timeout=240):
+        if not self.ok:
+            out = {'ok': False, 'request_id': request['request_id'], 'error': self.error, 'usage': {}}
+            if self.partial is not None:
+                out['partial_content'] = self.partial
+            return out
+        return {'ok': True, 'request_id': request['request_id'], 'usage': {'total_tokens': 11},
+                'content': self.content if self.content is not None else json.dumps(self.payload)}
+
+
+def _review_page(tmp_path, rgb, elements):
     from image2ppt_vision.layered import review
-    rgb = page()
-    cv2.rectangle(rgb, (40, 40), (400, 300), (255, 255, 255), -1)
-    cv2.rectangle(rgb, (40, 40), (400, 300), (180, 190, 205), 2)
-    cv2.rectangle(rgb, (70, 80), (220, 200), (255, 255, 255), -1)
-    cv2.rectangle(rgb, (70, 80), (220, 200), (40, 90, 180), 2)
     out = tmp_path/'perception'
     (out/'masks').mkdir(parents=True)
     (out/'assets').mkdir()
@@ -467,35 +479,198 @@ def test_review_applies_only_a_window_that_snaps(tmp_path):
     Image.fromarray(rgb).save(out/'source.png')
     Image.fromarray(rgb).save(out/'notext.png')
     Image.fromarray(rgb).save(out/'background.png')
-    mask = np.zeros(rgb.shape[:2], bool)
-    mask[40:301, 40:401] = True
-    np.savez_compressed(out/'masks/elements.npz', masks=np.stack([mask]), ids=np.array(['el-000']))
-    perception = {'elements': [{'id': 'el-000', 'kind': 'native_shape', 'source': 'calm_region', 'bbox': [40, 40, 361, 261],
-                                'area': int(mask.sum()), 'geometry': 'rect', 'fill': 'FFFFFF', 'level': 0}],
-                  'tables': [], 'image_size': [640, 360],
+    np.savez_compressed(out/'masks/elements.npz', masks=np.stack([e['mask'] for e in elements]),
+                        ids=np.array([e['id'] for e in elements]))
+    perception = {'elements': [{k: v for k, v in e.items() if k != 'mask'} for e in elements],
+                  'tables': [], 'image_size': [rgb.shape[1], rgb.shape[0]],
                   'background': {'path': 'background.png', 'sha256': '0', 'element_method': 'smooth_under_components'},
                   'counts': {}}
+    return review, out, perception
 
-    class Remote:
-        def __init__(self, payload):
-            self.payload = payload
 
-        def request(self, request, timeout=240):
-            return {'ok': True, 'request_id': request['request_id'], 'usage': {'total_tokens': 11},
-                    'content': json.dumps(self.payload)}
+def _review_piece(i, mask, role='block'):
+    return {'id': i, 'kind': 'raster', 'role': role, 'source': 'sam2', 'fallback': role == 'block',
+            'bbox': list(segment._bbox(mask)), 'area': int(mask.sum()), 'alpha': 'mask', 'mask': mask}
 
-    accepted, report = review.review(out, perception, remote=Remote(
-        {'decisions': [{'id': 'el-000', 'action': 'split', 'windows': [[70, 80, 151, 121]]},
-                       {'id': 'el-000', 'action': 'split', 'windows': [[0, 0, 30, 30]]}]}), model='vision')
-    assert report['model_used'] and any(a['action'] == 'split' and a['kind'] == 'native_shape' for a in report['applied'])
-    assert any('window:el-000' in i for i in report['issues'])
-    added = next(e for e in accepted['elements'] if e['source'] == 'review')
-    assert added['fill'] and (out/'assets').exists()
-    picture, pictured = review.review(out, accepted, remote=Remote(
-        {'decisions': [{'id': 'el-000', 'action': 'picture'}]}), model='vision')
-    host = next(e for e in picture['elements'] if e['id'] == 'el-000')
-    assert host['kind'] == 'raster' and pictured['applied'] == [{'id': 'el-000', 'action': 'picture'}]
-    assert (out/'assets/el-000.png').is_file()
+
+def test_review_picture_box_fits_the_card_edge(tmp_path):
+    """A loose picture box snaps to the card's own edge; the fuzzy mask and icon on it go."""
+    rgb = page()
+    rgb[80:220, 90:400] = (205, 220, 240)
+    cv2.circle(rgb, (170, 110), 9, (40, 90, 180), -1)
+    fuzzy = np.zeros(rgb.shape[:2], bool)
+    fuzzy[90:210, 100:380] = True
+    icon = np.zeros(rgb.shape[:2], bool)
+    icon[100:121, 160:181] = True
+    review, out, perception = _review_page(tmp_path, rgb, [_review_piece('el-000', fuzzy), _review_piece('el-001', icon, 'icon')])
+    accepted, report = review.review(out, perception, remote=_Remote(
+        {'objects': [{'bbox': [70, 60, 350, 180], 'kind': 'picture'}]}), model='vision')
+    added = next(e for e in accepted['elements'] if e.get('source') == 'review')
+    assert report['model_used'] and added['kind'] == 'raster' and added['alpha'] == 'rect'
+    x, y, w, h = added['bbox']
+    assert abs(x-90) <= 2 and abs(y-80) <= 2 and abs(x+w-400) <= 2 and abs(y+h-220) <= 2
+    assert [e['id'] for e in accepted['elements']] == [added['id']]
+    rgba = np.asarray(Image.open(out/added['asset']))
+    assert rgba.shape[2] == 4 and set(np.unique(rgba[:, :, 3])) == {255}
+
+
+def test_review_offset_box_keeps_an_icon_in_one_piece(tmp_path):
+    """The box misses part of the glyph; the crop still holds the disc and the whole glyph."""
+    rgb = page()
+    cv2.circle(rgb, (200, 150), 26, (220, 232, 248), -1)
+    cv2.rectangle(rgb, (188, 140), (212, 178), (40, 90, 180), -1)
+    disc = np.zeros(rgb.shape[:2], bool)
+    cv2.circle(disc.view(np.uint8), (200, 150), 26, 1, -1)
+    glyph = np.zeros(rgb.shape[:2], bool)
+    glyph[140:179, 188:213] = True
+    disc &= ~glyph
+    review, out, perception = _review_page(tmp_path, rgb, [_review_piece('el-000', disc), _review_piece('el-001', glyph, 'icon')])
+    accepted, report = review.review(out, perception, remote=_Remote(
+        {'objects': [{'bbox': [160, 110, 60, 50], 'kind': 'picture'}]}), model='vision')
+    added = [e for e in accepted['elements'] if e.get('source') == 'review']
+    assert len(added) == 1 and [e['id'] for e in accepted['elements']] == [added[0]['id']]
+    x, y, w, h = added[0]['bbox']
+    assert x <= 174 and y <= 124 and x+w >= 226 and y+h >= 179, added[0]['bbox']
+
+
+def test_review_unmeasured_shape_falls_back_to_a_card_crop(tmp_path):
+    """A shape box that measure cannot close still becomes one hard crop; the fragments go."""
+    rgb = page()
+    rng = np.random.default_rng(4)
+    rgb[60:200, 60:300] = rng.integers(180, 230, (140, 240, 3), dtype=np.uint8)
+    rgb[80:101, 80:101] = (40, 90, 180)
+    card = np.zeros(rgb.shape[:2], bool)
+    card[60:200, 60:300] = True
+    icon = np.zeros(rgb.shape[:2], bool)
+    icon[80:101, 80:101] = True
+    card &= ~icon
+    review, out, perception = _review_page(tmp_path, rgb, [_review_piece('el-000', card), _review_piece('el-001', icon, 'icon')])
+    accepted, report = review.review(out, perception, remote=_Remote(
+        {'objects': [{'bbox': [60, 60, 240, 140], 'kind': 'shape'}]}), model='vision')
+    added = next(e for e in accepted['elements'] if e.get('source') == 'review')
+    assert 'shape_unmeasured' in report['issues']
+    assert added['kind'] == 'raster' and added['alpha'] == 'rect'
+    x, y, w, h = added['bbox']
+    assert x <= 60 and y <= 60 and x+w >= 300 and y+h >= 200
+    assert [e['id'] for e in accepted['elements']] == [added['id']]
+    rgba = np.asarray(Image.open(out/added['asset']))
+    assert rgba.shape[2] == 4 and set(np.unique(rgba[:, :, 3])) == {255}
+
+
+def test_review_small_box_does_not_swallow_the_parent_photo(tmp_path):
+    rgb = page()
+    rng = np.random.default_rng(6)
+    rgb[40:300, 40:500] = rng.integers(0, 255, (260, 460, 3), dtype=np.uint8)
+    photo = np.zeros(rgb.shape[:2], bool)
+    photo[40:300, 40:500] = True
+    review, out, perception = _review_page(tmp_path, rgb, [_review_piece('el-000', photo)])
+    accepted, report = review.review(out, perception, remote=_Remote(
+        {'objects': [{'bbox': [100, 100, 60, 60], 'kind': 'picture'}]}), model='vision')
+    added = next(e for e in accepted['elements'] if e.get('source') == 'review')
+    assert added['alpha'] == 'rect' and added['bbox'][2] <= 80 and added['bbox'][3] <= 80
+    assert any(e['id'] == 'el-000' for e in accepted['elements'])
+    assert 'snap_limit' not in report['issues']
+
+
+def test_review_keeps_a_shape_whose_contour_measures(tmp_path):
+    """A closed card inside a shape box stays a native shape; the surrounding measured card stays."""
+    rgb = page()
+    cv2.rectangle(rgb, (40, 40), (400, 300), (255, 255, 255), -1)
+    cv2.rectangle(rgb, (40, 40), (400, 300), (180, 190, 205), 2)
+    cv2.rectangle(rgb, (70, 80), (220, 200), (255, 255, 255), -1)
+    cv2.rectangle(rgb, (70, 80), (220, 200), (40, 90, 180), 2)
+    outer = np.zeros(rgb.shape[:2], bool)
+    outer[40:301, 40:401] = True
+    review, out, perception = _review_page(tmp_path, rgb, [
+        {'id': 'el-000', 'kind': 'native_shape', 'source': 'calm_region', 'bbox': [40, 40, 361, 261],
+         'area': int(outer.sum()), 'geometry': 'rect', 'fill': 'FFFFFF', 'level': 0, 'mask': outer}])
+    accepted, report = review.review(out, perception, remote=_Remote(
+        {'objects': [{'bbox': [70, 80, 151, 121], 'kind': 'shape'}]}), model='vision')
+    assert report['model_used'] and any(a['kind'] == 'native_shape' for a in report['applied'])
+    added = next(e for e in accepted['elements'] if e.get('source') == 'review')
+    assert added['kind'] == 'native_shape' and added.get('fill')
+    assert any(e['id'] == 'el-000' and e['kind'] == 'native_shape' for e in accepted['elements'])
+
+
+def test_review_clips_a_box_that_spills_off_the_page(tmp_path):
+    rgb = page()
+    rgb[10:60, 0:48] = (40, 90, 180)
+    piece = np.zeros(rgb.shape[:2], bool)
+    piece[10:60, 0:48] = True
+    review, out, perception = _review_page(tmp_path, rgb, [_review_piece('el-000', piece)])
+    accepted, report = review.review(out, perception, remote=_Remote(
+        {'objects': [{'bbox': [-2, 10, 50, 50], 'kind': 'picture'}]}), model='vision')
+    added = next(e for e in accepted['elements'] if e.get('source') == 'review')
+    assert added['alpha'] == 'rect' and added['bbox'][0] >= 0 and added['bbox'][1] >= 0
+    assert 'window' not in report['issues']
+    far, far_report = review.review(out, perception, remote=_Remote(
+        {'objects': [{'bbox': [700, 400, 50, 50], 'kind': 'shape'}]}), model='vision')
+    assert far_report['issues'] == ['window'] and far_report['applied'] == []
+    failed, failed_report = review.review(out, perception, remote=_Remote(ok=False, error='down'), model='vision')
+    assert not failed_report['model_used'] and failed_report['issues'] == ['model_call_failed:down']
+
+
+def test_review_merges_touching_icon_crumbs_without_a_model_box(tmp_path):
+    rgb = page()
+    rgb[40:70, 40:70] = (40, 90, 180)
+    rgb[40:70, 70:100] = (40, 90, 180)
+    left = np.zeros(rgb.shape[:2], bool)
+    left[40:70, 40:70] = True
+    right = np.zeros(rgb.shape[:2], bool)
+    right[40:70, 70:100] = True
+    left_piece = _review_piece('el-000', left, 'icon')
+    right_piece = _review_piece('el-001', right, 'icon')
+    right_piece['source'] = 'shape_residual'
+    review, out, perception = _review_page(tmp_path, rgb, [left_piece, right_piece])
+    accepted, report = review.review(out, perception, remote=_Remote({'objects': []}), model='vision')
+    added = [e for e in accepted['elements'] if e.get('source') == 'review']
+    assert len(added) == 1 and added[0]['alpha'] == 'rect'
+    x, y, w, h = added[0]['bbox']
+    assert x <= 40 and y <= 40 and x+w >= 100 and y+h >= 70
+    assert min(w, h) <= 120
+    assert {e['id'] for e in accepted['elements']} == {added[0]['id']}
+
+
+def test_review_uses_complete_boxes_from_a_truncated_call(tmp_path):
+    rgb = page()
+    rgb[80:220, 90:400] = (205, 220, 240)
+    fuzzy = np.zeros(rgb.shape[:2], bool)
+    fuzzy[90:210, 100:380] = True
+    review, out, perception = _review_page(tmp_path, rgb, [_review_piece('el-000', fuzzy)])
+    truncated = '{"objects":[{"bbox":[70,60,350,180],"kind":"picture"},{"bbox":[70,60,350,180],"kind":"picture"},{"bbox":[1,2,3'
+    accepted, report = review.review(out, perception, remote=_Remote(ok=False, error='length', partial=truncated),
+                                     model='vision')
+    added = next(e for e in accepted['elements'] if e.get('source') == 'review')
+    assert report['model_used'] and 'model_call_failed:length' in report['issues']
+    assert added['alpha'] == 'rect'
+    assert len(report['applied']) == 1
+
+
+def test_review_lifts_an_unnamed_line_onto_a_solid_fill(tmp_path):
+    """A line the model never named becomes a crop; the slide fill is one colour."""
+    rgb = page()
+    rgb[80:200, 80:320] = (205, 220, 240)
+    cv2.circle(rgb, (120, 120), 10, (40, 90, 180), -1)
+    rgb[250:254, 40:600] = (40, 90, 180)
+    card = np.zeros(rgb.shape[:2], bool)
+    card[80:200, 80:320] = True
+    review, out, perception = _review_page(tmp_path, rgb, [_review_piece('el-000', card)])
+    accepted, report = review.review(out, perception, remote=_Remote(
+        {'objects': [{'bbox': [80, 80, 240, 120], 'kind': 'picture'}]}), model='vision')
+    assert accepted['background'].get('solid_color')
+    assert accepted['background'].get('element_method') == 'solid_whiteboard'
+    bg = np.asarray(Image.open(out/'background.png'))
+    assert len({tuple(p) for p in bg.reshape(-1, 3)}) == 1
+    line = next(e for e in accepted['elements'] if e.get('source') == 'review' and e['bbox'][1] >= 240)
+    assert line['alpha'] == 'rect' and line['bbox'][2] >= 500 and line['bbox'][3] <= 20
+    card_el = next(e for e in accepted['elements'] if e.get('source') == 'review' and e['bbox'][1] < 200)
+    assert card_el['bbox'][2] < 400
+    rgba = np.asarray(Image.open(out/card_el['asset']))
+    assert rgba[20, 20, 0] < 230
+    accepted['ocr'] = []
+    accepted['text'] = []
+    ir = emit_ir.emit(out, accepted, {}, [], tmp_path/'ir')
+    assert 'asset_id' not in ir['background'] and ir['background']['color']
 
 
 def test_duplicate_under_objects_flags_unrepaired_layers(tmp_path):
