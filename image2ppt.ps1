@@ -7,7 +7,11 @@ param(
   [string]$NodeId,
   [ValidateSet('delete','move','replace')][string]$Action,
   [string]$Value,
-  [string]$OutputPath
+  [string]$OutputPath,
+  [ValidateSet('legacy','quality-loop')][string]$QualityPolicy = 'legacy',
+  [string]$BaselineJob,
+  [ValidateRange(0,2)][int]$MaxExtraVisionCalls = 2,
+  [ValidateRange(0,2)][int]$MaxRepairRounds = 2
 )
 $ErrorActionPreference = 'Stop'
 $runtimeBase = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies'
@@ -34,6 +38,8 @@ if ($Command -in @('replay','regress','resume')) {
   if (-not $InputPath) { throw 'layered 需要 -InputPath，传入一张或多张页面图片。' }
   $layeredArgs = @((Join-Path $PSScriptRoot 'scripts\layered.py'), '--inputs') + @($InputPath | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
   if ($OutputPath) { $layeredArgs += @('--output', $OutputPath) }
+  $layeredArgs += @('--quality-policy', $QualityPolicy, '--max-extra-vision-calls', "$MaxExtraVisionCalls", '--max-repair-rounds', "$MaxRepairRounds")
+  if ($BaselineJob) { $layeredArgs += @('--baseline-job', $BaselineJob) }
   if ($env:IMAGE2PPT_LAYERED_WORKER) { $layeredArgs += @('--worker-config', $env:IMAGE2PPT_LAYERED_WORKER) }
   if ($env:IMAGE2PPT_MODEL_CONFIG) { $layeredArgs += @('--model-config', $env:IMAGE2PPT_MODEL_CONFIG) }
   & $pythonExecutable -X utf8 @layeredArgs

@@ -48,7 +48,7 @@ OBJECT_RE = re.compile(
     r'\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]\s*\}')
 
 
-def review(directory, perception, *, remote=None, model=None, record_dir=None):
+def review(directory, perception, *, remote=None, model=None, record_dir=None, quality_loop=False):
     """Return (perception, report). Always rewrites a solid slide fill."""
     directory = Path(directory)
     report = {'schema': SCHEMA, 'model': model, 'model_used': False, 'issues': [], 'usage': {}, 'applied': []}
@@ -66,20 +66,40 @@ def review(directory, perception, *, remote=None, model=None, record_dir=None):
         request = {'request_id': uuid4().hex, 'operation': 'model', 'timeout': 180, 'body': body}
         if record_dir:
             save_new(Path(record_dir)/'review-request.json', request)
-        response = remote.request(request, timeout=240)
+        try:
+            response = remote.request(request, timeout=240)
+        except Exception as error:
+            if not quality_loop:
+                raise
+            response = {'ok': False, 'error': 'transport_exception:'+type(error).__name__}
         if record_dir:
             save_new(Path(record_dir)/'review-response.json', response)
         report['usage'] = response.get('usage', {})
         objects, parsed = _response_objects(response, report, parse_object)
         report['model_used'] = parsed
-        _apply(notext, grad, elements, objects, report)
+        _apply(notext, grad, elements, objects, report, strict=quality_loop)
     _merge_icon_crumbs(elements, H, W, report)
-    _lift_leftover_ink(grad, elements, H, W, report)
+    excluded = None
+    if quality_loop:
+        # Text-removal ghosts are not independent visual objects. The quality
+        # loop validates/retains their source text separately after rendering.
+        excluded = np.zeros((H, W), bool)
+        for line in perception['ocr']:
+            x, y, w, h = (int(round(v)) for v in line['bbox'])
+            excluded[max(0, y-3):min(H, y+h+3), max(0, x-3):min(W, x+w+3)] = True
+        for record in perception['text']:
+            for x, y, w, h in record.get('icon_candidates', []):
+                excluded[max(0, y):y+h, max(0, x):x+w] = False
+        for x, y, w, h in perception.get('protected_regions', []):
+            excluded[y:y+h, x:x+w] = False
+    _lift_leftover_ink(grad, elements, H, W, report, excluded=excluded)
     assign_levels(elements)
     claim_fringe(notext, elements)
     _rerender(directory, notext, elements, perception)
     perception['review'] = {'applied': report['applied'], 'issues': report['issues']}
-    perception['residual_ocr'] = []
+    if quality_loop:
+        perception['pre_review_residual_ocr'] = perception.get('residual_ocr', [])
+    perception['residual_ocr'] = []  # The rewritten slide fill contains no pixels of text.
     _write(directory/'perception.json', perception)
     return perception, report
 
@@ -187,7 +207,7 @@ def _contour(rgb, window):
     return None if best is None else best[1]
 
 
-def _measured_shape(rgb, grad, window):
+def _measured_shape(rgb, grad, window, *, strict=False):
     mask = _contour(rgb, window)
     if mask is None:
         return None
@@ -195,6 +215,10 @@ def _measured_shape(rgb, grad, window):
     empty = np.zeros(rgb.shape[:2], bool)
     record = measure(rgb, comp, empty, empty, grad <= CALM)
     if not record:
+        return None
+    if strict and record.get('icons'):
+        # A preset does not reproduce its internal artwork. Keep the complete
+        # object crop, rather than throwing away measured residual detail.
         return None
     record.pop('icons', None)
     record['source'] = 'review'
@@ -321,7 +345,7 @@ def _punch(elements, box):
             old['bbox'] = list(_bbox(old['mask']))
 
 
-def _apply(rgb, grad, elements, objects, report):
+def _apply(rgb, grad, elements, objects, report, *, strict=False):
     H, W = rgb.shape[:2]
     changed = False
     for item in objects:
@@ -331,7 +355,7 @@ def _apply(rgb, grad, elements, objects, report):
             continue
         record = None
         if item['kind'] == 'shape':
-            record = _measured_shape(rgb, grad, _fit_to_ink(grad, window) or window)
+            record = _measured_shape(rgb, grad, _fit_to_ink(grad, window) or window, strict=strict)
             if record is not None:
                 _drop_duplicates(elements, record['mask'])
             else:
@@ -427,7 +451,7 @@ def _leftover_boxes(local, H, W):
     return out
 
 
-def _lift_leftover_ink(grad, elements, H, W, report):
+def _lift_leftover_ink(grad, elements, H, W, report, *, excluded=None):
     """Turn unnamed strokes into hard crops so they do not stay on the fill."""
     claimed = np.zeros((H, W), bool)
     for e in elements:
@@ -436,6 +460,8 @@ def _lift_leftover_ink(grad, elements, H, W, report):
             claimed |= mask
     claimed = cv2.dilate(claimed.astype(np.uint8), np.ones((LEFTOVER_GAP, LEFTOVER_GAP), np.uint8)) > 0
     ink = ((grad > CALM) & ~claimed).astype(np.uint8)
+    if excluded is not None:
+        ink[excluded] = 0
     if not ink.any():
         return False
     grouped = cv2.dilate(ink, np.ones((LEFTOVER_GAP, LEFTOVER_GAP), np.uint8))

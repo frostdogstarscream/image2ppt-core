@@ -4,6 +4,7 @@ import { runtime } from './runtime.mjs';
 import { sha256 } from './ir.mjs';
 import { renderPptx } from './render.mjs';
 import { compile } from './compile.mjs';
+import { compose } from './compose.mjs';
 import { doctorCapabilities } from './capabilities.mjs';
 // Keep helper diagnostics off the machine-readable stdout channel.
 const emit = process.stdout.write.bind(process.stdout);
@@ -13,6 +14,7 @@ try {
   let result;
   if(cmd==='render') result=await renderPptx(args[0],args[1]);
   else if(cmd==='compile') result=await compile(args[0]);
+  else if(cmd==='compose') result=await compose(args.slice(1),args[0]);
   else if(cmd==='doctor') {
     const rt=await runtime();
     const helpers={};

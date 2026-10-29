@@ -22,6 +22,10 @@ def main():
                         help='{"ssh_host", "remote_root"} of the GPU dev worker')
     parser.add_argument('--model-config', help='auto_transport client config; omit for deterministic grouping')
     parser.add_argument('--model', default='deepseek-flash')
+    parser.add_argument('--quality-policy', choices=('legacy', 'quality-loop'), default='legacy')
+    parser.add_argument('--baseline-job')
+    parser.add_argument('--max-extra-vision-calls', type=int, choices=range(3), default=2)
+    parser.add_argument('--max-repair-rounds', type=int, choices=range(3), default=2)
     parser.add_argument('--vision-model', default=None,
                         help='model that accepts images for the component review; default IMAGE2PPT_VISION_MODEL or --model')
     args = parser.parse_args()
@@ -32,15 +36,22 @@ def main():
         remote, model = SSHRemote(load_client(args.model_config)), args.model
         vision = args.vision_model or os.environ.get('IMAGE2PPT_VISION_MODEL') or model
     inputs = [str(Path(p).resolve(strict=True)) for p in args.inputs]
+    options = {}
+    if args.quality_policy == 'quality-loop':
+        from image2ppt_vision.layered.quality_loop import run
+        options = dict(baseline_job=args.baseline_job, max_extra_vision_calls=args.max_extra_vision_calls,
+                       max_repair_rounds=args.max_repair_rounds)
+    elif args.baseline_job:
+        parser.error('--baseline-job requires --quality-policy quality-loop')
     summary = run(inputs, args.output, worker_config=load_config(args.worker_config), project_root=ROOT,
-                  remote=remote, model=model, vision_model=vision)
+                  remote=remote, model=model, vision_model=vision, **options)
     brief = {'job': summary['job'], 'output': str(Path(args.output)/summary['job']),
              'total_model_tokens': summary['total_model_tokens'],
              'pages': {k: {'status': v['status'], 'ssim': v.get('metrics', {}).get('ssim'),
                            'ocr_char_recall': v.get('metrics', {}).get('ocr_char_recall')} for k, v in summary['pages'].items()}}
     sys.stdout.reconfigure(errors='backslashreplace')
     print(json.dumps(brief, ensure_ascii=False, indent=2), flush=True)
-    if any(p['status'] == 'FAILED' for p in summary['pages'].values()):
+    if summary.get('status') == 'FAILED' or summary.get('delivery', {}).get('status') == 'FAILED' or any(p['status'] == 'FAILED' for p in summary['pages'].values()):
         sys.exit(3)
 
 

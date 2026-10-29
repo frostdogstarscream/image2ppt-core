@@ -15,6 +15,17 @@ const pageNumber = ir => {
   return match ? match[1] : null;
 };
 
+export function validateCompositionCanvases(loaded) {
+  const [tw, th] = loaded[0].ir.canvas.target_px;
+  for (const {ir, file} of loaded) {
+    if (ir.unresolved_evidence_ids?.length) throw new Error(`${file}: 还有未处理源内容；先用图片回退保留内容，再导出。`);
+    const [width, height] = ir.canvas.target_px;
+    if (width !== tw || height !== th) throw new Error(`${file}: 目标画布与第 1 页不一致；一个 deck 的所有页必须同尺寸。`);
+    // Every IR has already passed its own source/aspect-ratio validation.
+    // buildSlide scales that page's coordinates from its own source dimensions.
+  }
+}
+
 // Build one deck whose slides are the given IRs, in the order supplied.
 // Each page still goes through the same authoring, OOXML adapt, finalize and
 // re-import render chain as the single-page `compile` path.
@@ -24,12 +35,7 @@ export async function compose(files, outputRoot) {
   for (const file of files) { await assertAuthoring(file); loaded.push(await loadIR(file)); }
 
   const [sw, sh] = loaded[0].ir.canvas.source_px, [tw, th] = loaded[0].ir.canvas.target_px;
-  for (const {ir, file} of loaded) {
-    if (ir.unresolved_evidence_ids?.length) throw new Error(`${file}: 还有未处理源内容；先用图片回退保留内容，再导出。`);
-    const [s2, s3] = ir.canvas.source_px, [t2, t3] = ir.canvas.target_px;
-    if (t2 !== tw || t3 !== th) throw new Error(`${file}: 目标画布与第 1 页不一致；一个 deck 的所有页必须同尺寸。`);
-    if (s2 !== sw || s3 !== sh) throw new Error(`${file}: 源画布与第 1 页不一致。`);
-  }
+  validateCompositionCanvases(loaded);
 
   const rt = await runtime();
   const { Presentation, PresentationFile } = rt.api;
@@ -83,7 +89,8 @@ export async function compose(files, outputRoot) {
     const dest = path.join(previewDir, name);
     await fs.copyFile(rendered.pages[index].path, dest);
     pages.push({slide:index+1, page:pageNumber(loaded[index].ir), ir:path.relative(ROOT,loaded[index].file),
-      ir_sha256:loaded[index].ir_sha256, source_sha256:loaded[index].ir.source_sha256, preview:`preview/${name}`,
+      ir_sha256:loaded[index].ir_sha256, source_sha256:loaded[index].ir.source_sha256,
+      source_px:loaded[index].ir.canvas.source_px, preview:`preview/${name}`,
       nodes:loaded[index].ir.nodes.length, groups:loaded[index].ir.groups.length,
       images:loaded[index].ir.nodes.filter(n=>n.type==='image').length});
     compareCases.push({slide:index+1, page:pageNumber(loaded[index].ir),
@@ -96,7 +103,8 @@ export async function compose(files, outputRoot) {
   const compare = pythonJson(rt, [path.join(ROOT,'scripts/compare_pages.py'), casesFile, compareDir]);
 
   const manifest = {schema_version:'0.1', kind:'composed_deck', slide_count:loaded.length,
-    canvas:{source_px:[sw,sh],target_px:[tw,th]}, pptx:'deck.pptx', pptx_sha256:sha256(await fs.readFile(final)),
+    canvas:{source_px:[sw,sh],target_px:[tw,th],source_px_by_page:loaded.map(p=>p.ir.canvas.source_px)},
+    pptx:'deck.pptx', pptx_sha256:sha256(await fs.readFile(final)),
     engine:{name:'@oai/artifact-tool',version:rt.artifact_version,node_modules:rt.node_modules},
     status:'REVIEW_REQUIRED', preview:{origin:'reimported_final_pptx',renderer:'Artifact Tool',dir:'preview'},
     pages, compare, package_checks:finalInfo,

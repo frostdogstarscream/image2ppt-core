@@ -87,6 +87,11 @@ def verify_v2_review(directory, revision, built_dir, built):
 def verify_layered_page(root, name, page):
     """Re-derive a layered v3 page's claims from its saved files only."""
     import hashlib
+    if page.get('quality_policy') == 'quality-loop':
+        return verify_loop_page(root, name, page)
+    if not page.get('pptx'):
+        return {'page': name, 'pipeline_status': 'FAILED', 'valid_pptx': False,
+                'uncovered_ocr_ids': [], 'residual_text_violations': 0, 'error': page.get('error')}
     from image2ppt_vision.layered.pipeline import ocr_coverage_gaps
     from image2ppt_vision.layered.qa import residual_violations
     perception_dir, page_dir = root/'perception'/name, root/'pages'/name
@@ -131,6 +136,10 @@ def verify_layered(root, manifest):
         if relative != 'job.json' and digest(root/relative) != expected:
             raise ValueError('layered job file changed: '+relative)
     rows = [verify_layered_page(root, name, page) for name, page in manifest['pages'].items()]
+    if manifest.get('quality_policy') == 'quality-loop':
+        delivery = manifest['delivery']
+        if delivery.get('pptx') and digest(root/delivery['pptx']) != delivery['pptx_sha256']:
+            raise ValueError('composed PPTX hash changed')
     report = {'schema': 'LayeredEvidenceVerification/1', 'job_id': root.name, 'pages': rows,
               'total_model_tokens': manifest['total_model_tokens'], 'new_model_requests': 0,
               'modified_page_records': False, 'human_acceptance': False, 'office_acceptance': False,
@@ -148,6 +157,37 @@ def verify_layered(root, manifest):
                      f"{len(row['uncovered_ocr_ids'])} | {row['residual_text_violations']} | {m.get('ssim', '')} | {m.get('ocr_char_recall', '')} |")
     (destination/'VERIFIED-RESULTS.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
     print(destination/'VERIFIED-RESULTS.md')
+
+
+def verify_loop_page(root, name, page):
+    from image2ppt_vision.layered.loop_checks import final_file
+    pd = root/'pages'/name
+    ir_file = pd/page['proposal']/'slideir.json'; ir = read_json(ir_file)
+    quality = read_json(pd/'quality.json')
+    for key, file in [('pptx', pd/page['pptx']), ('preview', pd/page['preview']), ('ir', ir_file)]:
+        if digest(file) != quality[key+'_sha256']:
+            raise ValueError(name+': selected '+key+' changed')
+    source = ir_file.parent/ir['source_image']
+    if digest(source) != ir['source_sha256'] or ir['source_sha256'] != quality['source_sha256']:
+        raise ValueError(name+': selected source changed')
+    # Worker PNG serialization can differ while preserving the exact pixels.
+    from PIL import Image, ImageChops
+    with Image.open(root/'input'/(name+'.png')) as a, Image.open(source) as b:
+        if a.size != b.size or ImageChops.difference(a.convert('RGB'), b.convert('RGB')).getbbox() is not None:
+            raise ValueError(name+': selected pixels differ from preserved input')
+    requests = len(list((pd/'visual-review').glob('*/request.json')))
+    repairs = max(0, len(list(pd.glob('r*/attempt.json')))-1)
+    if requests != page['extra_visual_requests'] or requests > quality['policy']['max_extra_vision_calls']:
+        raise ValueError(name+': visual budget mismatch')
+    if repairs != page['repair_attempts'] or repairs > quality['policy']['max_repair_rounds']:
+        raise ValueError(name+': repair budget mismatch')
+    actual = final_file(ir, pd/page['pptx'])
+    native = sum(n['type'] == 'text' for n in ir['nodes'])
+    return {'page': name, 'recorded_status': page['status'], 'pipeline_status': 'FAILED' if actual['issues'] else page['status'],
+            'valid_pptx': True, 'native_text_in_file': native, 'native_text_in_ir': native,
+            'uncovered_ocr_ids': [], 'residual_text_violations': 0, 'metrics': page['metrics'],
+            'extra_visual_requests': requests, 'repair_attempts': repairs, 'actual_file_issues': actual['issues'],
+            'human_acceptance': False, 'office_acceptance': False}
 
 
 def main():

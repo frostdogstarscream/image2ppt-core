@@ -108,7 +108,7 @@ def _overlaps(box, mask, fraction):
     return window.size and window.mean() >= fraction
 
 
-def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None):
+def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None, scan=None, guards=None):
     """``mode`` 'rebuild' (default) measures components and never repairs under
     them with the model; 'objects' is the erase-and-repair path it replaces."""
     mode = mode or os.environ.get('IMAGE2PPT_LAYERED_MODE', 'rebuild')
@@ -122,13 +122,27 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None):
     with Image.open(source) as image:
         rgb = np.asarray(image.convert('RGB')).copy()
     H, W = rgb.shape[:2]
-    lines = split_wide_gaps(rgb, ocr(rgb))
+    if scan is not None:
+        from .loop_scan import guarded_lines
+        if scan['source_sha256'] != _sha(Path(source)):
+            raise ValueError('scan does not match source bytes')
+        lines = guarded_lines(scan, guards)
+    else:
+        lines = split_wide_gaps(rgb, ocr(rgb))
     for i, line in enumerate(lines):
         line['id'] = f't{i:03d}'
     timings['ocr'] = time.time()-clock; clock = time.time()
     records, text_mask, icon_mask = analyze_page(rgb, lines)
+    protected = []
+    if guards is not None:
+        from .loop_scan import protect_masks
+        protected = protect_masks(text_mask, icon_mask, lines, records, guards)
     timings['textmask'] = time.time()-clock; clock = time.time()
     notext, text_method = repair.inpaint(rgb, text_mask, model)
+    local_repairs = None
+    if guards is not None:
+        from .loop_inpaint import repair_icons
+        notext, local_repairs = repair_icons(rgb, notext, text_mask, records, inpaint=repair.inpaint, model=model)
     timings['inpaint_text'] = time.time()-clock; clock = time.time()
     tables = detect_tables(notext)
     table_mask = np.zeros((H, W), bool)
@@ -246,6 +260,11 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None):
                          'native_share': round(sum(e['kind'] == 'native_shape' for e in public)/max(len(public), 1), 3),
                          'erased_fraction': round(float((erase | table_mask).mean()), 4)},
               'timings_s': {k: round(v, 3) for k, v in timings.items()}}
+    if guards is not None:
+        result['quality_guards'] = guards
+        result['protected_regions'] = protected
+        result['original_ocr'] = scan['ocr']
+        result['local_mask_repairs'] = local_repairs
     result['files'] = {p.relative_to(out).as_posix(): _sha(p) for p in sorted(out.rglob('*')) if p.is_file()}
     _write(out/'perception.json', result)
     return result
@@ -259,6 +278,11 @@ def _box(mask):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     mode = argv.pop(0)
+    if mode == 'scan':
+        from .loop_scan import scan
+        for page in sorted(Path(argv[0]).glob('*.png')):
+            scan(page, Path(argv[1])/page.stem, _ocr)
+        return 0
     if mode == 'ocr':
         target = Path(argv.pop(0))
         result = {}
@@ -267,15 +291,19 @@ def main(argv=None):
                 result[Path(name).name] = _ocr(np.asarray(image.convert('RGB')).copy())
         _write(target, result)
         return 0
-    if mode != 'pages':
-        raise SystemExit('mode must be pages or ocr')
+    if mode not in ('pages', 'pages-quality'):
+        raise SystemExit('mode must be pages, pages-quality, scan or ocr')
     source_dir, out_dir = Path(argv[0]), Path(argv[1])
     model = _lama()
     from ..models import LAMA_SHA256
     summary = {'schema': 'LayeredPerceptionRun/1', 'lama_sha256': LAMA_SHA256 if model else None, 'pages': {}}
     for page in sorted(source_dir.glob('*.png')):
         started = time.time()
-        result = perceive(page, out_dir/page.stem, model=model)
+        scan = guards = None
+        if mode == 'pages-quality':
+            scan = json.loads((Path(argv[2])/page.stem/'scan.json').read_text(encoding='utf-8'))
+            guards = json.loads((Path(argv[3])/(page.stem+'.json')).read_text(encoding='utf-8'))
+        result = perceive(page, out_dir/page.stem, model=model, scan=scan, guards=guards)
         summary['pages'][page.stem] = {'seconds': round(time.time()-started, 2), 'counts': result['counts']}
         print(page.stem, json.dumps(result['counts']), flush=True)
     _write(out_dir/'run.json', summary)
