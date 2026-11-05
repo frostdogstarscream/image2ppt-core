@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "image2ppt-planner"
+version = "0.1.0"
+description = "Turn a page image plus an element inventory into a validated ElementPlan/2"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.28",
+  "pillow>=10",
+  "fastapi>=0.115",
+  "uvicorn>=0.34",
+  "pydantic>=2",
+]
+
+[project.optional-dependencies]
+# The authoritative validator lives in the vision service package.
+vision = ["image2ppt-vision>=0.3"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+image2ppt-planner = "image2ppt_planner.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
