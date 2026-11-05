@@ -7,8 +7,9 @@ import { pathToFileURL } from 'node:url';
 import { runtime, ROOT, writeJson } from './runtime.mjs';
 import { assertAuthoring, loadIR, sha256 } from './ir.mjs';
 import { renderPptx } from './render.mjs';
-import { buildSlide } from './slide.mjs';
+import { buildSlide, declaredFontFamilies } from './slide.mjs';
 import { pythonJson } from './compile.mjs';
+import { exportBatched } from './export_batched.mjs';
 
 const pageNumber = ir => {
   const match = /(\d{2,})\.png/.exec(ir.review_notes?.[0] ?? '');
@@ -18,7 +19,7 @@ const pageNumber = ir => {
 // Build one deck whose slides are the given IRs, in the order supplied.
 // Each page still goes through the same authoring, OOXML adapt, finalize and
 // re-import render chain as the single-page `compile` path.
-export async function compose(files, outputRoot) {
+export async function compose(files, outputRoot, {exportBatchSize=0}={}) {
   if (!files || !files.length) throw new Error('compose 需要至少一个 IR。');
   const loaded = [];
   for (const file of files) { await assertAuthoring(file); loaded.push(await loadIR(file)); }
@@ -45,7 +46,8 @@ export async function compose(files, outputRoot) {
   }
 
   const raw = path.join(buildDir,'raw.pptx'), candidate = path.join(buildDir,'candidate.pptx'), final = path.join(output,'deck.pptx');
-  await (await PresentationFile.exportPptx(presentation)).save(raw);
+  const exportReceipt=exportBatchSize ? await exportBatched(rt,loaded,raw,exportBatchSize) : null;
+  if(!exportBatchSize) await (await PresentationFile.exportPptx(presentation)).save(raw);
 
   const adaptArgs = [path.join(ROOT,'scripts/pptx_xml.py'),'adapt',raw,'--target',candidate];
   for (const {file} of loaded) adaptArgs.push('--ir', file);
@@ -55,6 +57,7 @@ export async function compose(files, outputRoot) {
   // Slide numbers, not IR paths: the finalizer keys on the delivered deck.
   const tableOwners = loaded.flatMap(({ir}, index) => ir.nodes.some(n=>n.type==='table') ? [index+1] : []);
   const chartOwners = loaded.flatMap(({ir}, index) => ir.nodes.some(n=>n.type==='chart') ? [index+1] : []);
+  const declaredFonts=[...new Set(loaded.flatMap(({ir})=>declaredFontFamilies(ir)))];
   await finalizePresentation({workspaceDir:ROOT,candidatePath:candidate,finalPath:final,pythonExecutable:rt.python,
     explicitTotalSlideCount:loaded.length,requiredNativeTableOwnerSlides:tableOwners,
     requiredNativeChartOwnerSlides:chartOwners,materializeLiteralChartWorkbooks:true,
@@ -62,7 +65,7 @@ export async function compose(files, outputRoot) {
     layoutValidatorPath:path.join(rt.skill,'container_tools/inspect_presentation_layout_geometry.py'),
     layoutArgs:['--expected-slide-size-emu',`${Math.round(tw*9525)},${Math.round(th*9525)}`,
       ...tableOwners.flatMap(n=>['--require-native-table-slide',String(n)])],
-    fontPolicy:{basis:'design',families:[...new Set(loaded.flatMap(({ir})=>ir.nodes.filter(n=>n.type==='text'||n.type==='table').flatMap(n=>[n.font.latin,n.font.ea])))]},
+    fontPolicy:{basis:'design',families:declaredFonts.length?declaredFonts:['Arial']},
     verifyArtifactToolImport:true,receiptPath:path.join(buildDir,'validation.json')});
 
   const rendered = await renderPptx(final, path.join(buildDir,'render'));
@@ -103,6 +106,7 @@ export async function compose(files, outputRoot) {
     warnings:[...new Set(loaded.flatMap(({info})=>info.warnings))],
     font_identification_verified:false,powerPoint_checked:false,wps_checked:false,human_acceptance:false,
     validation_receipt:path.relative(ROOT,path.join(buildDir,'validation.json'))};
+  if(exportReceipt) {manifest.export_mode=exportReceipt.mode;manifest.export_receipt=path.relative(ROOT,raw+'.batch-export.json');}
   await writeJson(path.join(output,'quality.json'), manifest);
   return {output_dir:output, pptx:final, preview:previewDir, compare:compareDir,
     quality:path.join(output,'quality.json'), slide_count:loaded.length, status:manifest.status};

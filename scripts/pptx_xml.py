@@ -24,6 +24,43 @@ def q(name):
     return "{" + NS[prefix] + "}" + local
 
 
+def _text_properties(tag, style):
+    props = ET.Element(q(tag), {"sz": str(round(style["font"]["size_pt"] * 100)),
+                               "b": "1" if style.get("bold") else "0", "dirty": "0"})
+    fill = ET.SubElement(props, q("a:solidFill"))
+    ET.SubElement(fill, q("a:srgbClr"), {"val": style["color"]})
+    for role, family in (("latin", "latin"), ("ea", "ea"), ("cs", "ea")):
+        ET.SubElement(props, q("a:" + role), {"typeface": style["font"][family]})
+    return props
+
+
+def _replace_paragraphs(item, node, ir):
+    body = item.find("p:txBody", NS)
+    if body is None:
+        raise ValueError("原生文本框缺少 txBody: " + node["id"])
+    for existing in list(body.findall("a:p", NS)):
+        body.remove(existing)
+    scale = ir["canvas"]["target_px"][0] / ir["canvas"]["source_px"][0]
+    for spec in node["paragraphs"]:
+        paragraph = ET.SubElement(body, q("a:p"))
+        attrs = {"algn": {"left": "l", "center": "ctr", "right": "r"}[spec.get("align", "left")]}
+        if "left_indent_px" in spec:
+            attrs["marL"] = str(round(spec["left_indent_px"] * scale * 9525))
+        props = ET.SubElement(paragraph, q("a:pPr"), attrs)
+        for field, tag in (("line_spacing_pt", "lnSpc"), ("space_before_pt", "spcBef"), ("space_after_pt", "spcAft")):
+            if field in spec:
+                spacing = ET.SubElement(props, q("a:" + tag))
+                ET.SubElement(spacing, q("a:spcPts"), {"val": str(round(spec[field] * 100))})
+        props.append(_text_properties("a:defRPr", spec))
+        for run in spec.get("runs", [{"text": spec["text"]}]):
+            style = {**spec, **run}
+            element = ET.SubElement(paragraph, q("a:r"))
+            element.append(_text_properties("a:rPr", style))
+            text = ET.SubElement(element, q("a:t"), {"{http://www.w3.org/XML/1998/namespace}space": "preserve"})
+            text.text = run["text"]
+        paragraph.append(_text_properties("a:endParaRPr", spec))
+
+
 def adapt_slide(xml, ir):
     """Apply IR-driven OOXML fixes to one already-parsed slide tree, in place.
 
@@ -54,6 +91,9 @@ def adapt_slide(xml, ir):
                 if "vertical_anchor" in node:
                     body.set("anchor", {"top": "t", "middle": "ctr",
                                         "bottom": "b"}[node["vertical_anchor"]])
+            if node.get("paragraphs"):
+                _replace_paragraphs(item, node, ir)
+                continue
             if "line_spacing_pt" in node:
                 for paragraph in item.findall("p:txBody/a:p", NS):
                     props = paragraph.find("a:pPr", NS)

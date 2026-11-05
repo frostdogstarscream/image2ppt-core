@@ -58,7 +58,7 @@ def _sha256(path: Path) -> str:
 
 
 def detect_alpha_mode(rgba: np.ndarray) -> str:
-    """Straight vs premultiplied alpha.
+    """Legacy pixel diagnostic; never used to interpret a LayerD PNG.
 
     PNG stores straight alpha, so that is the default. The premultiplied test only
     looks at *semi-transparent* pixels: premultiplied data cannot have a colour
@@ -105,8 +105,16 @@ def region_candidates(rgba: np.ndarray, *, min_area: int = 64, threshold: int = 
     return regions
 
 
-def load_layer(path: Path, meta: dict) -> Layer:
+def load_layer(path: Path, meta: dict, *, alpha_mode: str = "straight") -> Layer:
+    actual_hash = _sha256(path)
+    if meta.get("sha256") and actual_hash != meta["sha256"]:
+        raise ValueError(f"{path.name}: sha256 does not match manifest")
+    alpha_mode = meta.get("alpha_mode", alpha_mode)
+    if alpha_mode != "straight":
+        raise ValueError(f"{path.name}: LayerD PNG requires explicit straight alpha")
     with Image.open(path) as image:
+        if image.mode != "RGBA":
+            raise ValueError(f"{path.name}: expected RGBA PNG, got {image.mode}")
         image = image.convert("RGBA")
         array = np.array(image)
         size = image.size
@@ -123,8 +131,8 @@ def load_layer(path: Path, meta: dict) -> Layer:
         alpha_bbox=[int(v) for v in meta.get("alpha_bbox", layer_alpha_bbox(array))],
         alpha_coverage=float(meta.get("alpha_coverage", 0.0)),
         partial_alpha_fraction=float(meta.get("partial_alpha_fraction", 0.0)),
-        sha256=meta.get("sha256", _sha256(path)),
-        alpha_mode=detect_alpha_mode(array),
+        sha256=actual_hash,
+        alpha_mode=alpha_mode,
         regions=region_candidates(array),
     )
 
@@ -132,14 +140,50 @@ def load_layer(path: Path, meta: dict) -> Layer:
 def load_page(page_dir: str | Path) -> Page:
     directory = Path(page_dir).resolve()
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("layer_order") != "back_to_front":
+        raise ValueError("manifest layer_order must be back_to_front")
+    if manifest.get("alpha_mode", "straight") != "straight":
+        raise ValueError("LayerD PNG alpha_mode must be straight")
     size = tuple(int(v) for v in manifest["image_size"])
-    layers = [load_layer(directory / meta["file"], meta) for meta in manifest["layers"]]
+    if len(size) != 2 or min(size) <= 0:
+        raise ValueError("invalid manifest image_size")
+    layers = []
+    for meta in manifest["layers"]:
+        path = (directory / meta["file"]).resolve()
+        if not path.is_relative_to(directory) or path.suffix.lower() != ".png":
+            raise ValueError("layer path must be a local PNG inside the pack")
+        layer = load_layer(path, meta, alpha_mode=manifest.get("alpha_mode", "straight"))
+        if layer.size != size:
+            raise ValueError(f"{layer.file}: layer size does not match page")
+        layers.append(layer)
+    if not layers or len({layer.file for layer in layers}) != len(layers):
+        raise ValueError("manifest must contain distinct layers")
     layers.sort(key=lambda layer: layer.z)
     if [layer.z for layer in layers] != list(range(len(layers))):
         raise ValueError("manifest z values must be a dense 0..n-1 sequence")
     source = directory / "source.png"
     if not source.exists():
         raise FileNotFoundError(f"{directory}: source.png missing")
+    source_hash = _sha256(source)
+    expected_source = manifest.get("normalized_sha256", manifest.get("source_sha256"))
+    if expected_source and source_hash != expected_source:
+        # LayerDOutput/1 hashes uploaded bytes before Pillow re-encodes source.png.
+        # Historical review packs omitted request.json, so they use a receipt
+        # independently verified against the user's original ZIP and RGB pixels.
+        request_path = directory / "request.json"
+        receipt_path = Path(__file__).resolve().parents[1] / "configs" / "layerd-baseline.json"
+        normalized = None
+        if request_path.exists():
+            request = json.loads(request_path.read_text(encoding="utf-8"))
+            if request.get("source_sha256") == manifest.get("source_sha256"):
+                normalized = request.get("normalized_sha256")
+        elif receipt_path.exists():
+            receipts = json.loads(receipt_path.read_text(encoding="utf-8"))["pages"]
+            receipt = receipts.get(manifest.get("source_sha256"), {})
+            if receipt.get("manifest_sha256") == _sha256(directory / "manifest.json"):
+                normalized = receipt.get("source_png_sha256")
+        if normalized != source_hash:
+            raise ValueError("source.png: normalized sha256 does not match verified provenance")
     composite = directory / "composite.png"
     with Image.open(source) as image:
         if image.size != size:
@@ -177,7 +221,6 @@ def verify(page: Page) -> dict:
     result = {"page": page.directory.name, "size": list(page.size),
               "layers": len(page.layers), "composite_available": page.composite_path is not None}
     rendered = recompose(page).astype(np.int16)
-    mse = float(((rendered - rendered) ** 2).mean())  # placeholder replaced below
     if page.composite_path is not None:
         with Image.open(page.composite_path) as image:
             composite = np.array(image.convert("RGB")).astype(np.int16)

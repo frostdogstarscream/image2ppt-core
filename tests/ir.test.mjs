@@ -6,6 +6,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { assertAuthoring, loadIR, localFile, sha256, validateIR } from '../scripts/ir.mjs';
 import { COMPILER, IR_NODE_TYPES, IR_SHAPE_GEOMETRIES, capabilities } from '../scripts/capabilities.mjs';
+import { declaredFontFamilies } from '../scripts/slide.mjs';
 
 function fixture() {
   return {schema_version:'0.1',canvas:{source_px:[1280,720],target_px:[1280,720]},background:{color:'FFFFFF'},
@@ -13,6 +14,25 @@ function fixture() {
     evidence:[{id:'ev-title',kind:'text',bbox:[20,20,500,80],text:'收入增长 18%'}],
     nodes:[{id:'title',type:'text',bbox:[20,20,500,80],z:1,evidence_ids:['ev-title'],text:'收入增长 18%',font:{latin:'Arial',ea:'Microsoft YaHei',size_pt:24},color:'222222'}]};
 }
+
+test('paragraphs preserve independent styles with matching source evidence',()=>{
+  const x=fixture(),n=x.nodes[0];
+  n.text='第一行\n第二行'; x.evidence[0].text=n.text;
+  n.paragraphs=['第一行','第二行'].map((text,i)=>({text,font:{latin:'Arial',ea:i?'宋体':'黑体',size_pt:i?16:20},color:i?'445566':'112233',bold:!!i,space_after_pt:0}));
+  n.paragraphs[0].runs=[{text:'第一',bold:true},{text:'行',font:{latin:'Arial',ea:'等线',size_pt:22}}];
+  assert.doesNotThrow(()=>validateIR(x));
+  assert.deepEqual(new Set(declaredFontFamilies(x)),new Set(['Arial','Microsoft YaHei','黑体','宋体','等线']));
+});
+
+test('paragraphs reject lost text, invalid styles and ambiguous run forms',()=>{
+  const make=()=>{const x=fixture(),n=x.nodes[0];n.paragraphs=[{text:n.text,font:n.font,color:n.color,bold:false}];return x;};
+  for(const mutate of [x=>x.nodes[0].paragraphs[0].text='丢失文字',x=>x.nodes[0].paragraphs[0].font.size_pt=0,
+    x=>x.nodes[0].paragraphs[0].color='bad',x=>x.nodes[0].paragraphs[0].bold='false',
+    x=>x.nodes[0].paragraphs[0].space_before_pt=-1,x=>x.nodes[0].paragraphs[0].runs=[],
+    x=>x.nodes[0].runs=[{text:x.nodes[0].text}],x=>x.nodes[0].paragraphs[0].rotation=90]) {
+    const x=make(); mutate(x); assert.throws(()=>validateIR(x));
+  }
+});
 
 test('rejects duplicate node IDs with the exact business diagnostic',()=>{const x=fixture();x.nodes.push({...structuredClone(x.nodes[0]),z:2});assert.throws(()=>validateIR(x),/节点 ID 重复/);});
 test('requires boolean node and run bold',()=>{

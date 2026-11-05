@@ -246,14 +246,68 @@ def cmd_scene(args) -> int:
 
 
 def cmd_export(args) -> int:
-    from pptx_exporter import export
+    return cmd_run(args)
 
-    scene = _load_scene(args.page, "scene")
-    page_dir = Path(args.pages_root) / args.page
-    out = ROOT / "outputs" / "slides" / f"{args.page}.pptx"
-    result = export(scene, out, workdir=ROOT / "workdir" / args.page, source_path=page_dir / "source.png")
+
+def cmd_run(args) -> int:
+    from rebuild_pipeline import run_page
+
+    review = args.review
+    default_review = ROOT / "configs" / "reviews" / f"{args.page[:2]}.json"
+    if review is None and default_review.exists():
+        review = default_review
+    result = run_page(args.pages_root, args.page, args.output, review_file=review,
+                      ocr_cache=args.ocr_cache, timeout=args.timeout,
+                      probes=not args.skip_probes, align=not args.skip_alignment)
+    print(json.dumps({k: result[k] for k in ("directory", "pptx", "preview", "counts", "status")}, ensure_ascii=False))
+    return 0
+
+
+def cmd_batch(args) -> int:
+    from rebuild_pipeline import batch
+
+    result = batch(args.pages_root, args.output, reviews=args.reviews, pages=args.pages,
+                   resume=args.resume, timeout=args.timeout, probes=not args.skip_probes)
+    print(json.dumps({"directory": result["directory"], "pages": len(result["pages"]),
+                      "failures": result["failures"], "deck": result.get("deck")}, ensure_ascii=False))
+    return 2 if result["failures"] else 0
+
+
+def cmd_baseline(args) -> int:
+    from rebuild_pipeline import baseline
+    from slideir_adapter import write_json
+
+    result = baseline(args.pages_root)
+    if args.output:
+        write_json(args.output, result)
     print(json.dumps(result, ensure_ascii=False))
     return 0
+
+
+def cmd_check_edits(args) -> int:
+    from rebuild_pipeline import verify_deliveries
+
+    result = verify_deliveries(args.input, args.output, timeout=args.timeout)
+    print(json.dumps(result, ensure_ascii=False))
+    return 2 if result["status"] == "FAIL" else 0
+
+
+def cmd_repair_text(args) -> int:
+    from text_repair import repair_batch
+
+    result = repair_batch(args.input,args.output,pages=args.pages,reviews=args.reviews,
+                          inpaint_url=args.inpaint_url,timeout=args.timeout)
+    print(json.dumps({"directory":result["directory"],"pages":len(result["pages"]),"deck":result["deck"]},ensure_ascii=False))
+    return 2 if any(page["coverage"]["pending_paragraphs"] for page in result["pages"]) else 0
+
+
+def cmd_rebuild_surfaces(args) -> int:
+    from surface_rebuild import rebuild_batch
+
+    result = rebuild_batch(args.input, args.output, args.reviews, args.pages, args.resume, args.timeout)
+    print(json.dumps({"directory": result["directory"], "pages": len(result["pages"]),
+                      "failures": result["failures"]}, ensure_ascii=False))
+    return 2 if result["failures"] else 0
 
 
 def cmd_eval(args) -> int:
@@ -311,9 +365,53 @@ def main(argv=None) -> int:
     p.add_argument("page")
     p.set_defaults(func=cmd_scene)
 
-    p = sub.add_parser("export", help="M5 write the PPTX")
-    p.add_argument("page")
-    p.set_defaults(func=cmd_export)
+    for command in ("run", "all", "export"):
+        p = sub.add_parser(command, help="three-branch reconstruction through fixed SlideIR compiler")
+        p.add_argument("page")
+        p.add_argument("--review", help="source-hash-bound candidate and text review JSON")
+        p.add_argument("--ocr-cache", help="source-hash-bound OCR JSON")
+        p.add_argument("--output", default=str(OUT / "rebuild"))
+        p.add_argument("--timeout", type=int, default=600)
+        p.add_argument("--skip-probes", action="store_true")
+        p.add_argument("--skip-alignment", action="store_true")
+        p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("batch", help="versioned multi-page reconstruction and compose")
+    p.add_argument("--pages", nargs="+", help="page prefixes, in delivery order")
+    p.add_argument("--reviews", default=str(ROOT / "configs" / "reviews"))
+    p.add_argument("--output", default=str(OUT / "rebuild"))
+    p.add_argument("--resume", help="previous batch.json or progress JSON")
+    p.add_argument("--timeout", type=int, default=600)
+    p.add_argument("--skip-probes", action="store_true")
+    p.set_defaults(func=cmd_batch)
+
+    p = sub.add_parser("baseline", help="read-only validation of all saved LayerD packs")
+    p.add_argument("--output", help="new baseline receipt path")
+    p.set_defaults(func=cmd_baseline)
+
+    p = sub.add_parser("check-edits", help="direct final-PPTX deletion and native-trial text replacement")
+    p.add_argument("input", help="delivery.json or batch.json")
+    p.add_argument("--output", default=str(OUT / "rebuild"))
+    p.add_argument("--timeout", type=int, default=600)
+    p.set_defaults(func=cmd_check_edits)
+
+    p = sub.add_parser("repair-text", help="text-first inpainting and paragraph reconstruction")
+    p.add_argument("input", help="source-backed LayerDPPT batch.json")
+    p.add_argument("--pages", nargs="+")
+    p.add_argument("--reviews",default=str(ROOT / "configs" / "text-repair-reviews"))
+    p.add_argument("--output",default=str(OUT / "text-repair"))
+    p.add_argument("--inpaint-url",default="http://127.0.0.1:18842/inpaint")
+    p.add_argument("--timeout",type=int,default=600)
+    p.set_defaults(func=cmd_repair_text)
+
+    p = sub.add_parser("rebuild-surfaces", help="native card backgrounds with bounded masks and source ownership")
+    p.add_argument("input", help="frozen text-repair batch.json")
+    p.add_argument("--pages", nargs="+")
+    p.add_argument("--reviews", default=str(ROOT / "configs/surface-reviews"))
+    p.add_argument("--output", default=str(OUT / "surfaces"))
+    p.add_argument("--resume", help="prior surface batch or progress JSON with verified artifact hashes")
+    p.add_argument("--timeout", type=int, default=600)
+    p.set_defaults(func=cmd_rebuild_surfaces)
 
     p = sub.add_parser("eval", help="M6 render comparison")
     p.add_argument("page")
@@ -321,7 +419,7 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_eval)
 
     args = parser.parse_args(argv)
-    print(f"[{args.command}] page={args.page}")
+    print(f"[{args.command}] page={getattr(args, 'page', 'batch')}")
     return args.func(args)
 
 

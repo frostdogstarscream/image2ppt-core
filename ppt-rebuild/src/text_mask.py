@@ -109,12 +109,12 @@ def below_coverage(mask: np.ndarray, layers: list[tuple[int, np.ndarray]], owner
     region = mask.sum()
     if region == 0:
         return 0.0
-    stacked = np.zeros(mask.shape, np.uint8)
+    transparent = np.ones(mask.shape, np.float32)
     for z, alpha in layers:
         if z >= owner_z:
             continue
-        stacked = np.maximum(stacked, alpha)
-    return float(((stacked > 200) & mask).sum() / region)
+        transparent *= 1.0 - alpha.astype(np.float32) / 255.0
+    return float((((1.0 - transparent) > 200 / 255.0) & mask).sum() / region)
 
 
 def erase_by_alpha(rgba: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -175,6 +175,35 @@ def remote_inpaint(image: np.ndarray, mask: np.ndarray, url: str, timeout: int =
         body += f'Content-Disposition: form-data; name="{name}"; filename="{name}.png"\r\n'.encode()
         body += b"Content-Type: image/png\r\n\r\n" + payload + b"\r\n"
     body += b"--" + boundary.encode() + b"--\r\n"
+    if url.startswith("ssh://"):
+        import base64
+        import json
+        import shlex
+        import subprocess
+        from urllib.parse import urlsplit
+
+        endpoint = urlsplit(url)
+        if not endpoint.hostname or endpoint.hostname.startswith("-") or endpoint.path != "/inpaint" or endpoint.port is None:
+            raise ValueError("SSH inpainting URL requires host, loopback service port and /inpaint")
+        payload = json.dumps({"body": base64.b64encode(body).decode("ascii"),
+                              "boundary": boundary, "port": endpoint.port, "timeout": timeout}).encode()
+        # Execute the existing loopback HTTP API through SSH when forwarding is
+        # disabled. No remote files or service configuration are changed.
+        relay = ("import sys,json,base64,urllib.request; p=json.load(sys.stdin); "
+                 "r=urllib.request.Request('http://127.0.0.1:'+str(p['port'])+'/inpaint',"
+                 "data=base64.b64decode(p['body']),headers={'Content-Type':'multipart/form-data; boundary='+p['boundary']}); "
+                 "sys.stdout.buffer.write(urllib.request.urlopen(r,timeout=p['timeout']).read())")
+        import time
+        for attempt in range(4):
+            result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
+                                     endpoint.hostname, "python3 -c " + shlex.quote(relay)],
+                                    input=payload, capture_output=True, timeout=timeout+20)
+            if result.returncode != 255 or attempt == 3:
+                break
+            time.sleep(10*(attempt+1))
+        if result.returncode:
+            raise RuntimeError("SSH inpainting failed: "+result.stderr.decode("utf-8",errors="replace")[-1800:])
+        return np.array(Image.open(io.BytesIO(result.stdout)).convert("RGB"))
     request = urllib.request.Request(
         url, data=body, method="POST",
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}",

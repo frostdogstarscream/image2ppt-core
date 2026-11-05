@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OWN_SOURCES = [
     "image2ppt.ps1", "image2ppt.sh",
     "scripts/runtime.mjs", "scripts/ir.mjs", "scripts/compile.mjs",
+    "scripts/slide.mjs", "scripts/compose.mjs", "scripts/capabilities.mjs",
+    "scripts/render.mjs", "scripts/export_batched.mjs", "scripts/merge_native_batches.py",
     "scripts/main.mjs", "scripts/prepare.py", "scripts/pptx_xml.py",
     "scripts/check_demo.mjs", "scripts/check_pixels.py",
     "tests/ir.test.mjs",

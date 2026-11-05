@@ -1,5 +1,17 @@
 import fs from 'node:fs/promises';
 
+export function declaredFontFamilies(ir) {
+  const fonts=[];
+  for(const node of ir.nodes.filter(n=>['text','table','chart'].includes(n.type))) {
+    fonts.push(node.font);
+    for(const paragraph of node.paragraphs||[]) {
+      fonts.push(paragraph.font);
+      for(const run of paragraph.runs||[]) if(run.font) fonts.push(run.font);
+    }
+  }
+  return [...new Set(fonts.flatMap(font=>[font.latin,font.ea]))];
+}
+
 // Authoring one page of a presentation from a loaded SlideIR.
 //
 // This is the per-slide half of the compiler, shared by the single-page

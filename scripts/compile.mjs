@@ -6,7 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { runtime, ROOT, writeJson, saveBlob } from './runtime.mjs';
 import { assertAuthoring, loadIR, sha256 } from './ir.mjs';
 import { renderPptx } from './render.mjs';
-import { buildSlide } from './slide.mjs';
+import { buildSlide, declaredFontFamilies } from './slide.mjs';
+import { exportBatched } from './export_batched.mjs';
 
 export function pythonJson(rt, args) {
   const result=spawnSync(rt.python,['-X','utf8',...args],{encoding:'utf8',windowsHide:true,maxBuffer:4*1024*1024});
@@ -16,7 +17,7 @@ export function pythonJson(rt, args) {
 
 // requireAuthoring is off only for the diagnostic `perturb` path, which edits a
 // throwaway copy of the IR and therefore cannot describe a recorded revision.
-export async function compile(file, {requireAuthoring=true}={}) {
+export async function compile(file, {requireAuthoring=true,exportBatchSize=0}={}) {
   if (requireAuthoring) await assertAuthoring(file);
   const data=await loadIR(file), {ir,info}=data;
   if (ir.unresolved_evidence_ids?.length) throw new Error('还有未处理源内容；先用图片回退保留内容，再导出。');
@@ -30,7 +31,8 @@ export async function compile(file, {requireAuthoring=true}={}) {
   const presentation=Presentation.create({slideSize:{width:tw,height:th}});
   await buildSlide(presentation,{ir,info});
   const raw=path.join(buildDir,'raw.pptx'), candidate=path.join(buildDir,'candidate.pptx'), final=path.join(output,'result.pptx');
-  await (await PresentationFile.exportPptx(presentation)).save(raw);
+  const exportReceipt=exportBatchSize ? await exportBatched(rt,[data],raw,exportBatchSize) : null;
+  if(!exportBatchSize) await (await PresentationFile.exportPptx(presentation)).save(raw);
   const packageInfo=pythonJson(rt,[path.join(ROOT,'scripts/pptx_xml.py'),'adapt',raw,'--target',candidate,'--ir',data.file]);
   const {finalizePresentation}=await import(pathToFileURL(path.join(rt.skill,'container_tools/artifact_tool_utils.mjs')).href);
   // The finalizer requires every declared table owner to carry exactly one
@@ -38,6 +40,8 @@ export async function compile(file, {requireAuthoring=true}={}) {
   // assert the table is really there.
   const tableOwners=ir.nodes.some(n=>n.type==='table')?[1]:[];
   const chartOwners=ir.nodes.some(n=>n.type==='chart')?[1]:[];
+  // Image-only pages still need a bounded policy; Arial is unused unless text exists.
+  const declaredFonts=declaredFontFamilies(ir);
   await finalizePresentation({workspaceDir:ROOT,candidatePath:candidate,finalPath:final,pythonExecutable:rt.python,
     explicitTotalSlideCount:1,requiredNativeTableOwnerSlides:tableOwners,requiredNativeChartOwnerSlides:chartOwners,
     // The engine authors literal charts; portable mode requires every chart to
@@ -48,7 +52,7 @@ export async function compile(file, {requireAuthoring=true}={}) {
     layoutValidatorPath:path.join(rt.skill,'container_tools/inspect_presentation_layout_geometry.py'),
     layoutArgs:['--expected-slide-size-emu',`${Math.round(tw*9525)},${Math.round(th*9525)}`,
       ...tableOwners.flatMap(n=>['--require-native-table-slide',String(n)])],
-    fontPolicy:{basis:'design',families:[...new Set(ir.nodes.filter(n=>n.type==='text'||n.type==='table').flatMap(n=>[n.font.latin,n.font.ea]))]},
+    fontPolicy:{basis:'design',families:declaredFonts.length?declaredFonts:['Arial']},
     verifyArtifactToolImport:true,receiptPath:path.join(buildDir,'validation.json')});
   const rendered=await renderPptx(final,path.join(buildDir,'render'));
   await fs.copyFile(rendered.pages[0].path,path.join(output,'preview.png'));
@@ -74,7 +78,8 @@ export async function compile(file, {requireAuthoring=true}={}) {
     image_fallbacks:ir.nodes.filter(n=>n.type==='image').map(n=>({id:n.id,asset_id:n.asset_id,editable:'move_resize_only'})),
     warnings:info.warnings,font_identification_verified:false,
     powerPoint_checked:false,wps_checked:false,human_acceptance:false,
-    validation_receipt:path.relative(ROOT,path.join(buildDir,'validation.json')),intermediate_package_checks:packageInfo};
+    validation_receipt:path.relative(ROOT,path.join(buildDir,'validation.json')),intermediate_package_checks:packageInfo,
+    ...(exportReceipt?{export_mode:exportReceipt.mode,export_receipt:path.relative(ROOT,raw+'.batch-export.json')}:{})};
   await writeJson(path.join(output,'quality.json'),report);
   return {output_dir:output,pptx:final,preview:path.join(output,'preview.png'),quality:path.join(output,'quality.json'),status:report.status};
 }

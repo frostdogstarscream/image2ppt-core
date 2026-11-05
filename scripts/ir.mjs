@@ -39,7 +39,7 @@ export function validateIR(ir) {
   for(const node of ir.nodes) {
     expect(IR_NODE_TYPES.includes(node?.type), `${node?.id} 不支持的节点类型 ${node?.type}。`);
     const common='id type bbox z evidence_ids';
-    const byType={text:'text font bold color align wrap line_spacing_pt runs text_override_reason source_text_bbox insets vertical_anchor',
+    const byType={text:'text font bold color align wrap line_spacing_pt runs paragraphs text_override_reason source_text_bbox insets vertical_anchor',
       shape:'geometry fill line corner_radius_px fill_gradient',image:'asset_id',
       table:'rows font column_tracks header_row banded_rows row_heights merges cell_styles',
       chart:'chart_type title font categories series has_legend legend_position'};
@@ -54,6 +54,34 @@ export function validateIR(ir) {
           fields(run,'text color bold','run');
           if(run.bold!==undefined) expect(typeof run.bold==='boolean',`${node.id} run.bold 必须为 boolean。`);
         }
+      }
+      if(node.paragraphs!==undefined) {
+        expect(array(node.paragraphs) && node.paragraphs.length>0 && node.paragraphs.length<=100,`${node.id} paragraphs 必须为 1—100 段。`);
+        expect(node.runs===undefined,`${node.id} paragraphs 与 runs 不能同时使用。`);
+        for(const paragraph of node.paragraphs) {
+          fields(paragraph,'text font bold color align line_spacing_pt space_before_pt space_after_pt left_indent_px runs','paragraph');
+          expect(typeof paragraph.text==='string' && paragraph.text.length>0 && !paragraph.text.includes('\n'),`${node.id} paragraph.text 必须为单行文字。`);
+          fields(paragraph.font,'latin ea size_pt','paragraph.font');
+          expect(['latin','ea'].every(k=>typeof paragraph.font[k]==='string' && paragraph.font[k].trim()) && Number.isFinite(paragraph.font.size_pt) && paragraph.font.size_pt>0 && paragraph.font.size_pt<=400,`${node.id} paragraph.font 无效。`);
+          expect(color(paragraph.color) && typeof paragraph.bold==='boolean',`${node.id} paragraph 颜色或字重无效。`);
+          expect(paragraph.align===undefined || ['left','center','right'].includes(paragraph.align),`${node.id} paragraph.align 无效。`);
+          for(const key of ['space_before_pt','space_after_pt','left_indent_px']) if(paragraph[key]!==undefined) expect(Number.isFinite(paragraph[key]) && paragraph[key]>=0 && paragraph[key]<=40000,`${node.id} paragraph.${key} 无效。`);
+          if(paragraph.line_spacing_pt!==undefined) expect(Number.isFinite(paragraph.line_spacing_pt) && paragraph.line_spacing_pt>0 && paragraph.line_spacing_pt<=40000,`${node.id} paragraph.line_spacing_pt 无效。`);
+          if(paragraph.runs!==undefined) {
+            expect(array(paragraph.runs) && paragraph.runs.length>0 && paragraph.runs.map(r=>r.text).join('')===paragraph.text,`${node.id} paragraph.runs 与文字不符。`);
+            for(const run of paragraph.runs) {
+              fields(run,'text font color bold','paragraph.run');
+              expect(typeof run.text==='string' && run.text.length>0 && !run.text.includes('\n'),`${node.id} paragraph.run.text 无效。`);
+              if(run.bold!==undefined) expect(typeof run.bold==='boolean',`${node.id} paragraph.run.bold 无效。`);
+              if(run.color!==undefined) expect(color(run.color),`${node.id} paragraph.run.color 无效。`);
+              if(run.font!==undefined) {
+                fields(run.font,'latin ea size_pt','paragraph.run.font');
+                expect(['latin','ea'].every(k=>typeof run.font[k]==='string' && run.font[k].trim()) && Number.isFinite(run.font.size_pt) && run.font.size_pt>0 && run.font.size_pt<=400,`${node.id} paragraph.run.font 无效。`);
+              }
+            }
+          }
+        }
+        expect(node.paragraphs.map(p=>p.text).join('\n')===node.text,`${node.id} paragraphs 与 text 不一致。`);
       }
     }
     if(node.line!==undefined) fields(node.line,'color width_pt','line');

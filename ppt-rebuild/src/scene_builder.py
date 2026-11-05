@@ -50,6 +50,11 @@ def build(page: str, *, ocr_path: Path, fonts_path: Path, mask_path: Path,
             })
             continue
         if not fit.get("size_pt"):
+            objects.append({
+                "id": f"raster_{box['id']}", "type": "image", "bbox_px": box["bbox"],
+                "z": 40, "source_layers": [], "editable_level": "raster",
+                "reason": "font_matching_failed", "crop_from": "source",
+            })
             continue
         objects.append({
             "id": f"text_{box['id']}",

@@ -48,7 +48,7 @@ export async function demo() {
   return {synthetic:true,ir:file,source,...result};
 }
 
-export async function perturb(file,nodeId,action,value) {
+export async function perturb(file,nodeId,action,value,{exportBatchSize=0}={}) {
   const data=await loadIR(file),ir=structuredClone(data.ir);
   for (const a of ir.assets) delete a._file;
   const group=ir.groups.find(g=>g.id===nodeId), node=ir.nodes.find(n=>n.id===nodeId);
@@ -78,7 +78,7 @@ export async function perturb(file,nodeId,action,value) {
   await writeJson(target,ir);
   // A perturbation edit is deliberately not the recorded revision, so the
   // authoring sidecar cannot describe it.
-  return {ir:target,...await compile(target,{requireAuthoring:false})};
+  return {ir:target,...await compile(target,{requireAuthoring:false,exportBatchSize})};
 }
 
 async function main() {

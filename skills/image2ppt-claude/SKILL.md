@@ -68,7 +68,7 @@ Composing is a packaging step, not a second recognition pass: each page still ne
 - `needs_review` means there are unresolved source questions. Build checks do not change it to accepted. Set human acceptance only after actual source comparison and editing in the target application.
 - Keep each source, IR and output revision. Do not overwrite old PPTX files or the source. Do not expose sensitive input content in general logs.
 - `authoring.json` binds an author and a timestamp to one exact IR revision. `compile` and `compose` refuse a sidecar whose `ir_sha256` no longer matches its IR (the M1 `replay` command enforces the same rule); `perturb` is exempt because it deliberately builds a throwaway edit. Runs prepared before the sidecar existed carry none and still work. Editing an IR without re-recording is the failure this catches.
-- SlideIR stays at 0.1. Native tables and charts are authored only when `doctor` reports them supported and are image fallbacks everywhere else; the decomposed-region form needs no new fields. Semantic connectors, nested groups and multiline mixed runs remain outside the protocol.
+- SlideIR stays at 0.1. Native tables and charts are authored only when `doctor` reports them supported and are image fallbacks everywhere else. Optional `paragraphs` preserves per-line and per-run styles in one editable text box; the protocol reference defines the contract. Semantic connectors and nested groups remain outside the protocol.
 
 ## Delivery
 

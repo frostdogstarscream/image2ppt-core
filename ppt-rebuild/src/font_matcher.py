@@ -201,3 +201,53 @@ def vote_family(fits: list[dict]) -> dict:
                 fit["font_family_final"] = winner
         assigned += fit.get("font_family_final") == winner
     return {"family": winner, "share": round(assigned / max(1, len(fits)), 3), "tally": tally}
+
+
+def fit_visual(rgb: np.ndarray, background: np.ndarray, text: str, bbox, *, dpi=96) -> dict:
+    """Rank real glyph silhouettes, including weight, against the source pixels."""
+    x, y, w, h = bbox
+    crop = rgb[y:y+h, x:x+w]
+    difference = np.abs(crop.astype(np.int16) - background.astype(np.int16)).max(axis=2)
+    ink = difference > 40
+    if ink.sum() < 8:
+        return {"size_pt": None}
+    yy, xx = np.nonzero(ink)
+    target_w, target_h = int(xx.max() - xx.min() + 1), int(yy.max() - yy.min() + 1)
+    foreground = np.median(crop[difference >= np.percentile(difference[ink], 85)], axis=0)
+    candidates = []
+    for family, filenames in CANDIDATE_FILES.items():
+        if family == "Arial" and any(ord(char) > 127 for char in text):
+            continue
+        for filename in filenames:
+            path = FONT_DIR / filename
+            if not path.exists():
+                continue
+            for size_px in sorted(set(_size_for_width(text, path, target_w, (6, max(100, h * 2))))):
+                font = ImageFont.truetype(str(path), size_px)
+                bounds = font.getbbox(text)
+                glyph = Image.new("L", (max(1, bounds[2]-bounds[0]), max(1, bounds[3]-bounds[1])), 0)
+                ImageDraw.Draw(glyph).text((-bounds[0], -bounds[1]), text, font=font, fill=255)
+                alpha = np.array(glyph).astype(float) / 255
+                best = None
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        left, top = int(xx.min()) + dx, int(yy.min()) + dy
+                        canvas = np.zeros((h, w), float)
+                        gx, gy = max(0, -left), max(0, -top)
+                        cx, cy = max(0, left), max(0, top)
+                        cw, ch = min(w-cx, alpha.shape[1]-gx), min(h-cy, alpha.shape[0]-gy)
+                        if min(cw, ch) <= 0:
+                            continue
+                        canvas[cy:cy+ch, cx:cx+cw] = alpha[gy:gy+ch, gx:gx+cw]
+                        rendered = foreground * canvas[..., None] + background * (1-canvas[..., None])
+                        # Penalize clipped glyphs so too-large fonts cannot win by truncation.
+                        clipping = max(0, alpha.shape[1] - (w-left)) + max(0, alpha.shape[0] - (h-top))
+                        score = float(np.abs(rendered - crop).mean()) + clipping * 2
+                        if best is None or score < best:
+                            best = score
+                candidates.append({"family": family, "file": filename,
+                                   "bold": "bd" in filename.lower() or "b." in filename.lower(),
+                                   "size_px": size_px, "size_pt": round(size_px * 72 / dpi, 3),
+                                   "pixel_mae": round(best, 4)})
+    candidates.sort(key=lambda item: item["pixel_mae"])
+    return {**candidates[0], "candidates": candidates[:5], "method": "local_glyph_pixel_comparison"} if candidates else {"size_pt": None}
