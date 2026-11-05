@@ -3,3 +3,4 @@ workdir/
 outputs/
 __pycache__/
 *.pyc
+.tmp-*.png
