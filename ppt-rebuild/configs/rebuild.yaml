@@ -1,0 +1,62 @@
+# ppt-rebuild 运行配置（计划 §7 / §6）
+# 所有阈值都是首版候选值，需在第 3/10/4 页试点后校准。
+
+canvas:
+  width: 1672
+  height: 941          # 参考坐标系；导出时按图片真实宽高比映射
+
+layerd:
+  pages_root: outputs/layerd-review-20261104
+  recompose_mae_tolerance: 3.0    # 重组与 composite.png 的 MAE 上限，超限视为读错层
+  region:
+    alpha_threshold: 24
+    min_area: 64
+
+ocr:
+  engine: ppocrv4                 # 复用 image2ppt_vision.models.recognize
+  min_confidence: 0.60
+  vlm_confidence_floor: 0.85      # 低于此值才交给 VLM 复核
+  line_group:
+    max_gap_ratio: 0.55           # 行间距/行高，超过即分段
+
+vlm:
+  model: qwen/qwen3.8-max
+  base_url: https://moma.cmecloud.cn/v1
+  disable_thinking: true
+  max_attempts: 3
+
+text_mask:
+  dilate_px: 1
+  mask_ratio_min: 0.15            # 掩码像素/bbox 面积下限，低于即拒绝（防整框擦除）
+  mask_ratio_max: 0.85
+  ghost_check_threshold: 6        # 重组合后该区域残差上限
+
+inpaint:
+  service: http://127.0.0.1:18841/inpaint
+  fallback: opencv-telea
+  only_when_needed: true          # 免修复优先（计划 §M3 原则）
+
+fonts:
+  candidates: [微软雅黑, 黑体, 宋体, 等线]
+  size_search_pt: [6, 72, 0.5]    # 起、止、步长
+
+shapes:
+  min_area_px: 400
+  max_rounding_ratio: 0.5
+  edge_straightness: 0.92
+
+icons:
+  svg_search: false               # 离线环境默认关闭，仅作候选
+  vectorize: vtracer
+  fallback: png
+
+exporter:
+  library: python-pptx
+  slide_size_from: image
+  min_font_pt: 6
+  text_autofit: none
+
+eval:
+  render: artifact-tool           # 回导最终 PPTX 渲染，可重复
+  metrics: [mae, psnr, ssim]
+  report_split: [visual, editable, structure]   # 三类指标必须分开报告
