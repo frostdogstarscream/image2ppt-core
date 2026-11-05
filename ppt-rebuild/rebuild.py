@@ -106,6 +106,172 @@ def cmd_fonts(args) -> int:
     return 0
 
 
+def cmd_mask(args) -> int:
+    import numpy as np
+    from PIL import Image
+
+    from layerd_loader import load_page
+    from text_mask import (below_coverage, composite, describe, erase_by_alpha, erase_by_inpaint,
+                           grow, inpaint_rgb, layer_coverage, mask_ratio_ok, owning_layer, remote_inpaint,
+                           residual_contrast, stroke_mask, topmost_opaque_below)
+
+    page = load_page(Path(args.pages_root) / args.page)
+    ocr = _load_scene(args.page, "ocr")
+    working = {layer.z: np.array(Image.open(layer.path).convert("RGBA")) for layer in page.layers}
+    alphas = [(z, rgba[..., 3]) for z, rgba in working.items()]
+    source = np.array(Image.open(page.source_path).convert("RGB"))
+
+    union_mask = np.zeros(page.size[::-1], bool)
+    boxes, summary = [], {"erased_alpha": 0, "erased_inpaint": 0, "repaired_lama": 0,
+                          "repaired_local": 0, "refused": 0, "keep_raster": 0}
+    for box in ocr["boxes"]:
+        result = stroke_mask(source, box["bbox"], tolerance=args.tolerance)
+        if result is None:
+            boxes.append({"box": box["id"], "status": "no_ink"}); summary["refused"] += 1; continue
+        ok, reason = mask_ratio_ok(result, low=args.ratio_min, high=args.ratio_max)
+        if not ok:
+            # 计划 §8.1：宁可交给审核，也不整框擦
+            boxes.append({"box": box["id"], "status": f"refused:{reason}", "mask": describe(result)})
+            summary["refused"] += 1
+            continue
+        owner_z, evidence = owning_layer(result.mask, alphas)
+        if owner_z is None:
+            boxes.append({"box": box["id"], "status": "refused:no_owner", "mask": describe(result),
+                          "layer_evidence": evidence})
+            summary["refused"] += 1
+            continue
+        repair_mask = grow(result.mask, args.repair_grow)
+        union_mask |= repair_mask
+        below = below_coverage(repair_mask, alphas, owner_z)
+        mode = "alpha" if below > args.free_erase_coverage else "inpaint"
+        before = composite(list(working.items()), page.size)
+        residual_before = residual_contrast(before, repair_mask, tolerance=args.residual_tolerance)
+        if mode == "alpha":
+            working[owner_z] = erase_by_alpha(working[owner_z], repair_mask)
+        else:
+            working[owner_z] = erase_by_inpaint(working[owner_z], result.mask)
+        after = composite(list(working.items()), page.size)
+        residual_after = residual_contrast(after, repair_mask, tolerance=args.residual_tolerance)
+        status = f"erased_{mode}"
+        summary[f"erased_{mode}"] += 1
+
+        # The layer below almost always keeps a faint impression of the glyphs (the
+        # coarse matte does not reach the halo), so the hole is filled unconditionally:
+        # waiting for a residual threshold lets faint ghosts through.
+        repaired_layer = None
+        fix_z = topmost_opaque_below(list(working.items()), repair_mask, owner_z)
+        if fix_z is not None:
+            working[fix_z] = erase_by_inpaint(working[fix_z], repair_mask, radius=args.repair_radius)
+            after = composite(list(working.items()), page.size)
+            residual_after = residual_contrast(after, repair_mask, tolerance=args.residual_tolerance)
+            repaired_layer = fix_z
+            status = "erased_and_repaired"
+            summary["repaired_local"] += 1
+        if residual_after > args.ghost_threshold and args.inpaint_url:
+            repaired = remote_inpaint(after, result.mask, args.inpaint_url)
+            if repaired.shape == after.shape:
+                fix_z = topmost_opaque_below(list(working.items()), result.mask, owner_z)
+                if fix_z is not None:
+                    target = working[fix_z].copy()
+                    target[result.mask, :3] = repaired[result.mask]
+                    working[fix_z] = target
+                    after = composite(list(working.items()), page.size)
+                residual_after = residual_contrast(after, result.mask)
+                status = "repaired_lama"
+                summary["repaired_lama"] += 1
+        if residual_after > args.ghost_threshold:
+            # 计划 §M3：擦不干净就回退为图片对象，绝不带着字影出片
+            summary["keep_raster"] += 1
+            status = f"keep_raster:{residual_after:.2f}"
+        boxes.append({
+            "box": box["id"], "text": box["text"], "status": status, "mask": describe(result),
+            "owner_layer": owner_z, "below_coverage": round(below, 3), "erase_mode": mode,
+            "repaired_layer": repaired_layer,
+            "residual_before": round(residual_before, 3), "residual_after": round(residual_after, 3),
+            "layer_evidence": evidence,
+        })
+
+    workdir = ROOT / "workdir" / args.page
+    erased_dir = workdir / "layers-erased"
+    erased_dir.mkdir(parents=True, exist_ok=True)
+    for layer in page.layers:
+        Image.fromarray(working[layer.z]).save(erased_dir / layer.file)
+    plate = composite(list(working.items()), page.size)
+    # Repair the flattened page: the plate is what the exporter ships, and a layer
+    # left with a halo would still be visible through every transparent layer above it.
+    plate = inpaint_rgb(plate, union_mask, radius=args.repair_radius)
+    Image.fromarray(plate).save(workdir / "plate.png")
+    for entry in boxes:
+        result = entry.get("mask")
+        if not result:
+            continue
+        x, y, w, h = result["bbox"]
+        m = np.zeros(plate.shape[:2], bool)
+        m[y:y + h, x:x + w] = True
+        entry["plate_residual"] = round(residual_contrast(plate, grow(m, args.repair_grow),
+                                                          tolerance=args.residual_tolerance), 3)
+
+    summary["plate_residual_max"] = round(max((b.get("plate_residual") or 0) for b in boxes), 3)
+    record = {"schema": "TextErase/1", "page": args.page, "image_size": list(page.size),
+              "boxes": boxes, "summary": summary,
+              "outputs": {"layers": str(erased_dir.relative_to(ROOT)), "plate": str((workdir / 'plate.png').relative_to(ROOT))}}
+    print(json.dumps(summary, ensure_ascii=False))
+    statuses: dict[str, int] = {}
+    for entry in boxes:
+        head = entry["status"].split(":")[0]
+        statuses[head] = statuses.get(head, 0) + 1
+    print(json.dumps({"statuses": statuses}, ensure_ascii=False))
+    _write(_scene_path(args.page, "mask"), record)
+    return 0
+
+
+def cmd_scene(args) -> int:
+    from scene_builder import build, validate
+
+    page_dir = Path(args.pages_root) / args.page
+    workdir = ROOT / "workdir" / args.page
+    scene = build(
+        args.page,
+        ocr_path=_scene_path(args.page, "ocr"),
+        fonts_path=_scene_path(args.page, "fonts"),
+        mask_path=_scene_path(args.page, "mask"),
+        plate_path=workdir / "plate.png",
+        source_path=page_dir / "source.png",
+        workdir=workdir,
+    )
+    problems = validate(scene)
+    print(json.dumps({"counts": scene["counts"], "problems": problems}, ensure_ascii=False))
+    _write(_scene_path(args.page, "scene"), scene)
+    return 0 if not problems else 4
+
+
+def cmd_export(args) -> int:
+    from pptx_exporter import export
+
+    scene = _load_scene(args.page, "scene")
+    page_dir = Path(args.pages_root) / args.page
+    out = ROOT / "outputs" / "slides" / f"{args.page}.pptx"
+    result = export(scene, out, workdir=ROOT / "workdir" / args.page, source_path=page_dir / "source.png")
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+def cmd_eval(args) -> int:
+    from visual_eval import evaluate
+
+    scene = _load_scene(args.page, "scene")
+    page_dir = Path(args.pages_root) / args.page
+    render = Path(args.render)
+    out = ROOT / "outputs" / "preview" / args.page
+    result = evaluate(scene, page_dir / "source.png", render, out_dir=out)
+    print(json.dumps({"visual": result["visual"], "text": {k: result["text"][k] for k in
+                     ("coverage", "mae_on_text_pixels", "mae_on_non_text_pixels")},
+                     "structure": {"objects": result["structure"]["objects"],
+                                   "over_10": result["structure"]["over_10"][:6]}}, ensure_ascii=False))
+    _write(_scene_path(args.page, "eval"), result)
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="rebuild")
     parser.add_argument("--pages-root", default=str(ROOT.parent / "outputs" / "layerd-review-20261104"))
@@ -127,6 +293,32 @@ def main(argv=None) -> int:
     p.add_argument("--min-pt", type=float, default=6.0)
     p.add_argument("--max-pt", type=float, default=72.0)
     p.set_defaults(func=cmd_fonts)
+
+    p = sub.add_parser("mask", help="M3 stroke mask and layered erase")
+    p.add_argument("page")
+    p.add_argument("--tolerance", type=int, default=40)
+    p.add_argument("--ratio-min", type=float, default=0.15)
+    p.add_argument("--ratio-max", type=float, default=0.85)
+    p.add_argument("--free-erase-coverage", type=float, default=0.98)
+    p.add_argument("--ghost-threshold", type=float, default=0.05)
+    p.add_argument("--repair-radius", type=int, default=6)
+    p.add_argument("--repair-grow", type=int, default=3)
+    p.add_argument("--residual-tolerance", type=int, default=8)
+    p.add_argument("--inpaint-url", default="")
+    p.set_defaults(func=cmd_mask)
+
+    p = sub.add_parser("scene", help="M5 build the scene graph")
+    p.add_argument("page")
+    p.set_defaults(func=cmd_scene)
+
+    p = sub.add_parser("export", help="M5 write the PPTX")
+    p.add_argument("page")
+    p.set_defaults(func=cmd_export)
+
+    p = sub.add_parser("eval", help="M6 render comparison")
+    p.add_argument("page")
+    p.add_argument("--render", required=True, help="PNG rendered from the exported PPTX")
+    p.set_defaults(func=cmd_eval)
 
     args = parser.parse_args(argv)
     print(f"[{args.command}] page={args.page}")
