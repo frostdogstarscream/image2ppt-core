@@ -8,7 +8,8 @@ from PIL import Image
 
 from _helpers import SRC
 from object_resolver import (MASK_ROLES, authorize_repair, digest, from_ir, load_mask,
-                             mask_ref, migrate_v1, registry_from_ir, resolve, validate_ir_owners, xywh_to_xyxy)
+                             mask_ref, migrate_v1, registry_from_ir, resolve, validate_ir_owners, xywh_to_xyxy,
+                             RepairAuthorizationError, authorization_digest, unknown_masks)
 
 
 def legacy():
@@ -76,7 +77,7 @@ def test_alpha_overlap_between_distinct_contributions_is_allowed(tmp_path):
     first["masks"]["visible"] = saved_mask(tmp_path, "alpha", alpha, semantics="alpha_coverage")
     registry["objects"].append(second)
     assert not resolve(registry, tmp_path)["conflicts"]
-    assert authorize_repair(registry, ["title", "card"], tmp_path).sum() == 20
+    assert authorize_repair(registry, ["title", "card"], tmp_path, tx_id="shared-card").sum() == 20
     second.pop("transaction_id")
     assert any(c["type"] == "SHARED_REPAIR_REQUIRES_TRANSACTION" for c in resolve(registry, tmp_path)["conflicts"])
 
@@ -157,3 +158,86 @@ def test_ir_owner_validation_has_narrow_scope_and_rejects_duplicates(tmp_path):
     ir = ir_fixture(tmp_path)
     ir['nodes'][0]['evidence_ids'].append('e2')
     assert validate_ir_owners(ir)['status'] == 'FAIL'
+
+
+def shared_registry(tmp_path):
+    registry = writable(tmp_path)
+    first = registry['objects'][0]
+    second = copy.deepcopy(first)
+    second.update(id='card', output_owner='card', evidence_ids=['e2'], contribution_ids=['e2'])
+    first['transaction_id'] = second['transaction_id'] = 'shared'
+    first['transaction_dependencies'] = ['card']
+    registry['objects'].append(second)
+    return registry
+
+
+def test_shared_pixels_require_full_transitive_closure_and_actual_identity(tmp_path):
+    registry = shared_registry(tmp_path)
+    with pytest.raises(RepairAuthorizationError, match='closure'):
+        authorize_repair(registry, ['title'], tmp_path, tx_id='shared')
+    with pytest.raises(RepairAuthorizationError, match='actual transaction'):
+        authorize_repair(registry, ['title', 'card'], tmp_path)
+    with pytest.raises(RepairAuthorizationError, match='identity differ'):
+        authorize_repair(registry, ['title', 'card'], tmp_path, tx_id='unrelated')
+    mask, grant = authorize_repair(registry, ['title', 'card'], tmp_path,
+                                  tx_id='shared', parent_scene_sha256='p'*64,
+                                  allowed_fields={'card': ['bbox']}, return_receipt=True)
+    assert mask.sum() == 20
+    assert grant['object_ids'] == ['card', 'title']
+    assert grant['authorization_sha256'] == authorization_digest(grant)
+    assert grant['repair_pixels'] == 20 and grant['evidence_files']
+    grant['tx_id'] = 'another'
+    assert grant['authorization_sha256'] != authorization_digest(grant)
+
+
+def test_shared_repair_closure_is_not_only_direct_dependency(tmp_path):
+    registry = shared_registry(tmp_path)
+    registry['objects'][0]['transaction_dependencies'] = []
+    with pytest.raises(RepairAuthorizationError, match='closure'):
+        authorize_repair(registry, ['title'], tmp_path, tx_id='shared')
+
+
+def test_unknown_affected_neighbor_requires_local_source_bound_evidence(tmp_path):
+    registry = writable(tmp_path)
+    neighbor = copy.deepcopy(registry['objects'][0])
+    neighbor.update(id='neighbor', action='retain', evidence_ids=['e2'], contribution_ids=['e2'],
+                    output_owner='neighbor', masks=unknown_masks())
+    registry['objects'].append(neighbor)
+    with pytest.raises(RepairAuthorizationError) as error:
+        authorize_repair(registry, ['title'], tmp_path)
+    assert error.value.status == 'REVIEW_REQUIRED'
+    assert any(c['type'] == 'UNKNOWN_AFFECTED_PROTECTION' for c in error.value.conflicts)
+    # Explicit independently supplied local evidence can resolve an overlap;
+    # a bounding box alone is not converted into such evidence.
+    scope = np.zeros((15, 20), np.uint8); scope[3:7, 2:7] = 255
+    neighbor['local_protection'] = {'source_sha256': registry['source_sha256'], 'method': 'fixture_independent',
+                                  'scope': saved_mask(tmp_path, 'scope', scope),
+                                  'protection': saved_mask(tmp_path, 'neighbor-clear', np.zeros_like(scope))}
+    assert authorize_repair(registry, ['title'], tmp_path).sum() == 20
+    neighbor['local_protection']['source_sha256'] = 'wrong'
+    with pytest.raises(RepairAuthorizationError):
+        authorize_repair(registry, ['title'], tmp_path)
+
+
+def test_unknown_unaffected_neighbor_does_not_block_local_grant(tmp_path):
+    registry = writable(tmp_path)
+    neighbor = copy.deepcopy(registry['objects'][0])
+    neighbor.update(id='neighbor', action='retain', evidence_ids=['e2'], contribution_ids=['e2'],
+                    output_owner='neighbor', bbox_xyxy=[12, 10, 16, 14], masks=unknown_masks())
+    registry['objects'].append(neighbor)
+    assert authorize_repair(registry, ['title'], tmp_path).sum() == 20
+
+
+def test_partial_local_protection_scope_is_not_accepted(tmp_path):
+    registry = writable(tmp_path)
+    neighbor = copy.deepcopy(registry['objects'][0])
+    tiny = np.zeros((15, 20), np.uint8); tiny[3, 2] = 255
+    neighbor.update(id='neighbor', action='retain', evidence_ids=['e2'], contribution_ids=['e2'],
+                    output_owner='neighbor', masks=unknown_masks(), local_protection={
+                        'source_sha256': registry['source_sha256'], 'method': 'fixture_independent',
+                        'scope': saved_mask(tmp_path, 'tiny-scope', tiny),
+                        'protection': saved_mask(tmp_path, 'clear', np.zeros_like(tiny))})
+    registry['objects'].append(neighbor)
+    with pytest.raises(RepairAuthorizationError) as error:
+        authorize_repair(registry, ['title'], tmp_path)
+    assert error.value.status == 'REVIEW_REQUIRED'

@@ -6,6 +6,7 @@ Caller holds RunLock for the whole run, including compile/render and publication
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -107,6 +108,9 @@ def scene_fingerprint(ir_file):
     for asset in ir.get("assets", []):
         if asset.get("sha256") and files[Path(asset["path"]).as_posix()] != asset["sha256"]:
             raise ValueError("Scene asset hash mismatch: " + asset["id"])
+    if ir.get("source_sha256") and ir.get("source_image"):
+        if files[Path(ir["source_image"]).as_posix()] != ir["source_sha256"]:
+            raise ValueError("Scene source hash mismatch")
     return {"schema": "SceneFingerprint/1", "ir_name": ir_file.name,
             "files": files, "sha256": _digest(files)}
 
@@ -138,19 +142,22 @@ class ReconstructionTransaction:
     """
 
     def __init__(self, directory, tx_id, baseline_ir, input_fingerprint,
-                 required_gates, object_ids=()):
+                 required_gates, object_ids=(), *, authorization=None):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", tx_id) or tx_id in {".", ".."}:
             raise ValueError("Invalid transaction identifier")
         if not required_gates or len(set(required_gates)) != len(required_gates):
             raise ValueError("Required gates must be nonempty and unique")
+        if len(set(object_ids)) != len(object_ids):
+            raise ValueError("Transaction object ids must be unique")
         self.root = Path(directory).resolve()
         self.directory = self.root / "transactions" / tx_id
         self.directory.mkdir(parents=True, exist_ok=True)
         self.tx_id = tx_id
         self.baseline_ir = Path(baseline_ir).resolve()
-        self.input_fingerprint = input_fingerprint
+        self.input_fingerprint = copy.deepcopy(input_fingerprint)
         self.required_gates = sorted(required_gates)
-        self.object_ids = list(object_ids)
+        self.object_ids = sorted(object_ids)
+        self.authorization = copy.deepcopy(authorization)
         self.prepare_file = self.directory / "prepare.json"
         self.active_file = self.root / "active.json"
 
@@ -161,13 +168,50 @@ class ReconstructionTransaction:
     def _record(self):
         record = _read(self.prepare_file)
         expected = {"tx_id": self.tx_id, "input_fingerprint": self.input_fingerprint,
-                    "required_gates": self.required_gates, "object_ids": self.object_ids}
-        if any(record[key] != value for key, value in expected.items()):
+                    "required_gates": self.required_gates, "object_ids": self.object_ids,
+                    "authorization": self.authorization}
+        if any(record.get(key) != value for key, value in expected.items()):
             raise ValueError("Resume transaction identity or inputs changed")
         for field in ("baseline", "candidate"):
             if scene_fingerprint(record[field + "_ir"]) != record[field + "_fingerprint"]:
                 raise ValueError("Immutable " + field + " snapshot changed")
+        self._validate_authorization(record["baseline_fingerprint"])
         return record
+
+    def _validate_authorization(self, baseline):
+        if self.authorization is None:
+            return  # Legacy callers still receive strict transaction identity checks.
+        from object_resolver import authorization_digest
+        grant = self.authorization
+        source = _read(self.baseline_ir).get("source_image")
+        source_hash = baseline["files"].get(Path(source).as_posix()) if source else None
+        if (grant.get("schema") not in {"RepairAuthorization/1", "SceneChangeAuthorization/1"}
+                or grant.get("status") != "PASS" or grant.get("tx_id") != self.tx_id
+                or grant.get("object_ids") != self.object_ids
+                or grant.get("parent_scene_sha256") != baseline["sha256"]
+                or not source_hash or grant.get("source_sha256") != source_hash
+                or grant.get("authorization_sha256") != authorization_digest(grant)):
+            raise ValueError("Authorization identity, source or parent mismatch")
+        if grant["schema"] == "RepairAuthorization/1" and (
+                not grant.get("repair_mask_sha256") or grant.get("repair_pixels", 0) <= 0
+                or not grant.get("evidence_files")):
+            raise ValueError("Repair authorization lacks pixel evidence")
+        if grant["schema"] == "SceneChangeAuthorization/1" and not grant.get("allowed_fields"):
+            raise ValueError("Scene authorization lacks explicit allowed fields")
+        self._validate_files(grant.get("evidence_files", {}))
+
+    @staticmethod
+    def _validate_files(files):
+        for path, expected in files.items():
+            if _hash(path) != expected:
+                raise ValueError("Bound evidence artifact changed: " + path)
+
+    def _identity(self, record):
+        return {"tx_id": self.tx_id, "input_fingerprint": self.input_fingerprint,
+                "object_ids": self.object_ids, "required_gates": self.required_gates,
+                "parent_sha256": record["baseline_fingerprint"]["sha256"],
+                "candidate_sha256": record["candidate_fingerprint"]["sha256"],
+                "authorization_sha256": (self.authorization or {}).get("authorization_sha256")}
 
     def _parent_valid(self, record, current_parent_ir=None):
         parent = current_parent_ir or self.baseline_ir
@@ -190,6 +234,7 @@ class ReconstructionTransaction:
             return Path(record["candidate_ir"])
         active = _read(self.active_file) if self.active_file.exists() else None
         baseline = scene_fingerprint(self.baseline_ir)
+        self._validate_authorization(baseline)
         if active and active.get("scene_sha256") != baseline["sha256"]:
             raise ValueError("Baseline is not the currently accepted scene")
         # Incomplete attempt directories are preserved for diagnostics. A retry
@@ -197,9 +242,10 @@ class ReconstructionTransaction:
         attempt = self.directory / ("attempt-" + uuid.uuid4().hex)
         base_ir, base_fp = _snapshot(self.baseline_ir, attempt / "baseline")
         new_ir, new_fp = _snapshot(candidate_ir, attempt / "candidate")
-        record = {"schema": "ReconstructionPrepare/1", "state": "STAGED",
+        record = {"schema": "ReconstructionPrepare/2", "state": "STAGED",
                   "tx_id": self.tx_id, "input_fingerprint": self.input_fingerprint,
                   "object_ids": self.object_ids, "required_gates": self.required_gates,
+                  "authorization": self.authorization,
                   "original_parent_ir": str(self.baseline_ir),
                   "baseline_ir": str(base_ir), "baseline_fingerprint": base_fp,
                   "candidate_ir": str(new_ir), "candidate_fingerprint": new_fp,
@@ -207,7 +253,7 @@ class ReconstructionTransaction:
         _atomic_write(self.prepare_file, record)
         return new_ir
 
-    def verify(self, gates, owner_validator, current_parent_ir=None):
+    def verify(self, gates, owner_validator, current_parent_ir=None, *, evidence_files=None):
         record = self._record()
         if (self.directory / "rollback.json").exists():
             raise ValueError("Rolled-back transaction is terminal; use a new transaction ID")
@@ -219,13 +265,20 @@ class ReconstructionTransaction:
             ownership = {"status": "FAIL", "error_type": type(error).__name__, "reason": str(error)}
         if _status(ownership) != "PASS":
             missing.append("ownership")
+        artifacts = {}
+        for role, file in (evidence_files or {}).items():
+            path = str(Path(file).resolve())
+            artifacts[role] = {"path": path, "sha256": _hash(path)}
+        if self.authorization is not None and not {"render", "qa"} <= artifacts.keys():
+            missing.append("render_and_qa_artifacts_required")
         # A validator is not allowed to mutate the scene under evaluation.
         self._record()
-        receipt = {"schema": "ReconstructionVerification/1", "tx_id": self.tx_id,
+        identity = self._identity(record)
+        receipt = {"schema": "ReconstructionVerification/2", **identity,
+                   "transaction_input_sha256": _digest(identity),
                    "state": "VERIFIED" if not missing else "NEEDS_REVIEW",
                    "gates": gates, "ownership": ownership, "failed_required": missing,
-                   "candidate_sha256": record["candidate_fingerprint"]["sha256"],
-                   "parent_sha256": record["baseline_fingerprint"]["sha256"]}
+                   "evidence_files": artifacts, "evidence_sha256": _digest(artifacts)}
         _atomic_write(self.directory / "acceptance.json", receipt)
         return receipt
 
@@ -234,6 +287,16 @@ class ReconstructionTransaction:
         if (self.directory / "rollback.json").exists():
             raise ValueError("Rolled-back transaction cannot commit")
         accepted = _read(self.directory / "acceptance.json")
+        identity = self._identity(record)
+        if (any(accepted.get(key) != value for key, value in identity.items())
+                or accepted.get("transaction_input_sha256") != _digest(identity)):
+            raise ValueError("Acceptance receipt transaction identity mismatch")
+        artifacts = accepted.get("evidence_files", {})
+        if accepted.get("evidence_sha256") != _digest(artifacts):
+            raise ValueError("Acceptance evidence references changed")
+        if self.authorization is not None and not {"render", "qa"} <= artifacts.keys():
+            raise ValueError("Acceptance lacks bound render and QA artifacts")
+        self._validate_files({ref["path"]: ref["sha256"] for ref in artifacts.values()})
         if (accepted.get("state") != "VERIFIED" or accepted.get("failed_required")
                 or any(_status(accepted.get("gates", {}).get(key)) != "PASS" for key in self.required_gates)
                 or _status(accepted.get("ownership")) != "PASS"

@@ -11,6 +11,8 @@ from r7_edit_checks import (NS, edited_ir, rewrite_probe, region_checks,
                             clean_plate_evidence, target_bbox, probe_specs,
                             baseline_contribution, replacement_overflow, shifted_mask)
 from slideir_adapter import sha256
+from PIL import Image
+import r7_edit_checks
 
 
 def example():
@@ -48,7 +50,10 @@ def test_actual_package_edit_preserves_other_files_and_neighbor_xml(tmp_path, ac
     before = sha256(source)
     target = "surface-card" if action == "recolor" else "text"
     result = rewrite_probe(source, tmp_path / "edited.pptx", example(), target, action)
-    assert result == {"protected_xml": "PASS", "package_parts": "PASS"}
+    assert result["protected_xml"] == result["package_parts"] == "PASS"
+    assert result["slide_number"] == 1 and result["slide_part"] == "ppt/slides/slide1.xml"
+    if action.startswith("replace"):
+        assert result["run_styles_preserved"] == "PASS"
     assert sha256(source) == before
     with ZipFile(tmp_path / "edited.pptx") as archive:
         root = ET.fromstring(archive.read("ppt/slides/slide1.xml"))
@@ -110,7 +115,7 @@ def test_edges_and_outside_are_checked_without_cropping():
     actual = before.copy(); actual[45, 45] = 0
     result = region_checks(before, actual, actual, [10, 10, 20, 20])
     assert result["export_consistency"] == "PASS"
-    assert result["protected_pixels"] == "REVIEW_REQUIRED" and result["outside_changed_pixels"] == 1
+    assert result["protected_pixels"] == "FAIL" and result["outside_changed_pixels"] == 1
 
 
 def test_matching_export_does_not_prove_clean_background():
@@ -220,3 +225,184 @@ def test_multiple_native_components_move_together_without_claiming_actual_group(
     with ZipFile(tmp_path / "moved.pptx") as z:
         root = ET.fromstring(z.read("ppt/slides/slide1.xml"))
         assert [n.attrib for n in root.findall(".//a:off", NS)] == [{"x": "300", "y": "220"}, {"x": "600", "y": "520"}]
+
+
+def deck_with_reordered_parts(tmp_path):
+    single = pptx(tmp_path / "single.pptx")
+    with ZipFile(single) as archive:
+        slide = archive.read("ppt/slides/slide1.xml")
+    rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    pkg_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    path = tmp_path / "deck.pptx"
+    with ZipFile(path, "x") as archive:
+        archive.writestr("ppt/slides/slide7.xml", slide)
+        archive.writestr("ppt/slides/slide22.xml", slide.replace(b'name="text"', b'name="other-page-text"'))
+        archive.writestr("ppt/presentation.xml", f'<p:presentation xmlns:p="{NS["p"]}" xmlns:r="{rel_ns}">'
+                          '<p:sldIdLst><p:sldId id="256" r:id="first"/><p:sldId id="257" r:id="second"/></p:sldIdLst>'
+                          '<p:sldSz cx="1000" cy="1000"/></p:presentation>')
+        archive.writestr("ppt/_rels/presentation.xml.rels", f'<Relationships xmlns="{pkg_ns}">'
+                          f'<Relationship Id="first" Type="{rel_ns}/slide" Target="slides/slide22.xml"/>'
+                          f'<Relationship Id="second" Type="{rel_ns}/slide" Target="slides/slide7.xml"/></Relationships>')
+        archive.writestr("ppt/media/original.png", b"original")
+    return path
+
+
+def test_final_deck_edit_uses_presentation_order_and_preserves_other_slide(tmp_path):
+    original = deck_with_reordered_parts(tmp_path)
+    output = tmp_path / "edited-deck.pptx"
+    result = rewrite_probe(original, output, example(), "text", "replace_short", slide_number=2)
+    assert result["slide_part"] == "ppt/slides/slide7.xml"
+    with ZipFile(original) as before, ZipFile(output) as after:
+        assert before.read("ppt/slides/slide22.xml") == after.read("ppt/slides/slide22.xml")
+        root = ET.fromstring(after.read("ppt/slides/slide7.xml"))
+        assert [v.text for v in root.findall(".//a:t", NS)] == ["测", "测"]
+    with pytest.raises(ValueError, match="absent"):
+        rewrite_probe(original, tmp_path / "invalid.pptx", example(), "text", "delete", slide_number=3)
+
+
+def test_boundary_measurement_survives_absent_independent_expectation():
+    before = np.full((50, 50, 3), 255, np.uint8)
+    actual = before.copy(); actual[49, 49] = 0
+    result = region_checks(before, actual, None, [10, 10, 20, 20])
+    assert result["export_consistency"] == "REVIEW_REQUIRED"
+    assert result["outside_changed_pixels"] == 1 and result["protected_pixels"] == "FAIL"
+
+
+@pytest.mark.parametrize("expected_error", [False, True])
+def test_audit_final_deck_keeps_target_slide_and_unmodified_page_evidence(tmp_path, monkeypatch, expected_error):
+    original = deck_with_reordered_parts(tmp_path)
+    original_hash = sha256(original)
+    ir = example(); ir["nodes"][0]["z"] = 10
+    irfile = tmp_path / "ir.json"; irfile.write_text(json.dumps(ir), encoding="utf-8")
+    blank = np.full((100, 100, 3), 255, np.uint8)
+    before = blank.copy(); before[12:15, 12:15] = 0
+    actual = blank.copy(); actual[12:15, 12:14] = 0
+    for name, data in (("before", before), ("actual", actual), ("blank", blank)):
+        Image.fromarray(data).save(tmp_path / (name+".png"))
+    def expectation(delivery, changed_ir, output, backend):
+        output.mkdir()
+        retained = any(n["id"] == "text" for n in changed_ir["nodes"])
+        if retained and expected_error:
+            raise PermissionError("expected render inaccessible")
+        return {"preview": str(tmp_path / ("actual.png" if retained else "blank.png"))}
+    monkeypatch.setattr(r7_edit_checks, "_expected", expectation)
+    class Backend:
+        def render(self, path, output):
+            return {"pages": [{"path": str(tmp_path / "blank.png")}, {"path": str(tmp_path / "actual.png")}]}
+    result = r7_edit_checks.audit_page({"ir": str(irfile), "page": "01", "pptx": str(original),
+                                       "preview": str(tmp_path / "before.png")}, tmp_path / "audit", Backend(),
+        expected_probes=[("text", "replace_short")], deck_pptx=original, slide_number=2,
+        baseline_deck_render={"pages": [{"path": str(tmp_path / "blank.png")}, {"path": str(tmp_path / "before.png")}]})
+    assert result["final_deck_probe"] and result["slide_number"] == 2
+    probe = result["probes"][0]
+    assert probe["actual_changed_pixels"] == 3 and probe["outside_changed_pixels"] == 0
+    assert probe["unmodified_pages"]["status"] == "PASS"
+    assert result["status"] == ("FAIL" if expected_error else "REVIEW_REQUIRED")
+    assert sha256(original) == original_hash
+
+
+def test_unmodified_page_visual_change_fails_even_if_target_is_correct(tmp_path):
+    a = np.full((5, 5, 3), 255, np.uint8); b = a.copy(); b[0, 0] = 0
+    Image.fromarray(a).save(tmp_path / "a.png"); Image.fromarray(b).save(tmp_path / "b.png")
+    result = r7_edit_checks.unchanged_page_checks(
+        {"pages": [{"path": str(tmp_path / "a.png")}, {"path": str(tmp_path / "a.png")}]},
+        {"pages": [{"path": str(tmp_path / "b.png")}, {"path": str(tmp_path / "a.png")}]}, 2)
+    assert result["status"] == "FAIL" and result["pages"][0]["changed_pixels"] == 1
+
+
+def test_neighbor_deletion_keeps_target_and_prunes_only_newly_empty_groups(tmp_path):
+    source=pptx(tmp_path/'original.pptx')
+    with ZipFile(source) as archive:
+        parts={name:archive.read(name) for name in archive.namelist()}
+    root=ET.fromstring(parts['ppt/slides/slide1.xml'])
+    tree=root.find('p:cSld/p:spTree',NS)
+    card=r7_edit_checks._find(root,'surface-card');tree.remove(card)
+    group=ET.SubElement(tree,'{'+NS['p']+'}grpSp')
+    props=ET.SubElement(group,'{'+NS['p']+'}nvGrpSpPr')
+    ET.SubElement(props,'{'+NS['p']+'}cNvPr',{'id':'10','name':'neighbor-group'})
+    ET.SubElement(group,'{'+NS['p']+'}grpSpPr');group.append(card)
+    # This unrelated empty container must not be cleaned up by the diagnostic.
+    empty=ET.SubElement(tree,'{'+NS['p']+'}grpSp')
+    props=ET.SubElement(empty,'{'+NS['p']+'}nvGrpSpPr')
+    ET.SubElement(props,'{'+NS['p']+'}cNvPr',{'id':'11','name':'unrelated-empty-group'})
+    ET.SubElement(empty,'{'+NS['p']+'}grpSpPr')
+    parts['ppt/slides/slide1.xml']=ET.tostring(root)
+    grouped=tmp_path/'grouped.pptx'
+    with ZipFile(grouped,'x') as archive:
+        for name,data in parts.items():archive.writestr(name,data)
+    result=r7_edit_checks._delete_neighbor_copy(grouped,tmp_path/'neighbors-deleted.pptx',example(),
+        'text',[{'id':'surface-card'}],1)
+    assert result['status']=='PASS' and result['removed_empty_groups']==['neighbor-group']
+    with ZipFile(tmp_path/'neighbors-deleted.pptx') as archive:
+        after=ET.fromstring(archive.read('ppt/slides/slide1.xml'))
+        assert ET.tostring(r7_edit_checks._find(after,'text'))==ET.tostring(r7_edit_checks._find(root,'text'))
+        assert r7_edit_checks._find(after,'unrelated-empty-group') is not None
+        assert archive.read('ppt/media/original.png')==parts['ppt/media/original.png']
+
+
+@pytest.mark.parametrize('scenario,expected_status',[
+    ('transparent_margin','REVIEW_REQUIRED'),('actual_foreground','FAIL'),
+    ('missing_neighbor_proof','REVIEW_REQUIRED'),('short_missing_neighbor_proof','FAIL')])
+def test_replacement_collision_requires_actual_neighbor_contribution(tmp_path,monkeypatch,scenario,expected_status):
+    """Actual ZIP edits plus controlled renderer outputs test evidence semantics."""
+    source=pptx(tmp_path/'original.pptx')
+    with ZipFile(source) as archive:
+        parts={name:archive.read(name) for name in archive.namelist()}
+    root=ET.fromstring(parts['ppt/slides/slide1.xml'])
+    card=r7_edit_checks._find(root,'surface-card')
+    card.tag='{'+NS['p']+'}pic';card.find('p:nvSpPr',NS).tag='{'+NS['p']+'}nvPicPr'
+    # The image has a large transparent margin around its small visible content.
+    import io
+    transparent=Image.new('RGBA',(30,30),(0,0,0,0))
+    for y in range(20,23):
+        for x in range(20,23):transparent.putpixel((x,y),(0,0,0,255))
+    data=io.BytesIO();transparent.save(data,format='PNG')
+    parts['ppt/media/original.png']=data.getvalue()
+    parts['ppt/slides/slide1.xml']=ET.tostring(root)
+    image_deck=tmp_path/'image-deck.pptx'
+    with ZipFile(image_deck,'x') as archive:
+        for name,data in parts.items():archive.writestr(name,data)
+    original_hash=sha256(image_deck)
+    ir=example();ir['nodes']=[ir['nodes'][0],ir['nodes'][-1]];ir['nodes'][0]['z']=10
+    ir['nodes'][1].update(type='image',z=5)
+    irfile=tmp_path/'ir.json';irfile.write_text(json.dumps(ir),encoding='utf-8')
+    blank=np.full((100,100,3),255,np.uint8)
+    before=blank.copy();before[12:15,12:15]=0;before[60:63,60:63]=0
+    target_deleted=blank.copy();target_deleted[60:63,60:63]=0
+    neighbors_deleted=blank.copy();neighbors_deleted[12:15,12:15]=0
+    actual=target_deleted.copy()
+    if scenario=='actual_foreground':actual[60:62,60:62]=[255,0,0]
+    else:actual[45:47,45:47]=[255,0,0]
+    for name,pixels_ in [('before',before),('target_deleted',target_deleted),('neighbors_deleted',neighbors_deleted),('actual',actual)]:
+        Image.fromarray(pixels_).save(tmp_path/(name+'.png'))
+    def expectation(delivery,changed,output,backend):
+        output.mkdir()
+        retained=any(n['id']=='text' for n in changed['nodes'])
+        return {'preview':str(tmp_path/('actual.png' if retained else 'target_deleted.png'))}
+    monkeypatch.setattr(r7_edit_checks,'_expected',expectation)
+    class Backend:
+        def render(self,path,output):
+            if Path(path).name=='neighbors-deleted.pptx':
+                if 'missing_neighbor_proof' in scenario:raise PermissionError('diagnostic evidence unavailable')
+                return {'pages':[{'path':str(tmp_path/'neighbors_deleted.png')}]}
+            return {'pages':[{'path':str(tmp_path/'actual.png')}]}
+    action='replace_short' if scenario=='short_missing_neighbor_proof' else 'replace_long'
+    report=r7_edit_checks.audit_page({'ir':str(irfile),'page':'01','pptx':str(image_deck),
+                                     'preview':str(tmp_path/'before.png')},tmp_path/'audit',Backend(),
+                                    expected_probes=[('text',action)])
+    probe=report['probes'][0]
+    assert report['status']==expected_status
+    assert probe['potential_neighbor_region_pixels']>0
+    if 'missing_neighbor_proof' in scenario:
+        assert probe['neighbor_evidence']['status']=='REVIEW_REQUIRED'
+        assert probe['protected_overlap_pixels'] is None
+        if action=='replace_long':assert probe['capacity_overflow']['verified'] is False
+    else:
+        evidence=probe['neighbor_evidence']
+        assert evidence['status']=='PASS' and evidence['visible_pixels']==9
+        assert evidence['mask_sha256']==sha256(evidence['mask'])
+        assert evidence['original_pptx_sha256']==original_hash
+        assert evidence['original_ir_sha256']==sha256(irfile)
+        assert probe['protected_overlap_pixels']==(4 if scenario=='actual_foreground' else 0)
+        if scenario=='transparent_margin':assert probe['capacity_overflow']['verified'] is True
+    assert sha256(image_deck)==original_hash

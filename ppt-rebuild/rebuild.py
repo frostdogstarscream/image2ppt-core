@@ -419,11 +419,12 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_eval)
 
     p = sub.add_parser("reconstruct-r7", help="source-bound object resolution and transactional reconstruction")
-    p.add_argument("--input", required=True, help="frozen r6 TypographyBatch JSON")
+    p.add_argument("--input", required=True, help="frozen TypographyBatch/1 or R7Batch/1 JSON")
     p.add_argument("--output", required=True)
     p.add_argument("--mode", choices=("shadow", "gated"), default="shadow")
     p.add_argument("--pages", nargs="+")
     p.add_argument("--resume")
+    p.add_argument("--relations", help="source-bound RelationCatalog JSON; default reviewed Xuzhou catalog")
     def run_r7(args):
         from r7_pipeline import run
         print(json.dumps(run(args), ensure_ascii=False, indent=2))

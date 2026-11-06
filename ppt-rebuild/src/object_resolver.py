@@ -25,6 +25,21 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def authorization_digest(record):
+    """Canonical integrity digest shared with the transaction consumer."""
+    value = {k: v for k, v in record.items() if k != "authorization_sha256"}
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+class RepairAuthorizationError(ValueError):
+    """A declined grant carries a machine-readable evidence status."""
+    def __init__(self, message, status="FAIL", conflicts=()):
+        super().__init__(message)
+        self.status = status
+        self.conflicts = list(conflicts)
+
+
 def xywh_to_xyxy(box, canvas):
     if len(box) != 4 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in box):
         raise ValueError("Invalid source-pixel bbox")
@@ -202,6 +217,29 @@ def resolve(registry, base_dir):
             if other["action"] == "superseded":
                 continue
             protection = arrays.get(other["id"], {}).get("protection")
+            if protection is None and other["id"] != obj["id"]:
+                # A bbox only identifies a potentially affected neighbor. It is
+                # never promoted into an erase or protection mask.
+                x0, y0, x1, y1 = other["bbox_xyxy"]
+                affected = np.zeros_like(repair)
+                affected[math.floor(y0):math.ceil(y1), math.floor(x0):math.ceil(x1)] = True
+                affected &= repair
+                if affected.any():
+                    local = other.get("local_protection", {})
+                    try:
+                        if local.get("source_sha256") != result["source_sha256"] or not local.get("method"):
+                            raise ValueError("Local protection must bind source and evidence method")
+                        scope = load_mask(local["scope"], base_dir, size) > 0
+                        if local["scope"]["semantics"] != "binary" or local["protection"]["semantics"] != "binary":
+                            raise ValueError("Local protection masks must be binary")
+                        protection = load_mask(local["protection"], base_dir, size)
+                        if np.any(affected & ~scope):
+                            raise ValueError("Local protection does not cover affected neighbor")
+                        protection = np.where(scope, protection, 0)
+                    except (KeyError, ValueError, OSError) as error:
+                        protection = None
+                        conflict("UNKNOWN_AFFECTED_PROTECTION", [obj["id"], other["id"]],
+                                 status="REVIEW_REQUIRED", reason=str(error))
             if protection is not None and np.any(repair & (protection > 0)):
                 conflict("REPAIR_INTERSECTS_PROTECTION", [obj["id"], other["id"]])
         for other in replacing:
@@ -233,27 +271,95 @@ def resolve(registry, base_dir):
             status = "BASELINE_RETAINED"
         obj["status"] = status
         decisions.append({"object_id": obj["id"], "status": status,
-                          "repair_authorized": status == "RESOLVED",
+                          "repair_authorized": False, "repair_eligible": status == "RESOLVED",
                           "reason": "Retained baseline is not pixel validation" if status == "BASELINE_RETAINED" else None})
     result.update(conflicts=conflicts, decisions=decisions,
                   review_required=bool(conflicts) or any(o["status"] == "BASELINE_RETAINED" for o in objects))
     return result
 
 
-def authorize_repair(registry, object_ids, base_dir):
-    """Return the union of explicitly resolved repair pixels, or fail closed."""
+def authorize_repair(registry, object_ids, base_dir, *, tx_id=None,
+                     parent_scene_sha256=None, allowed_fields=None, return_receipt=False):
+    """Grant exact pixels only to a complete, explicitly identified transaction.
+
+    The mask-only return remains available for legacy single-object callers.
+    Shared repairs and dependencies always require an actual transaction ID.
+    New production callers request a receipt bound to the immutable parent.
+    """
     resolved = resolve(registry, base_dir)
     objects = {o["id"]: o for o in resolved["objects"]}
     if not object_ids or len(set(object_ids)) != len(object_ids):
         raise ValueError("Repair requires unique nonempty object ids")
+    selected = set(object_ids)
+    if not selected <= objects.keys():
+        raise RepairAuthorizationError("Repair contains unknown object ids")
+    if not any(objects[i]["action"] == "replace" for i in selected):
+        raise RepairAuthorizationError("Repair not authorized: no resolved writer requested", "REVIEW_REQUIRED")
+    repairs = {i: load_mask(o["masks"]["repair"], base_dir, resolved["canvas_px"]) > 0
+               for i, o in objects.items() if o["action"] == "replace"
+               and o.get("masks", {}).get("repair", {}).get("status") == "VERIFIED"}
+    closure = set(selected)
+    while True:
+        expanded = set(closure)
+        for identifier in closure:
+            expanded.update(objects[identifier].get("transaction_dependencies", []))
+            if identifier in repairs:
+                expanded.update(other for other, mask in repairs.items()
+                                if np.any(repairs[identifier] & mask))
+        if expanded == closure:
+            break
+        if not expanded <= objects.keys():
+            raise RepairAuthorizationError("Repair dependency names an unknown object")
+        closure = expanded
+    if closure != selected:
+        raise RepairAuthorizationError("Repair requires complete shared/dependency closure: " +
+                                       ", ".join(sorted(closure - selected)))
+    requires_tx = len(selected) > 1 or any(objects[i].get("transaction_dependencies") for i in selected)
+    if (requires_tx or return_receipt) and not tx_id:
+        raise RepairAuthorizationError("Repair requires actual transaction identity")
+    for identifier in selected:
+        declared = objects[identifier].get("transaction_id")
+        if tx_id and declared != tx_id:
+            raise RepairAuthorizationError("Declared and actual transaction identity differ: " + identifier)
+    if return_receipt and not parent_scene_sha256:
+        raise RepairAuthorizationError("Repair receipt requires parent scene fingerprint")
     mask = np.zeros(tuple(reversed(resolved["canvas_px"])), bool)
     for identifier in object_ids:
         obj = objects.get(identifier)
-        if obj is None or obj["status"] != "RESOLVED":
+        dependency_only = obj is not None and obj["action"] == "retain"
+        if obj is None or (obj["status"] != "RESOLVED" and not dependency_only):
             reasons = [c for c in resolved["conflicts"] if not c["object_ids"] or identifier in c["object_ids"]]
-            raise ValueError(f"Repair not authorized for {identifier}: {reasons}")
-        mask |= load_mask(obj["masks"]["repair"], base_dir, resolved["canvas_px"]) > 0
-    return mask
+            unknown = {"UNKNOWN_AFFECTED_PROTECTION", "UNKNOWN_REPAIR_AUTHORIZATION"}
+            status = "REVIEW_REQUIRED" if reasons and all(c["type"] in unknown for c in reasons) else "FAIL"
+            raise RepairAuthorizationError(f"Repair not authorized for {identifier}: {reasons}", status, reasons)
+        if dependency_only:
+            reasons = [c for c in resolved["conflicts"] if not c["object_ids"] or identifier in c["object_ids"]]
+            if reasons:
+                raise RepairAuthorizationError(f"Repair not authorized for dependency {identifier}: {reasons}",
+                                               "REVIEW_REQUIRED", reasons)
+        else:
+            mask |= repairs[identifier]
+    if not return_receipt:
+        return mask
+    evidence_files = {}
+    # Bind all known evidence consumed by resolve, including neighboring local
+    # protection. A changed file invalidates the grant at prepare/commit.
+    for obj in resolved["objects"]:
+        references = list(obj.get("masks", {}).values())
+        references += [obj.get("local_protection", {}).get(k, {}) for k in ("scope", "protection")]
+        for ref in references:
+            if ref.get("status") == "VERIFIED":
+                path = Path(ref["path"])
+                path = path.resolve() if path.is_absolute() else (Path(base_dir) / path).resolve()
+                evidence_files[str(path)] = ref["sha256"]
+    receipt = {"schema": "RepairAuthorization/1", "status": "PASS", "tx_id": tx_id,
+               "source_sha256": resolved["source_sha256"], "parent_scene_sha256": parent_scene_sha256,
+               "object_ids": sorted(selected), "canvas_px": resolved["canvas_px"],
+               "repair_mask_sha256": hashlib.sha256(mask.astype(np.uint8).tobytes()).hexdigest(),
+               "repair_pixels": int(mask.sum()), "allowed_fields": copy.deepcopy(allowed_fields or {}),
+               "evidence_files": evidence_files}
+    receipt["authorization_sha256"] = authorization_digest(receipt)
+    return mask, receipt
 
 
 def validate_ir_owners(ir):

@@ -10,7 +10,9 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from object_resolver import registry_from_ir, mask_ref, resolve, authorize_repair
+from object_resolver import (registry_from_ir, mask_ref, resolve, authorize_repair,
+                             RepairAuthorizationError, authorization_digest)
+from reconstruction_transaction import scene_fingerprint
 from relation_validator import digest, rgb, checked_mask, blue_mask, silhouette
 
 
@@ -73,17 +75,40 @@ def _stroke_rgba(crop, ink):
     return rgba,[{'method':'source_stroke_unblend_local_plane','fit':quality}]
 
 
-def build_candidate(irfile, spec, output, *, raster_ids=()):
+def build_candidate(irfile, spec, output, *, raster_ids=(), object_ids=None,
+                    tx_id=None, parent_scene_sha256=None):
     """Create a separate proposed revision; no input file or base image is altered."""
     irfile=Path(irfile).resolve();output=Path(output).resolve()
-    if (output/'slideir.json').exists(): raise ValueError('Candidate revision already exists')
+    if output.exists(): raise ValueError('Candidate revision already exists')
     original=json.loads(irfile.read_text(encoding='utf-8'))
     ir=copy.deepcopy(original); source_path=(irfile.parent/ir['source_image']).resolve()
     if digest(source_path)!=spec['source_sha256']: raise ValueError('Candidate source hash mismatch')
     if ir['canvas']['source_px']!=spec['canvas_px']: raise ValueError('Candidate canvas mismatch')
-    unknown=set(raster_ids)-{e['id'] for e in spec['elements']}
+    all_ids=[e['id'] for e in spec['elements']]
+    if len(all_ids)!=len(set(all_ids)): raise ValueError('Duplicate relation element id')
+    selected_ids=all_ids if object_ids is None else list(object_ids)
+    if len(selected_ids)!=len(set(selected_ids)) or set(selected_ids)-set(all_ids):
+        raise ValueError('Unknown or duplicate selected repair object')
+    unknown=set(raster_ids)-set(selected_ids)
     if unknown: raise ValueError('Unknown raster fallback element')
-    output.mkdir(parents=True,exist_ok=True)
+    if not selected_ids:
+        return {'action':'NO_OP','ir':str(irfile),'added_ids':[],'removed_ids':[],
+                'authorization':None,'authorized_mask':None,'raster_ids':[], 'raster_records':[]}
+    if not tx_id: raise ValueError('Actual transaction ID required before candidate construction')
+    parent_fp=scene_fingerprint(irfile)
+    if parent_scene_sha256 and parent_scene_sha256!=parent_fp['sha256']:
+        raise ValueError('Candidate parent scene fingerprint mismatch')
+    parent_scene_sha256=parent_fp['sha256']
+    elements=[e for e in spec['elements'] if e['id'] in selected_ids]
+    existing_ids={item['id'] for name in ('nodes','assets','evidence','groups') for item in ir.get(name,[])}
+    for element in elements:
+        identifier=element['id']
+        if element.get('repairable') is False or element['kind'] not in ('label','arrow','decoration'):
+            raise RepairAuthorizationError('Unsupported repair relation: '+identifier,'REVIEW_REQUIRED')
+        if any(value==identifier or value.startswith(identifier+'-') or value=='ev-'+identifier
+               or value.startswith('ev-'+identifier+'-') for value in existing_ids):
+            raise RepairAuthorizationError('unsupported_existing_object_replacement: '+identifier,'REVIEW_REQUIRED')
+    output.mkdir(parents=True,exist_ok=False)
     for relative in [ir['source_image'],*[a['path'] for a in ir['assets']]]:
         src=(irfile.parent/relative).resolve();dest=(output/relative).resolve()
         if not src.is_relative_to(irfile.parent) or not dest.is_relative_to(output):
@@ -93,15 +118,21 @@ def build_candidate(irfile, spec, output, *, raster_ids=()):
     old_nodes={n['id']:n for n in original['nodes']}
     removed=[];additions=[];masks={};raster_records=[]
     authorized=np.zeros((size[1],size[0]),bool)
-    for element in spec['elements']:
+    for element in elements:
         identifier=element['id'];x,y,right,bottom=element['bbox_xyxy']
+        if (any(type(v) is not int for v in (x,y,right,bottom)) or x<0 or y<0
+                or right<=x or bottom<=y or right>size[0] or bottom>size[1]):
+            raise ValueError('Repair region must use bounded integer source coordinates')
         ink=checked_mask(element['masks']['source_ink'])
         footprint=checked_mask(element['masks']['silhouette'])
+        if ink.shape!=(bottom-y,right-x) or footprint.shape!=ink.shape:
+            raise ValueError('Repair evidence mask dimensions differ from source region')
         crop=source[y:bottom,x:right]
         prior_id=REMOVED_SEPARATORS.get(identifier)
         migrated=[]
         if prior_id:
-            if prior_id not in old_nodes: raise ValueError('Reviewed baseline separator is absent')
+            if prior_id not in old_nodes:
+                raise RepairAuthorizationError('Legacy separator mapping unavailable: '+identifier,'REVIEW_REQUIRED')
             removed.append(prior_id);migrated=old_nodes[prior_id].get('evidence_ids',[])
         localrepair=cv2.dilate(footprint.astype('uint8'),np.ones((5,5),np.uint8)).astype(bool)
         repair=np.zeros_like(authorized);repair[y:bottom,x:right]=localrepair
@@ -112,7 +143,12 @@ def build_candidate(irfile, spec, output, *, raster_ids=()):
         created=[]
         if identifier in raster_ids:
             rgba,records=(_label_rgba(crop,ink) if element['kind']=='label' else _stroke_rgba(crop,ink))
-            relative='assets/'+identifier+'.png';Image.fromarray(rgba).save(output/relative)
+            relative='assets/'+identifier+'.png'
+            raster_path=(output/relative).resolve()
+            if not raster_path.is_relative_to(output) or raster_path.exists():
+                raise ValueError('Candidate raster path conflicts with retained source assets')
+            raster_path.parent.mkdir(parents=True,exist_ok=True)
+            Image.fromarray(rgba).save(raster_path)
             evid='ev-'+identifier
             ir['evidence'].append({'id':evid,'kind':'image','bbox':[x,y,right-x,bottom-y],
                                    'description':'Reviewed source element restored without embedded source text'})
@@ -140,6 +176,8 @@ def build_candidate(irfile, spec, output, *, raster_ids=()):
                 nx,ny,nw,nh=node['bbox'];part=np.zeros_like(authorized)
                 part[ny:ny+nh,nx:nx+nw]=True;visible &= part
             masks[node['id']]={'visible':visible,'repair':repair,'inspection':repair}
+    if not additions:
+        raise RepairAuthorizationError('No supported visible source components to repair','REVIEW_REQUIRED')
     # Existing node order is stable; insert new backgrounds before text. Native
     # text retains its source fonts and is never copied into the repair assets.
     retained=[copy.deepcopy(n) for n in original['nodes'] if n['id'] not in removed]
@@ -157,24 +195,39 @@ def build_candidate(irfile, spec, output, *, raster_ids=()):
     maskdir=output/'masks';maskdir.mkdir(exist_ok=True)
     protection_path=maskdir/'outside-protection.png';Image.fromarray(protection.astype('uint8')*255).save(protection_path)
     for obj in registry['objects']:
-        if obj['id'] not in masks:continue
-        obj.update(action='replace',transaction_id='r7-'+spec['page']+'-restoration',source_layers=['reviewed-source-composite'])
+        if obj['id'] not in masks:
+            if obj['id'] in spec.get('local_protection',{}):
+                obj['local_protection']=copy.deepcopy(spec['local_protection'][obj['id']])
+            continue
+        obj.update(action='replace',transaction_id=tx_id,source_layers=['reviewed-source-composite'])
         for role,mask in {**masks[obj['id']],'protection':protection}.items():
             path=protection_path if role=='protection' else maskdir/(obj['id']+'-'+role+'.png')
             if role!='protection':Image.fromarray(mask.astype('uint8')*255).save(path)
             obj['masks'][role]=mask_ref(path,size,root=output,method='frozen_reviewed_source_'+role)
     registry=resolve(registry,output)
-    if additions:
-        checked=authorize_repair(registry,[n['id'] for n in additions],output)
-        if not np.array_equal(authorized,checked): raise ValueError('Repair authorization changed')
+    added_ids=[n['id'] for n in additions]
+    checked,grant=authorize_repair(registry,added_ids,output,tx_id=tx_id,
+                                  parent_scene_sha256=parent_scene_sha256,
+                                  allowed_fields={'added_ids':sorted(added_ids),'removed_ids':sorted(removed)},
+                                  return_receipt=True)
+    if not np.array_equal(authorized,checked): raise ValueError('Repair authorization changed')
     path=maskdir/'authorized.png';Image.fromarray(authorized.astype('uint8')*255).save(path)
+    grant['evidence_files'][str(path)]=digest(path)
+    for element in elements:
+        for reference in element['masks'].values():
+            if reference.get('path') and reference.get('sha256'):
+                grant['evidence_files'][str(Path(reference['path']).resolve())]=reference['sha256']
+    grant['authorization_sha256']=authorization_digest(grant)
+    write(output/'authorization.json',grant)
     write(output/'registry.json',registry)
     write(output/'authoring.json',{'tool':'image2ppt r7 deterministic source restoration','model_id':'none',
                                    'ir_sha256':digest(target),'input_ir_sha256':digest(irfile),
                                    'decisions':['Keep original text, groups and unaffected relative z order',
                                                 'No baseline pixel assets modified; restore reviewed missing contributions'],
                                    'raster_records':raster_records})
+    if scene_fingerprint(irfile)!=parent_fp: raise ValueError('Candidate construction changed its immutable parent')
     return {'ir':str(target),'registry':registry,'registry_path':str(output/'registry.json'),
-            'added_ids':[n['id'] for n in additions],'removed_ids':removed,'authorized_mask':str(path),
+            'added_ids':added_ids,'removed_ids':removed,'authorized_mask':str(path),
+            'authorization':grant,'authorization_path':str(output/'authorization.json'),'tx_id':tx_id,
             'raster_ids':list(raster_ids),'raster_records':raster_records,
             'baseline_ir_sha256':digest(irfile),'source_sha256':digest(source_path)}

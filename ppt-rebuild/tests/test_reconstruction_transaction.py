@@ -206,3 +206,88 @@ def test_path_traversal_is_not_copied_into_snapshot(tmp_path):
     candidate.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError, match="escapes"):
         tx.prepare(candidate)
+
+
+@pytest.mark.parametrize('field,value', [
+    ('tx_id', 'foreign-transaction'), ('object_ids', ['card']),
+    ('required_gates', ['render']), ('input_fingerprint', {'source': 'changed'}),
+    ('transaction_input_sha256', '0'*64)])
+def test_receipt_cannot_be_reused_for_other_transaction_inputs(tmp_path, field, value):
+    tx, _, candidate, root = setup(tmp_path)
+    tx.prepare(candidate); verify(tx)
+    file = tx.directory / 'acceptance.json'
+    receipt = json.loads(file.read_text(encoding='utf-8')); receipt[field] = value
+    file.write_text(json.dumps(receipt), encoding='utf-8')
+    with pytest.raises(ValueError, match='transaction identity'):
+        tx.commit()
+    assert not (root / 'active.json').exists()
+
+
+def authorized_setup(tmp_path):
+    from object_resolver import authorization_digest
+    _, base, candidate, root = setup(tmp_path)
+    baseline = scene_fingerprint(base)
+    evidence = tmp_path / 'authorization-evidence.json'; evidence.write_text('{}', encoding='utf-8')
+    grant = {'schema': 'SceneChangeAuthorization/1', 'status': 'PASS', 'tx_id': 'card-1',
+             'source_sha256': baseline['files']['source.png'],
+             'parent_scene_sha256': baseline['sha256'], 'object_ids': ['text'],
+             'allowed_fields': {'text': {'color': {'before': '112233', 'after': '445566'}}},
+             'evidence_files': {str(evidence): transactions._hash(evidence)}}
+    grant['authorization_sha256'] = authorization_digest(grant)
+    tx = ReconstructionTransaction(root, 'card-1', base, {'source': 'frozen'},
+                                   ['render', 'residue'], ['text'], authorization=grant)
+    render = tmp_path / 'render.png'; render.write_bytes(b'actual-render-fixture')
+    qa = tmp_path / 'qa.json'; qa.write_text('{"status":"PASS"}', encoding='utf-8')
+    return tx, base, candidate, grant, {'render': render, 'qa': qa}, evidence
+
+
+def test_authorized_transaction_binds_evidence_and_recovers(tmp_path):
+    tx, base, candidate, grant, artifacts, _ = authorized_setup(tmp_path)
+    tx.prepare(candidate)
+    receipt = tx.verify({'render': 'PASS', 'residue': 'PASS'}, passed, evidence_files=artifacts)
+    assert receipt['state'] == 'VERIFIED'
+    assert set(receipt['evidence_files']) == {'render', 'qa'}
+    resumed = ReconstructionTransaction(tx.root, tx.tx_id, base, {'source': 'frozen'},
+                                        ['residue', 'render'], ['text'], authorization=grant)
+    assert resumed.commit()['state'] == 'COMMITTED'
+
+
+@pytest.mark.parametrize('kind', ['render', 'qa', 'authorization'])
+def test_changed_bound_artifact_blocks_commit(tmp_path, kind):
+    tx, _, candidate, _, artifacts, evidence = authorized_setup(tmp_path)
+    tx.prepare(candidate)
+    tx.verify({'render': 'PASS', 'residue': 'PASS'}, passed, evidence_files=artifacts)
+    changed = evidence if kind == 'authorization' else artifacts[kind]
+    changed.write_bytes(b'changed')
+    with pytest.raises(ValueError, match='artifact changed'):
+        tx.commit()
+    assert not tx.active_file.exists()
+
+
+def test_authorized_transaction_without_actual_qa_render_is_not_verified(tmp_path):
+    tx, _, candidate, _, _, _ = authorized_setup(tmp_path)
+    tx.prepare(candidate)
+    assert 'render_and_qa_artifacts_required' in verify(tx)['failed_required']
+    with pytest.raises(ValueError):
+        tx.commit()
+
+
+@pytest.mark.parametrize('field,value', [('tx_id', 'other'), ('source_sha256', 'wrong'),
+                                       ('parent_scene_sha256', 'wrong'), ('object_ids', ['card'])])
+def test_even_sealed_grant_must_match_transaction(tmp_path, field, value):
+    from object_resolver import authorization_digest
+    tx, base, candidate, grant, _, _ = authorized_setup(tmp_path)
+    grant[field] = value; grant['authorization_sha256'] = authorization_digest(grant)
+    other = ReconstructionTransaction(tx.root, tx.tx_id, base, {'source': 'frozen'},
+                                      ['render', 'residue'], ['text'], authorization=grant)
+    with pytest.raises(ValueError, match='Authorization identity'):
+        other.prepare(candidate)
+
+
+def test_mutating_caller_grant_does_not_change_transaction(tmp_path):
+    tx, _, candidate, grant, artifacts, _ = authorized_setup(tmp_path)
+    grant['allowed_fields'].clear()
+    tx.prepare(candidate)
+    assert tx.verify({'render': 'PASS', 'residue': 'PASS'}, passed,
+                     evidence_files=artifacts)['state'] == 'VERIFIED'
+    tx.commit()
