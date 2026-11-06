@@ -51,12 +51,28 @@ def test_dense_text_does_not_turn_into_a_solid_repair_rectangle():
     source = np.array(image)
     protected = np.zeros((90, 500), bool)
     protected[:, 200:205] = True
-    line = {"bbox": [8, 20, 340, 40], "style": {"color": "141E28"}}
+    line = {"bbox": [8, 20, 340, 40], "style": {"color": "141E28"}, "runs": None}
     masks = precise_text_masks(source, line, protected)
     assert masks["core_pixels"] > 0
     assert 0 < masks["coverage"] < 0.8
     assert not masks["repair"][protected].any()
     assert np.all(masks["glyph"] <= masks["repair"])
+
+
+def test_mixed_color_emphasis_is_masked_without_touching_protected_icon():
+    source = np.full((60, 180, 3), 250, np.uint8)
+    source[20:40, 20:24] = (22, 38, 53)
+    source[20:40, 60:64] = (0, 98, 170)
+    source[20:40, 95:99] = (0, 98, 170)
+    protected = np.zeros((60, 180), bool)
+    protected[18:42, 93:101] = True
+    line = {"bbox": [10, 15, 110, 30], "style": {"color": "162635"},
+            "runs": [{"text": "数量"}, {"text": "27项", "color": "0062AA"}]}
+    masks = precise_text_masks(source, line, protected)
+    assert masks["core"][20:40, 60:64].all()
+    assert not masks["repair"][protected].any()
+    assert not masks["repair"][:, 130:].any()
+    assert masks["coverage"] < 0.8
 
 
 def test_no_stroke_evidence_requires_review():

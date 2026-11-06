@@ -29,6 +29,7 @@ class Settings:
     max_tokens: int = 16000
     timeout_s: float = 180.0
     max_attempts: int = 3
+    transport_attempts: int = 3
     max_image_side: int = 2000
     max_image_bytes: int = 4 * 1024 * 1024
     response_format: str = "json_object"

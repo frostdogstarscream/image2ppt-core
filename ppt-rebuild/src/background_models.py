@@ -143,8 +143,15 @@ def precise_text_masks(source, line, protected):
                        for px, py in polygon):
         polygon = None
     bounds = shape_mask(size, line["bbox"], polygon=polygon)
-    foreground = np.array([int(line["style"]["color"][i:i + 2], 16) for i in (0, 2, 4)])
-    distance = np.abs(source.astype(np.int16) - foreground).max(axis=2)
+    colors = {line["style"]["color"]}
+    colors.update(run["color"] for run in (line.get("runs") or []) if run.get("color"))
+    # Emphasized runs can have a different foreground (e.g. blue numbers in
+    # dark body text). Keep the same bounded ROI and protection for every color.
+    pixels = source.astype(np.int16)
+    distance = np.minimum.reduce([
+        np.abs(pixels - np.array([int(color[i:i + 2], 16)
+                                  for i in (0, 2, 4)])).max(axis=2)
+        for color in colors])
     gray = cv2.cvtColor(source, cv2.COLOR_RGB2GRAY).astype(np.float32)
     contrast = np.abs(gray - cv2.GaussianBlur(gray, (0, 0), max(1, height / 10)))
     core = bounds & roi & (distance <= 65) & (contrast >= 12)

@@ -67,15 +67,19 @@ class MomaClient:
             "Content-Type": "application/json",
         }
         last_error: Exception | None = None
-        for attempt in range(1, 4):
+        for attempt in range(1, self.settings.transport_attempts + 1):
             try:
                 async with httpx.AsyncClient(timeout=self.settings.timeout_s, transport=self._transport) as client:
                     response = await client.post(url, headers=headers, json=payload)
                 if response.status_code in (400, 422) and "response_format" in payload:
+                    if self.settings.transport_attempts == 1:
+                        raise ModelError(f"HTTP {response.status_code}: {response.text[:300]}")
                     # Some gateways reject response_format; retry once without it.
                     payload.pop("response_format", None)
                     continue
                 if response.status_code in (400, 422) and "enable_thinking" in payload:
+                    if self.settings.transport_attempts == 1:
+                        raise ModelError(f"HTTP {response.status_code}: {response.text[:300]}")
                     payload.pop("enable_thinking", None)
                     continue
                 if response.status_code == 429:
