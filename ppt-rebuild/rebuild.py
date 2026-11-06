@@ -418,6 +418,26 @@ def main(argv=None) -> int:
     p.add_argument("--render", required=True, help="PNG rendered from the exported PPTX")
     p.set_defaults(func=cmd_eval)
 
+    p = sub.add_parser("reconstruct-r7", help="source-bound object resolution and transactional reconstruction")
+    p.add_argument("--input", required=True, help="frozen r6 TypographyBatch JSON")
+    p.add_argument("--output", required=True)
+    p.add_argument("--mode", choices=("shadow", "gated"), default="shadow")
+    p.add_argument("--pages", nargs="+")
+    p.add_argument("--resume")
+    def run_r7(args):
+        from r7_pipeline import run
+        print(json.dumps(run(args), ensure_ascii=False, indent=2))
+        return 0
+    p.set_defaults(func=run_r7)
+    p = sub.add_parser("qa-r7", help="audit actual final r7 PPTX and edit diagnostic copies")
+    p.add_argument("--run", required=True)
+    p.add_argument("--output", help="new independent QA directory; permits only validation-code changes")
+    def qa_r7(args):
+        from r7_pipeline import qa_run
+        print(json.dumps(qa_run(args.run,args.output), ensure_ascii=False, indent=2))
+        return 0
+    p.set_defaults(func=qa_r7)
+
     args = parser.parse_args(argv)
     print(f"[{args.command}] page={getattr(args, 'page', 'batch')}")
     return args.func(args)
