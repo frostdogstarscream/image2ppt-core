@@ -21,7 +21,7 @@ from PIL import Image, UnidentifiedImageError
 from .materialize import write, digest
 
 ROOT=Path(__file__).resolve().parents[3]
-TERMINAL={'SUCCEEDED','QUALITY_FAILED','FAILED','INTERRUPTED'}
+TERMINAL={'SUCCEEDED','REVIEW_REQUIRED','QUALITY_FAILED','FAILED','INTERRUPTED'}
 
 
 class Queue:
@@ -196,7 +196,7 @@ def create_app(root=None, token=None, run_worker=True):
     @app.get('/api/jobs/{id}/files/{name}',dependencies=[Depends(auth)])
     def artifact(id:str,name:str):
         status=queue.status(id)
-        if status['status']!='SUCCEEDED':raise HTTPException(409,'该任务尚未通过自动复核')
+        if status['status'] not in ('SUCCEEDED','REVIEW_REQUIRED'):raise HTTPException(409,'该任务尚无可交付文件')
         manifest=status.get('result',{}).get('artifacts',{})
         if name not in manifest or Path(name).name!=name:raise HTTPException(404)
         path=root/id/'delivery'/name

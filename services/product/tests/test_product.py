@@ -162,6 +162,14 @@ def test_api_auth_upload_traversal_and_key_privacy(monkeypatch):
         assert r.status_code==202
         id=r.json()['id'];assert (root/id/'inputs/01.png').exists()
         assert client.get(f'/api/jobs/{id}/files/result.pptx',headers=headers).status_code==409
+        from product.app import Queue,TERMINAL
+        assert 'REVIEW_REQUIRED' in TERMINAL
+        delivery=root/id/'delivery';delivery.mkdir();(delivery/'result.pptx').write_bytes(b'regression-safe-parent')
+        write(root/id/'result.json',{'status':'REVIEW_REQUIRED','human_acceptance':False,'artifacts':{'result.pptx':digest(delivery/'result.pptx')}})
+        Queue(root).set(id,'REVIEW_REQUIRED')
+        assert client.get(f'/api/jobs/{id}/files/result.pptx',headers=headers).content==b'regression-safe-parent'
+        (delivery/'result.pptx').write_bytes(b'changed')
+        assert client.get(f'/api/jobs/{id}/files/result.pptx',headers=headers).status_code==409
         assert client.get('/api/jobs/invalid',headers=headers).status_code==404
         assert client.post('/api/jobs',headers=headers,files=[('files',('x.png',b'not-image'))]).status_code==422
         monkeypatch.setenv('MOMA_API_KEY','before');monkeypatch.setenv('PLANNER_API_KEY','before')

@@ -18,7 +18,7 @@ const supplied=new URLSearchParams(location.hash.slice(1)).get('token');
 if(supplied){sessionStorage.setItem('product-token',supplied);history.replaceState(null,'',location.pathname)}
 const token=sessionStorage.getItem('product-token')||'';
 async function api(url,options={}){const r=await fetch(url,{...options,headers:{Authorization:'Bearer '+token,...options.headers}});if(!r.ok){let e=await r.json().catch(()=>({}));throw new Error(typeof e.detail==='string'?e.detail:'请求失败 '+r.status)}return r}
-const labels={QUEUED:'等待处理',RUNNING:'正在生成',SUCCEEDED:'自动视觉复核通过',QUALITY_FAILED:'未通过自动复核，未发布成品',FAILED:'处理失败',INTERRUPTED:'任务中断，未自动重试'};
+const labels={QUEUED:'等待处理',RUNNING:'正在生成',SUCCEEDED:'自动视觉复核通过',REVIEW_REQUIRED:'已生成安全版本，待人工复核',QUALITY_FAILED:'未通过自动复核，未发布成品',FAILED:'处理失败',INTERRUPTED:'任务中断，未自动重试'};
 let activeJob=null,pollTimer=null;
 function watch(id){activeJob=id;clearTimeout(pollTimer);poll(id)}
 async function file(id,name){const blob=await(await api('/api/jobs/'+id+'/files/'+encodeURIComponent(name))).blob();return URL.createObjectURL(blob)}
@@ -26,7 +26,7 @@ async function poll(id){if(activeJob!==id)return;try{const j=await(await api('/a
 $('status').textContent=(labels[j.status]||j.status)+'\n'+({planning:'MoMA 正在规划和修改',compiling:'正在生成并渲染 PPT',reviewing:'OpenCode Go 正在对照原图复核'}[p.stage]||'')+(p.page?' · 第 '+p.page+' 页':'')+'\n模型请求：'+(p.model_calls||j.result?.model_calls||0);
 if(['QUEUED','RUNNING'].includes(j.status)){pollTimer=setTimeout(()=>poll(id),2000);return}
 $('start').disabled=false;
-if(j.status==='SUCCEEDED'){const link=document.createElement('a');link.href=await file(id,'result.pptx');link.download='可编辑演示文稿.pptx';link.textContent='下载 PPTX';$('downloads').append(link);
+if(['SUCCEEDED','REVIEW_REQUIRED'].includes(j.status)){const link=document.createElement('a');link.href=await file(id,'result.pptx');link.download='可编辑演示文稿.pptx';link.textContent='下载 PPTX';$('downloads').append(link);
 for(const name of Object.keys(j.result.artifacts).filter(n=>n.endsWith('.png')).sort()){const im=document.createElement('img');im.src=await file(id,name);im.alt=name;$('downloads').append(im)}}
 if(j.status==='QUALITY_FAILED')$('status').append('\n仍有问题的页面：'+(j.result.unresolved_pages||[]).join('、'));
 if(j.status==='FAILED')$('status').append('\n错误：'+(j.result?.error||'后台任务失败'));

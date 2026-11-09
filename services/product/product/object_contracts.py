@@ -47,3 +47,90 @@ Use full-page integer x,y,width,height coordinates, not 0..1000 and not xyxy. Bo
 Independent text/sequence numbers remain native and must be excluded. Intrinsic lettering in a logo/icon may remain raster only with text_policy intrinsic_label and its actual wording. Preserve text and geometry baseline; do not change fonts or layout.
 The supplied graphic baseline IDs may be declared in replaces ONLY if their complete visible content belongs to this object. Never claim a text node or large card background. Missing objects may have replaces=[]; do not omit them just because baseline missed them. components describes logical pieces, not connected-component numbers.
 No other planner outputs are supplied. Report limitations honestly; your inventory is a proposal, not acceptance.'''
+
+
+class ObjectPart(Strict):
+    name: str = Field(min_length=1, max_length=120)
+    bbox: list[int] = Field(min_length=4, max_length=4)
+    layers: list[str] = Field(min_length=1, max_length=12)
+
+
+class ClosedObject(LogicalObject):
+    kind: Literal['icon', 'logo', 'illustration', 'decoration', 'shadow', 'glow']
+    parts: list[ObjectPart] = Field(min_length=1, max_length=30)
+    exclusions: list[ObjectPart] = Field(default_factory=list, max_length=30)
+    required_owners: list[str] = Field(default_factory=list, max_length=30)
+
+
+class ClosedPlan(ObjectPlan):
+    schema_version: Literal['LogicalObjects/2'] = Field(alias='schema')
+    objects: list[ClosedObject] = Field(max_length=100)
+
+    @model_validator(mode='after')
+    def regions(self):
+        w,h=self.image_size
+        for obj in self.objects:
+            if not set(obj.required_owners)<=set(obj.replaces):
+                raise ValueError('required owner missing: '+obj.id)
+            for part in [*obj.parts,*obj.exclusions]:
+                x,y,bw,bh=part.bbox
+                if min(x,y)<0 or min(bw,bh)<=0 or x+bw>w or y+bh>h:
+                    raise ValueError('part outside canvas')
+                if part in obj.parts and not set(part.layers)<=set(obj.layers):raise ValueError('part layer outside object')
+        return self
+
+
+def read_plan(raw):
+    """Explicit legacy adapter. Never rewrite the raw model reply."""
+    if raw.get('schema')=='LogicalObjects/2':return ClosedPlan.model_validate(raw),False
+    old=ObjectPlan.model_validate(raw)
+    payload=old.model_dump();payload['schema']='LogicalObjects/2'
+    payload['objects']=[{**o.model_dump(),'kind':'icon','parts':[{'name':'legacy localization; requires review',
+        'bbox':o.bbox,'layers':o.layers}],'exclusions':[],'required_owners':o.replaces} for o in old.objects]
+    return ClosedPlan.model_validate(payload),True
+
+
+class ObjectVerdict(Strict):
+    id: str
+    candidate_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    pixels: Literal['PASS','FAIL','UNKNOWN']
+    complete_object: Literal['PASS','FAIL','UNKNOWN']
+    replacement: Literal['PASS','FAIL','UNKNOWN']
+    background_restoration: Literal['PASS','FAIL','UNKNOWN'] = 'UNKNOWN'
+    white_content_assembly: Literal['PASS','FAIL','UNKNOWN'] = 'UNKNOWN'
+    native_owner_scope: Literal['PASS','FAIL','UNKNOWN'] = 'UNKNOWN'
+    reasons: list[str] = Field(max_length=20)
+
+
+class ObjectReview(Strict):
+    schema_version: Literal['ObjectReview/1'] = Field(alias='schema')
+    source_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    scene_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    objects: list[ObjectVerdict] = Field(max_length=100)
+
+
+class ObjectRepairs(Strict):
+    schema_version: Literal['ObjectRepairs/1'] = Field(alias='schema')
+    source_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    image_size: list[int] = Field(min_length=2,max_length=2)
+    objects: list[ClosedObject] = Field(max_length=100,description='Only changed target objects; omit unchanged objects')
+    limitations: list[str] = Field(default_factory=list,max_length=30)
+
+
+def apply_repairs(plan,raw,targets):
+    repair=ObjectRepairs.model_validate(raw)
+    if repair.source_sha256!=plan.source_sha256 or repair.image_size!=plan.image_size:raise ValueError('repair binding mismatch')
+    changed={o.id:o for o in repair.objects}
+    if len(changed)!=len(repair.objects) or not set(changed)<=set(targets):raise ValueError('repair changed non-target inventory')
+    payload=plan.model_dump();payload['objects']=[changed.get(o.id,o).model_dump() for o in plan.objects]
+    return ClosedPlan.model_validate(payload)
+
+
+CLOSED_OBJECT_PROMPT=OBJECT_PROMPT+'''
+Use LogicalObjects/2. Classify kind, list required parts with their own source-coordinate seed boxes and layers; exclusions identify independent labels, neighbors, platform/base, connectors not belonging to the object. These boxes are localization evidence, never masks or permission to cut strokes. required_owners must include every old fragment, even fragments with a different name. Be precise about the visible content of old crops; unknown ownership is a limitation.
+For a cloud-server symbol, cloud outline and internal server bars/dots form ONE object; a separately typeset caption, caption plate, platform and external connectors remain separate. Include ALL old cloud halves in replaces and required_owners.
+On repair, change only the objects identified in feedback, and explain changed evidence. Do not repeat identical layer/part/prompt definitions.'''
+
+OBJECT_REVIEW_PROMPT='''Independently review screenshot-to-PPT object candidates. Return ObjectReview/1, bound exactly to supplied source/scene/PNG hashes. Images show original, actual PowerPoint slide and per-object detail strips: transparent PNG, original region, actual region after deleting ONLY that object and saving/reopening. For EVERY candidate decide separately: pixels (soft alpha, white content, holes, fine lines, background and independent-text leakage); complete_object (all declared parts, no neighbors); replacement (all old fragments accounted for, correct overlap/z, preserved neighbors). If background_assets is nonempty, explicitly judge background_restoration: verify that the deletion image shows only the correct page/card background, without ANY remaining icon stroke, halo fragment, glyph or neighbor embedded in the backing. Colour patches or invented backing must FAIL. This is a proposed restoration, NOT verified background. Missing or uncertain evidence is UNKNOWN, never PASS. A candidate mask is NOT its own ground truth. Do not judge font slant. Keep human acceptance separate. Never approve a cropped half-object just because it matches that half of the source.'''
+OBJECT_REVIEW_PROMPT+='''
+Background review applies ONLY inside actual OLD OWNER rectangles, shown with RED outlines in SOURCE/AFTER DELETE panels. The panels also include surrounding context. Independent text, cards, connectors and neighbors OUTSIDE the red rectangles MUST remain; their presence is correct preservation, not a ghost or leakage. Red borders are private annotations, not source/product pixels. For native_owner_scope_hypothesis, additionally return native_owner_scope PASS only after checking the ORIGINAL content INSIDE EVERY old rectangle belongs exclusively to this object or evidenced native backing. Unknown old content fails; context outside old rectangles is not evidence of an owner conflict.'''

@@ -60,4 +60,6 @@ python services/product/run_local.py --image C:/path/page.png --output outputs/p
 
 API 使用 `Authorization: Bearer <启动器访问凭据>`：`POST /api/jobs` 上传图片，`GET /api/jobs/{id}` 查询，`GET /api/jobs/{id}/files/{name}` 下载经过哈希核验的交付文件。内存密钥配置为 `POST /api/provider-key`，请使用网页密码框，不要把密钥放入 URL 或命令参数。
 
+新增影子对象路线可通过 `POST /api/jobs?object_extraction=auto` 选择，默认仍关闭。MoMA 规划完整对象，Alpha 与必要的私有 SAM 3 形成独立候选，经集合替换、实际 PowerPoint 编辑和 Go 复核后登记稳定 PNG。缺少证据时保留可靠父版本；`REVIEW_REQUIRED` 安全成品仍可下载，界面显示待人工复核。部署、缓存、预算与门禁说明见 [OBJECT_CLOSURE.md](OBJECT_CLOSURE.md)。
+
 本服务默认用于单用户本机验证。对外上线前还需要独立的身份与权限、TLS、租户隔离、配额、数据保留策略以及经过授权的可部署编译运行时。

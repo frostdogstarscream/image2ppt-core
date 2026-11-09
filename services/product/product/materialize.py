@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import time
+from uuid import uuid4
 import zipfile
 import xml.etree.ElementTree as ET
 from PIL import Image, ImageFont
@@ -19,9 +21,15 @@ def digest(path):
 def write(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix+'.tmp')
+    temporary = path.with_name('tmp-'+uuid4().hex[:8])
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
-    temporary.replace(path)
+    try:
+        for attempt in range(50):
+            try:temporary.replace(path);break
+            except PermissionError:
+                if attempt==49:raise
+                time.sleep(.02)
+    finally:temporary.unlink(missing_ok=True)
 
 
 def font_gate(page, manifest):
@@ -69,7 +77,7 @@ def font_gate(page, manifest):
     if errors:raise ValueError('\n'.join(errors[:40]))
 
 
-def materialize(page: Page, source, directory, manifest, model):
+def materialize(page: Page, source, directory, manifest, model, *, asset_references=None):
     source, directory = Path(source),Path(directory)
     with Image.open(source) as image:
         if list(image.size)!=page.image_size or digest(source)!=page.source_sha256:
@@ -120,8 +128,16 @@ def materialize(page: Page, source, directory, manifest, model):
             asset='asset-'+node.id
             file=directory/(asset+'.png')
             x,y,w,h=node.bbox
-            with Image.open(source) as image:
-                image.crop((round(x),round(y),round(x+w),round(y+h))).save(file)
+            ref=(asset_references or {}).get(node.id)
+            if ref is not None:
+                if ref['source_sha256']!=page.source_sha256 or ref['bbox']!=node.bbox:
+                    raise ValueError('stable asset scene binding changed; revalidate ownership')
+                if digest(ref['path'])!=ref['sha256']:raise ValueError('stable asset hash mismatch')
+                shutil.copyfile(ref['path'],file)
+            else:
+                if node.id.startswith(('extracted-','restored-bg-')):raise ValueError('transparent asset reference missing; source recrop forbidden')
+                with Image.open(source) as image:
+                    image.crop((round(x),round(y),round(x+w),round(y+h))).save(file)
             ir['assets'].append({'id':asset,'path':file.name,'purpose':'module','sha256':digest(file),
                                  'contains_evidence_ids':[ev['id']],'description':node.description})
             out.update(type='image',asset_id=asset,evidence_ids=[])

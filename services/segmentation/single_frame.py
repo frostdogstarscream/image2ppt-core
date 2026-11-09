@@ -53,7 +53,7 @@ def bridge_disabled_state_offload(model):
 
 def run(args):
     os.environ['HF_HUB_OFFLINE']='1';os.environ['TRANSFORMERS_OFFLINE']='1'
-    root=args.output.resolve();root.mkdir(parents=True,exist_ok=False)
+    root=args.output.resolve();root.mkdir(parents=True,exist_ok=getattr(args,'resume',False))
     receipt={'status':'STARTED','version':args.version,'precision':'official_bfloat16','input_protocol':'one_frame_predictor','human_acceptance':False}
     try:
         if not args.checkpoint.is_file() or sha(args.checkpoint)!=args.checkpoint_sha256:raise ValueError('checkpoint hash mismatch')
@@ -87,7 +87,7 @@ def run(args):
         with Image.open(args.source) as source:
             if source.size!=size:raise ValueError('source dimensions mismatch')
             # PNG avoids JPEG loss. Both versions receive exactly one frame.
-            frames=root/'frames';frames.mkdir();source.convert('RGB').save(frames/'00000.png')
+            frames=root/'frames';frames.mkdir(exist_ok=getattr(args,'resume',False));source.convert('RGB').save(frames/'00000.png')
         session=None
         try:
             session=predictor.handle_request({'type':'start_session','resource_path':str(frames),'offload_video_to_cpu':True})['session_id']
@@ -95,6 +95,15 @@ def run(args):
             if state.get('num_frames')!=1:raise ValueError('single-frame input not supported')
             for obj in plan['objects']:
                 if args.objects and obj['id'] not in args.objects:continue
+                old=root/(obj['id']+'.json')
+                if getattr(args,'resume',False) and old.exists():
+                    cached=json.loads(old.read_text(encoding='utf-8'))
+                    expected={'source_sha256':sha(args.source),'plan_sha256':sha(args.plan),'version':args.version,
+                        'checkpoint_sha256':args.checkpoint_sha256,'code_revision':revision,'status':'SUCCEEDED'}
+                    file=(root/cached['mask_file']).resolve()
+                    if not file.is_relative_to(root) or any(cached.get(k)!=v for k,v in expected.items()) or sha(file)!=cached.get('mask_sha256'):
+                        raise ValueError('resume mask cache binding mismatch')
+                    continue
                 started=time.monotonic();predictor.handle_request({'type':'reset_session','session_id':session})
                 result=predictor.handle_request({'type':'add_prompt','session_id':session,'frame_index':0,'text':obj['prompt_en'],
                     'bounding_boxes':[normalize_box(obj['bbox'],size)],'bounding_box_labels':[1],'rel_coordinates':True})
@@ -118,5 +127,5 @@ if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--version',choices=['sam3','sam3.1'],required=True)
     for name in ('source','plan','checkpoint','sam-source','output'):p.add_argument('--'+name,type=Path,required=True)
     p.add_argument('--checkpoint-sha256',required=True);p.add_argument('--code-revision',required=True)
-    p.add_argument('--objects',nargs='*')
+    p.add_argument('--objects',nargs='*');p.add_argument('--resume',action='store_true')
     run(p.parse_args())

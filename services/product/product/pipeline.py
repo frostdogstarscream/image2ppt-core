@@ -95,7 +95,8 @@ class Provider:
 def compile_pages(irs, output, pages):
     compiler,node=_compiler(ROOT)
     output.mkdir(parents=True,exist_ok=False)
-    command=[str(node),str(ROOT/'scripts/compose.mjs'),*map(str,irs),'--output',str(output)]
+    write(output/'input-irs.json',[str(Path(p).resolve()) for p in irs])
+    command=[str(node),str(ROOT/'services/product/compose_objects.mjs'),str((output/'input-irs.json').resolve()),str(output.resolve())]
     with (output/'compiler.stdout').open('w',encoding='utf-8') as stdout, (output/'compiler.stderr').open('w',encoding='utf-8') as stderr:
         try:
             result=subprocess.run(command,cwd=ROOT,stdout=stdout,stderr=stderr,timeout=1800,
@@ -143,6 +144,7 @@ def run(job, *, provider=None, review_provider=None, compiler=compile_pages, man
     calls=[0]*len(sources)
     best=[float('inf')]*len(sources);stale=[0]*len(sources)
     ledger=[]
+    object_reports=[None]*len(sources);parent_irs=[None]*len(sources);asset_references=[{} for _ in sources]
     def ask(i,kind,context,images,contract,actor=None):
         actor=actor or provider
         calls[i]+=1
@@ -151,8 +153,9 @@ def run(job, *, provider=None, review_provider=None, compiler=compile_pages, man
         write(job/'calls.json',ledger)
         progress(stage=kind,page=i+1,model_calls=sum(calls),max_model_calls=None)
         try:
-            from .object_contracts import OBJECT_PROMPT
-            system={'planning':prompts.PLAN,'reviewing':prompts.REVIEW,'object_planning':OBJECT_PROMPT}[kind]
+            from .object_contracts import OBJECT_PROMPT,CLOSED_OBJECT_PROMPT,ClosedPlan,ObjectRepairs,OBJECT_REVIEW_PROMPT
+            system={'planning':prompts.PLAN,'reviewing':prompts.REVIEW,'object_planning':CLOSED_OBJECT_PROMPT if contract in (ClosedPlan,ObjectRepairs) else OBJECT_PROMPT,
+                    'object_reviewing':OBJECT_REVIEW_PROMPT}[kind]
             result=actor.ask(system,context,images,contract)
         except Exception:
             ledger[-1].update(state='FAILED',finished_at=time.time());write(job/'calls.json',ledger)
@@ -175,18 +178,29 @@ def run(job, *, provider=None, review_provider=None, compiler=compile_pages, man
                 write(revision/f'page-{i+1:02d}-proposal.json',raw)
                 plan=Page.model_validate(raw)
                 plan,crop_changes=complete_crops(plan,source)
+                if asset_references[i] and object_reports[i] and object_reports[i].get('publication')=='STABLE':
+                    from .object_registry import pin_graphics
+                    plan=pin_graphics(plan,plans[i],object_reports[i]['objects'])
                 write(revision/f'page-{i+1:02d}-crop-fit.json',crop_changes)
                 drafts[i]=plan.model_dump()
-                ir=materialize(plan,source,revision/f'page-{i+1:02d}',manifest,provider.model)
+                ir=materialize(plan,source,revision/f'page-{i+1:02d}',manifest,provider.model,
+                    **({'asset_references':asset_references[i]} if asset_references[i] else {}))
+                parent_irs[i]=ir
                 if object_route!='off':
                     from .object_stage import process,obtain_layers
-                    if round_no<3:
+                    try:
                         layerdir=obtain_layers(source,job/f'layerd-page-{i+1:02d}')
                         ir,plan,object_report=process(source,plan,ir,revision/f'objects-{i+1:02d}',object_route,
-                            lambda context,images,contract:ask(i,'object_planning',context,images,contract),layerdir=layerdir)
-                        write(revision/f'page-{i+1:02d}-object-report.json',object_report)
-                    else:
-                        plan=plan.model_copy(update={'limitations':[*plan.limitations,'Object extraction stopped after two repair rounds; original graphic regions retained.']})
+                            lambda context,images,contract:ask(i,'object_planning',context,images,contract),layerdir=layerdir,
+                            state_directory=job/f'object-state-{i+1:02d}')
+                    except (ValueError,RuntimeError,OSError,KeyError,subprocess.SubprocessError) as exc:
+                        if object_route!='auto':raise
+                        ir=parent_irs[i]
+                        object_report={'schema':'ObjectClosure/2','objects':[],'staged':0,'fallback':None,
+                            'publication':'RETAINED_PARENT','automatic_quality':'REVIEW_REQUIRED','error_type':type(exc).__name__}
+                        plan=plan.model_copy(update={'limitations':[*plan.limitations,'Object service unavailable or evidence invalid; reliable parent graphics retained.']})
+                    object_reports[i]=object_report
+                    write(revision/f'page-{i+1:02d}-object-report.json',object_report)
                 plans[i]=plan;irs[i]=ir;feedback[i]=None
                 last_validation[i]=None;repeated_validation[i]=0
             except ValueError as exc:
@@ -204,7 +218,21 @@ def run(job, *, provider=None, review_provider=None, compiler=compile_pages, man
             if any(stale[i]>=3 for i in pending):break
             continue
         progress(stage='compiling',round=round_no,model_calls=sum(calls),max_model_calls=None)
-        artifacts=compiler(irs,revision/'build',plans)
+        if object_route=='auto':
+            from .object_finalize import finalize,review_objects
+            def repair_objects(i,report,verdicts,path):
+                from .object_stage import process,effective_page
+                feedback={'source_sha256':digest(sources[i]),'scene_file':str(irs[i]),'scene_sha256':digest(irs[i]),'objects':verdicts}
+                return process(sources[i],effective_page(plans[i],parent_irs[i]),parent_irs[i],path,'auto',
+                    lambda context,images,contract:ask(i,'object_planning',context,images,contract),
+                    layerdir=report['layer_directory'],state_directory=report['state_directory'],review_feedback=feedback)
+            artifacts,irs,plans=finalize(sources,irs,parent_irs,object_reports,plans,revision/'object-gates',compiler,
+                lambda i,source,preview,ir,report,path:review_objects(source,preview,ir,report,path,
+                    lambda context,images,contract:ask(i,'object_reviewing',context,images,contract,actor=review_provider),review_model=review_provider.model),repair=repair_objects)
+            from .object_registry import asset_refs
+            for i,r in enumerate(object_reports):
+                if r and r.get('publication')=='STABLE':asset_references[i]=asset_refs(irs[i])
+        else:artifacts=compiler(irs,revision/'build',plans)
         previews=sorted(Path(artifacts['preview']).glob('*.png'))
         if len(previews)!=len(sources): raise PipelineError('preview_count_mismatch')
         review_complete=set()
@@ -245,19 +273,24 @@ def run(job, *, provider=None, review_provider=None, compiler=compile_pages, man
                     stale[i]=1 if score<best[i] else stale[i]+1
                     best[i]=min(best[i],score)
                 else:stale[i]=0
-            except ValueError as exc:
+            except (ValueError,RuntimeError,OSError) as exc:
+                if not isinstance(exc,ValueError) and object_route!='auto':raise
                 feedback[i]=str(exc)[:6000];pending.add(i);stale[i]+=1
-        if not pending or (human_review and len(review_complete)==len(sources)):
+        if not pending or object_route=='auto' or (human_review and len(review_complete)==len(sources)):
             delivery=job/'delivery';delivery.mkdir()
             shutil.copyfile(artifacts['pptx'],delivery/'result.pptx')
             for i,p in enumerate(previews,1):shutil.copyfile(p,delivery/f'page-{i:02d}.png')
-            result={'status':'REVIEW_REQUIRED' if human_review else 'SUCCEEDED',
-                    'assessment':'HUMAN_REVIEW_DRAFT' if human_review else 'AUTOMATED_VISUAL_PASS','model':provider.model,
+            object_unresolved={i for i,r in enumerate(object_reports) if object_route=='auto' and
+                (not r or r.get('publication')!='STABLE' or r.get('inventory_missing_owner_ids') or
+                 any(o.get('status')=='FALLBACK' for o in r.get('objects',[])))}
+            needs_review=human_review or bool(pending|object_unresolved)
+            result={'status':'REVIEW_REQUIRED' if needs_review else 'SUCCEEDED',
+                    'assessment':'HUMAN_REVIEW_DRAFT' if needs_review else 'AUTOMATED_VISUAL_PASS','model':provider.model,
                     'review_model':review_provider.model,'italic_difference_ignored':True,
                     'model_calls':sum(calls),'pages':len(plans),'human_acceptance':False,
-                    'powerpoint_checked':False,'wps_checked':False,
+                    'powerpoint_checked':bool(artifacts.get('powerpoint_checked')),'wps_checked':False,
                     'object_extraction':object_route,
-                    'unresolved_pages':sorted(i+1 for i in pending),
+                    'unresolved_pages':sorted(i+1 for i in pending|object_unresolved),
                     'effective_plans':[str(revision/f'page-{i+1:02d}-effective.json') for i in range(len(plans))],
                     'slide_irs':[str(p) for p in irs],
                     'artifacts':{p.name:digest(p) for p in delivery.iterdir()}}

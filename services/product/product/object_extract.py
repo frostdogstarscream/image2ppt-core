@@ -61,7 +61,7 @@ def visible_rgba(layers,masks):
     return np.dstack([np.rint(rgb).clip(0,255).astype('uint8'),np.rint(alpha*255).clip(0,255).astype('uint8')])
 
 
-def load_sam(directory,obj,source_hash,plan_hash,size,version):
+def load_sam(directory,obj,source_hash,plan_hash,size,version,*,individual=False):
     """Only consume source/plan/version-bound, finite, full-canvas masks."""
     if directory is None:return None,'sam_not_configured'
     root=Path(directory).resolve();receipt=root/(obj.id+'.json')
@@ -75,13 +75,16 @@ def load_sam(directory,obj,source_hash,plan_hash,size,version):
     with np.load(file,allow_pickle=False) as value:
         masks=value['masks'];scores=value['scores']
     if masks.ndim!=3 or masks.shape[1:]!=(size[1],size[0]) or len(scores)!=len(masks) or not np.isfinite(masks).all() or not np.isfinite(scores).all():return None,'sam_invalid_mask'
-    roi=rectangle(obj.bbox,size);selected=np.zeros_like(roi)
-    for mask,score in zip(masks,scores):
+    roi=rectangle(obj.bbox,size);candidates=[]
+    for index,(mask,score) in enumerate(zip(masks,scores)):
         mask=mask>.5;area=int(mask.sum())
-        if score<.5 or not area:continue
-        if (mask & roi).sum()/area>=.7:selected|=mask
-    if not selected.any():return None,'sam_no_owned_candidate'
-    return selected,None
+        if not area:continue
+        overlap=int((mask & roi).sum())
+        if overlap:candidates.append({'mask':mask,'score':float(score),'index':index,'localization_fraction':overlap/area})
+    if not candidates:return None,'sam_no_owned_candidate'
+    candidates.sort(key=lambda c:-c['score'])
+    # Legacy callers receive ONE hypothesis; model masks are never blindly unioned.
+    return (candidates if individual else candidates[0]['mask']),None
 
 
 def extract(planfile,layerdir,baseline_ir,output,*,route='alpha',sam_dir=None,rejected=None):
