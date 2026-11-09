@@ -1,0 +1,40 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>图片转可编辑 PPT</title>
+<style>body{background:#f4f7fb;color:#163048;font:16px/1.65 system-ui,sans-serif;margin:0}main{max-width:850px;margin:55px auto;padding:30px}h1{font-size:32px}section{background:white;padding:28px;border-radius:16px;margin:20px 0;border:1px solid #dce5ef}button{background:#155ec4;color:white;border:0;border-radius:8px;padding:12px 24px;font:inherit;cursor:pointer}button:disabled{opacity:.5}input{font:inherit;max-width:100%}small{display:block;color:#53677c}#status{white-space:pre-wrap}img{max-width:100%;border:1px solid #ddd;margin:12px 0}a{color:#155ec4;cursor:pointer}label{display:block;margin:18px 0}.error{color:#aa2532}</style>
+<main><small>MoMA · 自动视觉重建</small><h1>把页面图片，变成可编辑 PPT</h1>
+<p>MoMA 分析图片、规划划分与修改，OpenCode Go 对照原图复核。无需 Codex 对话。</p>
+<section id="provider" hidden><h2>连接模型</h2><p>在本机输入 API 密钥，仅保存在当前服务进程内存中；关闭服务后需重新输入。</p><form id="keyform"><select id="keyprovider"><option value="moma">MoMA · 规划</option><option value="opencode_go">OpenCode Go · 复核</option></select><input id="key" type="password" autocomplete="off" placeholder="API key" required><button>连接</button></form><p id="keymsg"></p></section>
+<section><form id="form"><input id="files" type="file" accept="image/png,image/jpeg,image/webp" multiple required>
+<small>每批 1–12 页，同一批图片尺寸需相同。按选择顺序排列。支持 PNG、JPEG、WebP。</small>
+<label><input id="consent" type="checkbox" required> 我同意将所选图片、生成预览和方案发送至 MoMA 与 OpenCode Go 进行处理。</label>
+<small>模型请求不设次数上限，可能产生费用；连续无改善会停止。允许忽略斜体差异，其余字体与版式仍需复核。</small>
+<p><button id="start">开始生成</button></p></form><p id="health"></p><button id="reconnect" type="button">重新配置模型</button></section>
+<section id="result" hidden><h2>生成进度</h2><div id="status" aria-live="polite"></div><div id="downloads"></div></section>
+<section><h2>最近任务</h2><div id="history">暂无任务</div></section>
+<small>自动复核通过不等于人工验收。文字与简单形状可编辑；复杂图像保留为可移动图片。</small></main>
+<script>
+const $=id=>document.getElementById(id);
+const supplied=new URLSearchParams(location.hash.slice(1)).get('token');
+if(supplied){sessionStorage.setItem('product-token',supplied);history.replaceState(null,'',location.pathname)}
+const token=sessionStorage.getItem('product-token')||'';
+async function api(url,options={}){const r=await fetch(url,{...options,headers:{Authorization:'Bearer '+token,...options.headers}});if(!r.ok){let e=await r.json().catch(()=>({}));throw new Error(typeof e.detail==='string'?e.detail:'请求失败 '+r.status)}return r}
+const labels={QUEUED:'等待处理',RUNNING:'正在生成',SUCCEEDED:'自动视觉复核通过',QUALITY_FAILED:'未通过自动复核，未发布成品',FAILED:'处理失败',INTERRUPTED:'任务中断，未自动重试'};
+let activeJob=null,pollTimer=null;
+function watch(id){activeJob=id;clearTimeout(pollTimer);poll(id)}
+async function file(id,name){const blob=await(await api('/api/jobs/'+id+'/files/'+encodeURIComponent(name))).blob();return URL.createObjectURL(blob)}
+async function poll(id){if(activeJob!==id)return;try{const j=await(await api('/api/jobs/'+id)).json();if(activeJob!==id)return;const p=j.progress||{};
+$('status').textContent=(labels[j.status]||j.status)+'\n'+({planning:'MoMA 正在规划和修改',compiling:'正在生成并渲染 PPT',reviewing:'OpenCode Go 正在对照原图复核'}[p.stage]||'')+(p.page?' · 第 '+p.page+' 页':'')+'\n模型请求：'+(p.model_calls||j.result?.model_calls||0);
+if(['QUEUED','RUNNING'].includes(j.status)){pollTimer=setTimeout(()=>poll(id),2000);return}
+$('start').disabled=false;
+if(j.status==='SUCCEEDED'){const link=document.createElement('a');link.href=await file(id,'result.pptx');link.download='可编辑演示文稿.pptx';link.textContent='下载 PPTX';$('downloads').append(link);
+for(const name of Object.keys(j.result.artifacts).filter(n=>n.endsWith('.png')).sort()){const im=document.createElement('img');im.src=await file(id,name);im.alt=name;$('downloads').append(im)}}
+if(j.status==='QUALITY_FAILED')$('status').append('\n仍有问题的页面：'+(j.result.unresolved_pages||[]).join('、'));
+if(j.status==='FAILED')$('status').append('\n错误：'+(j.result?.error||'后台任务失败'));
+}catch(e){$('status').textContent=e.message;$('start').disabled=false}}
+$('form').onsubmit=async e=>{e.preventDefault();$('start').disabled=true;$('downloads').replaceChildren();$('result').hidden=false;try{const data=new FormData();for(const f of $('files').files)data.append('files',f);const j=await(await api('/api/jobs',{method:'POST',body:data})).json();sessionStorage.setItem('product-job',j.id);watch(j.id)}catch(e){$('status').textContent=e.message;$('start').disabled=false}};
+function health(){api('/api/health').then(r=>r.json()).then(j=>{$('health').textContent=j.model_ready?'MoMA 与 OpenCode Go 均已配置，可以上传。':'请连接规划与复核模型。';$('provider').hidden=j.model_ready;if(j.moma_configured&&!j.opencode_go_configured)$('keyprovider').value='opencode_go'}).catch(e=>$('health').textContent=e.message)}
+$('reconnect').onclick=()=>{$('provider').hidden=false;$('key').focus()};
+$('keyform').onsubmit=async e=>{e.preventDefault();try{await api('/api/provider-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:$('key').value,provider:$('keyprovider').value})});$('key').value='';health()}catch(e){$('keymsg').textContent=e.message}};health();
+const previous=sessionStorage.getItem('product-job');if(previous){$('result').hidden=false;watch(previous)}
+async function historyJobs(){try{const j=await(await api('/api/jobs')).json();$('history').replaceChildren();for(const job of j.jobs){const row=document.createElement('p');const a=document.createElement('a');a.textContent=new Date(job.created*1000).toLocaleString()+' · '+(labels[job.status]||job.status);a.onclick=()=>{sessionStorage.setItem('product-job',job.id);$('downloads').replaceChildren();$('result').hidden=false;watch(job.id)};row.append(a);$('history').append(row)}if(!j.jobs.length)$('history').textContent='暂无任务'}catch(e){$('history').textContent=e.message}}historyJobs();setInterval(historyJobs,10000);
+</script></html>

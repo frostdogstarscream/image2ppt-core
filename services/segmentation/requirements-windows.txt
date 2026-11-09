@@ -1,0 +1,23 @@
+# Install after torch 2.8.0+cu128 and torchvision 0.23.0+cu128.
+numpy>=1.26,<2
+pillow
+tqdm
+ftfy==6.1.1
+regex
+iopath>=0.1.10
+typing_extensions
+huggingface_hub
+einops
+scipy
+psutil
+triton-windows>=3.4,<3.5
+timm>=1.0.17
+pycocotools
+safetensors
+pyyaml
+filelock
+networkx
+jinja2
+fsspec
+sympy==1.14.0
+setuptools==78.1.0

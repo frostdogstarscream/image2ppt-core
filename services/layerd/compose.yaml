@@ -1,0 +1,43 @@
+services:
+  api:
+    image: image2ppt-layerd:20261104-r4
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    ports:
+      - "127.0.0.1:18840:18840"
+    environment:
+      HF_HOME: /tmp/hf
+      TORCH_HOME: /tmp/torch
+      LAYERD_PROCESS_SIZE: "1024"
+    volumes:
+      - /data/image2ppt-layerd/models:/models:ro
+      - /data/image2ppt-layerd/data:/data:rw
+      - /data/image2ppt-layerd/client-token:/run/secrets/client-token:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 6
+    mem_limit: 16g
+    shm_size: 1g
+    pids_limit: 256
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${LAYERD_GPU_UUID:?Set the selected idle GPU UUID}"]
+              capabilities: [gpu]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18840/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
