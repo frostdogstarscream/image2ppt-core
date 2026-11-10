@@ -128,4 +128,8 @@ if __name__=='__main__':
     for name in ('source','plan','checkpoint','sam-source','output'):p.add_argument('--'+name,type=Path,required=True)
     p.add_argument('--checkpoint-sha256',required=True);p.add_argument('--code-revision',required=True)
     p.add_argument('--objects',nargs='*');p.add_argument('--resume',action='store_true')
-    run(p.parse_args())
+    import os,sys
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+    from resource_lease import lease
+    with lease('gpu-'+os.environ.get('IMAGE2PPT_GPU_ID','0')):
+        run(p.parse_args())

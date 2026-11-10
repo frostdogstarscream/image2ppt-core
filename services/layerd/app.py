@@ -31,6 +31,7 @@ if not 3 <= MAX_ITERATIONS <= 12:
 Image.MAX_IMAGE_PIXELS = MAX_PIXELS
 JOBS: queue.Queue[str | None] = queue.Queue(maxsize=8)
 STATE = {"ready": False, "loading": True, "error_type": None, "current_job": None}
+ADMISSION=threading.Lock()
 STOP = threading.Event()
 THREAD: threading.Thread | None = None
 
@@ -193,6 +194,7 @@ def process(model, path: Path) -> None:
                 "composite_mae_255": round(float(np.abs(delta).mean()), 5),
                 "composite_psnr_db": round(10 * math.log10(255**2 / mse), 5) if mse else None,
                 "upstream_revision": os.getenv("LAYERD_REVISION"), "native_text": False,
+                "model_binding":STATE.get('model_binding'),"pixel_method":"bounded_components_v2-r10/1",
                 "refinement_policy": "bounded_components_v2", "refinement_steps": refinement_steps,
                 "review_status": "REVIEW_REQUIRED", "human_acceptance": False}
     write_json(path / "manifest.json", manifest)
@@ -212,7 +214,16 @@ def worker() -> None:
             raise RuntimeError("CUDA unavailable")
         torch.cuda.set_per_process_memory_fraction(0.70)
         size = int(os.getenv("LAYERD_PROCESS_SIZE", "1024"))
-        model = LayerD(matting_hf_card=str(MODELS / "birefnet"), matting_process_size=(size, size), device="cuda")
+        model_files=[p for p in MODELS.rglob('*') if p.is_file() and p.suffix.lower() in ('.pt','.pth','.safetensors','.bin','.json','.py')]
+        if not model_files:raise RuntimeError('offline model files missing')
+        model_hashes={}
+        for p in sorted(model_files):
+            with p.open('rb') as f:model_hashes[str(p.relative_to(MODELS))]=hashlib.file_digest(f,'sha256').hexdigest()
+        STATE['model_binding']=digest(json.dumps(model_hashes,sort_keys=True).encode())
+        # Shared with private SAM on this physical GPU, across services/processes.
+        import sys
+        sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+        from resource_lease import lease
         STATE.update(ready=True, loading=False)
         while not STOP.is_set():
             try:
@@ -224,7 +235,15 @@ def worker() -> None:
             STATE["current_job"] = job_id
             path = ROOT / "jobs" / job_id
             try:
-                process(model, path)
+                with lease('gpu-'+os.environ.get('IMAGE2PPT_GPU_ID','0')):
+                    model=None
+                    try:
+                        model=LayerD(matting_hf_card=str(MODELS / "birefnet"), matting_process_size=(size,size),device="cuda")
+                        process(model,path)
+                    finally:
+                        del model
+                        import gc
+                        gc.collect();torch.cuda.empty_cache()
             except Exception as error:
                 traceback.print_exc()
                 write_json(path / "status.json", {"id": job_id, "status": "FAILED", "error_type": type(error).__name__, "finished": time.time()})
@@ -280,6 +299,7 @@ def capabilities():
             "pptx_compilation": False, "device": "cuda", "network_inference": False,
             "max_iterations": [1, MAX_ITERATIONS], "max_pixels": MAX_PIXELS, "max_bytes": MAX_BYTES,
             "matting_process_size": int(os.getenv("LAYERD_PROCESS_SIZE", "1024")),
+            "model_binding":STATE.get('model_binding'),"pixel_method":"bounded_components_v2-r10/1",
             "queue_size": JOBS.qsize(), "current_job": STATE["current_job"], **health()}
 
 
@@ -287,8 +307,6 @@ def capabilities():
 async def decompose(file: UploadFile = File(...), max_iterations: int = Form(default=3, ge=1, le=MAX_ITERATIONS)):
     if not health()["ready"]:
         raise HTTPException(503, "Model worker is not ready")
-    if JOBS.full():
-        raise HTTPException(429, "Queue is full")
     data = await file.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise HTTPException(413, "Image exceeds 20 MiB")
@@ -301,19 +319,26 @@ async def decompose(file: UploadFile = File(...), max_iterations: int = Form(def
             image = ImageOps.exif_transpose(im).convert("RGB")
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
         raise HTTPException(400, "Invalid image")
-    job_id = uuid.uuid4().hex
-    path = ROOT / "jobs" / job_id
-    path.mkdir()
-    (path / "original.bin").write_bytes(data)
-    image.save(path / "source.png")
-    write_json(path / "request.json", {"source_sha256": digest(data), "normalized_sha256": digest((path / "source.png").read_bytes()),
-                                        "max_iterations": max_iterations, "created": time.time()})
-    write_json(path / "status.json", {"id": job_id, "status": "QUEUED", "created": time.time()})
-    try:
-        JOBS.put_nowait(job_id)
-    except queue.Full:
-        write_json(path / "status.json", {"id": job_id, "status": "FAILED", "error_type": "QueueFull"})
-        raise HTTPException(429, "Queue is full")
+    binding={'source':digest(data),'iterations':max_iterations,'process_size':os.getenv('LAYERD_PROCESS_SIZE','1024'),
+             'upstream':os.getenv('LAYERD_REVISION'),'models':STATE.get('model_binding'),'pixel_method':'bounded_components_v2-r10/1'}
+    cache_key=digest(json.dumps(binding,sort_keys=True).encode())
+    # A missing model binding is never assumed to be a reusable real result.
+    job_id=cache_key[:32] if binding['models'] else uuid.uuid4().hex
+    with ADMISSION:
+        path=ROOT/'jobs'/job_id
+        if path.exists():
+            prior=json.loads((path/'request.json').read_text(encoding='utf-8'))
+            if prior.get('cache_key')!=cache_key:raise HTTPException(409,'LayerD identity collision')
+            return json.loads((path/'status.json').read_text(encoding='utf-8'))
+        if JOBS.full():raise HTTPException(429,'Queue is full')
+        path.mkdir();(path/'original.bin').write_bytes(data);image.save(path/'source.png')
+        write_json(path/'request.json',{'source_sha256':digest(data),'normalized_sha256':digest((path/'source.png').read_bytes()),
+            'max_iterations':max_iterations,'created':time.time(),'cache_key':cache_key,'model_binding':binding['models']})
+        write_json(path/'status.json',{'id':job_id,'status':'QUEUED','created':time.time()})
+        try:JOBS.put_nowait(job_id)
+        except queue.Full:
+            write_json(path/'status.json',{'id':job_id,'status':'FAILED','error_type':'QueueFull'})
+            raise HTTPException(429,'Queue is full')
     return {"id": job_id, "status": "QUEUED"}
 
 

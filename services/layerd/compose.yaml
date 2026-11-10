@@ -10,10 +10,14 @@ services:
       HF_HOME: /tmp/hf
       TORCH_HOME: /tmp/torch
       LAYERD_PROCESS_SIZE: "1024"
+      IMAGE2PPT_RESOURCE_ROOT: /gpu-leases
+      IMAGE2PPT_GPU_ID: "${LAYERD_GPU_UUID:?Set the physical GPU UUID}"
     volumes:
       - /data/image2ppt-layerd/models:/models:ro
       - /data/image2ppt-layerd/data:/data:rw
       - /data/image2ppt-layerd/client-token:/run/secrets/client-token:ro
+      # SAM on this same host/device must bind this same directory and UUID.
+      - /data/image2ppt-resource-locks:/gpu-leases:rw
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=1g,mode=1777

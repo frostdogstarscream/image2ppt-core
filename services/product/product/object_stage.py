@@ -20,23 +20,33 @@ def route_setting(value='default'):
     return route
 
 
-def obtain_layers(source,directory):
+def obtain_layers(source,directory,*,resume=False):
     """Fresh uploads use LayerD; experiment callers inject an immutable saved pack."""
     directory=Path(directory)
-    if (directory/'manifest.json').is_file():return directory
+    if (directory/'manifest.json').is_file():
+        meta=json.loads((directory/'manifest.json').read_text(encoding='utf-8'))
+        if all((directory/r['file']).is_file() and digest(directory/r['file'])==r['sha256'] for r in meta['layers']):return directory
+        if not resume:raise ValueError('incomplete LayerD pack; resume explicitly')
     token=os.environ.get('LAYERD_TOKEN_FILE')
     if not token:raise RuntimeError('layerd_token_file_missing')
     directory.parent.mkdir(parents=True,exist_ok=True)
     log=directory.with_suffix('.log')
     args=[sys.executable,str(ROOT/'services/layerd/client.py'),'--input',str(source),'--output',str(directory),
           '--url',os.environ.get('LAYERD_URL','http://127.0.0.1:18840'),'--token-file',token]
+    if resume:args.append('--resume')
     with log.open('w',encoding='utf-8') as stream:
         result=subprocess.run(args,stdout=stream,stderr=stream,timeout=1300,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
     if result.returncode:raise RuntimeError('layerd_decomposition_failed')
     manifest=json.loads((directory/'manifest.json').read_text(encoding='utf-8'))
     if manifest['source_sha256']!=digest(source):raise ValueError('layerd_upload_binding_mismatch')
     if not np.array_equal(np.array(Image.open(source).convert('RGB')),np.array(Image.open(directory/'source.png').convert('RGB'))):raise ValueError('layerd_normalized_pixels_changed')
-    write(directory/'request.json',{'source_sha256':digest(source),'normalized_sha256':digest(directory/'source.png')})
+    binding={'source_sha256':digest(source),'normalized_sha256':digest(directory/'source.png')}
+    receipt=directory/'request.json'
+    if receipt.exists():
+        original=json.loads(receipt.read_text(encoding='utf-8'))
+        if any(original.get(k)!=v for k,v in binding.items()):raise ValueError('layerd_request_receipt_binding_mismatch')
+    else:write(receipt,binding)
+    write(directory/'upload-binding.json',binding)
     return directory
 
 

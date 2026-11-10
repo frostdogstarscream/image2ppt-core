@@ -13,6 +13,7 @@ from .materialize import digest
 from .object_extract import rectangle
 from .object_registry import fingerprint
 from .object_ownership import background
+CODE_SHA=digest(__file__)
 
 
 @lru_cache(maxsize=1)
@@ -128,3 +129,73 @@ def candidate(obj,source,ir,root,blocked,*,other_objects=()):
         'native_background_comparison':native_check,
         'method_binding':binding(),'independent_review_required':True}
     return full,metadata,backgrounds,estimate,mask
+
+
+def candidate_from_evidence(obj,source,protected,*,original_alpha=None,surface=None,owners=()):
+    """Source Unmix with fused evidence; no parent SlideIR required.
+
+    The original estimator and RGBA inversion are reused without invoking the
+    semi-automatic authoring workflow. A white-on-white interior is unknown unless
+    original Alpha supplies evidence. Self-recomposition is diagnostic only.
+    """
+    from reconstruction import background_model,extract_rgba
+    owner_ids={o['id'] for o in owners}
+    if len(owner_ids)!=len(owners) or not (set(obj.replaces)|set(obj.required_owners))<=owner_ids:
+        raise ValueError('incomplete old owner collection')
+    for owner in owners:
+        if not owner.get('path') or not owner.get('sha256') or digest(owner['path'])!=owner['sha256']:
+            raise ValueError('old owner hash evidence missing')
+        if any(k in owner for k in ('rotation','crop','flip_h','flip_v','transform')):
+            raise ValueError('old owner transform requires explicit visible-contribution proof')
+    size=(source.shape[1],source.shape[0]);support=rectangle(obj.bbox,size)
+    for part in obj.parts:support|=rectangle(part.bbox,size)
+    for owner in owners:support|=rectangle(owner['bbox'],size)
+    if original_alpha is not None:support|=original_alpha[...,3]>0
+    ys,xs=np.nonzero(support);scope=[int(xs.min()),int(ys.min()),int(xs.max()-xs.min()+1),int(ys.max()-ys.min()+1)]
+    box=rectangle(scope,size,pad=4);ys,xs=np.nonzero(box);x,y,w,h=int(xs.min()),int(ys.min()),int(xs.max()-xs.min()+1),int(ys.max()-ys.min()+1)
+    excluded=protected.copy()
+    for e in obj.exclusions:excluded|=rectangle(e.bbox,size)
+    backing,error,background_evidence=backing_from_evidence(source,[x,y,w,h],excluded,surface)
+    if not np.isfinite(error) or error>6:raise ValueError('unmix background uncertain')
+    crop=source[y:y+h,x:x+w];delta=np.abs(crop.astype(float)-backing).max(2)
+    core=delta>14;mask=(cv2.dilate(core.astype('uint8'),np.ones((3,3),np.uint8))>0)&(delta>max(1,error))
+    if mask[:,[0,-1]].any() or mask[[0,-1]].any():raise ValueError('unmix scope cuts foreground')
+    if (mask&excluded[y:y+h,x:x+w]).any():raise ValueError('unmix protected content')
+    rgba=extract_rgba(crop,backing,mask)
+    if original_alpha is not None:
+        prior=original_alpha[y:y+h,x:x+w];keep=(rgba[...,3]==0)&(prior[...,3]>0)
+        rgba[keep]=prior[keep]
+    full=np.zeros((*source.shape[:2],4),np.uint8);full[y:y+h,x:x+w]=rgba
+    if ((full[...,3]>0)&excluded).any():raise ValueError('unmix retained Alpha intersects protected content')
+    for part in obj.parts:
+        if not (rectangle(part.bbox,size)&(full[...,3]>0)).any():raise ValueError('missing required part')
+    return full,{'method':'source-unmix','scope':[x,y,w,h],'ring_error':error,'background_evidence':background_evidence,
+                'old_owner_ids':sorted(owner_ids),'independent_review_required':True}
+
+
+def backing_from_evidence(source,box,protected,surface=None):
+    """Prefer source-verified containing surface; otherwise use lateral samples."""
+    from reconstruction import background_model
+    x,y,w,h=[round(v) for v in box];size=(source.shape[1],source.shape[0]);scope=rectangle(box,size)
+    ring=rectangle([max(0,x-4),max(0,y-4),min(size[0],x+w+4)-max(0,x-4),min(size[1],y+h+4)-max(0,y-4)],size)&~scope&~protected
+    if surface is not None:
+        shapes=surface.shapes if hasattr(surface,'shapes') else []
+        from types import SimpleNamespace
+        shapes=[*shapes,SimpleNamespace(id='page-backing',bbox=[0,0,*size],fill=surface.background,
+            fill_gradient=None,geometry='rect')]
+        for s in sorted(shapes,key=lambda n:n.bbox[2]*n.bbox[3]):
+            if s.fill=='none' or s.fill_gradient is not None or s.geometry not in ('rect','roundRect'):continue
+            area=rectangle(s.bbox,size)
+            if (area&scope).sum()<scope.sum():continue
+            values=source[ring] if s.id=='page-backing' else source[area&~protected]
+            if len(values)<30:continue
+            colors,counts=np.unique(values,axis=0,return_counts=True);color=colors[counts.argmax()]
+            proposed=np.array([int(s.fill[i:i+2],16) for i in (0,2,4)])
+            if counts.max()/len(values)<.65 or np.abs(color.astype(float)-proposed).max()>16:continue
+            if ring.sum()<20:continue
+            residual=np.abs(source[ring].astype(float)-color).max(1)
+            if np.percentile(residual,75)>6:continue
+            backing=np.broadcast_to(color,(h,w,3)).copy()
+            return backing,float(np.percentile(residual,75)),{'method':'source_verified_surface_color','surface_id':s.id,'samples':len(values),'ring_samples':int(ring.sum())}
+    backing,error=background_model(source,box,protected)
+    return backing,error,{'method':'source_lateral_samples'}

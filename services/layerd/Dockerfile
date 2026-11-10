@@ -11,6 +11,8 @@ RUN python -m pip uninstall -y image2ppt-vision \
     && python -m pip check \
     && python -m pip freeze > /opt/layerd/environment.lock
 COPY app.py /opt/layerd/app.py
+# Added by services/prepare_gpu_service.py from the one maintained host lease.
+COPY resource_lease.py /opt/resource_lease.py
 COPY source-provenance.json /opt/layerd/source-provenance.json
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
     LAMA_MODEL=/models/big-lama.pt LAYERD_MODELS=/models LAYERD_DATA=/data \

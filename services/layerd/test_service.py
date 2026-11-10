@@ -69,6 +69,15 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result.status_code, 503)
         self.assertEqual(list((self.root / "jobs").iterdir()), [])
 
+    def test_bound_source_is_enqueued_once_even_after_client_retry(self):
+        with patch.dict(service.STATE,{'model_binding':'synthetic-model-sha'}):
+            image=io.BytesIO();Image.new('RGB',(20,10),'white').save(image,format='PNG')
+            ids=[]
+            for _ in range(2):
+                r=self.client.post('/v1/decompose',headers=self.auth,files={'file':('x.png',image.getvalue())})
+                self.assertEqual(r.status_code,202);ids.append(r.json()['id'])
+            self.assertEqual(ids[0],ids[1]);self.assertEqual(service.JOBS.qsize(),1)
+
     def test_upload_contract_and_artifact_allowlist(self):
         result = self.client.post("/v1/decompose", headers=self.auth, files={"file": ("x.png", b"bad")})
         self.assertEqual(result.status_code, 400)

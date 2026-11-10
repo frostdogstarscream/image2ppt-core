@@ -17,7 +17,7 @@ import time
 from uuid import uuid4
 from fastapi import FastAPI, Depends, File, Header, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse, HTMLResponse
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from .materialize import write, digest
 
 ROOT=Path(__file__).resolve().parents[3]
@@ -49,7 +49,16 @@ class Queue:
             import fcntl
             fcntl.flock(self.lease,fcntl.LOCK_EX|fcntl.LOCK_NB)
         with self.connect() as db:
-            db.execute("UPDATE jobs SET state='INTERRUPTED' WHERE state IN ('RUNNING','QUEUED')")
+            # r10 resumes immutable artifacts and call receipts; UNKNOWN calls
+            # are never repeated by the worker's durable reservation ledger.
+            for (id,) in db.execute("SELECT id FROM jobs WHERE state='RUNNING'").fetchall():
+                resume=False
+                if re.fullmatch(r'[a-f0-9]{32}',id):
+                    try:
+                        request=json.loads((self.root/id/'request.json').read_text(encoding='utf-8'))
+                        resume=request.get('pipeline_mode') in ('parallel_review','parallel_shadow') and (self.root/id/'state/parallel.sqlite').is_file()
+                    except (OSError,ValueError):pass
+                db.execute('UPDATE jobs SET state=? WHERE id=?',('QUEUED' if resume else 'INTERRUPTED',id))
         self.thread=threading.Thread(target=self.loop,daemon=True);self.thread.start()
 
     def loop(self):
@@ -60,9 +69,10 @@ class Queue:
             id=row[0];self.set(id,'RUNNING');job=self.root/id
             with (job/'worker.log').open('w',encoding='utf-8') as log:
                 env=os.environ.copy()
-                env['PYTHONPATH']=str(Path(__file__).resolve().parents[1])
+                env['PYTHONPATH']=os.pathsep.join(dict.fromkeys([str(Path(__file__).resolve().parents[1]),
+                    *filter(None,env.get('PYTHONPATH','').split(os.pathsep))]))
                 # Fixed module only; uploaded names and model output never become commands.
-                self.process=subprocess.Popen([sys.executable,'-m','product.pipeline',str(job)],cwd=ROOT,
+                self.process=subprocess.Popen([sys.executable,'-m','product.parallel_pipeline',str(job)],cwd=ROOT,
                     env=env,stdout=log,stderr=log,
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                 deadline=time.monotonic()+max(3600,1800*len(json.loads((job/'request.json').read_text())['sources']))
@@ -149,12 +159,10 @@ def create_app(root=None, token=None, run_worker=True):
         else:raise HTTPException(422,'未知模型供应商')
         return {'configured':True,'storage':'process_memory'}
     @app.post('/api/jobs',status_code=202,dependencies=[Depends(auth)])
-    def submit(files:list[UploadFile]=File(...),object_extraction:str='default'):
-        from .object_stage import route_setting
-        try:object_route=route_setting(object_extraction)
+    def submit(files:list[UploadFile]=File(...),object_extraction:str='default',pipeline_mode:str='parallel_review'):
+        from .parallel_contracts import strategy,mode
+        try:object_route=strategy(object_extraction);selected_mode=mode(pipeline_mode)
         except ValueError:raise HTTPException(422,'未知对象提取模式') from None
-        if object_route!='off' and not os.environ.get('LAYERD_TOKEN_FILE'):
-            raise HTTPException(503,'对象提取需要已配置的 LayerD 服务')
         if not 1<=len(files)<=12:raise HTTPException(422,'请上传 1–12 张图片')
         from .pipeline import settings
         try:settings()
@@ -165,7 +173,7 @@ def create_app(root=None, token=None, run_worker=True):
             with queue.connect() as db:
                 if db.execute("SELECT count(*) FROM jobs WHERE state IN ('QUEUED','RUNNING')").fetchone()[0]>=2:
                     raise HTTPException(429,'已有两项任务，请等待完成')
-            images=[];total=0;size=None
+            images=[];originals=[];total=0;size=None
             for upload in files:
                 data=upload.file.read(20*1024*1024+1);total+=len(data)
                 if len(data)>20*1024*1024 or total>100*1024*1024:raise HTTPException(413,'图片体积超限')
@@ -173,17 +181,22 @@ def create_app(root=None, token=None, run_worker=True):
                     with Image.open(io.BytesIO(data)) as image:
                         if image.format not in ('PNG','JPEG','WEBP') or getattr(image,'n_frames',1)!=1:
                             raise ValueError()
+                        format=image.format.lower();image=ImageOps.exif_transpose(image)
                         w,h=image.size
                         if max(w,h)>4000 or w*h>12_000_000:raise ValueError()
                         if size is not None and image.size!=size:raise HTTPException(422,'同一批页面需相同尺寸')
-                        size=image.size;images.append(image.convert('RGB'))
+                        size=image.size;images.append(image.convert('RGB'));originals.append((data,format))
                 except (OSError,ValueError,UnidentifiedImageError,Image.DecompressionBombError):
                     raise HTTPException(422,'图片无效，支持尺寸不超过 4000px 的单帧 PNG/JPEG/WebP') from None
             id=uuid4().hex;job=root/id;(job/'inputs').mkdir(parents=True)
-            names=[]
+            names=[];original_refs=[];(job/'originals').mkdir()
             for i,image in enumerate(images,1):
                 name=f'{i:02d}.png';image.save(job/'inputs'/name);names.append(name)
-            write(job/'request.json',{'sources':names,'max_calls':None,'italic_difference_ignored':True,'object_extraction':object_route})
+                data,format=originals[i-1];original=job/'originals'/f'{i:02d}.{format}';original.write_bytes(data)
+                original_refs.append({'path':str(original.relative_to(job)),'sha256':digest(original),
+                                      'canonical_file':name,'canonical_sha256':digest(job/'inputs'/name)})
+            write(job/'request.json',{'sources':names,'max_calls':None,'italic_difference_ignored':True,
+                                     'object_extraction':object_route,'pipeline_mode':selected_mode,'original_inputs':original_refs})
             with queue.connect() as db:db.execute('INSERT INTO jobs VALUES(?,?,?)',(id,'QUEUED',time.time()))
         return {'id':id,'status':'QUEUED','max_model_calls':None}
     @app.get('/api/jobs',dependencies=[Depends(auth)])
@@ -197,6 +210,12 @@ def create_app(root=None, token=None, run_worker=True):
     def artifact(id:str,name:str):
         status=queue.status(id)
         if status['status'] not in ('SUCCEEDED','REVIEW_REQUIRED'):raise HTTPException(409,'该任务尚无可交付文件')
+        if status.get('result',{}).get('pipeline_mode','').startswith('parallel_'):
+            from .parallel_store import Store
+            try:
+                committed=Store(root/id/'state').committed()
+                if committed is None or committed['result']!=status['result']:raise ValueError()
+            except (ValueError,OSError):raise HTTPException(409,'可交付版本校验失败') from None
         manifest=status.get('result',{}).get('artifacts',{})
         if name not in manifest or Path(name).name!=name:raise HTTPException(404)
         path=root/id/'delivery'/name

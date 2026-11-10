@@ -1,4 +1,14 @@
-# MoMA 独立图片转 PPT 服务
+# r10：三分支独立图片转 PPT 服务
+
+本分支的上传和 CLI 默认已改为 `parallel_review`：文字、素材、背景独立产证据，经 SceneGraph 仲裁和两次屏障重建，再由固定编译器、实际 PowerPoint 与 Go 验收。不先运行旧 `VisualPage/1` 规划，不支持 `serial` 执行模式。`object_extraction=off` 也不关闭三分支，只保留素材的源图表示。`parallel_auto` 尚未取得发布资格。
+
+**当前启动、部署、缓存和验收说明请阅读 [PARALLEL_R10.md](PARALLEL_R10.md)。** 修订计划保存在 [parallel-three-branches-r10.md](../../docs/plans/parallel-three-branches-r10.md)。
+
+以下保留旧串行实现的历史说明，用于理解冻结对照；其中的 `VisualPage/1`、重试策略、默认对象开关和交付状态不代表 r10 路由。
+
+---
+
+# 历史：MoMA 独立图片转 PPT 服务
 
 这条入口由 MoMA 看图、规划划分、生成及修正方案，由 OpenCode Go 对照原图和最终 PPTX 预览进行独立视觉复核。双方职责固定，复核失败不会换成规划模型自行验收。运行时不需要 Codex 会话，不读取先前人工整理的文字清单或字体分组。旧的 Codex 辅助流程保留。
 

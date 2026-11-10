@@ -17,9 +17,10 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--max-iterations", type=int, default=3, choices=range(1, 13))
     parser.add_argument("--timeout", type=int, default=1200)
+    parser.add_argument('--resume',action='store_true')
     args = parser.parse_args()
     output = Path(args.output)
-    if output.exists():
+    if output.exists() and not args.resume:
         raise FileExistsError("Use a new output directory")
     token = Path(args.token_file).read_text().strip()
 
@@ -41,7 +42,16 @@ def main():
             f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="input{source.suffix}"\r\n'
             f'Content-Type: {mimetypes.guess_type(source.name)[0] or "application/octet-stream"}\r\n\r\n').encode()
     body += source.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
-    status = json.loads(request("/v1/decompose", body, "multipart/form-data; boundary=" + boundary))
+    receipt=output.with_suffix('.remote.json')
+    binding={'source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),'url':args.url.rstrip('/'),'max_iterations':args.max_iterations}
+    if args.resume and receipt.exists():
+        saved=json.loads(receipt.read_text(encoding='utf-8'))
+        if any(saved.get(k)!=v for k,v in binding.items()):raise ValueError('LayerD resume request binding changed')
+        status=json.loads(request('/v1/jobs/'+saved['id']))
+    else:
+        status=json.loads(request('/v1/decompose',body,'multipart/form-data; boundary='+boundary))
+        receipt.parent.mkdir(parents=True,exist_ok=True)
+        temporary=receipt.with_suffix('.tmp');temporary.write_text(json.dumps({**binding,'id':status['id']}),encoding='utf-8');temporary.replace(receipt)
     job_id = status["id"]
     print(json.dumps(status), flush=True)
     deadline = time.monotonic() + args.timeout
@@ -58,7 +68,7 @@ def main():
         time.sleep(2)
     else:
         raise TimeoutError("Job is still recorded on the server: " + job_id)
-    output.mkdir(parents=True)
+    output.mkdir(parents=True,exist_ok=args.resume)
     for filename in status["artifacts"]:
         if Path(filename).name != filename or filename in (".", ".."):
             raise ValueError("Unsafe artifact filename")

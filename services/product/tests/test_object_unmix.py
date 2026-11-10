@@ -118,7 +118,7 @@ def test_part_evidence_expands_a_small_localization_box_without_cutting_strokes(
     assert matte[10,10,3]>0 and matte[24,14,3]>0
 
 
-def test_upload_auto_strategy_is_opt_in_and_preserves_existing_default(monkeypatch):
+def test_r10_upload_defaults_to_parallel_review_with_auto_assets(monkeypatch):
     import io,uuid
     from fastapi.testclient import TestClient
     from product import pipeline
@@ -131,12 +131,16 @@ def test_upload_auto_strategy_is_opt_in_and_preserves_existing_default(monkeypat
     app=create_app(root,'x'*32,run_worker=False)
     blob=io.BytesIO();Image.new('RGB',(800,450),'white').save(blob,format='PNG')
     with TestClient(app) as client:
-        for query,expected in (('', 'off'),('?object_extraction=auto','auto')):
+        for query,expected in (('', 'auto'),('?object_extraction=auto','auto')):
             response=client.post('/api/jobs'+query,headers={'Authorization':'Bearer '+'x'*32},
                 files=[('files',('page.png',blob.getvalue(),'image/png'))])
             assert response.status_code==202
             request=json.loads((root/response.json()['id']/'request.json').read_text())
             assert request['object_extraction']==expected
+            assert request['pipeline_mode']=='parallel_review'
+        response=client.post('/api/jobs?pipeline_mode=serial',headers={'Authorization':'Bearer '+'x'*32},
+            files=[('files',('page.png',blob.getvalue(),'image/png'))])
+        assert response.status_code==422
 
 
 def test_parent_render_gate_detects_a_real_non_target_change(tmp_path):
