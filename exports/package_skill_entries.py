@@ -5,18 +5,20 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
+from skill_files import skill_files
 
 ROOT = Path(__file__).resolve().parents[1]
 variants = {
-    "codex": (ROOT / "skills/image2ppt", ["SKILL.md", "references/slideir.md", "agents/openai.yaml"]),
-    "claude": (ROOT / "skills/image2ppt-claude", ["SKILL.md", "references/slideir.md"]),
+    "codex": ROOT / "skills/image2ppt",
+    "claude": ROOT / "skills/image2ppt-claude",
 }
 
 
 def main():
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid4().hex[:6]
     results = []
-    for name, (source, files) in variants.items():
+    for name, source in variants.items():
+        files = skill_files(source)
         archive = ROOT / "exports" / f"image2ppt-skill-{name}-{stamp}.zip"
         payload = {}
         for relative in files:

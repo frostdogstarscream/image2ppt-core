@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
+from skill_files import skill_files
 
 ROOT = Path(__file__).resolve().parents[1]
 OWN_SOURCES = [
@@ -15,18 +16,20 @@ OWN_SOURCES = [
     "scripts/main.mjs", "scripts/prepare.py", "scripts/pptx_xml.py",
     "scripts/check_demo.mjs", "scripts/check_pixels.py",
     "tests/ir.test.mjs",
-    "skills/image2ppt/SKILL.md", "skills/image2ppt/agents/openai.yaml",
-    "skills/image2ppt/references/slideir.md",
-    "skills/image2ppt-claude/SKILL.md",
-    "skills/image2ppt-claude/references/slideir.md",
     "examples/synthetic/slideir.json", "examples/synthetic/source/page.png",
     "examples/synthetic/assets/visual.png",
 ]
+for flavor in ('image2ppt','image2ppt-claude'):
+    OWN_SOURCES.extend('skills/'+flavor+'/'+name for name in skill_files(ROOT/'skills'/flavor))
 
 README = r"""# image2PPT 技能源码包与 Claude Code 入口
 
 本包导出 image2PPT v0.1 的项目自有源码，并提供 Claude Code 的项目级技能入口。
 它是源码及接入包；没有包含 PPT 编译、渲染引擎，不能当作独立安装包。
+
+Codex 主 Skill 已面向 r10 三分支自动产品；本包仍仅导出固定核心，
+不包含 services/product 后台、模型或完整自动产品部署。运行自动任务须回到
+具有 parallel_pipeline 的完整项目工作区。手工流程仅为历史参考。
 
 ## 包含的内容
 
@@ -170,9 +173,10 @@ def main():
     # Codex wording moves, and it cannot express Claude-Code-specific guidance.
     claude_source = ROOT / "skills/image2ppt-claude"
     claude = package / ".claude/skills/image2ppt"
-    (claude / "references").mkdir(parents=True)
-    (claude / "SKILL.md").write_bytes((claude_source / "SKILL.md").read_bytes())
-    (claude / "references/slideir.md").write_bytes((claude_source / "references/slideir.md").read_bytes())
+    for name in skill_files(claude_source):
+        target = claude / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((claude_source / name).read_bytes())
     (package / "README.md").write_text(README, encoding="utf-8", newline="\n")
     example = {"node_modules": "C:/path/to/existing/node_modules",
                "python": "C:/path/to/python.exe",

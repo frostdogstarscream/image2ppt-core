@@ -261,6 +261,15 @@ test('the skill asks for per-sub-region decomposition, not whole-region crops',a
     const text=await fs.readFile(fileURLToPath(new URL(file,import.meta.url)),'utf8');
     assert.doesNotMatch(text,/Keep complex visual modules as cropped images/,'整块裁图的无条件规则不得回归');
     assert.doesNotMatch(text,/Only when the background itself cannot be rebuilt does the whole region/,'整块保留的逃生舱不得回归');
+    if(file.includes('image2ppt/SKILL.md')){
+      assert.match(text,/product\.parallel_pipeline\.run/,'Codex 使用自动产品入口');
+      assert.match(text,/Do not hand-author SlideIR/,'不得用手工 IR 替代自动规划');
+      assert.match(text,/Split safe subregions/,'安全子区域独立重建');
+      assert.match(text,/Font sharing is not a pixel dependency/,'样式不得扩大像素回退范围');
+      assert.match(text,/visual integrity and editability separately/,'视觉与编辑化分别验收');
+      assert.match(text,/actual PowerPoint/,'保留实际文件验收');
+      continue;
+    }
     assert.match(text,/[Dd]ecompos/,`${file} 应保留下拆解要求`);
     assert.match(text,/sub-region/,`${file} 应按子区域判定`);
     assert.match(text,/part native and part crop/,`${file} 应说明半原生半裁剪是正常结果`);

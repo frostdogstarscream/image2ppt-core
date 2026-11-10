@@ -1,5 +1,13 @@
 # r10 独立三分支
 
+## AI 开发规范与实现状态
+
+主规范为 `skills/image2ppt/SKILL.md`，细则见其 `references/parallel-product.md`；根目录 `AGENTS.md` 采用同一自动产品入口。Codex 负责开发、调试和验证，不得手写 SlideIR、替换后台规划结果或手工拼装交付来冒充自动生成。旧手工流程保存在 `skills/image2ppt/references/legacy-manual-workflow.md`，固定编译与历史代码继续保留。
+
+局部对象事务是本轮整改要求：共享字体不建立像素提交依赖，独立区域失败不应扩散到全页。文字内容、位置和清除证据分别判断；source-plate 保留未知内容，禁止叠字或按 bbox 清空。当前 r10 基线仍含整页 Surface 门禁、共享样式联动和页级 QA 回退；规范更新不代表这些修复已接入或通过回归。
+
+验收必须分开记录视觉正确性和编辑完成度。`reconstructed_pages` 现有含义只是含保留重建节点的页数，不是完整重建页数；新增覆盖指标应采用独立参考清单和真实归属像素，缺少分母时 recall 为 UNKNOWN。Office 事务外像素稳定不等于目标内部无残影，Go PASS 也不等于所有文字/图形已编辑化。保留 `REVIEW_REQUIRED`；`parallel_auto` 的发布资格未因本次规范更新而改变。
+
 入口为 `product.parallel_pipeline`。网页和 `run_local.py` 默认 `parallel_review`；`serial` 不受支持，`parallel_auto` 尚未取得发布资格。原串行模块保留为历史对照，仅借用 Provider、固定编译、有效字体核对等工具函数，不执行其 `run()` 或 VisualPage 全页规划。
 
 安装 `requirements.txt` 后，显式核验现有本地 OCR：

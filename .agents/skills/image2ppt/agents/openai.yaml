@@ -1,5 +1,4 @@
 interface:
-  display_name: "image2PPT 图片还原"
-  short_description: "用 Codex 理解幻灯片图片，保留原文和布局，生成可编辑 PPT 与实际预览"
-  default_prompt: "使用 $image2ppt 将这张幻灯片图片还原为可编辑 PPT，保留原文与布局，并检查实际导出文件。"
-
+  display_name: "image2PPT 自动产品开发"
+  short_description: "开发与验证三分支自动重建，检查局部事务、可编辑完成度和真实 PPTX"
+  default_prompt: "使用 $image2ppt 开发或调试 parallel_pipeline 自动重建链路，核对真实产物和编辑完成度，不以手工 SlideIR 替代产品规划。"

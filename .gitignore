@@ -20,6 +20,8 @@ build/
 exports/*
 !exports/build_source_package.py
 !exports/package_skill_entries.py
+!exports/skill_files.py
+!exports/sync_codex_skill.py
 
 # Private business input; must never enter VCS or a public CI checkout.
 /PPT图片/
