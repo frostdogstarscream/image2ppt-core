@@ -54,8 +54,12 @@ def repair(graph,snap,findings,store,provider,fonts,cache,models,directory,basel
     if not targets:raise ValueError('no actionable repair evidence')
     existing={'text':graph.text,'asset':graph.asset,'surface':graph.surface};feedback={}
     for branch in targets:
-        store.consume(snap['source_sha256']+':'+branch,'planning-repair',key(findings),2)
-        feedback[branch]={'findings':findings,'previous_evidence':existing[branch].model_dump(),
+        previous=existing[branch].model_dump()
+        # File locations are receipts, not visual planning input. Leaving them
+        # in feedback makes a resumed no-op look like a new paid request.
+        previous['references']=[]
+        store.consume(snap['source_sha256']+':'+branch,'planning-repair',key({'findings':findings,'previous_evidence':previous}),2)
+        feedback[branch]={'findings':findings,'previous_evidence':previous,
             'identity_rule':'Preserve all previous logical IDs; do not rename existing objects. Fix only the affected evidence.'}
     saved=next((p['layers'] for p in baseline['pages'] if p['source']['sha256']==snap['source_sha256']),None)
     stable=[a for a in baseline['stable_assets'] if a['source_sha256']==snap['source_sha256']]

@@ -226,8 +226,12 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             if not findings:continue  # Unknown transport/Office is not a planning defect.
             try:
                 from .parallel_repair import repair
-                graphs[i],irs[i],reports[i]=repair(graphs[i],snaps[i],findings,store,provider,fonts,cache,models,
+                repaired_graph,repaired_ir,repaired_report=repair(graphs[i],snaps[i],findings,store,provider,fonts,cache,models,
                     job/f'page-{i+1:02d}'/f'repair-{round_no+1}',baseline,route)
+                if digest(repaired_ir)==digest(irs[i]):
+                    write(job/f'repair-no-change-{round_no}-{i+1:02d}.json',{'ir_sha256':digest(repaired_ir),'parent_retained':True})
+                    continue
+                graphs[i],irs[i],reports[i]=repaired_graph,repaired_ir,repaired_report
                 repaired=True
             except Exception as exc:write(job/f'repair-failure-{round_no}-{i+1:02d}.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
         if not repaired:break

@@ -33,6 +33,16 @@ def save(file,value):
     finally:tmp.unlink(missing_ok=True)
 
 
+def read_json(file):
+    # Retry a short Windows sharing violation while status replacement finishes.
+    # Missing, corrupt or persistently unavailable evidence still fails closed.
+    for attempt in range(50):
+        try:return json.loads(Path(file).read_text(encoding='utf-8'))
+        except PermissionError:
+            if attempt==49:raise
+            time.sleep(.02)
+
+
 def canonical(plan,source_hash,model):
     if plan.get('source_sha256')!=source_hash:raise ValueError('source mismatch')
     size=plan['image_size'];definitions={};mapping={}
@@ -57,7 +67,7 @@ def create_app(config,*,runner=None):
     token=Path(config['token_file']).read_text(encoding='utf-8').strip()
     if len(token)<32:raise ValueError('SAM token too short')
     tasks=queue.Queue();lock=threading.Lock();stop=threading.Event()
-    def read(job):return json.loads((job/'status.json').read_text(encoding='utf-8'))
+    def read(job):return read_json(job/'status.json')
     def object_cache(job):
         plan=json.loads((job/'plan.json').read_text(encoding='utf-8'));request=json.loads((job/'request.json').read_text(encoding='utf-8'))
         model={'version':request['version'],'sha256':config['models'][request['version']]['sha256'],'revision':config['code_revision']}

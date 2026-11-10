@@ -327,7 +327,7 @@ def test_final_office_failure_reverts_all_pages_and_publishes_complete_source(tm
         def ask(self,system,ctx,images,contract):
             self.calls+=1;fail=self.calls==2
             return {'schema':'VisualReview/1',**{k:ctx[k] for k in ('source_sha256','plan_sha256','preview_sha256')},
-                'passed':not fail,'findings':[{'category':'graphics','severity':'major','node_ids':[],
+                'passed':not fail,'findings':[{'category':'graphics','node_ids':[],
                     'description':'injected visual failure','suggested_fix':'keep source'}] if fail else [],
                 'checked':['wording','structure','font','emphasis','layout','graphics']}
     def compiler(irs,output,pages):
@@ -363,3 +363,65 @@ def test_office_picture_verifier_handles_relative_and_absolute_media(tmp_path,ta
     verify_pictures(pptx,[ir])
     rgba[1,2,3]=255;Image.fromarray(rgba).save(asset)
     with pytest.raises(ValueError):verify_pictures(pptx,[ir])
+
+
+def test_review_cache_binds_actual_request_parameters(tmp_path):
+    class Actor:
+        model='fixture';request_binding={'temperature':0};calls=0
+        def ask(self,*args):
+            self.calls+=1
+            return {'schema':'TextEvidence/1','source_sha256':'a'*64,'image_size':[40,30],'method_version':'test'}
+    s=Store(tmp_path/'db');actor=Actor()
+    s.call('review',actor,'JSON',{},[],TextEvidence,nullcontext())
+    actor.request_binding={'temperature':.1}
+    s.call('review',actor,'JSON',{},[],TextEvidence,nullcontext())
+    s.call('review',actor,'JSON',{},[],TextEvidence,nullcontext())
+    assert actor.calls==2
+
+
+def test_substantive_repair_budget_ignores_receipt_paths_but_counts_changed_evidence(tmp_path,monkeypatch):
+    from product import parallel_repair as mod
+    from product.parallel_store import BudgetExceeded
+    p=tmp_path/'source.png';Image.new('RGB',(40,30),'white').save(p);snap,b=branches(p);g=fuse(snap,b,{'lines':[]})
+    s=Store(tmp_path/'db');observed=[]
+    def perceive(*args,**kwargs):
+        observed.append(kwargs['repair']['text'])
+        assert not observed[-1]['previous_evidence']['references']
+        raise RuntimeError('fixture stopping before any model or reconstruction')
+    monkeypatch.setattr(mod,'perceive',perceive)
+    def invoke():mod.repair(g,snap,[{'category':'font','node_ids':[]}],s,None,{},tmp_path,'unused',tmp_path/'stage',{'pages':[],'stable_assets':[]},'auto')
+    g.text.references=['receipt-A']
+    with pytest.raises(RuntimeError):invoke()
+    g.text.references=['receipt-B']
+    with pytest.raises(RuntimeError):invoke()  # Same meaningful input: no new budget.
+    g.text.limitations=['changed semantic evidence']
+    with pytest.raises(RuntimeError):invoke()
+    g.text.limitations=['another substantive change']
+    with pytest.raises(BudgetExceeded):invoke()
+    assert len(observed)==3
+
+
+def test_identical_repair_ir_stops_recompiling_and_retains_parent(tmp_path,monkeypatch):
+    from product import parallel_pipeline as mod,parallel_repair
+    job=tmp_path/'job';(job/'inputs').mkdir(parents=True);Image.new('RGB',(40,30),'white').save(job/'inputs/01.png')
+    write(job/'request.json',{'sources':['01.png'],'pipeline_mode':'parallel_review','object_extraction':'off'})
+    monkeypatch.setenv('IMAGE2PPT_PARALLEL_CACHE',str(tmp_path/'cache'))
+    monkeypatch.setattr(mod,'perceive',lambda *a,**k:(_ for _ in ()).throw(ValueError('fixture')))
+    calls=[];captured=[]
+    class Actor:
+        model='no-op-fixture'
+        def ask(self,system,ctx,images,contract):
+            return {'schema':'VisualReview/1',**{k:ctx[k] for k in ('source_sha256','plan_sha256','preview_sha256')},'passed':False,
+                'findings':[{'category':'graphics','node_ids':[],'description':'fixture defect','suggested_fix':'retain source'}],
+                'checked':['wording','structure','font','emphasis','layout','graphics']}
+    def compiler(irs,output,pages):
+        calls.append('compile');captured[:]=irs;output.mkdir();(output/'preview').mkdir();(output/'fixture.pptx').write_bytes(b'fixture')
+        Image.new('RGB',(40,30),'white').save(output/'preview/01.png')
+        return {'pptx':str(output/'fixture.pptx'),'preview':str(output/'preview')}
+    def office(pptx,irs,output):
+        output.mkdir();Image.new('RGB',(40,30),'white').save(output/'page-01-before.png');return {'status':'PASS_APP_AUTOMATED'}
+    def repair(graph,*args,**kwargs):calls.append('repair');return graph,captured[0],[]
+    monkeypatch.setattr(parallel_repair,'repair',repair)
+    mod.run(job,provider=Actor(),review_provider=Actor(),compiler=compiler,office=office,fonts={'fonts':[]})
+    assert calls==['compile','repair','compile']
+    assert json.loads((job/'repair-no-change-0-01.json').read_text())['parent_retained'] is True

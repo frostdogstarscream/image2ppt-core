@@ -12,6 +12,18 @@ spec=importlib.util.spec_from_file_location('private_sam',Path(__file__).with_na
 module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 
 
+def test_status_read_retries_windows_sharing_violation(tmp_path,monkeypatch):
+    file=tmp_path/'status.json';file.write_text('{"status":"RUNNING"}',encoding='utf-8')
+    original=Path.read_text;attempts=[]
+    def read(path,*args,**kwargs):
+        if path==file:
+            attempts.append(1)
+            if len(attempts)<3:raise PermissionError('controlled sharing violation')
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'read_text',read)
+    assert module.read_json(file)=={'status':'RUNNING'} and len(attempts)==3
+
+
 def test_private_service_auth_binding_dedup_serial_and_download(tmp_path):
     token=tmp_path/'token';token.write_text('x'*48);active=[];peak=[];calls=[]
     def runner(job,request):

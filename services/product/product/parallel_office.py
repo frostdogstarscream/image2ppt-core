@@ -78,6 +78,7 @@ def inspect(pptx,irs,output,*,render_only=False):
                     if {k:v for k,v in got.items() if k!=name}!={k:v for k,v in sig.items() if k!=name}:raise ValueError('Office changed sibling')
                     if action=='delete' and name in got:raise ValueError('Office deletion did not persist')
                     if wanted and (name not in got or any(abs(a-b)>.1 for a,b in zip(got[name][:5],wanted[:5]))):raise ValueError('Office transform did not persist')
+                    if wanted and got[name][5:]!=wanted[5:]:raise ValueError('Office target text or effective run style did not persist')
                     png=output/f'{i:02d}-{name}-{action}.png';slide.Export(str(png),'PNG',pw,ph)
                     before=np.array(Image.open(output/f'page-{i:02d}-before.png').convert('RGB'));after=np.array(Image.open(png).convert('RGB'))
                     allowed=np.zeros((ph,pw),bool)

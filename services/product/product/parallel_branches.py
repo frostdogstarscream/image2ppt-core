@@ -113,7 +113,7 @@ def perceive(snap,store,provider,fonts,cache,model_manifest,*,saved_layers=None,
                 store.task(task,branch,'FALLBACK',{'reason':reason,'schema_repairs':attempt})
                 # Never repeat unknown/transport calls, nor retry a missing model.
                 if type(exc).__name__ not in ('ValidationError','ValueError') or attempt==2:raise
-                store.consume(snap['source_sha256']+':'+branch,'planning-repair',key(reason),2)
+                store.consume(snap['source_sha256']+':'+branch,'planning-repair',key({'error':reason,'feedback':feedback.get(branch)}),2)
                 feedback[branch]={'attempt':attempt+1,'validation_error':reason,'previous_feedback':feedback.get(branch)}
     def text():
         ocr=local_ocr(snap,cache,model_manifest);store.evidence(ocr)
