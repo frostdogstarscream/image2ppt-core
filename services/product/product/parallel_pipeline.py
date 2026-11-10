@@ -174,6 +174,14 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             return graph,ir,report,{'page':reason}
     with ThreadPoolExecutor(max_workers=2) as pool:pages=list(pool.map(page,range(len(snaps))))
     graphs=[p[0] for p in pages];irs=[p[1] for p in pages];reports=[p[2] for p in pages]
+    # Persist candidate-region state independently of final quality/publication.
+    for _,ir,_,_ in pages:
+        receipt=Path(ir).parent/'region-transactions.json'
+        if receipt.exists():
+            for region in json.loads(receipt.read_text(encoding='utf-8')):
+                store.task(region['region_id'],'region',region['status'],
+                    {**region,'ir':str(ir),'quality':'REVIEW_REQUIRED','human_acceptance':False},region['dependencies'])
+
     def compile_set(paths,name):
         update(stage='compiling')
         output=job/name
@@ -287,9 +295,11 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
         ir=json.loads(Path(irfile).read_text(encoding='utf-8'))
         for a in ir['assets']:
             p=(Path(irfile).parent/a['path']).resolve();files[str(p)]=digest(p)
-        for name in ('scene.json','transactions.json','ownership.json','ownership.npz','build-binding.json','source.png'):
+        for name in ('scene.json','transactions.json','ownership.json','ownership.npz','build-binding.json','source.png','region-transactions.json','editable-mask.npz'):
             p=Path(irfile).parent/name
             if p.is_file():files[str(p.resolve())]=digest(p)
+    for irfile in irs:
+        for p in Path(irfile).parent.glob('*-owner.npz'):files[str(p.resolve())]=digest(p)
     for p in [job/'request.json',job/'provenance.json',job/'fonts.json',*job.glob('quality-round-*.json'),
               *job.glob('office*/report.json'),*job.glob('snapshots/*.png')]:
         if p.is_file():files[str(p.resolve())]=digest(p)

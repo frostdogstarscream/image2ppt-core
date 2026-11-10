@@ -226,7 +226,7 @@ def test_scene_graph_alone_reproduces_ir_and_checks_backing_hash(tmp_path):
     with pytest.raises(ValueError,match='reference binding'):adapt(stored,ir.parent)
 
 
-def test_shared_title_style_reverts_when_one_paragraph_fails(tmp_path,monkeypatch):
+def test_explicit_indivisible_title_reverts_when_one_paragraph_fails(tmp_path,monkeypatch):
     import product.parallel_rebuild as mod
     from product.contracts import Text,Style
     p=tmp_path/'s.png';Image.new('RGB',(80,60),'white').save(p);snap,b=branches(p)
@@ -234,6 +234,8 @@ def test_shared_title_style_reverts_when_one_paragraph_fails(tmp_path,monkeypatc
     b['text'].texts=[Text(id='t-business',text='业务',bbox=[2.,2.,30.,20.],z=1,style='title'),Text(id='t-application',text='应用',bbox=[2.,24.,30.,20.],z=1,style='title')]
     b['text'].members={'t-business':['l1'],'t-application':['l2']}
     g=fuse(snap,b,{'lines':[{'id':'l1','text':'业务','score':.99},{'id':'l2','text':'应用','score':.99}]})
+    from product.parallel_contracts import Relation
+    g.relations.append(Relation(source='t-application',target='t-business',kind='part_of',status='RESOLVED',evidence=['indivisible-title']))
     def candidate(t,graph,source,fonts,blocked):
         if t.id=='t-application':raise ValueError('synthetic member failed')
         mask=np.zeros(source.shape[:2],bool);mask[3,3]=True
@@ -241,7 +243,7 @@ def test_shared_title_style_reverts_when_one_paragraph_fails(tmp_path,monkeypatc
     monkeypatch.setattr(mod,'text_candidate',candidate)
     ir,report=build(g,snap,{'fonts':[]},tmp_path/'scene')
     assert len(json.loads(ir.read_text(encoding='utf-8'))['nodes'])==1
-    assert any(r.get('reason')=='shared text style transaction reverted' for r in report)
+    assert any(r.get('reason_code')=='REGION_MEMBER_FAILURE' for r in report)
 
 
 def test_source_owner_uses_source_components_not_its_own_mask():

@@ -30,7 +30,7 @@ def local_findings(graph,report,stable):
     for r in report:
         if r['state']!='FALLBACK' or r['id'] not in kinds:continue
         reason=r.get('reason','')
-        if reason in ('source raster retained','shared text style transaction reverted'):continue
+        if reason=='source raster retained':continue
         result.append({'category':'graphics' if kinds[r['id']]=='asset' else 'font','severity':'major',
             'node_ids':[r['id']],'description':'Local reconstruction could not safely replace this object: '+reason,
             'suggested_fix':'Recheck only affected source geometry, role, layers and exclusions; do not invent pixels or text. Keep safe raster if evidence remains insufficient.'})

@@ -17,7 +17,7 @@ from .resource_lease import lease
 
 ROOT=Path(__file__).resolve().parents[3]
 CODE_SHA=key({str(p.relative_to(ROOT)):digest(p) for p in [Path(__file__),
-    *[Path(__file__).with_name(n+'.py') for n in ('parallel_fusion','parallel_typography','parallel_font_match','parallel_text_anchor','parallel_pixels','object_closure')],
+    *[Path(__file__).with_name(n+'.py') for n in ('parallel_fusion','parallel_typography','parallel_font_match','parallel_text_anchor','parallel_pixels','object_closure','parallel_regions','parallel_region_gate')],
     ROOT/'ppt-rebuild/src/reconstruction.py']})
 sys.path.insert(0,str(ROOT/'ppt-rebuild/src'))
 from reconstruction import background_model,extract_rgba
@@ -164,30 +164,25 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
     plate_alpha=np.full(source.shape[:2],255,np.uint8)
     # Asset search rectangles guard text reconstruction; true glyph masks guard
     # asset pixels. Empty text-box pixels remain available to graphic candidates.
-    text_masks={};failed_styles=set()
+    from .parallel_regions import regions,retain_atomic,finish_regions
+    from .parallel_region_gate import region_ready
+    region_records,region_by_id=regions(graph)
+    text_masks={}
     for t in graph.text.texts:
         if graph.ownership[t.id]!='RESOLVED':
-            failed_styles.add(t.style);report.append({'id':t.id,'state':'FALLBACK','reason':'text ownership is not resolved'});continue
+            report.append({'id':t.id,'state':'FALLBACK','reason':'text ownership is not resolved'});continue
         try:
             c=text_candidate(t,graph,source,fonts,blocked);chosen.append(c);text_masks[t.id]=c['mask'];claimed|=c['mask']
         except (ValueError,KeyError) as exc:
-            failed_styles.add(t.style);report.append({'id':t.id,'state':'FALLBACK','reason':str(exc)})
-    # Run emphasis can link two main-role groups. Close the dependency before
-    # accepting any member so a failed emphasized span cannot split the group.
-    changed=True
-    while changed:
-        changed=False
-        for t in graph.text.texts:
-            shared={t.style,*[s.style for s in t.spans]}
-            if shared&failed_styles and not shared<=failed_styles:
-                failed_styles|=shared;changed=True
-    # A role's shared typography is accepted or reverted as a whole.
-    retained=[];claimed[:]=False
-    for c in chosen:
-        if c['kind']=='text' and c['payload']['style'] in failed_styles:
-            report.append({'id':c['id'],'state':'FALLBACK','reason':'shared text style transaction reverted'});continue
-        retained.append(c);claimed|=c['mask']
-    chosen=retained
+            report.append({'id':t.id,'state':'FALLBACK','reason':str(exc)})
+    # Shared typography remains calibrated, but is not pixel ownership.
+    # Only explicit indivisible text relationships can cascade a rollback.
+    text_ids={t.id for t in graph.text.texts}
+    chosen,rejected=retain_atomic(chosen,[r for r in region_records if set(r['member_ids'])<=text_ids])
+    for identifier,code in rejected.items():
+        report.append({'id':identifier,'state':'FALLBACK','reason':'indivisible text region member failed','reason_code':code})
+    claimed[:]=False
+    for c in chosen:claimed|=c['mask']
     text_protection=np.zeros_like(claimed);uncertain_text=np.zeros_like(claimed)
     ocr=None
     for ref in graph.text.references:
@@ -230,7 +225,7 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
         try:candidates=asset_candidates(obj,source,layers,reserved,stable,strategy,(sam_candidates or {}).get(obj.id),pixel_cache,resolved_surface)
         except (ValueError,OSError) as exc:
             report.append({'id':obj.id,'state':'FALLBACK','reason':str(exc)});continue
-        accepted=False
+        accepted=False;candidate_failures=[]
         def alternatives():
             yield from candidates
             if any(meta['method']=='stable-reuse' for _,meta in candidates):
@@ -260,14 +255,23 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
                 chosen.append({'id':obj.id,'kind':'asset','bbox':box,'restore_bbox':restore_box,'mask':owner_mask,'patch':patch,'rgba':local,'payload':{**meta,**proof},
                                'candidate_index':index,'background_error':error})
                 claimed|=owner_mask;accepted=True;break
-            except ValueError:continue
-        if not accepted:report.append({'id':obj.id,'state':'FALLBACK','reason':'no safe candidate; full source pixels retained'})
+            except ValueError as exc:candidate_failures.append({'candidate_index':index,'method':meta.get('method'),'reason':str(exc)})
+        if not accepted:report.append({'id':obj.id,'state':'FALLBACK','reason':'no safe candidate; full source pixels retained','candidate_failures':candidate_failures})
+    foreground_ids={t.id for t in graph.text.texts}|{a.id for a in graph.asset.objects}
+    chosen,rejected=retain_atomic(chosen,[r for r in region_records if set(r['member_ids'])<=foreground_ids])
+    for identifier,code in rejected.items():
+        report.append({'id':identifier,'state':'FALLBACK','reason':'indivisible region member failed','reason_code':code})
+    claimed[:]=False
+    for c in chosen:claimed|=c['mask']
     # No branch mutates the parent: all source changes happen at this barrier.
     for c in chosen:
         x,y,w,h=c.get('restore_bbox',c['bbox']);mask=c['mask'][y:y+h,x:x+w];plate[y:y+h,x:x+w][mask]=c['patch'][mask]
         record={k:v for k,v in c.items() if k not in ('mask','patch','rgba')}
         record.update(state='STAGED',quality='REVIEW_REQUIRED',human_acceptance=False,source_sha256=graph.source_sha256,
             original_owner='source-plate',complete_owner_scope=True,mask_sha256=array_sha(c['mask'].astype('uint8')))
+        proof_file=directory/(c['id']+'-owner.npz')
+        np.savez_compressed(proof_file,mask=c['mask'],restore_bbox=c.get('restore_bbox',c['bbox']),backing_patch=c['patch'])
+        record['owner_evidence']={'file':proof_file.name,'sha256':digest(proof_file),'method':'source-derived-backing-and-ink/1'}
         graph.transactions.append(record);graph.selected[c['id']]=record
         report.append(record)
     # Native surfaces sit behind a soft source-backed plate. Only independently
@@ -276,11 +280,9 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
     surface_claimed=np.zeros_like(claimed)
     accepted_ids={c['id'] for c in chosen}
     intrinsic_ids={r.source for r in graph.relations if r.kind=='intrinsic_text' and r.target in accepted_ids and r.status=='RESOLVED'}
-    all_foreground=all(t.id in accepted_ids or t.id in intrinsic_ids for t in graph.text.texts) and all(
-        a.id in accepted_ids or graph.ownership[a.id]=='UNOWNED' for a in graph.asset.objects)
     for s in graph.surface.shapes:
-        if not all_foreground:
-            report.append({'id':s.id,'state':'FALLBACK','reason':'backing remains raster until foreground closure is complete'});continue
+        if not region_ready(region_by_id[s.id],region_records,accepted_ids|intrinsic_ids):
+            report.append({'id':s.id,'state':'FALLBACK','reason':'local surface foreground closure is incomplete','reason_code':'SURFACE_REGION_UNPROVEN'});continue
         if graph.ownership[s.id]!='RESOLVED' or s.fill=='none' or s.fill_gradient or s.geometry!='rect' or s.line_width_pt:
             report.append({'id':s.id,'state':'FALLBACK','reason':'complex surface remains source raster'});continue
         area=rectangle(s.bbox,size);color=np.array([int(s.fill[i:i+2],16) for i in (0,2,4)])
@@ -303,7 +305,11 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
         # foreground. It remains visible when moved away from its old location.
         plate[y:y+h,x:x+w]=parent;claimed|=area;surface_claimed|=area
         c={'id':s.id,'kind':'surface','bbox':s.bbox,'payload':s.model_dump(),'method':'source-color-confirmed-flat/1'}
-        chosen.append(c);record={**c,'state':'STAGED','quality':'REVIEW_REQUIRED','human_acceptance':False}
+        chosen.append(c);record={**c,'state':'STAGED','quality':'REVIEW_REQUIRED','human_acceptance':False,
+            'mask_sha256':array_sha(area.astype('uint8'))}
+        proof_file=directory/(s.id+'-owner.npz')
+        np.savez_compressed(proof_file,mask=area,restore_bbox=[x,y,w,h],backing_patch=parent)
+        record['owner_evidence']={'file':proof_file.name,'sha256':digest(proof_file),'method':'source-sampled-parent-backing/1'}
         graph.transactions.append(record);graph.selected[s.id]=record;report.append(record)
     outside=np.any(plate!=source,2)&~claimed
     if outside.any():raise ValueError('transaction changed unauthorized source pixels')
@@ -334,6 +340,10 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
         'uncertain_is_not_background':True})
     shutil_source=Path(snap['path']);(directory/'source.png').write_bytes(shutil_source.read_bytes())
     ir=adapt(graph,directory)
+    for r in report:r['region_id']=region_by_id[r['id']]['region_id']
+    region_records=finish_regions(region_records,report)
+    write(directory/'region-transactions.json',region_records)
+    np.savez_compressed(directory/'editable-mask.npz',mask=claimed)
     write(directory/'scene.json',graph.model_dump());write(directory/'transactions.json',report)
     write(directory/'slideir.json',ir)
     write(directory/'build-binding.json',{'rebuild_sha256':CODE_SHA,'unmix_sha256':UNMIX_CODE_SHA,
