@@ -31,6 +31,17 @@ def bounds(mask):
     return [int(xx.min()),int(yy.min()),int(xx.max()-xx.min()+1),int(yy.max()-yy.min()+1)]
 
 
+class OwnerConflict(ValueError):
+    def __init__(self,component,protected,box,label,source,rgba):
+        super().__init__('source component belongs to protected peer')
+        self.component=component.copy();self.conflict=(component&protected).copy();self.box=box
+        self.report={'schema':'OwnerConflictReport/1','component_id':int(label),'bbox':box,
+            'component_mask_sha256':array_sha(component),'protected_mask_sha256':array_sha(protected),
+            'candidate_rgba_sha256':array_sha(rgba),'source_pixels_sha256':array_sha(source),
+            'overlap_pixels':int(self.conflict.sum()),'reason_code':'PROTECTED_PEER_COMPONENT',
+            'status':'BLOCKED','semantic_attribution':'UNKNOWN'}
+
+
 def source_owner(obj,rgba,source,protected,surface):
     """Prove source-ink closure independently of the proposed PNG's Alpha.
 
@@ -50,7 +61,8 @@ def source_owner(obj,rgba,source,protected,surface):
     for label in np.unique(labels[seeds]):
         if not label:continue
         component=labels==label
-        if (component&protected[y:y+h,x:x+w]).any():raise ValueError('source component belongs to protected peer')
+        if (component&protected[y:y+h,x:x+w]).any():
+            raise OwnerConflict(component,protected[y:y+h,x:x+w],[x,y,w,h],label,source,rgba)
         sides=[(x>0,component[:,0]),(x+w<size[0],component[:,-1]),(y>0,component[0]),(y+h<size[1],component[-1])]
         if any(active and pixels.any() for active,pixels in sides):raise ValueError('source owner component escapes localization')
         owned|=component
@@ -154,6 +166,8 @@ def _asset_candidates(obj,source,layers,protected,stable,strategy,sam=None,cache
 
 
 def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam_candidates=None,pixel_cache=None):
+    # A legacy build is itself an isolated trial, never a mutation of barrier 1.
+    graph=graph.model_copy(deep=True)
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=False)
     source=np.array(Image.open(snap['path']).convert('RGB'));size=tuple(graph.image_size);plate=source.copy()
     resolved_surface=graph.surface.model_copy(deep=True)

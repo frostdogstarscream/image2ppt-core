@@ -36,6 +36,8 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
     from .parallel_review import PROMPT as REVIEW,panels
     from .go_provider import GoProvider
     job=Path(job).resolve();request=json.loads((job/'request.json').read_text(encoding='utf-8'))
+    from .parallel_candidate_engine import engine_mode,shadow_discover
+    candidate_engine=engine_mode(request.get('candidate_engine',os.environ.get('IMAGE2PPT_CANDIDATE_ENGINE','off')))
     pipeline_mode=mode(request.get('pipeline_mode','parallel_review'));route=strategy(request.get('object_extraction','default'))
     cache=Path(os.environ.get('IMAGE2PPT_PARALLEL_CACHE',str(ROOT/'.runtime/parallel-cache')));cache.mkdir(parents=True,exist_ok=True)
     store=Store(job/'state');call_store=Store(cache/'model-calls')
@@ -62,7 +64,7 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
         if progress:progress(**value)
     write(job/'provenance.json',{'pipeline_mode':pipeline_mode,'architecture':'text-asset-surface/r10','serial_executed':False,
         'source_sha256s':[s['source_sha256'] for s in snaps],'moma_model':provider.model,'review_model':review_provider.model,
-        'human_acceptance':False,'stable_baseline_is_pixel_truth':False})
+        'human_acceptance':False,'stable_baseline_is_pixel_truth':False,'candidate_engine':candidate_engine})
     def _page(i):
         with lease('page'):
             snap=snaps[i];folder=job/f'page-{i+1:02d}';folder.mkdir(parents=True,exist_ok=True)
@@ -174,6 +176,14 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             return graph,ir,report,{'page':reason}
     with ThreadPoolExecutor(max_workers=2) as pool:pages=list(pool.map(page,range(len(snaps))))
     graphs=[p[0] for p in pages];irs=[p[1] for p in pages];reports=[p[2] for p in pages]
+    if candidate_engine=='r11-shadow':
+        for i,(graph,snap) in enumerate(zip(graphs,snaps)):
+            try:
+                with lease('cpu'):
+                    shadow_discover(graph,snap,fonts,job/f'page-{i+1:02d}',store,
+                        [a for a in baseline['stable_assets'] if a['source_sha256']==snap['source_sha256']])
+            except Exception as exc:
+                write(job/f'page-{i+1:02d}'/'r11-shadow-failure.json',{'status':'UNKNOWN','reason':type(exc).__name__})
     # Persist candidate-region state independently of final quality/publication.
     for _,ir,_,_ in pages:
         receipt=Path(ir).parent/'region-transactions.json'

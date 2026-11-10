@@ -178,12 +178,14 @@ def test_pixel_cache_ignores_names_and_preserves_soft_alpha(tmp_path):
     assert np.array_equal(a[0][0],b[0][0]) and a[0][0][5,5].tolist()==[255,255,255,90]
 
 
-def test_complete_worker_keeps_source_when_branch_crashes(tmp_path,monkeypatch):
+@pytest.mark.parametrize('candidate_engine',['off','r11-shadow'])
+def test_complete_worker_keeps_source_when_branch_crashes(tmp_path,monkeypatch,candidate_engine):
     from product import parallel_pipeline as mod
     from product.contracts import Review
     job=tmp_path/'job';(job/'inputs').mkdir(parents=True);Image.new('RGB',(40,30),'white').save(job/'inputs/01.png')
     write(job/'request.json',{'sources':['01.png'],'pipeline_mode':'parallel_review','object_extraction':'off'})
     monkeypatch.setenv('IMAGE2PPT_PARALLEL_CACHE',str(tmp_path/'cache'))
+    monkeypatch.setenv('IMAGE2PPT_CANDIDATE_ENGINE',candidate_engine)
     monkeypatch.setattr(mod,'perceive',lambda *a,**k:(_ for _ in ()).throw(ValueError('wrong source SHA')))
     class Actor:
         model='synthetic'
@@ -203,6 +205,7 @@ def test_complete_worker_keeps_source_when_branch_crashes(tmp_path,monkeypatch):
     assert r['status']=='REVIEW_REQUIRED' and r['reconstructed_pages']==0 and r['generation']==1
     assert len(json.loads(Path(r['slide_irs'][0]).read_text())['nodes'])==1
     assert Store(job/'state').committed()['result']==r
+    assert bool(list(job.glob('page-01/r11-shadow-*/candidate-index.json')))==(candidate_engine=='r11-shadow')
 
 
 def test_shared_gpu_lease_blocks_another_process(tmp_path):
