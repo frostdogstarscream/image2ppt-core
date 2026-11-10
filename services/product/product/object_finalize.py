@@ -13,11 +13,30 @@ from .object_registry import Registry,fingerprint
 from .object_stage import effective_page
 
 
+def parent_region_check(parent_ir,report,before,after):
+    """Compare ACTUAL parent/candidate renders outside the complete transaction."""
+    parent=json.loads(Path(parent_ir).read_text(encoding='utf-8'))
+    if report.get('parent_ir_sha256')!=digest(parent_ir):raise ValueError('parent reference scene binding mismatch')
+    a=np.array(Image.open(before).convert('RGB'));b=np.array(Image.open(after).convert('RGB'))
+    if a.shape!=b.shape:raise ValueError('parent reference dimensions mismatch')
+    h,w=a.shape[:2];sw,sh=parent['canvas']['source_px'];sx,sy=w/sw,h/sh
+    owners={n['id']:n for n in parent['nodes']};allowed=np.zeros((h,w),bool)
+    for row in report['objects']:
+        if row['status']!='STAGED':continue
+        boxes=[row['bbox'],*[owners[i]['bbox'] for i in row['replaces']],*[r['bbox'] for r in row.get('background_assets',[])]]
+        for x,y,bw,bh in boxes:
+            allowed[max(0,int(y*sy)-4):min(h,int(np.ceil((y+bh)*sy))+4),max(0,int(x*sx)-4):min(w,int(np.ceil((x+bw)*sx))+4)]=True
+    outside=int(((a!=b).any(2)&~allowed).sum())
+    return {'status':'PASS' if outside==0 else 'FAIL','non_target_changed_pixels':outside,
+        'parent_ir_sha256':digest(parent_ir),'parent_preview_sha256':digest(before),'candidate_preview_sha256':digest(after)}
+
+
 def object_pass(row,verdict):
     return (all(verdict.get(k)=='PASS' for k in ('pixels','complete_object','replacement')) and
         (not row.get('background_assets') or verdict.get('background_restoration')=='PASS') and
         (not row.get('source_alpha_hole_hypothesis') or verdict.get('white_content_assembly')=='PASS') and
-        (not any(b.get('native_owner_scope_hypothesis') for b in row.get('background_assets',[])) or verdict.get('native_owner_scope')=='PASS'))
+        (not any(b.get('native_owner_scope_hypothesis') for b in row.get('background_assets',[])) or verdict.get('native_owner_scope')=='PASS') and
+        (not row.get('source_unmix') or verdict.get('source_unmix')=='PASS'))
 
 
 def review_objects(source,preview,irfile,report,directory,ask,*,review_model=None):
@@ -50,20 +69,28 @@ def review_objects(source,preview,irfile,report,directory,ask,*,review_model=Non
                     strip.paste(part,(offset,18));ImageDraw.Draw(strip).text((offset+2,2),title,fill='black');offset+=part.width
                 panel=strip
             file=directory/(r['id']+'-detail.png');panel.save(file);images.append(file)
+        def matte_evidence(row):
+            value=row.get('source_unmix')
+            # Code provenance belongs to the private ledger/pixel cache. It is
+            # not visual evidence and cannot change QA for byte-identical PNGs.
+            return {k:v for k,v in value.items() if k!='method_binding'} if value else None
         review_rows=[{'id':r['id'],'candidate_sha256':r['asset_sha256'],'bbox':r['bbox'],'replaces':r['replaces'],
             'definition':r.get('definition'),'method':r.get('method'),'background_assets':r.get('background_assets',[]),
             'source_alpha_hole_hypothesis':r.get('source_alpha_hole_hypothesis',False),
-            'owner_proof':next((c['owner_proof'] for c in r['candidates'] if c['index']==r['selected_index']),{})} for r in rows]
+            'source_unmix':matte_evidence(r),
+            'owner_proof_before_restoration':next((c['owner_proof'] for c in r['candidates'] if c['index']==r['selected_index']),{})} for r in rows]
         context={'source_sha256':digest(source),'scene_sha256':digest(irfile),'objects':review_rows,
             'binding_rule':'Copy ONLY the objects[i].candidate_sha256 values. These are the displayed PNG hashes. Do not substitute a raw mask/NPZ hash.',
             'white_content_rule':'For source_alpha_hole_hypothesis=true, explicitly return white_content_assembly=PASS only if restored source-layer pixels belong to real white/solid object content. Real transparent holes must remain holes. Unknown or indiscriminate filling must fail.',
             'native_owner_scope_rule':'If ANY background asset has native_owner_scope_hypothesis=true, independently inspect the ORIGINAL source over EVERY old owner bbox. Return native_owner_scope=PASS ONLY if ALL pixels in those old rectangles belong to this complete object OR its independently evidenced native page/card backing. Other icon strokes, independent text, connector/platform/label pixels, shadows belonging to neighbors, or any unknown content MUST FAIL or UNKNOWN. Those non-PNG pixels are an UNVERIFIED scope hypothesis, not known background. The after-delete view must also pass background_restoration. Missing this verdict blocks publication.',
             'detail_context_rule':'Red outlines show actual old-owner rectangles on SOURCE and AFTER DELETE. The detail image includes 32px of CONTEXT OUTSIDE those rectangles. Independent text/icons/connectors OUTSIDE red rectangles MUST remain and are NOT residuals. Judge backing/restoration only INSIDE old-owner rectangles, excluding the red annotation itself; compare context for preservation. These annotations are private review aids, never part of the PPT.',
+            'source_unmix_rule':'When source_unmix is non-null, the matte is independently estimated from ORIGINAL source and sampled backing, not the original design Alpha. Explicitly return source_unmix=PASS only if ORIGINAL source confirms complete object scope (including real white content and soft edges), real holes stay holes, no backdrop/independent text/neighbor is baked into the PNG, and EVERY old owner rectangle contains ONLY this object or plausible evidenced backing. Unknown/invented backing, missed white content, damaged glow, low-opacity opaque strokes or foreign pixels require FAIL/UNKNOWN. Red rectangles bound old scope; outside context MUST remain. Self-recomposition metrics are auxiliary, never proof of semantic correctness.',
             'image_order':['source','compiled_slide']+[r['id'] for r in rows]}
         cache=None
         if review_model and report.get('state_directory'):
-            semantic=[{k:r.get(k) for k in ('id','definition','asset_sha256','replaces','bbox','method','source_alpha_hole_hypothesis')}
+            semantic=[{k:r.get(k) for k in ('id','definition','asset_sha256','replaces','bbox','method','source_alpha_hole_hypothesis','source_unmix')}
                 for r in rows]
+            for item,row in zip(semantic,rows):item['source_unmix']=matte_evidence(row)
             key=fingerprint({'source':context['source_sha256'],'scene':context['scene_sha256'],'objects':semantic,
                 'images':[digest(p) for p in images],'model':review_model,'prompt':OBJECT_REVIEW_PROMPT,'contract':ObjectReview.model_json_schema()})
             cache=Path(report['state_directory'])/'review-cache'/key;cache.mkdir(parents=True,exist_ok=True)
@@ -110,19 +137,38 @@ def review_objects(source,preview,irfile,report,directory,ask,*,review_model=Non
     return verdicts
 
 
-def finalize(sources,irs,parents,reports,plans,output,compiler,ask,*,repair=None,reuse_office=None):
+def finalize(sources,irs,parents,reports,plans,output,compiler,ask,*,repair=None,reuse_office=None,parent_previews=None):
     """At most six assembly hypotheses; unresolved pages retain their parent.
 
     Compiler failures propagate, never becoming a quality pass. Go/service/Office
     failures roll back visual proposals before producing a safe deliverable.
     """
     output=Path(output);output.mkdir(parents=True,exist_ok=False)
+    if parent_previews is None and any(o.get('source_unmix') for r in reports if r for o in r['objects'] if o['status']=='STAGED'):
+        parent_plans=[effective_page(p,ir) for p,ir in zip(plans,parents)]
+        reference=compiler(parents,output/'parent-reference-build',parent_plans)
+        parent_scenes=output/'parent-reference-scenes.json'
+        write(parent_scenes,[{'objects':[],'scene_sha256':digest(ir),'slide_ir':str(ir)} for ir in parents])
+        parent_office=output/'parent-reference-office'
+        try:
+            with (output/'parent-reference-office.log').open('w') as log:
+                subprocess.run([sys.executable,str(Path(__file__).resolve().parents[1]/'office_objects.py'),str(reference['pptx']),str(parent_office),
+                    '--scenes',str(parent_scenes),'--per-object'],stdout=log,stderr=log,check=True,timeout=600,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+            parent_previews=[parent_office/f'page-{i+1:02d}-before.png' for i in range(len(parents))]
+        except (OSError,subprocess.SubprocessError):
+            for report in reports:
+                if not report:continue
+                for row in report['objects']:
+                    if row['status']=='STAGED':row.update(status='FALLBACK',reasons=['parent_reference_unavailable'])
+                report['publication']='ROLLED_BACK'
+            return reference,parents,parent_plans
     seen=[{digest(p)} for p in irs]
     for attempt in range(6):
         try:artifacts=compiler(irs,output/f'build-{attempt}',plans)
         except (RuntimeError,ValueError,OSError) as exc:
             if not any(r and any(o['status']=='STAGED' for o in r['objects']) for r in reports):raise
-            write(output/f'compile-rollback-{attempt}.json',{'error_type':type(exc).__name__,'parent_preserved':True})
+            write(output/f'compile-rollback-{attempt}.json',{'error_type':type(exc).__name__,'message':str(exc)[:400],'parent_preserved':True})
             for i,report in enumerate(reports):
                 if report:
                     for row in report['objects']:
@@ -157,6 +203,14 @@ def finalize(sources,irs,parents,reports,plans,output,compiler,ask,*,repair=None
             for i in range(len(plans)):shutil.copyfile(probe/f'page-{i+1:02d}-before.png',actual/f'page-{i+1:02d}.png')
             previews=sorted(actual.glob('*.png'));artifacts['preview']=str(actual)
             artifacts['powerpoint_checked']=True;artifacts['edit_probe']=str(probe/'report.json')
+            if parent_previews is not None:
+                if len(parent_previews)!=len(plans):raise ValueError('incomplete parent previews')
+                checks=[]
+                for i,report in enumerate(reports):
+                    if not report or not any(r['status']=='STAGED' for r in report['objects']):continue
+                    check=parent_region_check(parents[i],report,parent_previews[i],previews[i]);checks.append({'page':i+1,**check})
+                    if check['status']!='PASS':failed.add(i)
+                write(output/f'parent-region-regression-{attempt}.json',checks)
         except (OSError,ValueError,subprocess.SubprocessError):
             failed={i for i,r in enumerate(reports) if r and any(v['status']=='STAGED' for v in r['objects'])}
         for i,report in enumerate(reports):
@@ -181,7 +235,8 @@ def finalize(sources,irs,parents,reports,plans,output,compiler,ask,*,repair=None
                     report['publication']='STABLE'
                     report['automatic_quality']='REVIEW_REQUIRED' if report.get('inventory_missing_owner_ids') or any(r['status']=='FALLBACK' for r in report['objects']) else 'AUTOMATED_PASS'
                 return artifacts,irs,plans
-            except (OSError,ValueError,subprocess.SubprocessError):
+            except (OSError,ValueError,subprocess.SubprocessError) as exc:
+                write(output/f'publication-failure-{attempt}.json',{'error_type':type(exc).__name__,'message':str(exc)[:400]})
                 failed={i for i,r in enumerate(reports) if r and any(v['status']=='STAGED' for v in r['objects'])}
         for i in failed:
             values=verdicts.get(i)
@@ -195,7 +250,8 @@ def finalize(sources,irs,parents,reports,plans,output,compiler,ask,*,repair=None
                     for r in report['objects'] if r['status']=='STAGED'}
                 try:
                     ir,updated=extract_closed(report['plan_file'],report['layer_directory'],parents[i],output/f'candidate-{attempt}-{i:02d}',
-                        sam_dir=report.get('sam_directory'),registry=Path(report['state_directory'])/'registry',candidate_offsets=offsets,rejected=report.get('rejected_objects'))
+                        sam_dir=report.get('sam_directory'),registry=Path(report['state_directory'])/'registry',candidate_offsets=offsets,rejected=report.get('rejected_objects'),
+                        source_unmix_only=report.get('source_unmix_only',False),retained=report.get('retained_objects'))
                     updated['state_directory']=report['state_directory'];updated['publication']='STAGED_ONLY'
                     exhausted=[k for k,v in values.items() if not object_pass(next(r for r in report['objects'] if r['id']==k),v) and
                         not any(r['id']==k and r['status']=='STAGED' for r in updated['objects'])]

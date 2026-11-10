@@ -6,6 +6,7 @@
 <section id="provider" hidden><h2>连接模型</h2><p>在本机输入 API 密钥，仅保存在当前服务进程内存中；关闭服务后需重新输入。</p><form id="keyform"><select id="keyprovider"><option value="moma">MoMA · 规划</option><option value="opencode_go">OpenCode Go · 复核</option></select><input id="key" type="password" autocomplete="off" placeholder="API key" required><button>连接</button></form><p id="keymsg"></p></section>
 <section><form id="form"><input id="files" type="file" accept="image/png,image/jpeg,image/webp" multiple required>
 <small>每批 1–12 页，同一批图片尺寸需相同。按选择顺序排列。支持 PNG、JPEG、WebP。</small>
+<label>图标处理 <select id="objectStrategy"><option value="default">标准处理</option><option value="auto">标识与图标保真（试用）</option></select></label>
 <label><input id="consent" type="checkbox" required> 我同意将所选图片、生成预览和方案发送至 MoMA 与 OpenCode Go 进行处理。</label>
 <small>模型请求不设次数上限，可能产生费用；连续无改善会停止。允许忽略斜体差异，其余字体与版式仍需复核。</small>
 <p><button id="start">开始生成</button></p></form><p id="health"></p><button id="reconnect" type="button">重新配置模型</button></section>
@@ -31,7 +32,7 @@ for(const name of Object.keys(j.result.artifacts).filter(n=>n.endsWith('.png')).
 if(j.status==='QUALITY_FAILED')$('status').append('\n仍有问题的页面：'+(j.result.unresolved_pages||[]).join('、'));
 if(j.status==='FAILED')$('status').append('\n错误：'+(j.result?.error||'后台任务失败'));
 }catch(e){$('status').textContent=e.message;$('start').disabled=false}}
-$('form').onsubmit=async e=>{e.preventDefault();$('start').disabled=true;$('downloads').replaceChildren();$('result').hidden=false;try{const data=new FormData();for(const f of $('files').files)data.append('files',f);const j=await(await api('/api/jobs',{method:'POST',body:data})).json();sessionStorage.setItem('product-job',j.id);watch(j.id)}catch(e){$('status').textContent=e.message;$('start').disabled=false}};
+$('form').onsubmit=async e=>{e.preventDefault();$('start').disabled=true;$('downloads').replaceChildren();$('result').hidden=false;try{const data=new FormData();for(const f of $('files').files)data.append('files',f);const strategy=encodeURIComponent($('objectStrategy').value);const j=await(await api('/api/jobs?object_extraction='+strategy,{method:'POST',body:data})).json();sessionStorage.setItem('product-job',j.id);watch(j.id)}catch(e){$('status').textContent=e.message;$('start').disabled=false}};
 function health(){api('/api/health').then(r=>r.json()).then(j=>{$('health').textContent=j.model_ready?'MoMA 与 OpenCode Go 均已配置，可以上传。':'请连接规划与复核模型。';$('provider').hidden=j.model_ready;if(j.moma_configured&&!j.opencode_go_configured)$('keyprovider').value='opencode_go'}).catch(e=>$('health').textContent=e.message)}
 $('reconnect').onclick=()=>{$('provider').hidden=false;$('key').focus()};
 $('keyform').onsubmit=async e=>{e.preventDefault();try{await api('/api/provider-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:$('key').value,provider:$('keyprovider').value})});$('key').value='';health()}catch(e){$('keymsg').textContent=e.message}};health();

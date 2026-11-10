@@ -66,7 +66,7 @@ def run(args):
         if len(prior['slide_irs'])!=len(rows):raise ValueError('previous delivery page mismatch')
     offsets=json.loads(args.candidate_offsets.read_text(encoding='utf-8')) if args.candidate_offsets else {}
     focus=json.loads(args.focus_objects.read_text(encoding='utf-8')) if args.focus_objects else {}
-    actor=GoProvider(output)
+    actor=None if args.stage_only else GoProvider(output)
     prior_models={r['model'] for r in json.loads((args.resume_final.resolve()/'calls.json').read_text(encoding='utf-8')) if r['kind']=='final_page_review'} if prior else set()
     def ask(kind,system,context,images,contract):
         call={'kind':kind,'state':'RESERVED','model':actor.model,'started_at':time.time()};ledger.append(call);write(output/'calls.json',ledger)
@@ -108,7 +108,7 @@ def run(args):
             plan,_=read_plan(json.loads(planfile.read_text(encoding='utf-8')))
             parent_ir=json.loads(baseline.read_text(encoding='utf-8'));old=json.loads(history.read_text(encoding='utf-8'))
             if plan.source_sha256!=old['source_sha256'] or parent_ir['source_sha256']!=plan.source_sha256:raise ValueError('historical ledger source mismatch')
-            adapted,changes=adapt_owners(plan,parent_ir,old)
+            adapted,changes=adapt_owners(plan,parent_ir,old,closure=previous_report if prior else None)
             adaptedfile=directory/'adapted-plan.json';write(adaptedfile,adapted.model_dump())
             write(directory/'owner-adapter.json',{'schema':'HistoricalOwnerAdapter/1','raw_plan_sha256':digest(planfile),
                 'parent_ir_sha256':digest(baseline),'history_sha256':digest(history),'changes':changes})
@@ -120,12 +120,18 @@ def run(args):
                     if any(json.loads(p.read_text(encoding='utf-8')).get('plan_sha256')==digest(planfile) for p in receipts):
                         samdir=directory/'sam-rebound';rebind_sam(planfile,adaptedfile,candidate,samdir);break
             rejected={o.id:['retained_for_focused_regression'] for o in adapted.objects if str(number) in focus and o.id not in focus[str(number)]}
-            ir,report=extract_closed(adaptedfile,Path(row['directory'])/'layerd',baseline,directory/'stage',sam_dir=samdir,registry=state/'registry',candidate_offsets=offsets.get(str(number)),rejected=rejected)
+            retained={r['id']:r for r in previous_report['objects'] if r['status'] in ('STAGED','STABLE_REUSED')} if prior else {}
+            ir,report=extract_closed(adaptedfile,Path(row['directory'])/'layerd',baseline,directory/'stage',sam_dir=samdir,registry=state/'registry',candidate_offsets=offsets.get(str(number)),rejected=rejected,
+                source_unmix_only=args.source_unmix_only,retained=retained)
             report.update(state_directory=str(state),publication='STAGED_ONLY')
         except (ValueError,KeyError,OSError) as exc:
             write(directory/'fallback.json',{'error_type':type(exc).__name__,'message':str(exc)[:800],'parent_preserved':True})
         irs.append(ir);plans.append(effective_page(page,ir));reports.append(report)
         print(json.dumps({'stage_page':number,'staged':sum(r['status']=='STAGED' for r in report['objects'])}),flush=True)
+    if args.stage_only:
+        write(output/'stage-result.json',{'reports':reports,'slide_irs':[str(p) for p in irs],
+            'source_unmix_only':args.source_unmix_only,'human_acceptance':False,'publication':'STAGED_ONLY'})
+        return
     compile_deck=compile_pages
     if args.resume_stage:
         previous=args.resume_stage.resolve()/'gates/build-0'
@@ -142,7 +148,8 @@ def run(args):
     artifacts,irs,plans=finalize(sources,irs,parents,reports,plans,output/'gates',compile_deck,
         lambda i,source,preview,ir,report,path:review_objects(source,preview,ir,report,path,
             lambda context,images,contract:ask('object_review',OBJECT_REVIEW_PROMPT,context,images,contract),review_model=actor.model),
-        reuse_office=args.resume_stage.resolve()/'gates/office-0' if args.resume_stage else None)
+        reuse_office=args.resume_stage.resolve()/'gates/office-0' if args.resume_stage else None,
+        parent_previews=[Path(prior['delivery'])/f'page-{i:02d}.png' for i in range(1,len(rows)+1)] if prior else None)
     verify_package(artifacts['pptx'],plans)
     actual=output/'actual-office';export_office(artifacts['pptx'],actual)
     reviews=[]
@@ -178,4 +185,4 @@ if __name__=='__main__':
     for name in ('input','live','parent','output'):p.add_argument('--'+name,type=Path,required=True)
     p.add_argument('--go-key-stdin',action='store_true');p.add_argument('--wait',action='store_true');p.add_argument('--resume-stage',type=Path)
     p.add_argument('--resume-final',type=Path);p.add_argument('--refresh-pages',type=int,nargs='+',default=[])
-    p.add_argument('--candidate-offsets',type=Path);p.add_argument('--focus-objects',type=Path);run(p.parse_args())
+    p.add_argument('--candidate-offsets',type=Path);p.add_argument('--focus-objects',type=Path);p.add_argument('--source-unmix-only',action='store_true');p.add_argument('--stage-only',action='store_true');run(p.parse_args())

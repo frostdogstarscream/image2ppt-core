@@ -19,7 +19,7 @@ for directory in ('services/planner/src','services/vision/src','services/windows
     sys.path.insert(0,str(ROOT/directory))
 from image2ppt_planner.config import Settings
 from image2ppt_planner.client import MomaClient, strip_code_fence
-from image2ppt_vision.conversion import _compiler, _final_json, _compiled_artifacts
+from image2ppt_vision.conversion import _compiler, _final_json, _compiled_artifacts, ConversionError
 from .contracts import Page, Review
 from .fonts import font_manifest
 from .materialize import digest, write, materialize, verify_package
@@ -92,17 +92,45 @@ class Provider:
             raise ValueError('model response is not JSON') from None
 
 
+def compiler_runtime():
+    """Match image2ppt.ps1's bundled Node, retaining explicit caller overrides."""
+    if os.environ.get('VISION_NODE'):return _compiler(ROOT)
+    preferred=os.environ.get('IMAGE2PPT_NODE')
+    if preferred:
+        selected=Path(shutil.which(preferred) or preferred).expanduser().resolve()
+        if not selected.is_file() or selected.suffix.lower() in ('.cmd','.bat','.ps1','.sh'):
+            raise PipelineError('invalid_node_executable')
+    else:
+        executable='node.exe' if os.name=='nt' else 'node'
+        selected=next((p for p in (Path.home()/'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin'/executable,
+            ROOT/'.runtime/bundle/codex-primary-runtime/dependencies/node/bin'/executable) if p.is_file()),None)
+    try:compiler,node=_compiler(ROOT)
+    except ConversionError as exc:
+        # _compiler checks fixed compiler files before resolving its executable.
+        if str(exc)!='node_executable_missing' or selected is None:raise
+        compiler,node=ROOT,selected
+    return compiler,selected or node
+
+
 def compile_pages(irs, output, pages):
-    compiler,node=_compiler(ROOT)
+    compiler,node=compiler_runtime()
     output.mkdir(parents=True,exist_ok=False)
     write(output/'input-irs.json',[str(Path(p).resolve()) for p in irs])
     command=[str(node),str(ROOT/'services/product/compose_objects.mjs'),str((output/'input-irs.json').resolve()),str(output.resolve())]
-    with (output/'compiler.stdout').open('w',encoding='utf-8') as stdout, (output/'compiler.stderr').open('w',encoding='utf-8') as stderr:
-        try:
-            result=subprocess.run(command,cwd=ROOT,stdout=stdout,stderr=stderr,timeout=1800,
-                                  creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-        except subprocess.TimeoutExpired:
-            raise PipelineError('compiler_timeout') from None
+    for attempt in range(2):
+        with (output/'compiler.stdout').open('w',encoding='utf-8') as stdout, (output/'compiler.stderr').open('w',encoding='utf-8') as stderr:
+            try:
+                result=subprocess.run(command,cwd=ROOT,stdout=stdout,stderr=stderr,timeout=1800,
+                                      creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+            except subprocess.TimeoutExpired:
+                raise PipelineError('compiler_timeout') from None
+        if not result.returncode:break
+        error=(output/'compiler.stderr').read_text(encoding='utf-8',errors='replace')
+        transient='ETIMEDOUT' in error and 'verifyFirstPartyImport' in error and 'spawnSync' in error
+        if attempt or not transient:break
+        for name in ('stdout','stderr'):shutil.copyfile(output/('compiler.'+name),output/('compiler-attempt-0.'+name))
+        write(output/'compile-retry-0.json',{'reason':'first_party_import_timeout','node':str(node),
+            'stderr_sha256':digest(output/'compiler-attempt-0.stderr')})
     if result.returncode:
         raise PipelineError('fixed_compiler_failed')
     artifacts=_compiled_artifacts(_final_json((output/'compiler.stdout').read_bytes()),output,len(pages))

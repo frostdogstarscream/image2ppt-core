@@ -11,6 +11,7 @@ from .object_contracts import read_plan
 from .object_extract import rectangle,visible_rgba,load_sam,load_page,recompose
 from .object_ownership import text_evidence,replacement_proof
 from .object_registry import Registry,pixel_key,scene_key,SAM_BINDING
+from .object_unmix import binding as unmix_binding
 
 
 def components(alpha,parts,exclusions,size):
@@ -95,7 +96,7 @@ def replace(ir,obj,row):
     return candidate
 
 
-def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=None,rejected=None,candidate_offsets=None):
+def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=None,rejected=None,candidate_offsets=None,source_unmix_only=False,retained=None):
     output=Path(output);output.mkdir(parents=True,exist_ok=False)
     baseline_ir=Path(baseline_ir);planfile=Path(planfile)
     raw=json.loads(planfile.read_text(encoding='utf-8'));plan,legacy=read_plan(raw)
@@ -120,11 +121,12 @@ def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=
     Image.fromarray(np.where(hard,1,np.where(unknown,4,0)).astype('uint8')).save(output/'text-ownership.png')
     original=copy.deepcopy(ir);records=[];prepared={};reserved=np.zeros_like(hard);prep_owners={}
     registry=Registry(registry) if registry else None
+    matte_binding=unmix_binding()
     # Compute good Alpha ownership for ALL objects before any SAM candidate.
     for obj in plan.objects:
         if not set(obj.layers)<=set(names) or any(not set(p.layers)<=set(names) for p in obj.exclusions):continue
         if registry:
-            stable=registry.lookup(pixel_key(plan.source_sha256,layer_hashes,obj)) or registry.lookup(pixel_key(plan.source_sha256,layer_hashes,obj,SAM_BINDING))
+            stable=registry.lookup(pixel_key(plan.source_sha256,layer_hashes,obj)) or registry.lookup(pixel_key(plan.source_sha256,layer_hashes,obj,SAM_BINDING)) or registry.lookup(pixel_key(plan.source_sha256,layer_hashes,obj,matte_binding))
             if stable:
                 locked=np.zeros_like(layers[0]);x,y,w,h=stable['bbox']
                 locked[y:y+h,x:x+w]=np.array(Image.open(registry.asset(stable)).convert('RGBA'))
@@ -136,6 +138,13 @@ def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=
             if complete:prepared[obj.id]=rgba;reserved|=support
     occupied=np.zeros_like(hard);owner_cache={}
     for obj in plan.objects:
+        if obj.id in (retained or {}):
+            previous=copy.deepcopy(retained[obj.id]);node=next((n for n in ir['nodes'] if n['id']=='extracted-'+obj.id),None)
+            if node is None or node['bbox']!=previous['bbox']:raise ValueError('retained object scene changed')
+            asset=next(a for a in ir['assets'] if a['id']==node['asset_id'])
+            if asset.get('sha256')!=previous['asset_sha256']:raise ValueError('retained object bytes changed')
+            previous.update(status='STABLE_REUSED',asset=asset['path'],retained_parent_sha256=digest(baseline_ir))
+            records.append(previous);continue
         row={'id':obj.id,'kind':obj.kind,'replaces':obj.replaces,'status':'FALLBACK','quality':'REVIEW_REQUIRED',
             'human_acceptance':False,'candidates':[],'reasons':[],'legacy_adapter':legacy}
         row['definition']=obj.model_dump()
@@ -145,9 +154,10 @@ def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=
         # Even an unselected higher layer attenuates visible source contribution.
         key=pixel_key(plan.source_sha256,layer_hashes,obj)
         sam_key=pixel_key(plan.source_sha256,layer_hashes,obj,SAM_BINDING)
+        matte_key=pixel_key(plan.source_sha256,layer_hashes,obj,matte_binding)
         row['pixel_key']=key;row['scene_key']=scene_key(original)
         choices=[]
-        cached=(registry.lookup(key) or registry.lookup(sam_key)) if registry else None
+        cached=(registry.lookup(key) or registry.lookup(sam_key) or registry.lookup(matte_key)) if registry else None
         if cached:
             if cached.get('background_assets'):
                 row['background_assets']=[];row['background_reuse']=True
@@ -165,7 +175,17 @@ def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=
             rgba=np.zeros_like(layers[0]);x,y,w,h=cached['bbox'];rgba[y:y+h,x:x+w]=np.array(Image.open(registry.asset(cached)).convert('RGBA'))
             choices.append(('stable-reuse',rgba,{},[]))
         rgba,bad,missing=assemble(obj,layers,names,page.size)
-        choices.append(('alpha',rgba,bad,missing))
+        if not cached:choices.append(('alpha',rgba,bad,missing))
+        matte=None;matte_meta=None;matte_backgrounds=None
+        if not cached:
+            from .object_unmix import candidate as unmix_candidate
+            own=prepared.get(obj.id,np.zeros_like(rgba))[...,3]>0
+            try:
+                matte,matte_meta,matte_backgrounds,estimate,matte_mask=unmix_candidate(obj,source,original,output,
+                    hard|unknown|(reserved & ~own),other_objects=plan.objects)
+                np.savez_compressed(output/('source-unmix-'+obj.id+'.npz'),background=estimate,mask=matte_mask)
+                choices.append(('source-unmix',matte,{},[]))
+            except ValueError as exc:row['source_unmix_error']=str(exc)
         def white_assembly(base):
             nonlocal all_source_rgba
             owned=base[...,3]>0;closed=enclosed_ownership(owned);holes=closed & ~owned & ~reserved
@@ -205,6 +225,13 @@ def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=
         if not cached and sam_dir:
             masks,error=load_sam(sam_dir,obj,plan.source_sha256,digest(planfile),page.size,'sam3',individual=True)
             row['sam_error']=error
+            if masks:
+                # Keep space for the independent raw SAM, backing-scope and
+                # white-content hypotheses. A new source matte must not crowd
+                # out the white-content candidate that previously fixed clouds.
+                priority={'alpha':0,'source-unmix':1,'alpha-source-alpha-holes-native-owner-bg':2,
+                    'alpha-native-owner-bg':3,'alpha-native-bg':4}
+                choices=sorted(choices,key=lambda c:priority.get(c[0],5))[:3]
             for value in (masks or []):
                 if len(choices)>=6:break
                 rgba,bad,missing=assemble(obj,layers,names,page.size,value['mask'],reserved)
@@ -232,12 +259,13 @@ def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=
                             interior&=~reserved
                             rgba[interior]=all_source_rgba[interior]
                     choices.append(('sam3-mask-'+str(value['index'])+'-source-alpha-holes-native-owner-bg',rgba,bad,missing))
+        if source_unmix_only and not cached:choices=[choice for choice in choices if choice[0]=='source-unmix']
         seen=set()
         for index,(method,rgba,bad,missing) in enumerate(choices[:6]):
             support=rgba[...,3]>0;problems=[]
             import hashlib
             pixels_hash=hashlib.sha256(rgba.tobytes()).hexdigest()
-            identity=(pixels_hash,method.endswith('-native-bg'),method.endswith('-native-owner-bg'),method.startswith('sam'))
+            identity=(pixels_hash,method.endswith('-native-bg'),method.endswith('-native-owner-bg'),method.startswith('sam'),method=='source-unmix')
             if identity in seen:continue
             seen.add(identity)
             if not support.any():problems.append('no_visible_pixels')
@@ -255,12 +283,14 @@ def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=
             ok,reason,proof=replacement_proof(ir,obj,support,output,source,page.size,owner_cache,
                 {b['id']:b['sha256'] for b in row.get('background_assets',[])})
             backgrounds=None
-            if not ok and reason=='replacement_contains_other_content':
+            if method=='source-unmix' and (ok or reason=='replacement_contains_other_content'):
+                backgrounds=matte_backgrounds
+            elif not ok and reason=='replacement_contains_other_content':
                 from .object_background import restoration
                 backgrounds=restoration(ir,obj,rgba,layers,names,output,source,hard,unknown,
                     native=method.endswith(('-native-bg','-native-owner-bg')),owner_scope=method.endswith('-native-owner-bg'))
             if not ok and not backgrounds:problems.append(reason)
-            mae=float(np.abs(composite-source.astype('int16'))[support].mean()) if support.any() else None
+            mae=matte_meta['reconstruction_mae'] if method=='source-unmix' else (float(np.abs(composite-source.astype('int16'))[support].mean()) if support.any() else None)
             if mae is None or mae>10:problems.append('source_fidelity')
             stem=f'candidate-{obj.id}-{index:02d}'
             # Retain full RGBA/ownership, including failed hypotheses, privately.
@@ -275,6 +305,7 @@ def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=
             if method=='stable-reuse':shutil.copyfile(registry.asset(cached),file)
             row.update(status='STAGED',method=method,bbox=box,asset=file.name,asset_sha256=digest(file),selected_index=index)
             row['source_alpha_hole_hypothesis']=cached.get('source_alpha_hole_hypothesis',False) if method=='stable-reuse' else '-source-alpha-holes' in method
+            row['source_unmix']=cached.get('source_unmix') if method=='stable-reuse' else (matte_meta if method=='source-unmix' else None)
             if row['source_alpha_hole_hypothesis']:row['additional_layer_ownership']='Enclosed source pixels only; independent white-content review required'
             if backgrounds:
                 row['background_assets']=[]
@@ -282,9 +313,13 @@ def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=
                     bgfile=output/(bg['id']+'.png');Image.fromarray(bg.pop('rgba')).save(bgfile)
                     row['background_assets'].append({**bg,'file':bgfile.name,'sha256':digest(bgfile)})
             if method.startswith('sam'):row['pixel_key']=sam_key
-            if method=='stable-reuse' and cached:row['pixel_key']=key if registry.lookup(key) else sam_key
+            if method=='source-unmix':row['pixel_key']=matte_key
+            if method=='stable-reuse' and cached:row['pixel_key']=next(k for k in (key,sam_key,matte_key) if registry.lookup(k))
             ir=replace(ir,obj,row);occupied|=support;break
-        if row['status']=='FALLBACK':row['reasons']=sorted({p for c in row['candidates'] for p in c['reasons']}) or ['no_candidate']
+        if row['status']=='FALLBACK':
+            reasons={p for c in row['candidates'] for p in c['reasons']}
+            if row.get('source_unmix_error'):reasons.add(row['source_unmix_error'])
+            row['reasons']=sorted(reasons) or ['no_candidate']
     text_fields=lambda value:[{k:v for k,v in n.items() if k!='z'} for n in value['nodes'] if n['type']=='text']
     if text_fields(ir)!=text_fields(original):raise ValueError('text changed')
     file=output/'slideir.json';write(file,ir)
@@ -305,6 +340,7 @@ def extract_closed(planfile,layerdir,baseline_ir,output,*,sam_dir=None,registry=
         'plan_file':str(planfile.resolve()),'layer_directory':str(Path(layerdir).resolve()),'baseline_ir':str(baseline_ir.resolve()),'sam_directory':str(Path(sam_dir).resolve()) if sam_dir else None,
         'staged':sum(r['status']=='STAGED' for r in records),'fallback':sum(r['status']=='FALLBACK' for r in records),
         'rejected_objects':rejected or {},
+        'source_unmix_only':source_unmix_only,'retained_objects':retained or {},
         'human_acceptance':False,'automatic_quality':'REVIEW_REQUIRED'}
     write(output/'closure.json',report)
     return file,report

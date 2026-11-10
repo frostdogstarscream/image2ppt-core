@@ -86,6 +86,7 @@ class Registry:
             if r.get('source_alpha_hole_hypothesis') and verdict.get('white_content_assembly')!='PASS':raise ValueError('white content ownership unverified')
             if any(b.get('native_owner_scope_hypothesis') for b in r.get('background_assets',[])) and verdict.get('native_owner_scope')!='PASS':
                 raise ValueError('old crop scope ownership unverified')
+            if r.get('source_unmix') and verdict.get('source_unmix')!='PASS':raise ValueError('source matte ownership unverified')
         updated=copy.deepcopy(parent)
         for r in records:
             if r.get('status')!='STAGED':continue
@@ -105,6 +106,7 @@ class Registry:
                 'owners':r['replaces'],'scene_key':r['scene_key'],'quality':'AUTOMATED_PASS','human_acceptance':False,
                 'background_assets':r.get('background_assets',[]),
                 'source_alpha_hole_hypothesis':r.get('source_alpha_hole_hypothesis',False),
+                'source_unmix':r.get('source_unmix'),
                 'evidence':evidence[r['id']]}
         # Last check immediately before atomic replace; caller serializes job writes.
         if self.current()['generation']!=expected_generation:raise ValueError('concurrent object commit')

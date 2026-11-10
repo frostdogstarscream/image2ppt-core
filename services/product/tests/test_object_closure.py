@@ -252,7 +252,7 @@ def test_white_and_background_unknown_never_pass_by_default():
 def test_native_background_candidate_keeps_non_owned_pixels_and_soft_foreground(tmp_path):
     layers,base,file=prepared(tmp_path);ir=json.loads((base/'slideir.json').read_text())
     ir['background']={'color':'F0F0F0'};write(base/'slideir.json',ir)
-    result,report=extract_closed(file,layers,base/'slideir.json',tmp_path/'out',candidate_offsets={'icon':1})
+    result,report=extract_closed(file,layers,base/'slideir.json',tmp_path/'out',candidate_offsets={'icon':2})
     row=report['objects'][0];assert row['status']=='STAGED' and row['method']=='alpha-native-bg'
     bg=row['background_assets'][0];assert bg['backing_method']=='verified_native_fill'
     patch=np.array(Image.open(result.parent/bg['file']))
@@ -269,7 +269,7 @@ def test_whole_old_crop_scope_is_separate_unverified_hypothesis(tmp_path):
     from product.object_finalize import object_pass
     layers,base,file=prepared(tmp_path);ir=json.loads((base/'slideir.json').read_text())
     ir['background']={'color':'F0F0F0'};write(base/'slideir.json',ir)
-    result,report=extract_closed(file,layers,base/'slideir.json',tmp_path/'out',candidate_offsets={'icon':2})
+    result,report=extract_closed(file,layers,base/'slideir.json',tmp_path/'out',candidate_offsets={'icon':3})
     row=report['objects'][0];assert row['method']=='alpha-native-owner-bg'
     bg=row['background_assets'][0];assert bg['native_owner_scope_hypothesis']
     assert not bg['non_owned_pixels_unchanged'] and bg['unverified_old_scope_pixels']>0

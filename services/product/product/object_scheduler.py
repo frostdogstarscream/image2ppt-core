@@ -7,6 +7,8 @@ from .object_registry import fingerprint
 
 def repair_route(reasons):
     values=set(reasons)
+    if values & {'unmix_scope_cuts_foreground','unmix_owner_unsupported','unmix_owner_not_source_crop','unmix_old_owner_text_or_locked_pixels'}:return 'replan_owners'
+    if values & {'unmix_protected_content','unmix_old_owner_neighbor'}:return 'joint_arbitration'
     if values & {'wrong_layer_selected','unknown_layer'} or ('no_visible_pixels' in values and 'ambiguous_components' not in values):return 'replan_layers'
     if values & {'protected_text_ink','uncertain_text_ownership'}:return 'local_text_evidence'
     if values & {'incomplete_owner_set','replacement_contains_other_content','shape_not_wholly_owned','group_transaction_requires_group_preservation'}:return 'replan_owners'

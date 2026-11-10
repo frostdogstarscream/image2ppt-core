@@ -7,16 +7,30 @@ from .materialize import digest,write
 from .object_contracts import read_plan
 
 
-def adapt_owners(plan,ir,history):
+def adapt_owners(plan,ir,history,*,closure=None):
     present={n['id'] for n in ir['nodes']};payload=plan.model_dump();changes=[]
+    old={('extracted-'+r['id']):set(r['replaces']) for r in history['objects'] if r['status']=='EXTRACTED'}
+    def expanded(owners,trail=frozenset()):
+        leaves=set()
+        for owner in owners:
+            if owner in old and owner not in trail:leaves|=expanded(old[owner],trail|{owner})
+            else:leaves.add(owner)
+        return leaves
+    current=[{'node':node,'leaves':expanded(owners)} for node,owners in old.items() if node in present]
+    if closure:
+        for row in closure['objects']:
+            node='extracted-'+row['id']
+            if row['status'] not in ('STAGED','STABLE_REUSED') or node not in present:continue
+            current=[r for r in current if r['node']!=node]
+            current.append({'node':node,'leaves':expanded(row.get('definition',{}).get('replaces',row['replaces']))})
     for obj in payload['objects']:
-        original=set(obj['replaces']);mapped=[]
+        original=expanded(obj['replaces']);mapped=[]
         for owner in obj['replaces']:
             if owner in present:mapped.append(owner);continue
-            matches=[r for r in history['objects'] if r['status']=='EXTRACTED' and owner in r['replaces']]
+            leaves=expanded([owner]);matches=[r for r in current if r['leaves'] & leaves]
             if len(matches)!=1:raise ValueError('ambiguous historical owner')
-            previous=matches[0];node='extracted-'+previous['id']
-            if node not in present or not set(previous['replaces'])<=original:raise ValueError('cannot split historical complete owner')
+            previous=matches[0];node=previous['node']
+            if not previous['leaves']<=original:raise ValueError('cannot split historical complete owner')
             if node not in mapped:mapped.append(node)
         if mapped!=obj['replaces']:
             changes.append({'id':obj['id'],'from':obj['replaces'],'to':mapped})
