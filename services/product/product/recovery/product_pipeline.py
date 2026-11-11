@@ -155,6 +155,59 @@ def select_adaptive(graph,identifier,snap,source,saved,folder,current,fonts,font
         stream.close()
 
 
+def expand_assets(graph, current, source, layers, folder, fonts, compiler, office):
+    """Stage independent complete icons sequentially, then batch changed-object QA."""
+    from .asset_retry import retry_asset_extraction
+    from .agent_asset_stage import stage_asset_candidate
+    rows=[];added=[]
+    for number,obj in enumerate(graph.asset.objects):
+        latest=SceneGraph.model_validate_json((current.parent/'scene.json').read_text('utf8'))
+        if obj.id in latest.selected or obj.kind!='icon':continue
+        root=folder/'ax'/str(number)
+        row={'object_id':obj.id,'state':'LOCAL_FALLBACK','office':'NOT_RUN'}
+        rows.append(row)
+        try:
+            result=retry_asset_extraction(latest,obj.id,source,layers,current.parent,root/'c')
+            row.update(result)
+            if result['status']!='CANDIDATE_READY':continue
+            current=stage_asset_candidate(result['candidate_directory'],latest,current.parent,root/'s',layer_directory=layers)
+            row.update(state='STAGED_LOCAL',ir=str(current))
+            added.append(obj.id)
+        except Exception as exc:
+            row.update(failure=failure(exc,'generation'),reason=str(exc)[:400])
+    if added:
+        latest=SceneGraph.model_validate_json((current.parent/'scene.json').read_text('utf8'))
+        try:
+            with lease('compiler'):
+                artifacts=compiler([current],folder/'ax-package',[effective_texts(latest,current)])
+            with lease('office'):
+                receipt=(office or inspect)(artifacts['pptx'],[current],folder/'ax-office',target_ids=added)
+            residuals=inspect_residuals(current,folder/'ax-office',1,folder/'ax-residuals.json')
+            bad={r['id'] for r in residuals if r['id'] in added and r['residual_check_status']=='FAIL'}
+            unknown={r['id'] for r in residuals if r['id'] in added and r['residual_check_status']=='UNKNOWN'}
+            unknown |= set(added)-{r['id'] for r in residuals}
+            if receipt.get('status')=='UNKNOWN':
+                raise RecoveryBlocked('QA_INFRASTRUCTURE_UNAVAILABLE','new asset Office batch unavailable')
+            if receipt.get('status')!='PASS_APP_AUTOMATED':raise ValueError('new asset Office batch failed')
+            for row in rows:
+                if row['object_id'] in added:
+                    if row['object_id'] in unknown:
+                        row.update(state='STAGED_LOCAL',office='UNKNOWN',failure='QA_INFRASTRUCTURE_UNAVAILABLE')
+                    else:
+                        row.update(state='VERIFIED_LOCAL' if row['object_id'] not in bad else 'LOCAL_FALLBACK',office='PASS' if row['object_id'] not in bad else 'FAIL')
+            if bad:current=rollback(graph,current.parent,bad,folder/'ax-rollback','OFFICE_VALIDATION_FAILED')
+        except Exception as exc:
+            affected={getattr(exc,'object_id',None)} & set(added)
+            if affected:
+                current=rollback(graph,current.parent,affected,folder/'ax-rollback','OFFICE_VALIDATION_FAILED')
+            for row in rows:
+                if row['object_id'] in added:
+                    row.update(office='UNKNOWN',failure=failure(exc,'office'),reason=str(exc)[:400])
+                    if row['object_id'] in affected:row['state']='LOCAL_FALLBACK'
+    write(folder/'asset-expansion.json',rows)
+    return current,rows
+
+
 def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,reviewer,office=None,progress=None,shadow=False):
     from ..pipeline import effective_findings
     adaptive=request.get('regional_strategy','adaptive')=='adaptive'
@@ -195,6 +248,18 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
                 saved,_=layer_evidence(snap,root/'layer-cache')
             except Exception:saved=None
         current=ir;state=[];font_choices={};region_records,by_id=regions(graph)
+        seed_file=job/f'page-{index+1:02d}'/'verified-seed.json'
+        if seed_file.is_file():
+            seed=json.loads(seed_file.read_text('utf8'))
+            for prior in seed['regions']:
+                reused=dict(prior)
+                reused.update(ir=str(ir),reused_from_verified_delivery=seed['source_job'],
+                              quality='PENDING_FINAL_REVIEW',attempts=[])
+                state.append(reused)
+                font_choices[next(t.style for t in graph.text.texts if t.id==prior['object_id'])]=prior.get('font')
+            targets=[identifier for identifier in targets if identifier not in {r['object_id'] for r in state}]
+        if request.get('retry_assets') and saved and not shadow:
+            current,asset_rows=expand_assets(graph,current,snap['path'],saved,folder,fonts,compiler,office)
         write(folder/'dependencies.json',region_records)
         for identifier in targets:
             if goal is not None and sum(r['state']=='VERIFIED_LOCAL' for r in state)>=goal:
@@ -290,7 +355,7 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
                 proof_root=acceptance.parent
                 record['verified_files']={str(p.resolve()):digest(p) for p in proof_root.rglob('*') if p.is_file()}
             except Exception as exc:
-                record.update(failure=failure(exc,'generation'),error_type=type(exc).__name__)
+                record.update(failure=failure(exc,'generation'),error_type=type(exc).__name__,reason=str(exc)[:400])
             finally:
                 if binding and record['state']=='LOCAL_FALLBACK' and not record.get('resumed_from_failure_receipt'):
                     record.update(reconstruction_binding=binding,parent_ir_sha256=parent_ir_sha)
@@ -445,7 +510,7 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
             if p.is_file():files[str(p.resolve())]=digest(p)
     for p in job.glob('page-*/perception-replay.json'):files[str(p.resolve())]=digest(p)
     for p in job.glob('page-*/barrier-1.json'):files[str(p.resolve())]=digest(p)
-    for pattern in ('page-*/asset-coordinate-report.json','page-*/agent/**/*'):
+    for pattern in ('page-*/asset-coordinate-report.json','page-*/agent/**/*','page-*/verified-seed.json'):
         for p in job.glob(pattern):
             if p.is_file():files[str(p.resolve())]=digest(p)
     if request.get('perception_replay'):files[str(Path(request['perception_replay']).resolve())]=digest(request['perception_replay'])

@@ -10,6 +10,16 @@ Go 或 Office 基础设施故障会保留独立区域候选并记录 UNKNOWN。�
 
 `run_r12_product_regression.py` 调用同一正式入口，可通过源图／三分支／OCR 哈希回放已有感知证据。其记录明确标注 `hash-bound-recorded-branches`，不计作一次新的上传感知验收。故障注入参数只存在于此测试驱动中。
 
+## R12-05 局部扩展与工具目录
+
+冻结扩展可用 `run_r1204_regression.py --from-job <verified-job> --reuse-verified --retry-assets --text-region-goal 8`。复用前核对不可变 generation、源图、文字定义、Owner、依赖关系、已用字体文件与原 PNG 字节。旧文字候选直接载入，最终组合继续执行实际 Office 和 Go。`--retry-assets` 顺序使用最新父场景重提取完整独立 icon，通过源组件、受限 halo 与 Owner 复算后暂存，再批量检查新增图片。缺少或 UNKNOWN 的编辑／残影收据保留暂存状态，明确失败按依赖闭包局部回退。
+
+`run_local.py` 同时支持 `--retry-assets`、`--reuse-perception-from <job>`、`--reuse-verified-from <job>`。新上传先使用 `--fresh-perception`。同次上传发生工具故障时，可保留原始感知证据并仅补跑失败分支。复用文字与版面证据的续跑须在验收记录中写明来源，完整感知是否完成以三条分支的实际收据为准。
+
+`run_r1205_agent.py --job <job> --layers <layers> --skill <installed-image2ppt-auto-agent> --kind text|asset --output <new-output> --prompt-key` 执行已有 RegionalRepairAgent。文字模式需要真实 `--failure` 收据。素材模式可从原 source-owner 闭包失败事务自动发现目标。工具目录提供 `retry_text_mask_completion`、`switch_background_candidate`、`retry_asset_extraction`，宿主仅注册真实可执行回调。背景切换额外需要 `--rejected-candidate` 和 `--rejection-report`。每次最多两次 VLM 决策、一次工具执行，候选就绪后继续由实际 Office 和 Go 决定最终质量。
+
+`run_text_coverage_scan.py` 对全部尚未验证的文字执行 L1 扫描并记录逐对象阻塞。独立图片须完整通过源图、RGBA、保护区域、Owner 及重合成验证。素材批次的实际编译和 Office 包次数同时进入现有 adaptive_usage 计数器。background_candidates 统计文字背景，PNG 候选另记，比较成本时需注明两种候选的范围。相关真实记录见 `docs/acceptance/r12-05.json`。
+
 ## R12-03 自适应执行
 
 `r12-regional` 默认采用 `regional_strategy=adaptive`。可信 LayerD 下层、连续背景拟合、Big LaMa 按需推进，首个通过源像素、邻居保护、实际 Office 编辑与残影门禁的区域候选即停止搜索。页内文字优先使用三分支已经选择并统一校准的已安装字体，不再为每段正文运行多字体 Office 排名。最终组合仍须独立验收。`regional_strategy=exhaustive` 保留上一版完整比较路径，`r12-shadow` 继续保留原交付基础。

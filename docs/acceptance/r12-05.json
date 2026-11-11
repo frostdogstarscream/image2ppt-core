@@ -1,0 +1,3652 @@
+{
+  "background_switch_l1": {
+    "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-background-switch-case\\summary.json",
+    "sha256": "935c808a3b6ebb4fb8b6a8134ed6902868b57ccbd6ec80e3771ac043d437b6fa",
+    "report": {
+      "object_id": "t-14",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "before": {
+        "status": "REVIEW_REQUIRED",
+        "remaining_source_signal_pixels": 1063,
+        "complete_visible_scope": true,
+        "scope_error_p95_rgb": 25.0,
+        "candidate_hashes": {
+          "difference_map.png": "56a97b5cf1f38f799fdaa422b48feeebc57ee3cdc4ad90b64541d1f5b97774b8",
+          "mask.png": "afac3528ca4b91fe0d92ab826733c38e15afb4f2411428a5b4d19fc12205ba3e",
+          "raw_crop.png": "f67c726f1020eaef8e28529d1f255b4cb748e4f933d96608502ff4ea6110c635",
+          "raw_inpaint.png": "69eb41076818677e63a58bf2401605142f134f88f7eb5143c8c6ec8ed9314c41",
+          "residual_map.png": "008323f74503142dfaa550f00cd8760b4609ea12b06341237a067eef35645a67",
+          "residual_report.json": "85cb697252e9fee583a9dcf194f54322adbeeff4f3dd4bc30dcc67baf5c31fe7",
+          "source.png": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "source_crop.png": "fc85df3de1432024fb00b86b91952a6333aba1c8e5437ffa55d169afd3b821a9",
+          "written_back.png": "94adba4cc745db9f89a43d02444591a78a9dd839ea71d0a99ed85594a569f241",
+          "written_crop.png": "4ba1abb00d550668d3b606ac24d57d8b5ceff19bc68970d9d87b0147469ecaa1"
+        }
+      },
+      "after": {
+        "state": "STAGED_LOCAL",
+        "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-background-switch-case\\switch\\text-fce93e3a308a5483b83e0325\\backgrounds\\semantic_completion--layerd-2",
+        "remaining_source_signal_pixels": 0,
+        "protected_changed_pixels": 0,
+        "scope_error_p95_rgb": 3.0,
+        "candidate_hashes": {
+          "difference_map.png": "fffbec8a5e062dd98c843347fa0a202a554c780d7fc2d45d9816ae52881c26c7",
+          "mask.png": "afac3528ca4b91fe0d92ab826733c38e15afb4f2411428a5b4d19fc12205ba3e",
+          "raw_crop.png": "4d761f664f684ce94d2e5f402466d9134e1f6d3cc997c71b16ebc9c38b089963",
+          "raw_inpaint.png": "00aca87af8a40c0d03081fa4ecb0f16ba115dfae139837a1a403a32db86706e8",
+          "residual_map.png": "d66092c2077b9ed12b0d01ac313e28ff8ea20d55d288e875eea46e1d7f491535",
+          "residual_report.json": "bb4f5a2e16a49a194fdba95b25bf71e47234b3ddb653d7cea85f033d1d952e43",
+          "source.png": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "source_crop.png": "fc85df3de1432024fb00b86b91952a6333aba1c8e5437ffa55d169afd3b821a9",
+          "written_back.png": "92163153d00e4e41f82b71931b4d1965ffeea5ebd7f3b05308f5411987a5b56f",
+          "written_crop.png": "176a5984df4d7d8553094dfc646a5ee9ae9ed5d60a03a772b3d1119e9f2ce2ce"
+        }
+      },
+      "model_calls": 0,
+      "office_calls": 0,
+      "published": false
+    }
+  },
+  "schema": "R1205Acceptance/1",
+  "entrypoint": "product.parallel_pipeline.run",
+  "baseline_commit": "878a14d98510a9138e87df6d59378ce3ec3beab5",
+  "jobs": {
+    "baseline": {
+      "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1204-live",
+      "committed_files_verified": 463,
+      "code_manifest_matches_current": false,
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "perception_mode": "fresh-three-branch",
+      "background_candidates": 4,
+      "lower_hypotheses_assessed": 12,
+      "lama_candidates": 0,
+      "compiler_packages": 6,
+      "office_packages": 5,
+      "replacement_packages": 5,
+      "regional_wall_seconds": 262.4,
+      "editable_texts": 4,
+      "editable_images": 5,
+      "office_pass": true,
+      "final_office_actions": 18,
+      "local_hard_gate_receipts": [
+        {
+          "id": "t-05",
+          "acceptance_sha256": "097c098806f70009cc846286228e05becce46984c13829ca2b3fc38fbe04eef0",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-06",
+          "acceptance_sha256": "415eb0691e1fd985b496f2677c1cdd3458827a824550534678cc0732fe61d388",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-09",
+          "acceptance_sha256": "4c7f081e01bb1f293c018981d9394107a0bd20c1b731f67dcbe861bba1b00202",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-10",
+          "acceptance_sha256": "22db495b873eb11acd9e28f26cb7a4adf88e34c26b4f91ea4d58fd1dd62233ba",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        }
+      ],
+      "outside_pixels": 0,
+      "visual": [
+        {
+          "schema": "VisualReview/1",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "plan_sha256": "3e51136dcadf3da9c2704a81e9a6e9781cfca6c3d22ad43e9a67ce24d10602cf",
+          "preview_sha256": "21e065aea5d9d6aeb2d8842e1e21729709a021c71950ee3c0a9c5dc2c245d01f",
+          "passed": true,
+          "checked": [
+            "wording",
+            "structure",
+            "font",
+            "emphasis",
+            "layout",
+            "graphics"
+          ],
+          "findings": [],
+          "minor_deviations": [
+            {
+              "category": "font",
+              "description": "t-05/t-09 标签字形与源图存在轻微字重/字距差异，t-06/t-10 正文行距与源图略有出入，整体阅读无影响。",
+              "node_ids": [
+                "t-05",
+                "t-06",
+                "t-09",
+                "t-10"
+              ],
+              "aspect": "other",
+              "source_bbox": [
+                175.0,
+                161.0,
+                188.0,
+                57.0
+              ],
+              "suggested_fix": "",
+              "reason_to_accept": "风格接近的字体与轻微字距行距差异，普通用户不易察觉，不影响内容与阅读。"
+            },
+            {
+              "category": "layout",
+              "description": "原生文本框高度按字体行距微调（如 t-05 由 40 增至 46），文字基线位置与源图有亚像素级偏移。",
+              "node_ids": [
+                "t-05",
+                "t-06",
+                "t-09",
+                "t-10"
+              ],
+              "aspect": "other",
+              "source_bbox": [
+                175.0,
+                161.0,
+                188.0,
+                57.0
+              ],
+              "suggested_fix": "",
+              "reason_to_accept": "为安装字体行距所做的正常适配，位置差异极小且无碰撞或裁切。"
+            },
+            {
+              "category": "graphics",
+              "description": "a-icon-camera/bank/factory 与装饰条、箭头为透明 PNG，边缘抗锯齿与源图有细微差别。",
+              "node_ids": [
+                "a-icon-camera",
+                "a-icon-bank",
+                "a-icon-factory",
+                "a-deco-title-bars",
+                "a-deco-subtitle-arrows"
+              ],
+              "aspect": "other",
+              "source_bbox": [
+                43.0,
+                29.0,
+                46.0,
+                42.0
+              ],
+              "suggested_fix": "",
+              "reason_to_accept": "图形完整、颜色正确、透明背景正常，删除测试无残留旧笔画，边缘差异不影响使用。"
+            }
+          ],
+          "status": "PASS"
+        }
+      ],
+      "execution_cost": {
+        "limits": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "repair_rounds": 1,
+          "model_calls": 12,
+          "office_validations": 60,
+          "max_seconds": 2400,
+          "cost_units": 120.0
+        },
+        "counts": {
+          "model_calls": 6,
+          "office_validations": 5,
+          "background_candidates": 4,
+          "compiler_calls": 6
+        },
+        "cost_units": 35.2,
+        "cost_unit_definition": {
+          "model_calls": 5.0,
+          "office_validations": 1.0,
+          "background_candidates": 0.05,
+          "compiler_calls": 0.0
+        },
+        "elapsed_seconds": 464.0565128326416
+      },
+      "workflow_states": {
+        "candidate_generation": "COMPLETED",
+        "regional_commit": "COMPLETED",
+        "final_qa": "PASS",
+        "automatic_publication": "GATED"
+      },
+      "verified_regions": [
+        {
+          "object_id": "t-03",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-04",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-05",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-06",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-07",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-08",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-09",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-10",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        }
+      ],
+      "artifacts": {
+        "page-01.png": "21e065aea5d9d6aeb2d8842e1e21729709a021c71950ee3c0a9c5dc2c245d01f",
+        "result.pptx": "0695808518d444c8515bda4ed67f90046bccaffd766dfe76b472ecb30b74d12b",
+        "stable-fallback.pptx": "7fd0df877ca077f0d069a611037578251ff5dedddf9b653cdb166c08193e8dac"
+      },
+      "actual_final_office_actions": 18,
+      "text_replacement_status": "PASS",
+      "actual_office_packages": 5,
+      "actual_replacement_packages": 5,
+      "pipeline_wall_seconds": 468.25,
+      "independent_icons": [
+        "a-icon-camera",
+        "a-icon-bank",
+        "a-icon-factory"
+      ],
+      "residual_records": [
+        {
+          "id": "a-icon-camera",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "c5f482d121f08279c6cbfc0ee84c1827da14af069ef0ef7e1e631bf2d428ef5a",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1098,
+          "delete_sha256": "ab2b235fdd5c5dfbcf7aa4600338eebfeaf0069d7433f89344535ce613d6f030",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-bank",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "6e3736517c7b46faa5a90ee4017c6bdd181d1715b19d9d486487e0e96e3e33b2",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1768,
+          "delete_sha256": "ffe9ca96736997a55f63c66ae2ae5c0c5620d64b7f1c61bba79c456f6c1bb637",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-factory",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "8d6bc6c0c7ecef0241b0c31ecc4365ffaeca00e11ca46237c5b94b6c4234f93f",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1754,
+          "delete_sha256": "300275293fec0d33df14238bd3e050fdfdbc22b81b0b393560f6cf3fc337d5c3",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-title-bars",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "adcbbcc952e70dc10cb127bdd209b1657a41062eec3193b2b36e00461d7e1101",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1017,
+          "delete_sha256": "ab91d83056569939cd180ee8d2825b2673ba2dbf2d8f4d7d0dd69c2a936cee07",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-subtitle-arrows",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "6ec7619cbb2d377bf6c05921b6bd361026a577e5251dcbfd3dd7fcbdd2ec5931",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 528,
+          "delete_sha256": "8c988c009c04b94b11a98129a57ac52d3b72a730761a5892120b7bb9c0805f16",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-05",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "f31b582ea5291ecc09d15776c8cb28d00f4d75ad70eb15782676ef9a3fcbc6e4",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1446,
+          "delete_sha256": "f3a97be34d0c844d011fa71cb423ffb3d2e792e6ef879f28e84da0632c6d8240",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-06",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "c5f4d96d2b26cc90e6aed9642709c1dc520f9dbd586d93d9c5693bb2b782141b",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 7710,
+          "delete_sha256": "45ce98706d2b172e57ba925b2ec29547ac6d3e2f29ebb617b07753f3bb54e4c2",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-09",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "9a445516ba61c188186bc19c71c8a52d78253c3b9a19d9c8a58883f3b76d5934",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1368,
+          "delete_sha256": "824ef15ece0a5a51754e717011af983cea238c975249e50c0e5b05e311b16d46",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-10",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "279d8aa6da52c2ec2cff2280cca6ae473aabd2d640da2de3b6cc625c80f31d07",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 7688,
+          "delete_sha256": "98dc385e7e388000a9cbb668fc8100fa7aa6a99f5445a64a4457883e448b1723",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        }
+      ],
+      "source_text_objects": 39,
+      "source_asset_definitions": 16,
+      "independent_reference_recall": null,
+      "cost_ledger_scope": "compiler and Office ledger includes new asset batch; background_candidates counts text backgrounds; PNG candidates are separate",
+      "png_candidates": 0,
+      "fallback_exact_source_pixels": true
+    },
+    "expanded": {
+      "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5",
+      "committed_files_verified": 1318,
+      "code_manifest_matches_current": false,
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "perception_mode": "hash-bound-recorded-branches",
+      "background_candidates": 4,
+      "lower_hypotheses_assessed": 6,
+      "lama_candidates": 0,
+      "compiler_packages": 9,
+      "office_packages": 7,
+      "replacement_packages": 7,
+      "regional_wall_seconds": 383.17,
+      "editable_texts": 8,
+      "editable_images": 9,
+      "office_pass": true,
+      "final_office_actions": 34,
+      "local_hard_gate_receipts": [
+        {
+          "id": "t-05",
+          "acceptance_sha256": "097c098806f70009cc846286228e05becce46984c13829ca2b3fc38fbe04eef0",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-06",
+          "acceptance_sha256": "415eb0691e1fd985b496f2677c1cdd3458827a824550534678cc0732fe61d388",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-09",
+          "acceptance_sha256": "4c7f081e01bb1f293c018981d9394107a0bd20c1b731f67dcbe861bba1b00202",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-10",
+          "acceptance_sha256": "22db495b873eb11acd9e28f26cb7a4adf88e34c26b4f91ea4d58fd1dd62233ba",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-14",
+          "acceptance_sha256": "8651a3f35ac23d8a0eb411ea6fc6f60515ab4aa4a0277936fc6d69b4564862e7",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-20",
+          "acceptance_sha256": "c6f172132f010796b4368ebe6d29ca40a974e546b8e1fefb4259db60ccc380d2",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-26",
+          "acceptance_sha256": "538d62e03705fa9f17cbc030178e2f73e7672e9df637418a1e0ae156d17fc4c3",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-32",
+          "acceptance_sha256": "644019f40df7ab6e0e7871a61714bc62ed85a34a893317768e20834531f433e4",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        }
+      ],
+      "outside_pixels": 0,
+      "visual": [
+        {
+          "schema": "VisualReview/1",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "plan_sha256": "e541b788f7c886323814ee7cf461fe508ea22eb974c64d33d15a73624699ea55",
+          "preview_sha256": "9f5a8c2f45974c9b61758144078a49054b4f0dd501db641b3624ba1465fe13f3",
+          "passed": true,
+          "checked": [
+            "wording",
+            "structure",
+            "font",
+            "emphasis",
+            "layout",
+            "graphics"
+          ],
+          "findings": [],
+          "minor_deviations": [
+            {
+              "category": "font",
+              "description": "t-20/t-26/t-32 等卡片标题的字体渲染与源图略有差异，字重与字距存在轻微不同，但整体观感接近。",
+              "node_ids": [
+                "t-20",
+                "t-26",
+                "t-32"
+              ],
+              "aspect": "other",
+              "source_bbox": [
+                278.0,
+                424.0,
+                196.0,
+                50.0
+              ],
+              "suggested_fix": "",
+              "reason_to_accept": "风格接近的字体差异，普通用户不易察觉，不影响阅读。"
+            },
+            {
+              "category": "layout",
+              "description": "部分文本对象（如 t-05、t-09、t-14）的边界框高度因字体行距调整而略有增加，但文字位置与对齐方式保持一致。",
+              "node_ids": [
+                "t-05",
+                "t-09",
+                "t-14"
+              ],
+              "aspect": "other",
+              "source_bbox": [
+                175.0,
+                166.0,
+                61.0,
+                46.0
+              ],
+              "suggested_fix": "",
+              "reason_to_accept": "位置差异微小，不影响整体布局和阅读。"
+            }
+          ],
+          "status": "PASS"
+        }
+      ],
+      "execution_cost": {
+        "limits": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "repair_rounds": 1,
+          "model_calls": 12,
+          "office_validations": 60,
+          "max_seconds": 2400,
+          "cost_units": 120.0
+        },
+        "counts": {
+          "model_calls": 1,
+          "office_validations": 8,
+          "background_candidates": 4,
+          "compiler_calls": 9
+        },
+        "cost_units": 13.2,
+        "cost_unit_definition": {
+          "model_calls": 5.0,
+          "office_validations": 1.0,
+          "background_candidates": 0.05,
+          "compiler_calls": 0.0
+        },
+        "elapsed_seconds": 366.83146238327026
+      },
+      "workflow_states": {
+        "candidate_generation": "COMPLETED",
+        "regional_commit": "COMPLETED",
+        "final_qa": "PASS",
+        "automatic_publication": "GATED"
+      },
+      "verified_regions": [
+        {
+          "object_id": "t-05",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-06",
+          "quality": "ACCEPT",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-09",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-10",
+          "quality": "ACCEPT",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-03",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-04",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-07",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-08",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-11",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-12",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-14",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-15",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-16",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-17",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-18",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-19",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-20",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-21",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-22",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-23",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-24",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-25",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-26",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-27",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-28",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-29",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-30",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-31",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-32",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        }
+      ],
+      "artifacts": {
+        "page-01.png": "9f5a8c2f45974c9b61758144078a49054b4f0dd501db641b3624ba1465fe13f3",
+        "result.pptx": "407b89c0513630b0869de4ff28d650596eb8fc365337257860782c03d2ae44b2",
+        "stable-fallback.pptx": "bd1aacb4a1818b6efa5c6d460b2c3a0d2299a4c2377e6c9caa8a39fc8b2312be"
+      },
+      "actual_final_office_actions": 34,
+      "text_replacement_status": "PASS",
+      "actual_office_packages": 8,
+      "actual_replacement_packages": 7,
+      "pipeline_wall_seconds": 417.98,
+      "independent_icons": [
+        "a-icon-camera",
+        "a-icon-bank",
+        "a-icon-factory",
+        "a-icon-monitor-chart",
+        "a-icon-network-tree",
+        "a-icon-layers",
+        "a-icon-antenna"
+      ],
+      "residual_records": [
+        {
+          "id": "a-icon-camera",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "c5f482d121f08279c6cbfc0ee84c1827da14af069ef0ef7e1e631bf2d428ef5a",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1098,
+          "delete_sha256": "d3c411d4eadad762e6fc37d210e4e66f58e4be429dbc93e8e11e3262dd6e2e3e",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-bank",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "6e3736517c7b46faa5a90ee4017c6bdd181d1715b19d9d486487e0e96e3e33b2",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1768,
+          "delete_sha256": "6652b3ad64d17e2176dbf8a6b7c4bc0ce87249c3b25863d75802107b0b2a7acc",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-factory",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "8d6bc6c0c7ecef0241b0c31ecc4365ffaeca00e11ca46237c5b94b6c4234f93f",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1754,
+          "delete_sha256": "6261719ecf8c00ec5a4f69be03af7b81141bce010dc6468afed87f4fc9f83120",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-title-bars",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "adcbbcc952e70dc10cb127bdd209b1657a41062eec3193b2b36e00461d7e1101",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1017,
+          "delete_sha256": "96ad217e1ff638e3ff48782161b54ea7e3480347983152afb21d1fdf4078a957",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-subtitle-arrows",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "6ec7619cbb2d377bf6c05921b6bd361026a577e5251dcbfd3dd7fcbdd2ec5931",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 528,
+          "delete_sha256": "f1aa18e226aa9420e85177cb646e962b8d356178c5e41ae588efc33907d0dbd5",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-05",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "f31b582ea5291ecc09d15776c8cb28d00f4d75ad70eb15782676ef9a3fcbc6e4",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1446,
+          "delete_sha256": "c4d3f69368cce62c62c0ac636c04d97f646d2634393c9e8c68495cc66a74415f",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-06",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "c5f4d96d2b26cc90e6aed9642709c1dc520f9dbd586d93d9c5693bb2b782141b",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 7710,
+          "delete_sha256": "96e0db78d2418c758df2e8574e94b0bb858e0a829a2a02c070a53d846c902d23",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-09",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "9a445516ba61c188186bc19c71c8a52d78253c3b9a19d9c8a58883f3b76d5934",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1368,
+          "delete_sha256": "4347d279431136e7c5e1cbd7c7982493baa5cf72459f5fe7b54e3503f06af1d4",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-10",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "279d8aa6da52c2ec2cff2280cca6ae473aabd2d640da2de3b6cc625c80f31d07",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 7688,
+          "delete_sha256": "c877fe62e6d2c62f245c99a1db63ec5850b477bc7632c9cbac0e4b18ab716ce4",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-monitor-chart",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "e2aff9273066a1616c4b46f68168307867ffa8716a4eb811302641d193dc5845",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1548,
+          "delete_sha256": "bf7efeccfa838875038dd1c407210a9dc139ed519a79184b168936a21031a679",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-network-tree",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "e50c2170e98035626ac7d607c87acc66dfcf9fabb0a7fcda00ef7cfdf4d05353",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1374,
+          "delete_sha256": "f4b9a2f8893611639466317f1e135154c7ec65610ca214e75c89455a271d02cf",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-layers",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "d6f69c95b182f35f26604b3e59d5a4d1a9c96bffaa66d899e0a1103ac9fb4c43",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1716,
+          "delete_sha256": "dfb26fc4acca15ec9468dec19ebd9fb54a5757d5159ac86428c81b71d5467bbb",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-antenna",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "2356dcd3d5c987c1b2ed972ef298d6fe52c182e9a767906cbcd9e9f4182d7507",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1746,
+          "delete_sha256": "3e347ccbfd8bd583bf6039c224d911fcef3b6d98a34b3ecde98ffd893c2ef368",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-14",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "361fea005a4932bcbeb34d8bb1016869102524c4077e0be21b8b60567ff7ae74",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1346,
+          "delete_sha256": "ca2426bfcf05a9d5890a42bb6d9649bb20e5f25548b86b192f8deff5a43fd76c",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-20",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "e6f501d51501bf693f8092e79887ad2a015021e31f8dca87400440b22a496f36",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 5684,
+          "delete_sha256": "38a65ca7b89b67b62f4ed6468b610778bcb363786f8c5df3456b48fd4e4361f1",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-26",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "fead530b8e31d8f0293a2d4a4960e96e674fd3d8a49d37618d1490b59f71242b",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 6812,
+          "delete_sha256": "f0d17d34d60ba876b3049858376397fb676720d9ed0026c373ac62850fdf592b",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-32",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "753feb4042a3727b14da449f4625483333e529fadfef49580f1d913e469d3497",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 5627,
+          "delete_sha256": "4045a0862c049bc5524dcc678177b6fa4d94be11b4de0e6f9c11030fdf5a1629",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        }
+      ],
+      "source_text_objects": 39,
+      "source_asset_definitions": 16,
+      "independent_reference_recall": null,
+      "cost_ledger_scope": "compiler and Office ledger includes new asset batch; background_candidates counts text backgrounds; PNG candidates are separate",
+      "png_candidates": 4,
+      "fallback_exact_source_pixels": true
+    },
+    "final": {
+      "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-final",
+      "committed_files_verified": 739,
+      "code_manifest_matches_current": true,
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "perception_mode": "hash-bound-recorded-branches",
+      "background_candidates": 0,
+      "lower_hypotheses_assessed": 0,
+      "lama_candidates": 0,
+      "compiler_packages": 2,
+      "office_packages": 1,
+      "replacement_packages": 1,
+      "regional_wall_seconds": 177.54,
+      "editable_texts": 8,
+      "editable_images": 9,
+      "office_pass": true,
+      "final_office_actions": 34,
+      "local_hard_gate_receipts": [
+        {
+          "id": "t-05",
+          "acceptance_sha256": "097c098806f70009cc846286228e05becce46984c13829ca2b3fc38fbe04eef0",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-06",
+          "acceptance_sha256": "415eb0691e1fd985b496f2677c1cdd3458827a824550534678cc0732fe61d388",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-09",
+          "acceptance_sha256": "4c7f081e01bb1f293c018981d9394107a0bd20c1b731f67dcbe861bba1b00202",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-10",
+          "acceptance_sha256": "22db495b873eb11acd9e28f26cb7a4adf88e34c26b4f91ea4d58fd1dd62233ba",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-14",
+          "acceptance_sha256": "8651a3f35ac23d8a0eb411ea6fc6f60515ab4aa4a0277936fc6d69b4564862e7",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-20",
+          "acceptance_sha256": "c6f172132f010796b4368ebe6d29ca40a974e546b8e1fefb4259db60ccc380d2",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-26",
+          "acceptance_sha256": "538d62e03705fa9f17cbc030178e2f73e7672e9df637418a1e0ae156d17fc4c3",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-32",
+          "acceptance_sha256": "644019f40df7ab6e0e7871a61714bc62ed85a34a893317768e20834531f433e4",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        }
+      ],
+      "outside_pixels": 0,
+      "visual": [
+        {
+          "schema": "VisualReview/1",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "plan_sha256": "e541b788f7c886323814ee7cf461fe508ea22eb974c64d33d15a73624699ea55",
+          "preview_sha256": "9f5a8c2f45974c9b61758144078a49054b4f0dd501db641b3624ba1465fe13f3",
+          "passed": true,
+          "checked": [
+            "wording",
+            "structure",
+            "font",
+            "emphasis",
+            "layout",
+            "graphics"
+          ],
+          "findings": [],
+          "minor_deviations": [
+            {
+              "category": "font",
+              "description": "t-20、t-26、t-32 等卡片标题的最终渲染字重略重于源图，笔画稍粗，字面宽度略增。",
+              "node_ids": [
+                "t-20",
+                "t-26",
+                "t-32"
+              ],
+              "aspect": "other",
+              "source_bbox": [
+                278.0,
+                424.0,
+                196.0,
+                50.0
+              ],
+              "suggested_fix": "",
+              "reason_to_accept": "字体族与字号一致，仅字重/字距的细微差异，普通阅读不易察觉，不影响内容与层级。"
+            },
+            {
+              "category": "layout",
+              "description": "t-05、t-09、t-14 等标签文字在最终图中的基线/字面位置与源图有约 1-2px 的垂直偏移。",
+              "node_ids": [
+                "t-05",
+                "t-09",
+                "t-14"
+              ],
+              "aspect": "other",
+              "source_bbox": [
+                175.0,
+                166.0,
+                61.0,
+                46.0
+              ],
+              "suggested_fix": "",
+              "reason_to_accept": "偏移极小，未造成碰撞、裁切或对齐破坏，整体版式保持一致。"
+            },
+            {
+              "category": "graphics",
+              "description": "a-icon-monitor-chart、a-icon-network-tree、a-icon-layers、a-icon-antenna 的透明 PNG 边缘抗锯齿与源图存在轻微差异，个别像素亮度略高。",
+              "node_ids": [
+                "a-icon-monitor-chart",
+                "a-icon-network-tree",
+                "a-icon-layers",
+                "a-icon-antenna"
+              ],
+              "aspect": "other",
+              "source_bbox": [
+                1212.0,
+                165.0,
+                56.0,
+                46.0
+              ],
+              "suggested_fix": "",
+              "reason_to_accept": "图形完整、颜色与透明背景正确，删除测试无残留，边缘差异属抗锯齿级别，不影响识别。"
+            }
+          ],
+          "status": "PASS"
+        }
+      ],
+      "execution_cost": {
+        "limits": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "repair_rounds": 1,
+          "model_calls": 12,
+          "office_validations": 60,
+          "max_seconds": 2400,
+          "cost_units": 120.0
+        },
+        "counts": {
+          "model_calls": 1,
+          "office_validations": 1,
+          "background_candidates": 0,
+          "compiler_calls": 2
+        },
+        "cost_units": 6.0,
+        "cost_unit_definition": {
+          "model_calls": 5.0,
+          "office_validations": 1.0,
+          "background_candidates": 0.05,
+          "compiler_calls": 0.0
+        },
+        "elapsed_seconds": 177.52771592140198
+      },
+      "workflow_states": {
+        "candidate_generation": "COMPLETED",
+        "regional_commit": "COMPLETED",
+        "final_qa": "PASS",
+        "automatic_publication": "GATED"
+      },
+      "verified_regions": [
+        {
+          "object_id": "t-05",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-06",
+          "quality": "ACCEPT",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-09",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-10",
+          "quality": "ACCEPT",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-14",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-20",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-26",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-32",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        }
+      ],
+      "artifacts": {
+        "page-01.png": "9f5a8c2f45974c9b61758144078a49054b4f0dd501db641b3624ba1465fe13f3",
+        "result.pptx": "f833af4b63f0adc8fc4cbfc68aa3a41c2a90cda911d195adef6228614cdf725d",
+        "stable-fallback.pptx": "4d9bcdd9b48ae7991ef968aece797f32cfb783a5aacdb7c7da0387ef0d0f3465"
+      },
+      "actual_final_office_actions": 34,
+      "text_replacement_status": "PASS",
+      "actual_office_packages": 1,
+      "actual_replacement_packages": 1,
+      "pipeline_wall_seconds": 264.79,
+      "independent_icons": [
+        "a-icon-camera",
+        "a-icon-bank",
+        "a-icon-factory",
+        "a-icon-monitor-chart",
+        "a-icon-network-tree",
+        "a-icon-layers",
+        "a-icon-antenna"
+      ],
+      "residual_records": [
+        {
+          "id": "a-icon-camera",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "c5f482d121f08279c6cbfc0ee84c1827da14af069ef0ef7e1e631bf2d428ef5a",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1098,
+          "delete_sha256": "d3c411d4eadad762e6fc37d210e4e66f58e4be429dbc93e8e11e3262dd6e2e3e",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-bank",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "6e3736517c7b46faa5a90ee4017c6bdd181d1715b19d9d486487e0e96e3e33b2",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1768,
+          "delete_sha256": "6652b3ad64d17e2176dbf8a6b7c4bc0ce87249c3b25863d75802107b0b2a7acc",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-factory",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "8d6bc6c0c7ecef0241b0c31ecc4365ffaeca00e11ca46237c5b94b6c4234f93f",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1754,
+          "delete_sha256": "6261719ecf8c00ec5a4f69be03af7b81141bce010dc6468afed87f4fc9f83120",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-title-bars",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "adcbbcc952e70dc10cb127bdd209b1657a41062eec3193b2b36e00461d7e1101",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1017,
+          "delete_sha256": "96ad217e1ff638e3ff48782161b54ea7e3480347983152afb21d1fdf4078a957",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-subtitle-arrows",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "6ec7619cbb2d377bf6c05921b6bd361026a577e5251dcbfd3dd7fcbdd2ec5931",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 528,
+          "delete_sha256": "f1aa18e226aa9420e85177cb646e962b8d356178c5e41ae588efc33907d0dbd5",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-05",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "f31b582ea5291ecc09d15776c8cb28d00f4d75ad70eb15782676ef9a3fcbc6e4",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1446,
+          "delete_sha256": "c4d3f69368cce62c62c0ac636c04d97f646d2634393c9e8c68495cc66a74415f",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-06",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "c5f4d96d2b26cc90e6aed9642709c1dc520f9dbd586d93d9c5693bb2b782141b",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 7710,
+          "delete_sha256": "96e0db78d2418c758df2e8574e94b0bb858e0a829a2a02c070a53d846c902d23",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-09",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "9a445516ba61c188186bc19c71c8a52d78253c3b9a19d9c8a58883f3b76d5934",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1368,
+          "delete_sha256": "4347d279431136e7c5e1cbd7c7982493baa5cf72459f5fe7b54e3503f06af1d4",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-10",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "279d8aa6da52c2ec2cff2280cca6ae473aabd2d640da2de3b6cc625c80f31d07",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 7688,
+          "delete_sha256": "c877fe62e6d2c62f245c99a1db63ec5850b477bc7632c9cbac0e4b18ab716ce4",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-monitor-chart",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "e2aff9273066a1616c4b46f68168307867ffa8716a4eb811302641d193dc5845",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1548,
+          "delete_sha256": "bf7efeccfa838875038dd1c407210a9dc139ed519a79184b168936a21031a679",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-network-tree",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "e50c2170e98035626ac7d607c87acc66dfcf9fabb0a7fcda00ef7cfdf4d05353",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1374,
+          "delete_sha256": "f4b9a2f8893611639466317f1e135154c7ec65610ca214e75c89455a271d02cf",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-layers",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "d6f69c95b182f35f26604b3e59d5a4d1a9c96bffaa66d899e0a1103ac9fb4c43",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1716,
+          "delete_sha256": "dfb26fc4acca15ec9468dec19ebd9fb54a5757d5159ac86428c81b71d5467bbb",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-antenna",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "2356dcd3d5c987c1b2ed972ef298d6fe52c182e9a767906cbcd9e9f4182d7507",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1746,
+          "delete_sha256": "3e347ccbfd8bd583bf6039c224d911fcef3b6d98a34b3ecde98ffd893c2ef368",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-14",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "361fea005a4932bcbeb34d8bb1016869102524c4077e0be21b8b60567ff7ae74",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1346,
+          "delete_sha256": "ca2426bfcf05a9d5890a42bb6d9649bb20e5f25548b86b192f8deff5a43fd76c",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-20",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "e6f501d51501bf693f8092e79887ad2a015021e31f8dca87400440b22a496f36",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 5684,
+          "delete_sha256": "38a65ca7b89b67b62f4ed6468b610778bcb363786f8c5df3456b48fd4e4361f1",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-26",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "fead530b8e31d8f0293a2d4a4960e96e674fd3d8a49d37618d1490b59f71242b",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 6812,
+          "delete_sha256": "f0d17d34d60ba876b3049858376397fb676720d9ed0026c373ac62850fdf592b",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-32",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "753feb4042a3727b14da449f4625483333e529fadfef49580f1d913e469d3497",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 5627,
+          "delete_sha256": "4045a0862c049bc5524dcc678177b6fa4d94be11b4de0e6f9c11030fdf5a1629",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        }
+      ],
+      "source_text_objects": 39,
+      "source_asset_definitions": 16,
+      "independent_reference_recall": null,
+      "cost_ledger_scope": "compiler and Office ledger includes new asset batch; background_candidates counts text backgrounds; PNG candidates are separate",
+      "png_candidates": 0,
+      "fallback_exact_source_pixels": true
+    },
+    "smoke": {
+      "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-smoke",
+      "committed_files_verified": 676,
+      "code_manifest_matches_current": false,
+      "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+      "perception_mode": "fresh-three-branch",
+      "background_candidates": 6,
+      "lower_hypotheses_assessed": 0,
+      "lama_candidates": 0,
+      "compiler_packages": 11,
+      "office_packages": 10,
+      "replacement_packages": 10,
+      "regional_wall_seconds": 278.97,
+      "editable_texts": 6,
+      "editable_images": 0,
+      "office_pass": true,
+      "final_office_actions": 12,
+      "local_hard_gate_receipts": [
+        {
+          "id": "t-09",
+          "acceptance_sha256": "930d193dd8673059fbbd546c453ec6a406148dcb210a3319678a3b1e90c2e73c",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-11",
+          "acceptance_sha256": "46f34c67c1de6666ef5e4b85b327f5b956af04f32acb129ae6b8827ca8de0745",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-14",
+          "acceptance_sha256": "173ab8da6ab14fcf3a7db2ea3a3028c59f1089666a9138340723a3c05d60c572",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-15",
+          "acceptance_sha256": "55347d061c9f6f5759c13bafac7aac511f549f1664b0aaa14746106cc8685237",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-20",
+          "acceptance_sha256": "7947d88912c61f6907f0f59dbb113544baae7983f128bd306c8aa6532ca31002",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-21",
+          "acceptance_sha256": "705516d4ed5f5307ae0f6ca6142a7efbb29fad8456338385819b7740909a07b5",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        }
+      ],
+      "outside_pixels": 0,
+      "visual": [
+        {
+          "schema": "VisualReview/1",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "plan_sha256": "e2e37cd049904b1e61d00fb4a23d5fe9079c916a9db74728c954fa4acb887a8f",
+          "preview_sha256": "ec19c4853bd48f6092c44ee20fa4d8f02f63de75117d36bbc4367543c53a5d02",
+          "passed": true,
+          "checked": [
+            "wording",
+            "structure",
+            "font",
+            "emphasis",
+            "layout",
+            "graphics"
+          ],
+          "findings": [],
+          "minor_deviations": [
+            {
+              "category": "font",
+              "description": "t-09/t-15/t-21 的“01/03/05”在最终 PPT 中为 Arial 粗体，字形比源图略窄、笔画略细，数字整体观感与源图接近但不完全一致。",
+              "node_ids": [
+                "t-09",
+                "t-15",
+                "t-21"
+              ],
+              "aspect": "other",
+              "source_bbox": [
+                633.0,
+                186.0,
+                58.0,
+                55.0
+              ],
+              "suggested_fix": "",
+              "reason_to_accept": "字体风格接近，字号、颜色、粗体和位置一致，普通用户不易察觉，不影响阅读。"
+            },
+            {
+              "category": "layout",
+              "description": "t-11/t-14/t-20 的正文在最终 PPT 中行高略增，文字基线相对源图有约 1-2px 的轻微下移，未造成碰撞或裁切。",
+              "node_ids": [
+                "t-11",
+                "t-14",
+                "t-20"
+              ],
+              "aspect": "other",
+              "source_bbox": [
+                1113.0,
+                192.0,
+                418.0,
+                41.0
+              ],
+              "suggested_fix": "",
+              "reason_to_accept": "位置差异极小，不影响阅读和版面结构。"
+            }
+          ],
+          "status": "PASS"
+        }
+      ],
+      "execution_cost": {
+        "limits": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "repair_rounds": 1,
+          "model_calls": 12,
+          "office_validations": 60,
+          "max_seconds": 2400,
+          "cost_units": 120.0
+        },
+        "counts": {
+          "model_calls": 4,
+          "office_validations": 10,
+          "background_candidates": 6,
+          "compiler_calls": 11
+        },
+        "cost_units": 30.3,
+        "cost_unit_definition": {
+          "model_calls": 5.0,
+          "office_validations": 1.0,
+          "background_candidates": 0.05,
+          "compiler_calls": 0.0
+        },
+        "elapsed_seconds": 420.62109088897705
+      },
+      "workflow_states": {
+        "candidate_generation": "COMPLETED",
+        "regional_commit": "COMPLETED",
+        "final_qa": "PASS",
+        "automatic_publication": "GATED"
+      },
+      "verified_regions": [
+        {
+          "object_id": "t-01",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-02",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-03",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-04",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-05",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-06",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-07",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-08",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-09",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-10",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-11",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-12",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-13",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-14",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-15",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-16",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-17",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-18",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-19",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-20",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        },
+        {
+          "object_id": "t-21",
+          "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+          "early_stop": {
+            "reason": "hard gates and real editing passed",
+            "background_candidates_consumed": 1,
+            "further_candidates_requested": false
+          },
+          "failure": null
+        }
+      ],
+      "artifacts": {
+        "page-01.png": "ec19c4853bd48f6092c44ee20fa4d8f02f63de75117d36bbc4367543c53a5d02",
+        "result.pptx": "8292fe132722745d5fa461ae05528e70854f364df7679974f3cb915406db1487",
+        "stable-fallback.pptx": "0a841db244a5fc76cabea89cf3757f9e72a0501e6e2cbf0de58de56e5782b826"
+      },
+      "actual_final_office_actions": 12,
+      "text_replacement_status": "PASS",
+      "actual_office_packages": 10,
+      "actual_replacement_packages": 10,
+      "pipeline_wall_seconds": 424.79,
+      "independent_icons": [],
+      "residual_records": [
+        {
+          "id": "t-09",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "817c03cbcda1675f1f63e6c7b827bde105563e973770619c27bbac388795b76d",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1418,
+          "delete_sha256": "25a2c43f6001b20c06b06193414b2a56c64b3bb9ce23200ec9cc560329b50d03",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-11",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "01857824c757c4f7febb11880e05a28cb168f6b88fe5ea711722d205ff0e1f71",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 9889,
+          "delete_sha256": "385e1aabda20681e83958f418abba021c7adec1b206cbb8c3979ffde99724177",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-14",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "6879a917ddd7e3ee46e59337239a3d8d6f1b2e8a064a289f816b923c28925521",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 11954,
+          "delete_sha256": "59107fae94646d00c60d43f0ed778f016273e3a2003c1fde32d21166f70ac509",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-15",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "d283d980dfc204f41ba4f5f5bce2791aa70a9d0e1c44b9969633a4679d2e23ca",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1612,
+          "delete_sha256": "ff0df73c45f535b0d5ec145fa46b8e4cc32a36ec145fcb2aec0f723af177af9c",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-20",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "3f3f2923b50f3a1d9e5882a14596d8d04b4a18e2d662578446b6739271ddc5ad",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 10499,
+          "delete_sha256": "a63a0af63d694c867cd03911156d72cc9e04f71a1542c8d8a711b859c4eeae60",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "t-21",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "579e17a2194bdcb5181f56fcaa78f267b66ea905df1bad78d717c265ae0e5166",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1648,
+          "delete_sha256": "e86d0305aad9c1a35557794e6b0f485def4f66f919cc249fbc70b1044683c73e",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        }
+      ],
+      "source_text_objects": 28,
+      "source_asset_definitions": 0,
+      "independent_reference_recall": null,
+      "cost_ledger_scope": "compiler and Office ledger includes new asset batch; background_candidates counts text backgrounds; PNG candidates are separate",
+      "png_candidates": 0,
+      "fallback_exact_source_pixels": true
+    },
+    "smoke_final": {
+      "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-smoke-ok",
+      "committed_files_verified": 208,
+      "code_manifest_matches_current": true,
+      "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+      "perception_mode": "live-or-cache",
+      "background_candidates": 0,
+      "lower_hypotheses_assessed": 0,
+      "lama_candidates": 0,
+      "compiler_packages": 2,
+      "office_packages": 1,
+      "replacement_packages": 1,
+      "regional_wall_seconds": 62.26,
+      "editable_texts": 0,
+      "editable_images": 18,
+      "office_pass": false,
+      "final_office_actions": 0,
+      "local_hard_gate_receipts": [],
+      "outside_pixels": 0,
+      "visual": [
+        {
+          "status": "UNKNOWN",
+          "failure": "QA_INFRASTRUCTURE_UNAVAILABLE",
+          "error_type": "RuntimeError",
+          "verified_regions_retained": true,
+          "automatic_retry": false
+        }
+      ],
+      "execution_cost": {
+        "limits": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "repair_rounds": 1,
+          "model_calls": 12,
+          "office_validations": 60,
+          "max_seconds": 2400,
+          "cost_units": 120.0
+        },
+        "counts": {
+          "model_calls": 1,
+          "office_validations": 1,
+          "background_candidates": 0,
+          "compiler_calls": 2
+        },
+        "cost_units": 6.0,
+        "cost_unit_definition": {
+          "model_calls": 5.0,
+          "office_validations": 1.0,
+          "background_candidates": 0.05,
+          "compiler_calls": 0.0
+        },
+        "elapsed_seconds": 268.8096706867218
+      },
+      "workflow_states": {
+        "candidate_generation": "COMPLETED",
+        "regional_commit": "COMPLETED",
+        "final_qa": "UNKNOWN_OR_REVIEW_REQUIRED",
+        "automatic_publication": "GATED"
+      },
+      "verified_regions": [
+        {
+          "object_id": "t-01",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-02",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-06",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-07",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-08",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-09",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-10",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-11",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-14",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-17",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-20",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-23",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-24",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-25",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-26",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-27",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-28",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        }
+      ],
+      "artifacts": {
+        "page-01.png": "46afc9ce1875aab1f0f2dd37a81bb3579c24193bf162539cfb53ee4cfc513b10",
+        "result.pptx": "0402c4447e459a55333a13990aecd605b06463361745d9431a7fc98b80775ff0",
+        "stable-fallback.pptx": "59e60265befe32409ac68181d11588c136fac57c36d3a034e0d1e012d398395f"
+      },
+      "actual_final_office_actions": 36,
+      "text_replacement_status": "FAIL",
+      "actual_office_packages": 1,
+      "actual_replacement_packages": 1,
+      "pipeline_wall_seconds": 291.57,
+      "independent_icons": [
+        "a-icon-check-1",
+        "a-icon-check-2",
+        "a-icon-check-3",
+        "a-icon-grid"
+      ],
+      "residual_records": [
+        {
+          "id": "a-label-mainline-plate",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "f623dad736b6c2c8bd4c1c04643236e8819b5d16cc76f6b224bbecea5912b57e",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 12560,
+          "delete_sha256": "34967ab8ee35c7d2d9faf8822a63f8f08e5424d8fb949e49cf1c8205b7cbea27",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-check-1",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "b7c5a201f36029223ef74d3ad884325827370bd59a627dddea9ce6e44faa6846",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 972,
+          "delete_sha256": "007c3f3168ef8fcee53d310a91ca9f8c52f7c13244c03daa46f35352a1c3a0b3",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-check-2",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "d5752799d2fd7b2c739e825c9c8367e938ca50162d75dd013855ec47519180ca",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 990,
+          "delete_sha256": "ae46948b38ec6e7ceaafd2a9574726e4f121ec2a5cfe19f458de825aa0a1ec8d",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-check-3",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "d2b14422d9c687df22c33f828c69f9397ee3a376aad92e3bb9793e007e31981c",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 987,
+          "delete_sha256": "290bf229b66ef03030e4c1a10cc5229c04cacb77b79ead8b83c1589762df676e",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-separator-1",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "8309669285ee9fb54fc34c1d9d4985291bc783f2164e77cc118764a7b1c7cd43",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1044,
+          "delete_sha256": "8a23590ff22b5d57cd3eac6bb7f67a92e4cfa10a5fdee2e3f4552a8d137f9c43",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-separator-2",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "dcbaef30f5f36778ad2db7081d6fc003ac996ec58c79c409e2f082499d2ce018",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 1021,
+          "delete_sha256": "56cf6482e0b1e54c504624e1ed09f9d6a8f99e4354c008c89ad7e1843fffe337",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-separator-3",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "18f3c935aed90dbf31d51ce4c033aa020567c4dbe2977c1ea288e3e1260b1ef0",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 966,
+          "delete_sha256": "0ca1be90419e81f4e9edbd815aa3900bb9d760f3ff0cfc67b04c225c0a9253e0",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-icon-grid",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "32a3de078e28d7cb5dafd8b61034d5238ba861cece73e7c84d14e963fa21f7ff",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 2283,
+          "delete_sha256": "9efa5b9d582d2eccf6bc3543b013e24e48ac6838790c97f23c539e4490c0e7a0",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-row-sep-1",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "ab00c5e020f556bc2551008372da766a148efee936980c09ed636a283fbe6c8e",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 272,
+          "delete_sha256": "30529a4ee15fe630061cf477720a57f775d1cbff0554d9014263e473e5cb440c",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-row-sep-2",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "f02922006d1be11b0e7dff9fe127ea6940bb5b43dc91788f38042eb28c3a4202",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 261,
+          "delete_sha256": "0c067a51af5bfcfe47aea6f6ee9855f791715efc0cd6d1947399872782278f7b",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-row-sep-3",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "d7cfe9873901060fb2a2891034e17feb37c779b2fbe60164ebb5ba66c1b2ef9f",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 270,
+          "delete_sha256": "d8a45eabfba73f59847d606f7f14055cd0f1d110d622ec56305951722012bdec",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-row-sep-4",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "630cd522d115c135b9129632f5532481c0d6b131ddac0ef9a6b185210d0d1296",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 264,
+          "delete_sha256": "314402ad227eb0d023609360911c25456b6456d90ccfaf6616e2a6b9c88986ec",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-row-sep-5",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "9e3a345f7e49ac466aca1e719d68a0cb257107930e235b669b05373ba54fc801",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 274,
+          "delete_sha256": "28482301fbd45b76199912a18c0a569deb730015b00516b726d6f2986b48020f",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-row-desc-sep-1",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "a81f6df81a3adb8d7a4ed9704b28e35db31b3d57265f6895864792c77f865c77",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 197,
+          "delete_sha256": "fdd9a27fa2f14eb5aa2149adcea558a3bc44363f72f446b7ee2dc11de254b770",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-row-desc-sep-2",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "129f3219cda5c6e75728b607890c26fed5634ac1e642e03831126dc57d505f89",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 202,
+          "delete_sha256": "8c4f3035d458627351ca9ade01ce3e55345d51b80215a457342a308e8b68dd0a",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-row-desc-sep-3",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "1bad5654c3ec85e59ca6b5e25667a617a33e73efbdb2d82424f34cb6aee0a802",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 199,
+          "delete_sha256": "981f06a2d1b825026e921cc44cbd709d371c9a21f6557151cc7075575e70ea85",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-row-desc-sep-4",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "627a2e48dc6f4651de9151fdce126e2f4064fbf81294c166cae2c9db0aec7819",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 204,
+          "delete_sha256": "fc211b3a5fc183bcae8470a154da1de6aa3148367a1d28513c9e31a879a3ce21",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        {
+          "id": "a-deco-row-desc-sep-5",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "8dc70a7fc9b6ed6c3d5455db5ebe0bae2bc7dcd29f0180ec6f97e2e1ba398383",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 195,
+          "delete_sha256": "da920e0860e742c8c79710650902216e879b528a286ad1218c43538c90ee65cb",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        }
+      ],
+      "source_text_objects": 28,
+      "source_asset_definitions": 39,
+      "independent_reference_recall": null,
+      "cost_ledger_scope": "compiler and Office ledger includes new asset batch; background_candidates counts text backgrounds; PNG candidates are separate",
+      "png_candidates": 0,
+      "fallback_exact_source_pixels": true
+    }
+  },
+  "old_png_sha256_preserved": {
+    "a-icon-camera": "2f41bf6a3e13450fc702be9b3f1aca3efe540e5cb76fa79cef52fc557ac75f62",
+    "a-icon-bank": "efd608e48aa8d5fe337dfad93e1676efe382887b2d1b76931de8238dedebd913",
+    "a-icon-factory": "39232aa54a7859e9654b77d6992914ba7708dfc5441498ac6da24cd8725a9609",
+    "a-deco-title-bars": "cc4ae7062a356526e7f82d226059ddf1d1911a438052da3d20ca62629c6c83cd",
+    "a-deco-subtitle-arrows": "8eb261dc6ad97230ad00a848fcb530882e56189584cfbd251fec4d4d23b88530"
+  },
+  "old_native_text_definitions_preserved": [
+    "t-05",
+    "t-06",
+    "t-09",
+    "t-10"
+  ],
+  "asset_expansion": [
+    {
+      "object_id": "a-icon-monitor-chart",
+      "state": "VERIFIED_LOCAL",
+      "office": "PASS",
+      "status": "CANDIDATE_READY",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\5\\c\\scene.json",
+      "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\page-01\\seed",
+      "attempts": [
+        {
+          "seed_method": "alpha",
+          "seed_rgba_sha256": "8b75abba9eca941fb71dec0251a0ba85d8e29e6f5da1f6b87c52b5795ab0c9a1",
+          "status": "CANDIDATE_READY",
+          "added_source_halo_pixels": 21
+        }
+      ],
+      "published": false,
+      "go": "NOT_RUN",
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\5\\c\\candidate-0",
+      "candidate_id": "c-24d28f26d196eb0617a3d0ea677cc8f0c56a57820e4a033ef1c2e69eddbe5079",
+      "ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\5\\s\\slideir.json"
+    },
+    {
+      "object_id": "a-icon-network-tree",
+      "state": "VERIFIED_LOCAL",
+      "office": "PASS",
+      "status": "CANDIDATE_READY",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\6\\c\\scene.json",
+      "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\5\\s",
+      "attempts": [
+        {
+          "seed_method": "alpha",
+          "seed_rgba_sha256": "b2609bf6081d06f7500fcf618588bd415746cd6d2b718814d5e45b79767e49da",
+          "status": "CANDIDATE_READY",
+          "added_source_halo_pixels": 1
+        }
+      ],
+      "published": false,
+      "go": "NOT_RUN",
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\6\\c\\candidate-0",
+      "candidate_id": "c-2cd48db37b4abb25eb2843ac690bc6bd91f8a3a4fe7b0a832b5ec156e2d74929",
+      "ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\6\\s\\slideir.json"
+    },
+    {
+      "object_id": "a-icon-layers",
+      "state": "VERIFIED_LOCAL",
+      "office": "PASS",
+      "status": "CANDIDATE_READY",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\7\\c\\scene.json",
+      "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\6\\s",
+      "attempts": [
+        {
+          "seed_method": "alpha",
+          "seed_rgba_sha256": "ee2237fd3ec84c3c3672881841f004e2777f494cd2e66c0cafb932fb03b662a9",
+          "status": "CANDIDATE_READY",
+          "added_source_halo_pixels": 2
+        }
+      ],
+      "published": false,
+      "go": "NOT_RUN",
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\7\\c\\candidate-0",
+      "candidate_id": "c-1c58a04472dd89f0dff81e249f95072f7feb6a57f8843b9f897b9bfc6670039b",
+      "ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\7\\s\\slideir.json"
+    },
+    {
+      "object_id": "a-icon-pc-gear",
+      "state": "LOCAL_FALLBACK",
+      "office": "NOT_RUN",
+      "status": "BLOCKED",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\8\\c\\scene.json",
+      "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\7\\s",
+      "attempts": [],
+      "published": false,
+      "go": "NOT_RUN",
+      "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+      "seed_diagnostics": {
+        "alpha_ambiguities": {
+          "layer-03.png": [
+            58
+          ]
+        },
+        "missing_parts": [],
+        "alpha_visible_pixels": 2128,
+        "sam": "NOT_SUPPLIED",
+        "source_unmix_failure": "unmix scope cuts foreground"
+      }
+    },
+    {
+      "object_id": "a-icon-antenna",
+      "state": "VERIFIED_LOCAL",
+      "office": "PASS",
+      "status": "CANDIDATE_READY",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\9\\c\\scene.json",
+      "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\7\\s",
+      "attempts": [
+        {
+          "seed_method": "alpha",
+          "seed_rgba_sha256": "b607775d1e0f85485c0cc2e45cf6d0023c86ca23ed9d52fb9d4117178dd001c2",
+          "status": "CANDIDATE_READY",
+          "added_source_halo_pixels": 2
+        }
+      ],
+      "published": false,
+      "go": "NOT_RUN",
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\9\\c\\candidate-0",
+      "candidate_id": "c-cb2da485d40d3c873fcc30c43a2d88a41a1331d87a6a014e4e1b21fd15dcaac9",
+      "ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\9\\s\\slideir.json"
+    },
+    {
+      "object_id": "a-icon-cloud-sync",
+      "state": "LOCAL_FALLBACK",
+      "office": "NOT_RUN",
+      "status": "BLOCKED",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\10\\c\\scene.json",
+      "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\9\\s",
+      "attempts": [],
+      "published": false,
+      "go": "NOT_RUN",
+      "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+      "seed_diagnostics": {
+        "alpha_ambiguities": {
+          "layer-03.png": [
+            89
+          ]
+        },
+        "missing_parts": [],
+        "alpha_visible_pixels": 1831,
+        "sam": "NOT_SUPPLIED",
+        "source_unmix_failure": "unmix scope cuts foreground"
+      }
+    },
+    {
+      "object_id": "a-icon-database-gear",
+      "state": "LOCAL_FALLBACK",
+      "office": "NOT_RUN",
+      "status": "BLOCKED",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\11\\c\\scene.json",
+      "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-p5\\r12\\attempt-2ce80dd49ccc5097\\page-01\\ax\\9\\s",
+      "attempts": [],
+      "published": false,
+      "go": "NOT_RUN",
+      "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+      "seed_diagnostics": {
+        "alpha_ambiguities": {
+          "layer-03.png": [
+            90
+          ]
+        },
+        "missing_parts": [],
+        "alpha_visible_pixels": 2688,
+        "sam": "NOT_SUPPLIED",
+        "source_unmix_failure": "unmix scope cuts foreground"
+      }
+    }
+  ],
+  "full_text_scan": {
+    "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\scan-9bd6c8a9414e49643b7ea28e.json",
+    "sha256": "1a2e455e12d3d79456c355f2f063973f21d884e65f8b314af1d72a556f8e1dd7",
+    "report": {
+      "schema": "R1205TextCoverageScan/1",
+      "binding": {
+        "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+        "source_scene_sha256": "52bc9e3e3a02c4c77187b40a8faf8431d089ce5729912ff0444828b03a7ff1ba",
+        "parent_ir_sha256": "3e51136dcadf3da9c2704a81e9a6e9781cfca6c3d22ad43e9a67ce24d10602cf",
+        "code": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\services\\product\\run_text_coverage_scan.py": "067b811cea519814112690dcaea5c1ed09de8d69af016ff636bf5421f7eaec78",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\services\\product\\product\\recovery\\text_probe.py": "22f77b37aeeecd856a8e36f223bc35018e78c5bacc83608015a57aa18a916e61",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\services\\product\\product\\recovery\\text_actions.py": "b27da47500aab25e0e0d799774ba82176343d429c0e2ecd94b7ad7a9ac4c6dac"
+        }
+      },
+      "source_job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1204-live",
+      "page": 1,
+      "total_source_text_objects": 39,
+      "state_counts": {
+        "BLOCKED": 30,
+        "VERIFIED_REUSED": 4,
+        "STAGED_LOCAL": 5
+      },
+      "failure_counts": {
+        "OWNER_CONFLICT": 12,
+        "BACKGROUND_REPAIR_FAILED": 5,
+        "MASK_INCOMPLETE": 13
+      },
+      "objects": [
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-01",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-327e294f7d428edfc5a7b852\\probe.json",
+          "failure": "OWNER_CONFLICT",
+          "error_type": "RecoveryBlocked",
+          "reason": "unresolved source owner",
+          "text": "中国移动",
+          "role": "logo text cn",
+          "source_bbox": [
+            1515.0,
+            19.0,
+            118.0,
+            32.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-02",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-0163bc67985ef782948a2428\\probe.json",
+          "failure": "OWNER_CONFLICT",
+          "error_type": "RecoveryBlocked",
+          "reason": "unresolved source owner",
+          "text": "China Mobile",
+          "role": "logo text en",
+          "source_bbox": [
+            1516.0,
+            50.0,
+            118.0,
+            23.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-03",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-3add556f9f4369214b6adee8\\probe.json",
+          "failure": "INSUFFICIENT_CONTEXT",
+          "error_type": "RecoveryBlocked",
+          "reason": "no trusted continuous background reference; expensive tools cannot repair that evidence",
+          "text": "算网资源支撑",
+          "role": "page title",
+          "source_bbox": [
+            106.0,
+            21.0,
+            222.0,
+            44.0
+          ],
+          "failure_category": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-04",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-fd688f2e84f418ad31102c95\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "发挥移动算网资源优势，保障各类AI应用稳定运行",
+          "role": "subtitle",
+          "source_bbox": [
+            104.0,
+            97.0,
+            652.0,
+            36.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-05",
+          "state": "VERIFIED_REUSED",
+          "office": "PREVIOUSLY_VERIFIED",
+          "text": "现场",
+          "role": "diagram label",
+          "source_bbox": [
+            175.0,
+            166.0,
+            61.0,
+            40.0
+          ],
+          "failure_category": null
+        },
+        {
+          "object_id": "t-06",
+          "state": "VERIFIED_REUSED",
+          "office": "PREVIOUSLY_VERIFIED",
+          "text": "工地监管、视频识别、\n现场巡检、实时告警",
+          "role": "diagram body",
+          "source_bbox": [
+            286.0,
+            161.0,
+            188.0,
+            53.0
+          ],
+          "failure_category": null
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-07",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-18158af5a709079fc0ce5aac\\probe.json",
+          "failure": "PROTECTED_NEIGHBOR",
+          "error_type": "RecoveryBlocked",
+          "reason": "confirmed text overlaps protected peer",
+          "text": "算力供给",
+          "role": "diagram label",
+          "source_bbox": [
+            1299.0,
+            157.0,
+            98.0,
+            33.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-08",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-1bbcb568a4c57bb951a6aafd\\probe.json",
+          "failure": "PROTECTED_NEIGHBOR",
+          "error_type": "RecoveryBlocked",
+          "reason": "confirmed text overlaps protected peer",
+          "text": "（模型推理、视频分析、数据处理）",
+          "role": "diagram body",
+          "source_bbox": [
+            1302.0,
+            187.0,
+            274.0,
+            27.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-09",
+          "state": "VERIFIED_REUSED",
+          "office": "PREVIOUSLY_VERIFIED",
+          "text": "部门",
+          "role": "diagram label",
+          "source_bbox": [
+            175.0,
+            244.0,
+            60.0,
+            40.0
+          ],
+          "failure_category": null
+        },
+        {
+          "object_id": "t-10",
+          "state": "VERIFIED_REUSED",
+          "office": "PREVIOUSLY_VERIFIED",
+          "text": "政务办理、数据查询、\n业务协同、指挥调度",
+          "role": "diagram body",
+          "source_bbox": [
+            285.0,
+            241.0,
+            189.0,
+            54.0
+          ],
+          "failure_category": null
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-11",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-0a58d3d4f4eca255ed485fb5\\probe.json",
+          "failure": "PROTECTED_NEIGHBOR",
+          "error_type": "RecoveryBlocked",
+          "reason": "confirmed text overlaps protected peer",
+          "text": "网络连接",
+          "role": "diagram label",
+          "source_bbox": [
+            1305.0,
+            235.0,
+            98.0,
+            34.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-12",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-c68bdf941066dc2c54b504ef\\probe.json",
+          "failure": "PROTECTED_NEIGHBOR",
+          "error_type": "RecoveryBlocked",
+          "reason": "confirmed text overlaps protected peer",
+          "text": "（专线、5G、物联网）",
+          "role": "diagram body",
+          "source_bbox": [
+            1304.0,
+            265.0,
+            188.0,
+            30.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-13",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-6f08b34d8ede78932902f0eb\\probe.json",
+          "failure": "OWNER_CONFLICT",
+          "error_type": "RecoveryBlocked",
+          "reason": "unresolved source owner",
+          "text": "中心算力",
+          "role": "center node",
+          "source_bbox": [
+            780.0,
+            303.0,
+            112.0,
+            32.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-14",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "STAGED_LOCAL",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [
+            {
+              "candidate": "semantic_completion--layerd-2",
+              "status": "PRECHECK_PASS"
+            }
+          ],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-dbed385d94c6cd1b6b768c10\\probe.json",
+          "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-dbed385d94c6cd1b6b768c10\\backgrounds\\semantic_completion--layerd-2",
+          "staged_ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-dbed385d94c6cd1b6b768c10\\staged\\slideir.json",
+          "residual_report_sha256": "bb4f5a2e16a49a194fdba95b25bf71e47234b3ddb653d7cea85f033d1d952e43",
+          "stop_reason": "first source-safe editable candidate staged; Office and visual QA required",
+          "text": "企业",
+          "role": "diagram label",
+          "source_bbox": [
+            175.0,
+            324.0,
+            61.0,
+            39.0
+          ],
+          "failure_category": null
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-15",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-ee68ff605e26d47bbc5153b1\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "生产管理、质检分析、\n经营分析、知识问答",
+          "role": "diagram body",
+          "source_bbox": [
+            285.0,
+            319.0,
+            191.0,
+            55.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-16",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-acd4af12b35f769c35838f7b\\probe.json",
+          "failure": "PROTECTED_NEIGHBOR",
+          "error_type": "RecoveryBlocked",
+          "reason": "confirmed text overlaps protected peer",
+          "text": "云边协同",
+          "role": "diagram label",
+          "source_bbox": [
+            1303.0,
+            314.0,
+            96.0,
+            34.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-17",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-c029444c2c1699f4a2f5d250\\probe.json",
+          "failure": "PROTECTED_NEIGHBOR",
+          "error_type": "RecoveryBlocked",
+          "reason": "confirmed text overlaps protected peer",
+          "text": "（边缘处理、中心统筹）",
+          "role": "diagram body",
+          "source_bbox": [
+            1304.0,
+            343.0,
+            205.0,
+            32.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-18",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-5d9a23d0a6ef0283e2fb78d5\\probe.json",
+          "failure": "PROTECTED_NEIGHBOR",
+          "error_type": "RecoveryBlocked",
+          "reason": "confirmed text overlaps protected peer",
+          "text": "统一算力调度丨统一资源管理丨统一服务供给",
+          "role": "divider text",
+          "source_bbox": [
+            594.0,
+            358.0,
+            482.0,
+            32.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-19",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-75039b40a3c06b52112ae87b\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "01",
+          "role": "sequence number",
+          "source_bbox": [
+            58.0,
+            472.0,
+            60.0,
+            53.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-20",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "STAGED_LOCAL",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [
+            {
+              "candidate": "semantic_completion--layerd-0",
+              "status": "PRECHECK_PASS"
+            }
+          ],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-d6a673b2f49c7b3a3ee49eca\\probe.json",
+          "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-d6a673b2f49c7b3a3ee49eca\\backgrounds\\semantic_completion--layerd-0",
+          "staged_ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-d6a673b2f49c7b3a3ee49eca\\staged\\slideir.json",
+          "residual_report_sha256": "bb7554fdabdc311c74575e6ba2f79f3531c36b439fa56ed93c9ae3dc0aa3aff8",
+          "stop_reason": "first source-safe editable candidate staged; Office and visual QA required",
+          "text": "算力按需配置",
+          "role": "card title",
+          "source_bbox": [
+            278.0,
+            424.0,
+            189.0,
+            42.0
+          ],
+          "failure_category": null
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-21",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-765ba6d4a527eae87d5785e9\\probe.json",
+          "failure": "PROTECTED_NEIGHBOR",
+          "error_type": "RecoveryBlocked",
+          "reason": "confirmed text overlaps protected peer",
+          "text": "统筹模型推理、视频分析和数据处理需求，根据使用规模\n配置资源，减少分散建设和重复投入。",
+          "role": "card body",
+          "source_bbox": [
+            240.0,
+            479.0,
+            547.0,
+            58.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-22",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-94524f92f2badc43a5552706\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "模型推理",
+          "role": "tag text",
+          "source_bbox": [
+            255.5,
+            549.0,
+            89.0,
+            32.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-23",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-2213687007c4e86c480e190b\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "视频分析",
+          "role": "tag text",
+          "source_bbox": [
+            449.5,
+            551.0,
+            87.0,
+            29.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-24",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-81648dc7f93f0b1baa3df1c6\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "数据处理",
+          "role": "tag text",
+          "source_bbox": [
+            640.0,
+            548.0,
+            92.0,
+            33.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-25",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-548682dd6a365396ca4c693b\\probe.json",
+          "failure": "INSUFFICIENT_CONTEXT",
+          "error_type": "RecoveryBlocked",
+          "reason": "no trusted continuous background reference; expensive tools cannot repair that evidence",
+          "text": "02",
+          "role": "sequence number",
+          "source_bbox": [
+            861.0,
+            471.0,
+            58.0,
+            53.0
+          ],
+          "failure_category": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-26",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "STAGED_LOCAL",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [
+            {
+              "candidate": "semantic_completion--layerd-0",
+              "status": "PRECHECK_PASS"
+            }
+          ],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-9c75eab803ec4a1ea3711055\\probe.json",
+          "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-9c75eab803ec4a1ea3711055\\backgrounds\\semantic_completion--layerd-0",
+          "staged_ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-9c75eab803ec4a1ea3711055\\staged\\slideir.json",
+          "residual_report_sha256": "7856a0a7185b1781da506d1ad3b1da2f18514b68c8f1f2dfd96eaaa7ce4f910e",
+          "stop_reason": "first source-safe editable candidate staged; Office and visual QA required",
+          "text": "网络随业务适配",
+          "role": "card title",
+          "source_bbox": [
+            1078.0,
+            424.0,
+            222.0,
+            41.0
+          ],
+          "failure_category": null
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-27",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-de7c52a13baae4e93e50a8c1\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "围绕工地监管、应急指挥、移动办公等场景，提供专线、\n5G及物联网连接服务。",
+          "role": "card body",
+          "source_bbox": [
+            1057.0,
+            479.0,
+            538.0,
+            57.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-28",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-c85c0afbe42b5c91aca15581\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "专线",
+          "role": "tag text",
+          "source_bbox": [
+            1074.0,
+            547.0,
+            50.0,
+            35.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-29",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-2e68a56808df6c49488cc6bb\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "5G",
+          "role": "tag text",
+          "source_bbox": [
+            1267.0,
+            548.0,
+            35.0,
+            32.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-30",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-fbb1c65410c5bea2287c2c21\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "物联网",
+          "role": "tag text",
+          "source_bbox": [
+            1454.0,
+            549.0,
+            69.0,
+            33.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-31",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-f96782f9da2019fb5a5a4001\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "03",
+          "role": "sequence number",
+          "source_bbox": [
+            58.0,
+            668.0,
+            60.0,
+            54.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-32",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "STAGED_LOCAL",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [
+            {
+              "candidate": "semantic_completion--layerd-0",
+              "status": "PRECHECK_PASS"
+            }
+          ],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-110f2d0ac006081981a10f28\\probe.json",
+          "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-110f2d0ac006081981a10f28\\backgrounds\\semantic_completion--layerd-0",
+          "staged_ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-110f2d0ac006081981a10f28\\staged\\slideir.json",
+          "residual_report_sha256": "0403ea90a25040f092a7a1e885e03e9fb5745d2c807842229a1458ec57d89378",
+          "stop_reason": "first source-safe editable candidate staged; Office and visual QA required",
+          "text": "云边协同部署",
+          "role": "card title",
+          "source_bbox": [
+            276.0,
+            628.0,
+            195.0,
+            47.0
+          ],
+          "failure_category": null
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-33",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-04a6db4b3a4e9ff27327f24f\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "现场视频识别、实时告警等业务结合边缘计算就近处理；\n知识问答、集中分析等业务统筹使用中心算力。",
+          "role": "card body",
+          "source_bbox": [
+            240.0,
+            687.0,
+            548.0,
+            60.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-34",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-55f3798db7c2d9c2fde0483c\\probe.json",
+          "failure": "INSUFFICIENT_CONTEXT",
+          "error_type": "RecoveryBlocked",
+          "reason": "no trusted continuous background reference; expensive tools cannot repair that evidence",
+          "text": "04",
+          "role": "sequence number",
+          "source_bbox": [
+            860.0,
+            666.0,
+            60.0,
+            54.0
+          ],
+          "failure_category": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-35",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-e2d2c9372f160cac295182a4\\probe.json",
+          "failure": "MASK_INCOMPLETE",
+          "error_type": "RecoveryBlocked",
+          "reason": "visible unassigned signal blocks repair",
+          "text": "资源持续管理",
+          "role": "card title",
+          "source_bbox": [
+            1076.0,
+            630.0,
+            193.0,
+            41.0
+          ],
+          "failure_category": "MASK_INCOMPLETE"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-36",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "STAGED_LOCAL",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [
+            {
+              "candidate": "semantic_completion--layerd-0",
+              "status": "PRECHECK_PASS"
+            }
+          ],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-ff46123687df164ae7d3e501\\probe.json",
+          "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-ff46123687df164ae7d3e501\\backgrounds\\semantic_completion--layerd-0",
+          "staged_ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-ff46123687df164ae7d3e501\\staged\\slideir.json",
+          "residual_report_sha256": "9c2bd89c82c6d8880466aa569fca41d20dafb69defc6dde9a34cf213c4addd75",
+          "stop_reason": "first source-safe editable candidate staged; Office and visual QA required",
+          "text": "结合业务增长和实际用量，做好资源监测、容量调整和\n运行维护。",
+          "role": "card body",
+          "source_bbox": [
+            1056.0,
+            687.0,
+            539.0,
+            63.0
+          ],
+          "failure_category": null
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-37",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-f7c1b8a50ba53978f3883976\\probe.json",
+          "failure": "PROTECTED_NEIGHBOR",
+          "error_type": "RecoveryBlocked",
+          "reason": "confirmed text overlaps protected peer",
+          "text": ">>",
+          "role": "footer text",
+          "source_bbox": [
+            390.0,
+            813.0,
+            66.0,
+            46.0
+          ],
+          "failure_category": "OWNER_CONFLICT"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-38",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-2308b139df86d8759a581595\\probe.json",
+          "failure": "INSUFFICIENT_CONTEXT",
+          "error_type": "RecoveryBlocked",
+          "reason": "both lateral sides need independent unprotected samples",
+          "text": "为高新区智能化应用提供稳定可靠、按需扩展的基础保障。",
+          "role": "footer text",
+          "source_bbox": [
+            450.0,
+            822.0,
+            833.0,
+            37.0
+          ],
+          "failure_category": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "schema": "R1204TextProbeResult/1",
+          "object_id": "t-39",
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "scene_sha256": "bea6ad8a702b7009715a5ceb774ad7a0b0b94980421642b420c4040081a03c9a",
+          "state": "BLOCKED",
+          "office": "NOT_RUN",
+          "visual": "NOT_RUN",
+          "automatic_publication": false,
+          "attempts": [],
+          "cache_hit": false,
+          "receipt_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-cc95562bc7713534f9b61d26\\probe.json",
+          "failure": "INSUFFICIENT_CONTEXT",
+          "error_type": "RecoveryBlocked",
+          "reason": "no trusted continuous background reference; expensive tools cannot repair that evidence",
+          "text": "05",
+          "role": "page number",
+          "source_bbox": [
+            1594.0,
+            889.0,
+            31.0,
+            30.0
+          ],
+          "failure_category": "BACKGROUND_REPAIR_FAILED"
+        }
+      ],
+      "external_model_calls": 0,
+      "compiler_calls": 0,
+      "office_calls": 0,
+      "automatic_publication": false,
+      "next_gate": "Actual Office and independent visual verification"
+    }
+  },
+  "agent_loops": {
+    "text": {
+      "id": "t-14",
+      "tools": [
+        "retry_text_mask_completion"
+      ],
+      "decisions": 2,
+      "status": "CANDIDATE_READY",
+      "bytes_match_final": {
+        "source.png": true,
+        "mask.png": true,
+        "raw_inpaint.png": true,
+        "written_back.png": true
+      },
+      "receipt_sha256": "f044410398cc715f21a95ee79097e9336217b9cf9bee368b99279303822ad870",
+      "budget": {
+        "limits": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "repair_rounds": 1,
+          "model_calls": 2,
+          "office_validations": 60,
+          "max_seconds": 2400,
+          "cost_units": 120.0
+        },
+        "counts": {
+          "model_calls": 2,
+          "office_validations": 0,
+          "background_candidates": 0,
+          "compiler_calls": 0
+        },
+        "cost_units": 10.0,
+        "cost_unit_definition": {
+          "model_calls": 5.0,
+          "office_validations": 1.0,
+          "background_candidates": 0.05,
+          "compiler_calls": 0.0
+        },
+        "elapsed_seconds": 40.4253466129303
+      }
+    },
+    "asset": {
+      "id": "a-icon-monitor-chart",
+      "tools": [
+        "retry_asset_extraction"
+      ],
+      "decisions": 2,
+      "status": "CANDIDATE_READY",
+      "bytes_match_final": {
+        "asset_png": true
+      },
+      "receipt_sha256": "7c304bfb1d44d1de39ac3a4adcab0c27f6f84cb44526b8b2fbb974248220e59e",
+      "budget": {
+        "limits": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "repair_rounds": 1,
+          "model_calls": 2,
+          "office_validations": 60,
+          "max_seconds": 2400,
+          "cost_units": 120.0
+        },
+        "counts": {
+          "model_calls": 2,
+          "office_validations": 0,
+          "background_candidates": 0,
+          "compiler_calls": 0
+        },
+        "cost_units": 10.0,
+        "cost_unit_definition": {
+          "model_calls": 5.0,
+          "office_validations": 1.0,
+          "background_candidates": 0.05,
+          "compiler_calls": 0.0
+        },
+        "elapsed_seconds": 32.21983361244202
+      }
+    }
+  },
+  "fresh_heldout_branches": {
+    "surface": {
+      "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-smoke\\state\\evidence\\a9a483e0c5800053e1f337e6f49a412de20c44514d269e06d707fbecccab72e8.json",
+      "sha256": "559f72a055dcb2a3c5421b1b8280e0727971a9a979522232633d5346a699f035"
+    },
+    "text": {
+      "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-smoke\\state\\evidence\\f061e57bf3a78a41ecf53fec864664fad92f0b35b502d343cd101d69dd78e662.json",
+      "sha256": "985739b14132de0f75ed117ab43873fb9cb631bbd85823dd539f53de5a299f1e"
+    },
+    "asset": {
+      "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-smoke-ok\\state\\evidence\\28c40ba3e46b8c3bce92f9b47c07324ee483c4b1b8c72be980a98638ba9d75b2.json",
+      "sha256": "7635feadf0b1c2af656ddceb6a7ee83a557f308cf5c360ef66c1da2dafe90013"
+    }
+  },
+  "heldout_original_page": 2,
+  "unresolved_issues": [
+    "page5 pc-gear/cloud-sync/database-gear complete foreground crosses semantic scope; no new SAM evidence",
+    "page5 30 text regions blocked in full L1 scan; one further L1-ready body deferred at goal8",
+    "heldout page2 asset/surface overlap expands peer protection and blocks all native text recovery",
+    "heldout full run has no native text replacement records; TextEditProbe FAIL; final Go NOT_RUN"
+  ],
+  "source_boundaries": "page5 expanded from frozen evidence; page2 initial fresh text/surface plus recovered asset branch from the same upload; no prior-page scene or OCR used",
+  "final_recheck_reason": "fault-injection found missing/UNKNOWN asset QA receipts; fail-closed fix retested, existing candidates reused for final combination QA",
+  "tests": {
+    "product_passed": 257,
+    "protocol_passed": 39
+  },
+  "human_acceptance": false,
+  "wps_checked": false,
+  "automatic_publication": false,
+  "scope": "8 native texts and 9 independent PNGs on page5;heldout coverage is recorded under jobs.smoke_final;remaining regions retain source raster;independent recall unknown",
+  "failed_resume": {
+    "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-smoke-full",
+    "committed_files_verified": 52,
+    "code_manifest_matches_current": true,
+    "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+    "perception_mode": "live-or-cache",
+    "background_candidates": 0,
+    "lower_hypotheses_assessed": 0,
+    "lama_candidates": 0,
+    "compiler_packages": 2,
+    "office_packages": 1,
+    "replacement_packages": 1,
+    "regional_wall_seconds": 30.67,
+    "editable_texts": 0,
+    "editable_images": 0,
+    "office_pass": false,
+    "final_office_actions": 0,
+    "local_hard_gate_receipts": [],
+    "outside_pixels": 0,
+    "visual": [
+      {
+        "status": "UNKNOWN",
+        "failure": "QA_INFRASTRUCTURE_UNAVAILABLE",
+        "error_type": "RuntimeError",
+        "verified_regions_retained": true,
+        "automatic_retry": false
+      }
+    ],
+    "execution_cost": {
+      "limits": {
+        "region_candidates": 2,
+        "complex_region_candidates": 4,
+        "repair_rounds": 1,
+        "model_calls": 12,
+        "office_validations": 60,
+        "max_seconds": 2400,
+        "cost_units": 120.0
+      },
+      "counts": {
+        "model_calls": 0,
+        "office_validations": 1,
+        "background_candidates": 0,
+        "compiler_calls": 2
+      },
+      "cost_units": 1.0,
+      "cost_unit_definition": {
+        "model_calls": 5.0,
+        "office_validations": 1.0,
+        "background_candidates": 0.05,
+        "compiler_calls": 0.0
+      },
+      "elapsed_seconds": 18.505013465881348
+    },
+    "workflow_states": {
+      "candidate_generation": "COMPLETED",
+      "regional_commit": "COMPLETED",
+      "final_qa": "UNKNOWN_OR_REVIEW_REQUIRED",
+      "automatic_publication": "GATED"
+    },
+    "verified_regions": [],
+    "artifacts": {
+      "page-01.png": "ddb61151dffc8569619f2f73a052310f254fadc4427796efcba6a4f81bdc0999",
+      "result.pptx": "f46d1453fa496a54f0f33a4c2b91aca44761988461bf1f45be92805c01290ea9",
+      "stable-fallback.pptx": "dd6089199633e21370d13e6fc5ae0b28373263c7d04af080462f430f2bac9a4c"
+    },
+    "failure_receipts": [
+      {
+        "branch": "asset",
+        "state": "FALLBACK",
+        "receipt": {
+          "reason": "ValueError:LayerD active model binding mismatch",
+          "schema_repairs": 2
+        }
+      },
+      {
+        "branch": "scene",
+        "state": "FALLBACK",
+        "receipt": {
+          "reason": "ValueError:verified seed owner no longer resolved",
+          "ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1205-smoke-full\\page-01\\branch-fallback-1cdfbe32\\slideir.json"
+        }
+      }
+    ],
+    "cause": "initial local forward reached legacy LayerD without expected model_binding; seed rejected unresolved ownership; corrected local target to existing remote port18847; no server deployment changed"
+  }
+}

@@ -17,10 +17,13 @@ def main():
     parser.add_argument('--prompt-key',action='store_true')
     parser.add_argument('--opencode-profile')
     parser.add_argument('--text-region-goal',type=int)
+    parser.add_argument('--retry-assets',action='store_true')
     parser.add_argument('--regional-agent',action='store_true')
     parser.add_argument('--agent-skill')
     parser.add_argument('--regional-strategy',choices=['adaptive','exhaustive'],default='adaptive')
     parser.add_argument('--adaptive-budget',type=json.loads,default={})
+    parser.add_argument('--reuse-perception-from')
+    parser.add_argument('--reuse-verified-from')
     parser.add_argument('--fresh-perception',action='store_true',help='isolate model evidence cache for a real fresh three-branch run')
     parser.add_argument('--pipeline-mode',choices=['parallel_review','parallel_shadow'],default='parallel_review')
     parser.add_argument('--object-extraction',choices=['default','auto','off','alpha','sam3','sam3.1'],default='default')
@@ -48,8 +51,9 @@ def main():
     write(output/'request.json',{'sources':names,'max_calls':None,'italic_difference_ignored':True,
                                'pipeline_mode':args.pipeline_mode,'object_extraction':args.object_extraction,
                                'candidate_engine':args.candidate_engine,'regional_strategy':args.regional_strategy,
+                               'reuse_perception_from':args.reuse_perception_from,'reuse_verified_from':args.reuse_verified_from,
                                'adaptive_budget':args.adaptive_budget,'fresh_perception_requested':args.fresh_perception,
-                               'text_region_goal':args.text_region_goal,'regional_agent':args.regional_agent,'agent_skill':args.agent_skill})
+                               'text_region_goal':args.text_region_goal,'retry_assets':args.retry_assets,'regional_agent':args.regional_agent,'agent_skill':args.agent_skill})
     def progress(**kw):
         write(output/'progress.json',kw)
         print(json.dumps(kw),flush=True)

@@ -18,6 +18,8 @@ def main():
     parser.add_argument('--output',required=True)
     parser.add_argument('--layers',required=True)
     parser.add_argument('--text-region-goal',type=int,default=4)
+    parser.add_argument('--reuse-verified',action='store_true')
+    parser.add_argument('--retry-assets',action='store_true')
     parser.add_argument('--regional-agent',action='store_true')
     parser.add_argument('--agent-skill')
     parser.add_argument('--prompt-key',action='store_true')
@@ -46,8 +48,12 @@ def main():
         'layers':str(Path(args.layers).resolve())}],'stable_assets':[]})
     write(output/'request.json',{'sources':['01.png'],'pipeline_mode':'parallel_review','object_extraction':'auto',
         'candidate_engine':'r12-regional','regional_strategy':'adaptive','text_region_goal':args.text_region_goal,
-        'regional_agent':args.regional_agent,'agent_skill':args.agent_skill,
+        'retry_assets':args.retry_assets,'regional_agent':args.regional_agent,'agent_skill':args.agent_skill,
         'perception_replay':str(output/'replay.json'),'frozen_baseline':str(output/'baseline.json')})
+    if args.reuse_verified:
+        request=json.loads((output/'request.json').read_text('utf8'))
+        request['reuse_verified_from']=str(prior)
+        write(output/'request.json',request)
     if args.prompt_key:
         os.environ['MOMA_API_KEY']=getpass.getpass('MoMA credential (hidden): ')
         os.environ['OPENCODE_GO_API_KEY']=getpass.getpass('OpenCode Go credential (hidden): ')

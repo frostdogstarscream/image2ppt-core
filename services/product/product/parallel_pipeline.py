@@ -150,6 +150,15 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
                 branches['asset'],coordinate_report=normalize(branches['asset'],store)
                 write(folder/'asset-coordinate-report.json',coordinate_report)
             graph=fuse(snap,branches,ocr)
+            if candidate_engine=='r12-regional' and request.get('reuse_verified_from'):
+                from .recovery.verified_seed import load as load_verified_seed,materialize as materialize_seed
+                seed=load_verified_seed(request['reuse_verified_from'],graph,fonts)
+                ir=materialize_seed(seed,folder)
+                write(folder/'barrier-1.json',graph.model_dump())
+                report=json.loads((ir.parent/'transactions.json').read_text('utf8'))
+                store.task('scene-'+snap['source_sha256'],'scene','STAGED',{'ir':str(ir),'failures':failures,
+                    'reused_verified_delivery':seed['source_job']})
+                return graph,ir,report,failures
             from .parallel_typography import calibrate
             from .parallel_text_anchor import anchor
             import numpy as np
