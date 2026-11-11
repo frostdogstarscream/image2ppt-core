@@ -143,6 +143,12 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             if candidate_engine=='r12-regional' and request.get('regional_strategy','adaptive')=='adaptive':
                 from .recovery.text_groups import coalesce
                 branches=coalesce(branches,ocr,store)
+            raw_graph=fuse(snap,branches,ocr)
+            coordinate_report=None
+            if candidate_engine=='r12-regional':
+                from .asset_geometry import normalize
+                branches['asset'],coordinate_report=normalize(branches['asset'],store)
+                write(folder/'asset-coordinate-report.json',coordinate_report)
             graph=fuse(snap,branches,ocr)
             from .parallel_typography import calibrate
             from .parallel_text_anchor import anchor
@@ -185,6 +191,15 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
                         with lease('cpu'):ir,report=build(graph,snap,fonts,folder/'staged-sam',layers=layers,stable=stable,strategy=route,sam_candidates=masks,pixel_cache=cache/'pixels',
                             text_candidates=candidate_engine!='r12-regional')
                 except Exception as exc:write(folder/'sam-failure.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
+            if candidate_engine=='r12-regional' and request.get('regional_agent'):
+                from .recovery.agent_recovery import run as run_agent_repair
+                raw_graph.text=graph.text.model_copy(deep=True)
+                skill_directory=request.get('agent_skill') or os.environ.get('IMAGE2PPT_AGENT_SKILL')
+                try:
+                    run_agent_repair(raw_graph,graph,snap,ocr,ir.parent,fonts,directory if layers else None,
+                        coordinate_report,provider,cache,store,folder/'agent',skill_directory)
+                except Exception as exc:
+                    write(folder/'agent/status.json',{'status':'UNKNOWN','reason':type(exc).__name__,'published':False})
             # A visually faithful raster fallback must not suppress directed
             # repairs of known extraction/planning failures before Go reviews.
             from .parallel_repair import local_findings,repair

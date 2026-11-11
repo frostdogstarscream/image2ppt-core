@@ -86,3 +86,9 @@ def test_tampered_cached_tool_is_rejected(product_fixture,tmp_path):
     file.write_bytes(b'changed')
     with pytest.raises(ValueError,match='cached tool result changed'):
         runtime.execute('recover_text')
+
+
+def test_scene_binding_uses_validated_numeric_representation(product_fixture,tmp_path):
+    product_fixture.graph.text.texts[0].bbox=[15,15,40,35]
+    runtime,_,_=agent(product_fixture,tmp_path,[])
+    runtime.checked()

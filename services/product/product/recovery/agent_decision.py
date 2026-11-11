@@ -111,7 +111,7 @@ class RegionalRepairAgent:
         self.output=Path(output).resolve();self.output.mkdir(parents=True,exist_ok=True)
         self.max_decisions=max_decisions;self.max_tools=max_tools
         if not 1<=max_decisions<=6 or not 1<=max_tools<=3:raise ValueError('invalid regional agent budget')
-        self.binding={'source_sha256':graph.source_sha256,'scene_sha256':key(graph.model_dump()),
+        self.binding={'source_sha256':graph.source_sha256,'scene_sha256':key(self.graph.model_dump()),
             'object_id':object_id,'failure_hashes':sorted(self.failures.values()),
             'skill_sha256':policy.version,'runtime_sha256':digest(__file__),
             'tools':{name:tool.implementation_sha256 for name,tool in self.tools.items()}}
@@ -135,7 +135,7 @@ class RegionalRepairAgent:
                 if any(digest(p)!=sha for p,sha in result['files'].items()):raise ValueError('cached tool result changed')
                 return result
             db.execute('INSERT INTO regional_agent_tools VALUES(?,?,?)',(signature,'RESERVED',None))
-        directory=self.output/('tool-'+signature[:16]);directory.mkdir(exist_ok=False)
+        directory=self.output/('t-'+signature[:12]);directory.mkdir(exist_ok=False)
         try:
             candidate=self.tools[name].execute(directory)
             self.checked()

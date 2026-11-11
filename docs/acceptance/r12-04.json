@@ -1,0 +1,468 @@
+{
+  "schema": "R1204VerifiedReceipt/1",
+  "baseline_commit": "ab78a5e54bfd96c523b3d325b00a3c0039292f12",
+  "workstreams": {
+    "assets": "050b539925f4ac91b8a30b80512a0eaa8c8c5b73",
+    "text": "efc6d13896b7e9d483d2fe0afc4f8adb9cdca657",
+    "agent": "dc3dc46721011fa11ddcc275c66b6c9708bf6f78"
+  },
+  "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+  "product_tests_passed": 233,
+  "protocol_tests_passed": 39,
+  "fresh_branch_receipt_sha256": {
+    "surface": "d99ed947bb33dc89c6202034175b2b305afc818099a1a2de176412990030d98f",
+    "asset": "e228c0b5a8c4c8469114e993fe6b28384ff916ebe5bc617b4f166fd3d49d0d96",
+    "text": "2635df00d9425fc93aca68b739e7ec06009befcc501a97e2b7d19879f1d6beb8"
+  },
+  "current": {
+    "code_manifest_matches_current": true,
+    "editable_texts": 4,
+    "editable_images": 5,
+    "background_candidates": 4,
+    "compiler_packages": 6,
+    "office_packages": 5,
+    "replacement_packages": 5,
+    "regional_wall_seconds": 262.4,
+    "office_pass": true,
+    "final_office_actions": 18,
+    "outside_pixels": 0,
+    "artifacts": {
+      "page-01.png": "21e065aea5d9d6aeb2d8842e1e21729709a021c71950ee3c0a9c5dc2c245d01f",
+      "result.pptx": "0695808518d444c8515bda4ed67f90046bccaffd766dfe76b472ecb30b74d12b",
+      "stable-fallback.pptx": "7fd0df877ca077f0d069a611037578251ff5dedddf9b653cdb166c08193e8dac"
+    }
+  },
+  "previous": {
+    "editable_texts": 2,
+    "editable_images": 0,
+    "background_candidates": 2,
+    "compiler_packages": 4,
+    "office_packages": 3,
+    "replacement_packages": 3,
+    "regional_wall_seconds": 143.94,
+    "office_pass": true,
+    "artifacts": {
+      "page-01.png": "adb8da555be457f98e37b9fd871fd00a7307e65a21b49fccde769ae488d471d2",
+      "result.pptx": "1f2ed86859499c9897aa92e50b7fbdefc8f20533881a938d1f752300bf05ed04",
+      "stable-fallback.pptx": "bc5e6a8ac6fe81a8c7efc2e7e30bfeacd83de32cd070e6d887d8f8f411d58393"
+    }
+  },
+  "independent_icons": [
+    "a-icon-camera",
+    "a-icon-bank",
+    "a-icon-factory"
+  ],
+  "picture_ids": [
+    "a-icon-camera",
+    "a-icon-bank",
+    "a-icon-factory",
+    "a-deco-title-bars",
+    "a-deco-subtitle-arrows"
+  ],
+  "owner_residuals": [
+    {
+      "id": "a-icon-camera",
+      "residual_check_status": "PASS",
+      "residual_pixels_confirmed": 0,
+      "reference_sha256": "c5f482d121f08279c6cbfc0ee84c1827da14af069ef0ef7e1e631bf2d428ef5a",
+      "unexplained_pixels": 0,
+      "checked_owner_pixels": 1098,
+      "delete_sha256": "ab2b235fdd5c5dfbcf7aa4600338eebfeaf0069d7433f89344535ce613d6f030",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "tolerance_rgb": 8,
+      "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+    },
+    {
+      "id": "a-icon-bank",
+      "residual_check_status": "PASS",
+      "residual_pixels_confirmed": 0,
+      "reference_sha256": "6e3736517c7b46faa5a90ee4017c6bdd181d1715b19d9d486487e0e96e3e33b2",
+      "unexplained_pixels": 0,
+      "checked_owner_pixels": 1768,
+      "delete_sha256": "ffe9ca96736997a55f63c66ae2ae5c0c5620d64b7f1c61bba79c456f6c1bb637",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "tolerance_rgb": 8,
+      "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+    },
+    {
+      "id": "a-icon-factory",
+      "residual_check_status": "PASS",
+      "residual_pixels_confirmed": 0,
+      "reference_sha256": "8d6bc6c0c7ecef0241b0c31ecc4365ffaeca00e11ca46237c5b94b6c4234f93f",
+      "unexplained_pixels": 0,
+      "checked_owner_pixels": 1754,
+      "delete_sha256": "300275293fec0d33df14238bd3e050fdfdbc22b81b0b393560f6cf3fc337d5c3",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "tolerance_rgb": 8,
+      "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+    },
+    {
+      "id": "a-deco-title-bars",
+      "residual_check_status": "PASS",
+      "residual_pixels_confirmed": 0,
+      "reference_sha256": "adcbbcc952e70dc10cb127bdd209b1657a41062eec3193b2b36e00461d7e1101",
+      "unexplained_pixels": 0,
+      "checked_owner_pixels": 1017,
+      "delete_sha256": "ab91d83056569939cd180ee8d2825b2673ba2dbf2d8f4d7d0dd69c2a936cee07",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "tolerance_rgb": 8,
+      "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+    },
+    {
+      "id": "a-deco-subtitle-arrows",
+      "residual_check_status": "PASS",
+      "residual_pixels_confirmed": 0,
+      "reference_sha256": "6ec7619cbb2d377bf6c05921b6bd361026a577e5251dcbfd3dd7fcbdd2ec5931",
+      "unexplained_pixels": 0,
+      "checked_owner_pixels": 528,
+      "delete_sha256": "8c988c009c04b94b11a98129a57ac52d3b72a730761a5892120b7bb9c0805f16",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "tolerance_rgb": 8,
+      "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+    },
+    {
+      "id": "t-05",
+      "residual_check_status": "PASS",
+      "residual_pixels_confirmed": 0,
+      "reference_sha256": "f31b582ea5291ecc09d15776c8cb28d00f4d75ad70eb15782676ef9a3fcbc6e4",
+      "unexplained_pixels": 0,
+      "checked_owner_pixels": 1446,
+      "delete_sha256": "f3a97be34d0c844d011fa71cb423ffb3d2e792e6ef879f28e84da0632c6d8240",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "tolerance_rgb": 8,
+      "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+    },
+    {
+      "id": "t-06",
+      "residual_check_status": "PASS",
+      "residual_pixels_confirmed": 0,
+      "reference_sha256": "c5f4d96d2b26cc90e6aed9642709c1dc520f9dbd586d93d9c5693bb2b782141b",
+      "unexplained_pixels": 0,
+      "checked_owner_pixels": 7710,
+      "delete_sha256": "45ce98706d2b172e57ba925b2ec29547ac6d3e2f29ebb617b07753f3bb54e4c2",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "tolerance_rgb": 8,
+      "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+    },
+    {
+      "id": "t-09",
+      "residual_check_status": "PASS",
+      "residual_pixels_confirmed": 0,
+      "reference_sha256": "9a445516ba61c188186bc19c71c8a52d78253c3b9a19d9c8a58883f3b76d5934",
+      "unexplained_pixels": 0,
+      "checked_owner_pixels": 1368,
+      "delete_sha256": "824ef15ece0a5a51754e717011af983cea238c975249e50c0e5b05e311b16d46",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "tolerance_rgb": 8,
+      "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+    },
+    {
+      "id": "t-10",
+      "residual_check_status": "PASS",
+      "residual_pixels_confirmed": 0,
+      "reference_sha256": "279d8aa6da52c2ec2cff2280cca6ae473aabd2d640da2de3b6cc625c80f31d07",
+      "unexplained_pixels": 0,
+      "checked_owner_pixels": 7688,
+      "delete_sha256": "98dc385e7e388000a9cbb668fc8100fa7aa6a99f5445a64a4457883e448b1723",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "tolerance_rgb": 8,
+      "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+    }
+  ],
+  "agent": {
+    "binding": {
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "scene_sha256": "5b2c93276b0906b524bb97fa07488beb56e1dc2567bc066fa7d34da2616c0896",
+      "object_id": "t-05",
+      "failure_hashes": [
+        "283f7f438714025524f917a4918e4146c950eb04e11281d25ff3752b065ebdcd"
+      ],
+      "skill_sha256": "0d009bbb1c3ce219abe28d5880d0b3eed050bf1426bc0bd801ebcd96424fdf28",
+      "runtime_sha256": "1637f493eb8d39452d536fbf7cc8946fde6491d51103c33c2b2a130905647fe2",
+      "tools": {
+        "normalize_asset_geometry_and_retry_text": "ee067c4e0ce6db2d381500ce261d75b93095bbb935b30b5a0c0170c3b16502d4"
+      }
+    },
+    "model_decisions": 2,
+    "tools_executed": 1,
+    "status": "CANDIDATE_READY",
+    "candidate_bytes_match_final": {
+      "source.png": true,
+      "mask.png": true,
+      "raw_inpaint.png": true,
+      "written_back.png": true
+    },
+    "actual_office_verified_id": "t-05",
+    "receipt_sha256": "e4d20dfe28ef8850e6852fa46c14e4740120fcf12fd5c2b416d4e892153a8cf8"
+  },
+  "agent_decisions": [
+    {
+      "schema": "RegionalRepairDecision/1",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "scene_sha256": "5b2c93276b0906b524bb97fa07488beb56e1dc2567bc066fa7d34da2616c0896",
+      "evidence_sha256": "0eecd499169a9177244c03259701754a6b828338276b1cae4d914eaaeeae2c5d",
+      "object_id": "t-05",
+      "action": "execute_tool",
+      "tool": "normalize_asset_geometry_and_retry_text",
+      "reason": "The R1204 probe for t-05 ('现场') is BLOCKED with INSUFFICIENT_CONTEXT because lateral sides lack independent unprotected samples. The coordinate evidence shows the host adapter corrected a whole-branch xyxy/xywh geometry mismatch (ADAPTED_XYXY_TO_XYWH) for multiple assets including the nearby icon and cloud. Normalizing this proven geometry interpretation should re-fuse source ownership correctly, potentially resolving the context sampling issue by establishing accurate boundaries for the text's neighbors, allowing the safe text-mask/background tool to retry."
+    },
+    {
+      "schema": "RegionalRepairDecision/1",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "scene_sha256": "5b2c93276b0906b524bb97fa07488beb56e1dc2567bc066fa7d34da2616c0896",
+      "evidence_sha256": "0eecd499169a9177244c03259701754a6b828338276b1cae4d914eaaeeae2c5d",
+      "object_id": "t-05",
+      "action": "accept_candidate",
+      "tool": null,
+      "reason": "The tool 'normalize_asset_geometry_and_retry_text' successfully resolved the geometry mismatch and produced a CANDIDATE_READY status. All internal checks (reference_context, complete_visible_scope, no_visible_original_signal, background_colour, seam, protected_integrity, outside_mask_integrity, raw_writeback_identity) passed. The background_after_text_removal preview shows a clean removal of the '现场' text with no visible residual strokes or damage to neighbors. Per instructions, when a tool reports CANDIDATE_READY with passing checks, the preferred action is to accept the candidate."
+    }
+  ],
+  "execution_cost": {
+    "limits": {
+      "region_candidates": 2,
+      "complex_region_candidates": 4,
+      "repair_rounds": 1,
+      "model_calls": 12,
+      "office_validations": 60,
+      "max_seconds": 2400,
+      "cost_units": 120.0
+    },
+    "counts": {
+      "model_calls": 6,
+      "office_validations": 5,
+      "background_candidates": 4,
+      "compiler_calls": 6
+    },
+    "cost_units": 35.2,
+    "cost_unit_definition": {
+      "model_calls": 5.0,
+      "office_validations": 1.0,
+      "background_candidates": 0.05,
+      "compiler_calls": 0.0
+    },
+    "elapsed_seconds": 464.0565128326416
+  },
+  "pipeline_wall_seconds": 468.25,
+  "perception_wall_seconds": 159.77,
+  "model_receipts": [
+    {
+      "sha256": "dfd54a12c10bea0003d478f0b955a81b42b22daa51b6458a51c5e3e0f6be9476",
+      "model": "qwen3.8-max",
+      "usage": {
+        "completion_tokens": 3022,
+        "completion_tokens_details": {
+          "text_tokens": 3022
+        },
+        "prompt_tokens": 2723,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "image_tokens": 1510,
+          "text_tokens": 1213
+        },
+        "total_tokens": 5745
+      }
+    },
+    {
+      "sha256": "009dadd9348843db34c7c2cfcd2f2799256e42b96ef02b5d2943f8b683750711",
+      "model": "deepseek-v4.1-flash",
+      "usage": {
+        "prompt_tokens": 20320,
+        "completion_tokens": 564,
+        "total_tokens": 20884,
+        "prompt_tokens_details": {
+          "cached_tokens": 768,
+          "cache_write_tokens": null
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        },
+        "cost": 0,
+        "opencode": {
+          "billing_source": "go",
+          "list_cost": 0.0032735,
+          "allowance": 0.0019641,
+          "tokens": {
+            "input": 19552,
+            "output": 564,
+            "reasoning": 0,
+            "cache_read": 768,
+            "cache_write_5m": 0,
+            "cache_write_1h": 0
+          }
+        }
+      }
+    },
+    {
+      "sha256": "c7b6021d9b34698a2c867eac93b8802cb620f8ff30f41186422e7edbb7f25176",
+      "model": "qwen3.8-max",
+      "usage": {
+        "completion_tokens": 5768,
+        "completion_tokens_details": {
+          "text_tokens": 5768
+        },
+        "prompt_tokens": 15765,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "image_tokens": 1510,
+          "text_tokens": 14255
+        },
+        "total_tokens": 21533
+      }
+    },
+    {
+      "sha256": "9fb2342995fbc0c4b354f8df1b4e2ac14bac4215ea8d1c7f08a08e487218d1f0",
+      "model": "qwen3.8-max",
+      "usage": {
+        "completion_tokens": 5187,
+        "completion_tokens_details": {
+          "text_tokens": 5187
+        },
+        "prompt_tokens": 9375,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "image_tokens": 7550,
+          "text_tokens": 1825
+        },
+        "total_tokens": 14562
+      }
+    },
+    {
+      "sha256": "7e91843dcae78e150d9438678378c2aaef1d901a82738847ee3c646901149163",
+      "model": "qwen3.8-max",
+      "usage": {
+        "completion_tokens": 365,
+        "completion_tokens_details": {
+          "text_tokens": 365
+        },
+        "prompt_tokens": 22456,
+        "prompt_tokens_details": {
+          "cached_tokens": 11264,
+          "image_tokens": 1654,
+          "text_tokens": 20802
+        },
+        "total_tokens": 22821
+      }
+    },
+    {
+      "sha256": "79292a4f97be8a7a0c868ae016462b06dabc27e41537960551c3b4e85fb422bd",
+      "model": "qwen3.8-max",
+      "usage": {
+        "completion_tokens": 371,
+        "completion_tokens_details": {
+          "text_tokens": 371
+        },
+        "prompt_tokens": 13978,
+        "prompt_tokens_details": {
+          "cached_tokens": 3072,
+          "image_tokens": 1510,
+          "text_tokens": 12468
+        },
+        "total_tokens": 14349
+      }
+    }
+  ],
+  "visual_review": [
+    {
+      "schema": "VisualReview/1",
+      "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "plan_sha256": "3e51136dcadf3da9c2704a81e9a6e9781cfca6c3d22ad43e9a67ce24d10602cf",
+      "preview_sha256": "21e065aea5d9d6aeb2d8842e1e21729709a021c71950ee3c0a9c5dc2c245d01f",
+      "passed": true,
+      "checked": [
+        "wording",
+        "structure",
+        "font",
+        "emphasis",
+        "layout",
+        "graphics"
+      ],
+      "findings": [],
+      "minor_deviations": [
+        {
+          "category": "font",
+          "description": "t-05/t-09 标签字形与源图存在轻微字重/字距差异，t-06/t-10 正文行距与源图略有出入，整体阅读无影响。",
+          "node_ids": [
+            "t-05",
+            "t-06",
+            "t-09",
+            "t-10"
+          ],
+          "aspect": "other",
+          "source_bbox": [
+            175.0,
+            161.0,
+            188.0,
+            57.0
+          ],
+          "suggested_fix": "",
+          "reason_to_accept": "风格接近的字体与轻微字距行距差异，普通用户不易察觉，不影响内容与阅读。"
+        },
+        {
+          "category": "layout",
+          "description": "原生文本框高度按字体行距微调（如 t-05 由 40 增至 46），文字基线位置与源图有亚像素级偏移。",
+          "node_ids": [
+            "t-05",
+            "t-06",
+            "t-09",
+            "t-10"
+          ],
+          "aspect": "other",
+          "source_bbox": [
+            175.0,
+            161.0,
+            188.0,
+            57.0
+          ],
+          "suggested_fix": "",
+          "reason_to_accept": "为安装字体行距所做的正常适配，位置差异极小且无碰撞或裁切。"
+        },
+        {
+          "category": "graphics",
+          "description": "a-icon-camera/bank/factory 与装饰条、箭头为透明 PNG，边缘抗锯齿与源图有细微差别。",
+          "node_ids": [
+            "a-icon-camera",
+            "a-icon-bank",
+            "a-icon-factory",
+            "a-deco-title-bars",
+            "a-deco-subtitle-arrows"
+          ],
+          "aspect": "other",
+          "source_bbox": [
+            43.0,
+            29.0,
+            46.0,
+            42.0
+          ],
+          "suggested_fix": "",
+          "reason_to_accept": "图形完整、颜色正确、透明背景正常，删除测试无残留旧笔画，边缘差异不影响使用。"
+        }
+      ],
+      "status": "PASS"
+    }
+  ],
+  "fallback_basis": "immutable_source_raster",
+  "full_local_acceptance": "outputs/r1204-final-evidence/acceptance.json",
+  "acceptance_sha256": "4ac28a381e3794351da40b74ce08fe86525f153a7c368c8208b2bbfcfe9b8f96",
+  "scope": "four native text regions and three independent icons plus two decorations; remaining content stays raster; recall denominator unknown",
+  "human_acceptance": false,
+  "automatic_publication": false,
+  "model_call_comparison": {
+    "r12_03_production": {
+      "fresh_perception": 3,
+      "regional_agent": 0,
+      "final_go": 1
+    },
+    "r12_04_production": {
+      "fresh_perception": 3,
+      "regional_agent": 2,
+      "final_go": 1
+    },
+    "scope": "one production path; independent development diagnostics are retained separately"
+  },
+  "text_candidate_counts": {
+    "regional": 4,
+    "agent_tool": 1,
+    "total_saved": 5,
+    "unique_mask_writeback_pairs": 4
+  }
+}

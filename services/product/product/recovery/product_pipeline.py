@@ -161,6 +161,8 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
     if request.get('regional_strategy','adaptive') not in ('adaptive','exhaustive'):
         raise ValueError('unsupported regional strategy')
     budget=AdaptiveBudget(store,request.get('adaptive_budget')) if adaptive else None
+    goal=request.get('text_region_goal')
+    if goal is not None and (type(goal) is not int or goal<1):raise ValueError('text region goal must be a positive integer')
     root=job/'r12';root.mkdir(exist_ok=True)
     attempt=root/('attempt-'+key({'request':request,'code':digest(__file__)})[:16])
     if attempt.exists():
@@ -168,7 +170,7 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
         attempt=attempt.with_name(attempt.name+'-'+uuid4().hex[:8])
     attempt.mkdir()
     package=Path(__file__).resolve().parents[1]
-    code_files=[*package.glob('*.py'),*Path(__file__).parent.glob('*.py')]
+    code_files=[*package.glob('*.py'),*Path(__file__).parent.glob('*.py'),*list((package/'agent_service').glob('*.py'))]
     write(attempt/'code-manifest.json',{'entrypoint':'product.parallel_pipeline.run',
         'files':{str(p.relative_to(package.parent)):digest(p) for p in code_files},
         'candidate_engine':'r12-shadow' if shadow else 'r12-regional'})
@@ -195,6 +197,9 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
         current=ir;state=[];font_choices={};region_records,by_id=regions(graph)
         write(folder/'dependencies.json',region_records)
         for identifier in targets:
+            if goal is not None and sum(r['state']=='VERIFIED_LOCAL' for r in state)>=goal:
+                write(folder/'coverage-stop.json',{'goal':goal,'reason':'requested verified regional coverage reached','remaining_regions_retained_in_source':True})
+                break
             record={'object_id':identifier,'region_id':by_id[identifier]['region_id'],
                     'dependencies':by_id[identifier]['dependencies'],'state':'LOCAL_FALLBACK','attempts':[],
                     'candidate_state':'NOT_GENERATED','regional_commit':'NOT_COMMITTED'}
@@ -378,7 +383,15 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
     delivery=job/'delivery';delivery.mkdir(exist_ok=True)
     shutil.copyfile(artifacts['pptx'],delivery/'result.pptx')
     for index,preview in enumerate(previews,1):shutil.copyfile(preview,delivery/f'page-{index:02d}.png')
-    stable=compile_set(original_irs,'stable-fallback')
+    from ..parallel_pipeline import safe_graph
+    from ..parallel_rebuild import build
+    stable_irs=[]
+    for index,(graph,snap) in enumerate(zip(graphs,snaps),1):
+        with lease('cpu'):
+            stable_ir,_=build(safe_graph(graph),snap,fonts,attempt/f'stable-source-{index:02d}',
+                strategy='off',text_candidates=False)
+        stable_irs.append(stable_ir)
+    stable=compile_set(stable_irs,'stable-fallback')
     shutil.copyfile(stable['pptx'],delivery/'stable-fallback.pptx')
     for index,page in enumerate(states):
         visual=reviews[index]
@@ -416,7 +429,7 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
         'pages':len(snaps),'generation':expected+1,'candidate_engine':'r12-shadow' if shadow else 'r12-regional',
         'locally_verified_text_regions':count,'regions':states,'independent_review':reviews,'office_pass':office_ok,
         'reconstructed_pages':sum(bool(SceneGraph.model_validate_json((p.parent/'scene.json').read_text('utf8')).selected) for p in irs),
-        'slide_irs':[str(p) for p in irs],'human_acceptance':False,'automatic_publication':False,
+        'slide_irs':[str(p) for p in irs],'human_acceptance':False,'automatic_publication':False,'fallback_basis':'immutable_source_raster',
         'artifacts':{p.name:digest(p) for p in delivery.iterdir() if p.is_file()}}
     result['workflow_states']={'candidate_generation':'COMPLETED','regional_commit':'COMPLETED',
         'final_qa':'PASS' if office_ok and all(r.get('passed') is True and not r.get('findings') for r in reviews) else 'UNKNOWN_OR_REVIEW_REQUIRED',
@@ -432,8 +445,11 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
             if p.is_file():files[str(p.resolve())]=digest(p)
     for p in job.glob('page-*/perception-replay.json'):files[str(p.resolve())]=digest(p)
     for p in job.glob('page-*/barrier-1.json'):files[str(p.resolve())]=digest(p)
+    for pattern in ('page-*/asset-coordinate-report.json','page-*/agent/**/*'):
+        for p in job.glob(pattern):
+            if p.is_file():files[str(p.resolve())]=digest(p)
     if request.get('perception_replay'):files[str(Path(request['perception_replay']).resolve())]=digest(request['perception_replay'])
-    for original in original_irs:
+    for original in [*original_irs,*stable_irs]:
         for p in original.parent.rglob('*'):
             if p.is_file():files[str(p.resolve())]=digest(p)
     for record in all_regions:

@@ -24,6 +24,10 @@ Go 或 Office 基础设施故障会保留独立区域候选并记录 UNKNOWN。�
 
 ## AI 开发规范与实现状态
 
+R12-04 在融合前对全分支一致的素材坐标方言进行显式适配。至少两个对象按 xywh 越界且全部对象、parts、exclusions 均符合合法 xyxy 时，生成带输入和代码哈希的坐标适配收据，再经原有源像素和 Owner 门禁生成候选。`run_r1204_assets_local.py` 与 `recovery.text_probe.probe_one` 支持真实冻结证据 L1 检查及候选哈希复用。
+
+本地入口可用 `--text-region-goal 4` 在每页达到四个实际 Office 验证通过的文字区域后停止继续尝试。`--regional-agent --agent-skill <已安装的 image2ppt-auto-agent 目录>` 注册受控的坐标修复与文字重试工具，VLM 读取真实失败、调用工具、检查结果并决定接受候选或停止。Agent 接受表示候选就绪，实际 Office、最终 Go 与发布资格继续分别判断。`run_r1204_agent.py` 可仅执行区域决策，`run_r1204_regression.py` 可复用三分支结果完成集成验收；`summarize_r1204.py` 验证最终哈希、区域工具产物与实际编辑结果。默认稳定路径及 Shadow 入口沿用现有开关，回退文件使用不可变源图表示。
+
 主规范为 `skills/image2ppt/SKILL.md`，细则见其 `references/parallel-product.md`；根目录 `AGENTS.md` 采用同一自动产品入口。Codex 负责开发、调试和验证，不得手写 SlideIR、替换后台规划结果或手工拼装交付来冒充自动生成。旧手工流程保存在 `skills/image2ppt/references/legacy-manual-workflow.md`，固定编译与历史代码继续保留。
 
 局部对象事务是本轮整改要求：共享字体不建立像素提交依赖，独立区域失败不应扩散到全页。文字内容、位置和清除证据分别判断；source-plate 保留未知内容，禁止叠字或按 bbox 清空。当前 r10 基线仍含整页 Surface 门禁、共享样式联动和页级 QA 回退；规范更新不代表这些修复已接入或通过回归。
