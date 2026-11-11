@@ -33,32 +33,41 @@ def font_line_height(record, size):
         return size*units/face['head'].unitsPerEm
 
 
-def native_frame(text, styles, fonts, source_size, protected, scope):
+def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_size=None):
     """Fit installed font bearings/leading within this local replacement scope."""
     used = {text.style, *[span.style for span in text.spans]}
     records = {(font['family'], font['bold']): font for font in fonts['fonts']}
     bearing = 0
     line_height = 0
+    advance_width = text.bbox[2]
     for identifier in used:
         style = styles[identifier]
         family = style.ea if any(ord(c) > 255 for c in text.text) else style.latin
         record = records[family, style.bold]
         face = ImageFont.truetype(record['file'], max(1, round(style.size_px)), index=record['index'])
         bearing = max(bearing, max(0, face.getbbox(text.text.split('\n')[0])[1]))
+        advance_width=max(advance_width,*[math.ceil(face.getlength(line))+1 for line in text.text.split('\n')])
         for name in (style.ea, style.latin):
             line_height = max(line_height, font_line_height(records[name, style.bold], style.size_px))
     payload = text.model_dump()
     spacing = text.line_spacing_px or styles[text.style].size_px*1.2
     metric_height = (len(text.text.split('\n'))-1)*spacing+math.ceil(line_height)+1
-    payload['bbox'] = [*text.bbox[:3], max(text.bbox[3]+bearing, metric_height)]
+    payload['bbox'] = [*text.bbox[:2],advance_width,max(text.bbox[3]+bearing, metric_height)]
+    if minimum_size is not None:
+        payload['bbox'][2]=max(payload['bbox'][2],minimum_size[0])
+        payload['bbox'][3]=max(payload['bbox'][3],minimum_size[1])
     from ..object_extract import rectangle
     grown = rectangle(payload['bbox'], source_size)
-    if (grown & protected).any() or (grown & ~rectangle(scope, source_size)).any():
-        raise ValueError('native font frame allowance leaves the local text closure')
+    # A transparent textbox's font-leading allowance is not an erase mask.
+    # Keep its origin fixed and validate canvas/peer bounds independently.
+    left,top,width,height=payload['bbox']
+    if ((grown & protected).any() or min(left,top)<0 or left+width>source_size[0]
+            or top+height>source_size[1]):
+        raise ValueError('native font frame allowance conflicts with canvas or protected peers')
     return payload
 
 
-def stage_background(trial_directory, graph, baseline_directory, fonts, output):
+def stage_background(trial_directory, graph, baseline_directory, fonts, output, *, typography=None, frame_minimum=None):
     """Recompute all local prechecks, then atomically expose one trial directory.
 
     Failed trials leave the baseline and already staged regions untouched.
@@ -92,8 +101,6 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output):
     if region['member_ids'] != [text.id]:
         raise ValueError('indivisible region cannot be split')
     styles = {s.id: s for s in graph.text.styles}
-    used = {text.style, *[span.style for span in text.spans]}
-    font_gate(SimpleNamespace(styles=[styles[i] for i in used], texts=[text]), fonts)
     protected = peer_protection(text, graph, source, np.zeros(source.shape[:2], bool))
     x, y, w, h = map(round, text.bbox)
     box = [x-3, y-3, w+6, h+6]
@@ -119,6 +126,7 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output):
         raise ValueError('trial writeback mismatch')
     output.parent.mkdir(parents=True, exist_ok=True)
     identity = {'source': graph.source_sha256, 'scene': key(graph.model_dump()), 'text': text.id,
+                'typography':typography,'frame_minimum':frame_minimum,
                 'trial_hashes': hashes, 'fonts': key(fonts), 'font_files': font_bindings(graph, fonts),
                 'implementation_sha256': digest(__file__)}
     cid = 'c-'+key(identity)
@@ -134,8 +142,22 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output):
         folder.mkdir()
         np.savez_compressed(folder/'pixels.npz', mask=wanted,
                             patch=written[by:by+bh, bx:bx+bw], bbox=box)
-        text_payload = native_frame(text, styles, fonts, source.shape[1::-1], protected, box)
+        proposed=text.model_copy(deep=True)
+        definitions=[]
+        if typography:
+            if text.spans:raise ValueError('font proposal cannot overwrite emphasis spans')
+            style=styles[text.style].model_copy(update=typography)
+            style.id=text.style[:40]+'-r12-'+key(style.model_dump())[:12]
+            definitions=[style.model_dump()]
+            styles={**styles,style.id:style};proposed.style=style.id
+        frame_options={'minimum_size':frame_minimum['size']} if frame_minimum else {}
+        text_payload = native_frame(proposed, styles, fonts, source.shape[1::-1], protected, box,**frame_options)
+        fitted=proposed.model_copy(update={'bbox':text_payload['bbox']})
+        fitted_styles={fitted.style,*[span.style for span in fitted.spans]}
+        font_gate(SimpleNamespace(styles=[styles[i] for i in fitted_styles],texts=[fitted]),fonts)
         payload = {'id': text.id, 'kind': 'text', 'bbox': box, 'payload': text_payload,
+                   'source_text_definition':text.model_dump(),'style_definitions':definitions,
+                   'office_frame_feedback':frame_minimum,
                    'native_layout': {'original_bbox': text.bbox, 'proposed_bbox': text_payload['bbox'],
                                      'reason': 'installed EA/Latin font bearings and leading; source origin and line pitch retained'},
                    'method': 'r12-'+saved['method'], 'owner_method': 'source-connected-strokes+lateral-context/r12-1',

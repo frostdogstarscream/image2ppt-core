@@ -16,24 +16,32 @@ from ..parallel_text_candidates import peer_protection
 from ..pipeline import compile_pages
 from .candidate_stage import stage_background
 from .gradient_backing import fit_gradient
+from .background_adapter import RecoveryBlocked
 
 
-def stage_and_verify(trial, graph, baseline, fonts, output, *, office=False):
+def stage_and_verify(trial, graph, baseline, fonts, output, *, office=False, typography=None, compiler=None, office_probe=None,frame_minimum=None):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     baseline = Path(baseline)
     parent_hashes = {str(p.relative_to(baseline)): digest(p) for p in baseline.rglob('*') if p.is_file()}
-    ir = stage_background(trial, graph, baseline, fonts, output/'region')
+    from ..resource_lease import lease
+    with lease('cpu'):
+        ir = stage_background(trial, graph, baseline, fonts, output/'region',typography=typography,frame_minimum=frame_minimum)
     staged = SceneGraph.model_validate_json((ir.parent/'scene.json').read_text('utf8'))
-    artifacts = compile_pages([ir], output/'compiled', [effective_texts(staged, ir)])
+    with lease('compiler'):
+        artifacts = (compiler or compile_pages)([ir], output/'compiled', [effective_texts(staged, ir)])
     result = {'schema': 'R12RegionalAcceptance/1', 'artifacts': artifacts, 'status': 'REVIEW_REQUIRED',
               'source_sha256': graph.source_sha256, 'baseline_unchanged': False,
               'published': False, 'human_acceptance': False, 'go': 'NOT_RUN'}
     row = json.loads((Path(trial)/'residual_report.json').read_text('utf8'))
     identifier = row['object_id']
     if office:
-        result['office'] = inspect(artifacts['pptx'], [ir], output/'office')
-        result['replacement'] = inspect_text(artifacts['pptx'], [ir], output/'replacement', target_ids={identifier})
+        try:
+            with lease('office'):
+                result['office'] = (office_probe or inspect)(artifacts['pptx'], [ir], output/'office',target_ids={identifier})
+                result['replacement'] = inspect_text(artifacts['pptx'], [ir], output/'replacement', target_ids={identifier})
+        except Exception as exc:
+            raise RecoveryBlocked('OFFICE_VALIDATION_FAILED',type(exc).__name__) from None
         result['owner_residual'] = inspect_residuals(ir, output/'office', 1, output/'owner-residual.json')
         source = np.array(Image.open(baseline/'source.png').convert('RGB'))
         text = next(t for t in graph.text.texts if t.id == identifier)
@@ -61,6 +69,10 @@ def stage_and_verify(trial, graph, baseline, fonts, output, *, office=False):
         if (result['office']['status'] == 'PASS_APP_AUTOMATED' and result['replacement']['status'] == 'PASS'
                 and target_owner['residual_check_status'] == 'PASS' and target_report['status'] == 'PASS'):
             result['regional_automatic_checks'] = 'PASS'
+        else:
+            result['failure']=('OFFICE_VALIDATION_FAILED' if result['replacement']['status']=='UNKNOWN'
+                or result['office']['status']!='PASS_APP_AUTOMATED' else 'FONT_LAYOUT_FAILED'
+                if result['replacement']['status']!='PASS' else 'BACKGROUND_REPAIR_FAILED')
     result['baseline_unchanged'] = parent_hashes == {
         str(p.relative_to(baseline)): digest(p) for p in baseline.rglob('*') if p.is_file()}
     if not result['baseline_unchanged']:

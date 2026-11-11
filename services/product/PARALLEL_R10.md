@@ -1,5 +1,15 @@
 # r10 独立三分支
 
+## R12 区域候选入口
+
+`product.parallel_pipeline.run` 支持 `candidate_engine=r12-regional`，本地入口可用 `--candidate-engine r12-regional`，上传 worker 可通过 `IMAGE2PPT_CANDIDATE_ENGINE` 选择。默认 `off` 继续使用稳定路径。`r11-shadow` 保留，`r12-shadow` 仅收集本地区域候选，采用原有重建作为交付基础。
+
+R12 在三分支融合之后运行文字 Mask 补全、背景比较、字体候选比较、逐区域实际 Office 验证及组合验证。局部渐变或可信 LayerD 候选通过时跳过 LaMa。每个区域保存依赖、选择与失败原因，已验证收据绑定实际文件哈希，重启可按相同父场景恢复。显式不可分关系和依赖区域共同回退，共享字体不建立像素回退依赖。
+
+Go 或 Office 基础设施故障会保留独立区域候选并记录 UNKNOWN。实际发现的对象错误按依赖闭包回退，组合改变后重新编译及验证。交付保留 `stable-fallback.pptx`，所有 R12 结果仍为 `REVIEW_REQUIRED`，`parallel_auto` 继续受原发布门禁约束。真实 Office 删除残影、短文本／等长替换、整页独立视觉复核分别记录。
+
+`run_r12_product_regression.py` 调用同一正式入口，可通过源图／三分支／OCR 哈希回放已有感知证据。其记录明确标注 `hash-bound-recorded-branches`，不计作一次新的上传感知验收。故障注入参数只存在于此测试驱动中。
+
 ## AI 开发规范与实现状态
 
 主规范为 `skills/image2ppt/SKILL.md`，细则见其 `references/parallel-product.md`；根目录 `AGENTS.md` 采用同一自动产品入口。Codex 负责开发、调试和验证，不得手写 SlideIR、替换后台规划结果或手工拼装交付来冒充自动生成。旧手工流程保存在 `skills/image2ppt/references/legacy-manual-workflow.md`，固定编译与历史代码继续保留。

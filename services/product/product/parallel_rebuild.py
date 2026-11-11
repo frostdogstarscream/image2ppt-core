@@ -165,7 +165,7 @@ def _asset_candidates(obj,source,layers,protected,stable,strategy,sam=None,cache
     return results
 
 
-def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam_candidates=None,pixel_cache=None):
+def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam_candidates=None,pixel_cache=None,text_candidates=True):
     # A legacy build is itself an isolated trial, never a mutation of barrier 1.
     graph=graph.model_copy(deep=True)
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=False)
@@ -183,6 +183,9 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
     region_records,region_by_id=regions(graph)
     text_masks={}
     for t in graph.text.texts:
+        if not text_candidates:
+            report.append({'id':t.id,'state':'FALLBACK','reason':'deferred to regional text candidate engine'})
+            continue
         if graph.ownership[t.id]!='RESOLVED':
             report.append({'id':t.id,'state':'FALLBACK','reason':'text ownership is not resolved'});continue
         try:
@@ -236,6 +239,15 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
         reserved=protected.copy()
         for identifier,mask in locked.items():
             if identifier!=obj.id:reserved|=mask
+        try:
+            from .recovery.stable_assets import verified_candidate
+            verified=verified_candidate(obj,source,reserved,stable)
+            if verified is not None:
+                if (verified['mask']&claimed).any():raise ValueError('stable verified owner overlaps a staged owner')
+                chosen.append(verified);claimed|=verified['mask'];continue
+        except (ValueError,OSError) as exc:
+            report.append({'id':obj.id,'state':'FALLBACK','reason':str(exc),'reason_code':'STABLE_EVIDENCE_CONFLICT'})
+            continue
         try:candidates=asset_candidates(obj,source,layers,reserved,stable,strategy,(sam_candidates or {}).get(obj.id),pixel_cache,resolved_surface)
         except (ValueError,OSError) as exc:
             report.append({'id':obj.id,'state':'FALLBACK','reason':str(exc)});continue
@@ -361,6 +373,7 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
     write(directory/'scene.json',graph.model_dump());write(directory/'transactions.json',report)
     write(directory/'slideir.json',ir)
     write(directory/'build-binding.json',{'rebuild_sha256':CODE_SHA,'unmix_sha256':UNMIX_CODE_SHA,
+        'text_candidates':text_candidates,
         'scene_sha256':digest(directory/'scene.json'),'ir_sha256':digest(directory/'slideir.json')})
     return directory/'slideir.json',report
 

@@ -18,6 +18,7 @@ def main():
     parser.add_argument('--opencode-profile')
     parser.add_argument('--pipeline-mode',choices=['parallel_review','parallel_shadow'],default='parallel_review')
     parser.add_argument('--object-extraction',choices=['default','auto','off','alpha','sam3','sam3.1'],default='default')
+    parser.add_argument('--candidate-engine',choices=['off','r11-shadow','r12-shadow','r12-regional'],default='off')
     args=parser.parse_args()
     if args.opencode_profile:
         from product.go_provider import load_profile
@@ -37,7 +38,8 @@ def main():
         with Image.open(path) as image:image.convert('RGB').save(output/'inputs'/name)
         names.append(name)
     write(output/'request.json',{'sources':names,'max_calls':None,'italic_difference_ignored':True,
-                               'pipeline_mode':args.pipeline_mode,'object_extraction':args.object_extraction})
+                               'pipeline_mode':args.pipeline_mode,'object_extraction':args.object_extraction,
+                               'candidate_engine':args.candidate_engine})
     def progress(**kw):
         write(output/'progress.json',kw)
         print(json.dumps(kw),flush=True)

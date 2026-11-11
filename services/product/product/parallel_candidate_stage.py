@@ -11,6 +11,23 @@ from .parallel_candidate_contracts import ReconstructionCandidate, PreflightResu
 from .parallel_rebuild import adapt, array_sha
 
 
+def compatible_text(original, baseline):
+    """Permit only prior staged local text definitions and declared new styles."""
+    wanted={t.id:t.model_dump() for t in original.text.texts}
+    if set(wanted)!={t.id for t in baseline.text.texts}:return False
+    for text in baseline.text.texts:
+        if text.model_dump()==wanted[text.id]:continue
+        record=baseline.selected.get(text.id,{})
+        if (record.get('state')!='STAGED' or record.get('source_text_definition')!=wanted[text.id]
+                or record.get('payload')!=text.model_dump()):return False
+    styles={s.id:s.model_dump() for s in original.text.styles}
+    for record in baseline.selected.values():
+        for style in record.get('style_definitions',[]):
+            if style['id'] in styles and styles[style['id']]!=style:return False
+            styles[style['id']]=style
+    return styles=={s.id:s.model_dump() for s in baseline.text.styles}
+
+
 def stage(candidate_dir, graph, baseline_dir, output):
     candidate_dir,baseline_dir,output=map(Path,(candidate_dir,baseline_dir,output))
     load=lambda p:json.loads(p.read_text(encoding='utf-8'))
@@ -25,7 +42,7 @@ def stage(candidate_dir, graph, baseline_dir, output):
     for file,sha in candidate.references.items():
         if digest(candidate_dir/file)!=sha:raise ValueError('candidate evidence tampered')
     baseline=SceneGraph.model_validate(load(baseline_dir/'scene.json'))
-    if baseline.source_sha256!=graph.source_sha256 or baseline.text!=graph.text:
+    if baseline.source_sha256!=graph.source_sha256 or not compatible_text(graph,baseline):
         raise ValueError('baseline scene/content mismatch')
     with np.load(candidate_dir/'pixels.npz',allow_pickle=False) as data:
         mask=data['mask'];patch=data['patch'];box=list(map(int,data['bbox']))
@@ -61,6 +78,12 @@ def stage(candidate_dir, graph, baseline_dir, output):
         if text.id==identifier:
             if record['payload']['text']!=text.text:raise ValueError('candidate rewrote content')
             text.bbox=record['payload']['bbox']
+            text.style=record['payload']['style']
+    from .contracts import Style
+    for definition in record.get('style_definitions',[]):
+        existing=next((s for s in baseline.text.styles if s.id==definition['id']),None)
+        if existing and existing.model_dump()!=definition:raise ValueError('candidate changed shared style')
+        if not existing:baseline.text.styles.append(Style.model_validate(definition))
     baseline.raster_backing['sha256']=digest(output/'source-plate.png')
     write(output/'scene.json',baseline.model_dump())
     reports=[r for r in load(output/'transactions.json') if r['id']!=identifier]+[record]

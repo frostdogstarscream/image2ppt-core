@@ -13,7 +13,7 @@ CHECKS=('source_binding','content_verification','owner_coverage','protected_peer
 
 
 def engine_mode(value='off'):
-    if value not in ('off','r11-shadow'):raise ValueError('r11 candidate engine is shadow-only')
+    if value not in ('off','r11-shadow','r12-shadow','r12-regional'):raise ValueError('unsupported candidate engine')
     return value
 
 

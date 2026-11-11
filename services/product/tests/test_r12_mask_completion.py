@@ -184,12 +184,12 @@ def test_native_frame_adds_bearing_without_moving_text(monkeypatch):
     text = Text(id='t', text='测试', bbox=[40., 30., 20., 20.], z=1, style='body')
     style = Style(id='body', role='body', ea='EA', latin='Latin', size_px=18, bold=False, color='111111')
     monkeypatch.setattr('product.recovery.candidate_stage.ImageFont.truetype',
-                        lambda *args, **kwargs: SimpleNamespace(getbbox=lambda _: [0, 2, 30, 18]))
+                        lambda *args, **kwargs: SimpleNamespace(getbbox=lambda _: [0, 2, 30, 18],getlength=lambda _:25.5))
     monkeypatch.setattr('product.recovery.candidate_stage.font_line_height', lambda *args: 24.)
     fonts = {'fonts': [{'family': family, 'bold': False, 'file': 'synthetic.ttf', 'index': 0}
                        for family in ('EA', 'Latin')]}
     payload = native_frame(text, {'body': style}, fonts, (120, 80), np.zeros((80, 120), bool), [35, 25, 35, 30])
-    assert payload['bbox'] == [40., 30., 20., 25.]
+    assert payload['bbox'] == [40., 30., 27., 25.]
     assert text.bbox == [40., 30., 20., 20.]
 
 

@@ -8,6 +8,13 @@ from PIL import Image
 from .materialize import digest,write
 
 
+class OfficeValidationError(ValueError):
+    code='OFFICE_VALIDATION_FAILED'
+    def __init__(self,object_id,reason):
+        self.object_id=object_id
+        super().__init__(reason)
+
+
 def scale_text(tr, factor):
     """Scale absolute paragraph pitch together with glyph size in an edit probe."""
     for index in range(1, tr.Runs().Count+1):
@@ -44,12 +51,12 @@ def verify_pictures(pptx,irs,deleted=None):
                     raise ValueError('embedded Alpha or visible RGB changed')
 
 
-def inspect(pptx,irs,output,*,render_only=False):
+def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
     import pythoncom
     import win32com.client
     pythoncom.CoInitialize()
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=False);pptx=Path(pptx).resolve();original=digest(pptx)
-    app=win32com.client.Dispatch('PowerPoint.Application');deck=None;records=[]
+    app=win32com.client.Dispatch('PowerPoint.Application');deck=None;records=[];current_id=None
     def text_styles(s):
         if not (s.HasTextFrame and s.TextFrame.HasText):return ()
         tr=s.TextFrame.TextRange
@@ -66,12 +73,14 @@ def inspect(pptx,irs,output,*,render_only=False):
         for i,file in enumerate(irs,1):
             ir=json.loads(Path(file).read_text(encoding='utf-8'));slide=deck.Slides(i)
             slide.Export(str(output/f'page-{i:02d}-before.png'),'PNG',pw,ph)
-            sig=signature(slide);targets=[] if render_only else [n['id'] for n in ir['nodes'] if n['id']!='source-plate']
+            sig=signature(slide);targets=[] if render_only else [n['id'] for n in ir['nodes'] if n['id']!='source-plate'
+                and (target_ids is None or n['id'] in target_ids)]
             if not set(targets)<=set(sig):raise ValueError('compiled object inventory mismatch')
             inventory.append((i,targets,sig))
         deck.Close();deck=None
         for i,targets,sig in inventory:
             for name in targets:
+                current_id=name
                 for action in ('move-scale','delete'):
                     file=output/f'{i:02d}-{name}-{action}.pptx';shutil.copyfile(pptx,file)
                     deck=app.Presentations.Open(str(file),ReadOnly=False,Untitled=False,WithWindow=False)
@@ -106,6 +115,11 @@ def inspect(pptx,irs,output,*,render_only=False):
         result={'status':'PASS_APP_AUTOMATED','pptx_sha256':original,'records':records,'human_acceptance':False,
                 'edit_checked':not render_only,'embedded_alpha_and_visible_rgb_checked':True,'powerpoint_version':app.Version}
         write(output/'report.json',result);return result
+    except Exception as exc:
+        write(output/'report.json',{'status':'FAIL_APP_AUTOMATED','failed_object_id':current_id,
+              'reason':str(exc)[:400],'error_type':type(exc).__name__,'records':records,
+              'pptx_sha256':original,'human_acceptance':False})
+        raise OfficeValidationError(current_id,str(exc)) from None
     finally:
         if deck is not None:deck.Close()
         pythoncom.CoUninitialize()

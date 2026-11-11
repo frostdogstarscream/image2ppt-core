@@ -51,7 +51,13 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
         except Exception as exc:write(job/'catalog-recovery-required.json',{'reason':type(exc).__name__})
         result=store.committed()['result'];write(job/'result.json',result);return result
     from .parallel_provider import Planner,Reviewer
-    provider=provider or Planner(settings());review_provider=review_provider or Reviewer(job)
+    provider=provider or Planner(settings())
+    if review_provider is None:
+        try:review_provider=Reviewer(job)
+        except RuntimeError:
+            if not candidate_engine.startswith('r12-'):raise
+            from .recovery.product_pipeline import UnavailableReviewer
+            review_provider=UnavailableReviewer()
     compiler=compiler or compile_pages;fonts=fonts or font_manifest([]);write(job/'fonts.json',fonts)
     models=os.environ.get('IMAGE2PPT_OCR_MANIFEST',str(ROOT/'.runtime/ocr-models.json'))
     baseline=json.loads(Path(request['frozen_baseline']).read_text(encoding='utf-8')) if request.get('frozen_baseline') else {'pages':[],'stable_assets':[]}
@@ -62,7 +68,8 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
     def update(**value):
         write(job/'progress.json',value)
         if progress:progress(**value)
-    write(job/'provenance.json',{'pipeline_mode':pipeline_mode,'architecture':'text-asset-surface/r10','serial_executed':False,
+    write(job/'provenance.json',{'pipeline_mode':pipeline_mode,'architecture':'text-asset-surface/'+('r12' if candidate_engine.startswith('r12-') else 'r10'),'serial_executed':False,
+        'perception_mode':'hash-bound-recorded-branches' if request.get('perception_replay') else 'live-or-cache',
         'source_sha256s':[s['source_sha256'] for s in snaps],'moma_model':provider.model,'review_model':review_provider.model,
         'human_acceptance':False,'stable_baseline_is_pixel_truth':False,'candidate_engine':candidate_engine})
     def _page(i):
@@ -79,12 +86,21 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
                     receipt=existing/'build-binding.json'
                     if not receipt.exists() or graph.raster_backing is None:continue
                     binding=json.loads(receipt.read_text(encoding='utf-8'))
+                    if binding.get('text_candidates',True)!=(candidate_engine!='r12-regional'):continue
                     if binding['rebuild_sha256']!=CODE_SHA or binding['unmix_sha256']!=UNMIX_CODE_SHA or binding['scene_sha256']!=digest(existing/'scene.json') or binding['ir_sha256']!=digest(existing/'slideir.json'):continue
+                    if candidate_engine.startswith('r12-') and (folder/'barrier-1.json').is_file():
+                        graph=SceneGraph.model_validate_json((folder/'barrier-1.json').read_text('utf8'))
+                        if graph.source_sha256!=snap['source_sha256']:raise ValueError('resume source scene mismatch')
                     return graph,existing/'slideir.json',json.loads((existing/'transactions.json').read_text(encoding='utf-8')),{}
             saved=next((p['layers'] for p in baseline['pages'] if p['source']['sha256']==snap['source_sha256']),None)
             stable=[a for a in baseline['stable_assets'] if a['source_sha256']==snap['source_sha256']]
             update(stage='perceiving',page=i+1,branches=['text','asset','surface'])
-            existing={}
+            existing={};replay_ocr=None
+            if request.get('perception_replay'):
+                from .recovery.evidence_replay import load as replay_evidence
+                existing,replay_ocr=replay_evidence(request['perception_replay'],snap)
+                write(folder/'perception-replay.json',{'manifest_sha256':digest(request['perception_replay']),
+                    'source_sha256':snap['source_sha256'],'fresh_perception':False,'branches':sorted(existing)})
             if request.get('reuse_perception_from'):
                 previous=Path(request['reuse_perception_from']).resolve()
                 import sqlite3
@@ -106,7 +122,7 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
                         break
             branches,failures=perceive(snap,store,provider,fonts,cache,models,saved_layers=saved,stable=stable,
                                       existing=existing,targets=set(('text','asset','surface'))-set(existing))
-            try:ocr=local_ocr(snap,cache,models)
+            try:ocr=replay_ocr if replay_ocr is not None else local_ocr(snap,cache,models)
             except Exception:ocr={'lines':[]}
             graph=fuse(snap,branches,ocr)
             from .parallel_typography import calibrate
@@ -128,7 +144,8 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             if stage.exists():
                 from uuid import uuid4
                 stage=folder/('staged-'+uuid4().hex[:8])
-            with lease('cpu'):ir,report=build(graph,snap,fonts,stage,layers=layers,stable=stable,strategy=route,pixel_cache=cache/'pixels')
+            with lease('cpu'):ir,report=build(graph,snap,fonts,stage,layers=layers,stable=stable,strategy=route,pixel_cache=cache/'pixels',
+                text_candidates=candidate_engine!='r12-regional')
             difficult=[r['id'] for r in report if r['state']=='FALLBACK' and r['id'] in {o.id for o in graph.asset.objects}]
             if difficult and route in ('auto','sam3','sam3.1'):
                 from .object_stage import infer_sam
@@ -145,13 +162,14 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
                         if not error:masks[obj.id]=candidates
                     if masks:
                         graph.selected={};graph.transactions=[]
-                        with lease('cpu'):ir,report=build(graph,snap,fonts,folder/'staged-sam',layers=layers,stable=stable,strategy=route,sam_candidates=masks,pixel_cache=cache/'pixels')
+                        with lease('cpu'):ir,report=build(graph,snap,fonts,folder/'staged-sam',layers=layers,stable=stable,strategy=route,sam_candidates=masks,pixel_cache=cache/'pixels',
+                            text_candidates=candidate_engine!='r12-regional')
                 except Exception as exc:write(folder/'sam-failure.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
             # A visually faithful raster fallback must not suppress directed
             # repairs of known extraction/planning failures before Go reviews.
             from .parallel_repair import local_findings,repair
             findings=local_findings(graph,report,stable)
-            if findings and route!='off':
+            if findings and route!='off' and candidate_engine not in ('r12-regional','r12-shadow'):
                 try:
                     graph,ir,report=repair(graph,snap,findings,store,provider,fonts,cache,models,
                         folder/'local-repair-1',baseline,route)
@@ -176,6 +194,10 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             return graph,ir,report,{'page':reason}
     with ThreadPoolExecutor(max_workers=2) as pool:pages=list(pool.map(page,range(len(snaps))))
     graphs=[p[0] for p in pages];irs=[p[1] for p in pages];reports=[p[2] for p in pages]
+    if candidate_engine in ('r12-regional','r12-shadow'):
+        from .recovery.product_pipeline import run as regional_run
+        return regional_run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,
+            compiler=compiler,reviewer=review_provider,office=office,progress=update,shadow=candidate_engine=='r12-shadow')
     if candidate_engine=='r11-shadow':
         for i,(graph,snap) in enumerate(zip(graphs,snaps)):
             try:
