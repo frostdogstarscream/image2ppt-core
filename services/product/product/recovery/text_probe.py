@@ -54,7 +54,8 @@ def input_binding(graph, identifier, source_file, layer_directory, baseline_dire
     }
 
 
-def probe_one(graph, identifier, source_file, layer_directory, baseline_directory, fonts, directory):
+def probe_one(graph, identifier, source_file, layer_directory, baseline_directory, fonts, directory,
+              *, excluded_candidates=()):
     """Generate and stage the first safe local candidate without compile/QA.
 
     A complete receipt can be reused only while every candidate, baseline,
@@ -62,6 +63,7 @@ def probe_one(graph, identifier, source_file, layer_directory, baseline_director
     independent visual acceptance remain explicit subsequent tool operations.
     """
     binding = input_binding(graph, identifier, source_file, layer_directory, baseline_directory, fonts)
+    binding['excluded_candidates'] = sorted(set(excluded_candidates))
     target = Path(directory).resolve()/('text-'+key(binding)[:24])
     receipt = target/'probe.json'
     if receipt.is_file():
@@ -76,11 +78,15 @@ def probe_one(graph, identifier, source_file, layer_directory, baseline_director
     result = {'schema': 'R1204TextProbeResult/1', 'object_id': identifier,
               'source_sha256': graph.source_sha256, 'scene_sha256': binding['scene_sha256'],
               'state': 'BLOCKED', 'office': 'NOT_RUN', 'visual': 'NOT_RUN',
-              'automatic_publication': False, 'attempts': [], 'cache_hit': False}
+              'automatic_publication': False, 'attempts': [], 'cache_hit': False,
+              'receipt_file': str(receipt)}
     stream = adaptive_candidates(graph, identifier, source_file, layer_directory, target/'backgrounds')
     try:
         for row in stream:
             result['attempts'].append({'candidate': row['candidate'], 'status': row['status']})
+            if row['candidate'] in binding['excluded_candidates']:
+                result['attempts'][-1]['decision'] = 'SKIP_REJECTED_CANDIDATE'
+                continue
             if row['status'] != 'PRECHECK_PASS':
                 continue
             candidate = target/'backgrounds'/row['candidate']
