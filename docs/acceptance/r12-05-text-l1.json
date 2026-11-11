@@ -1,0 +1,157 @@
+{
+  "schema": "R1205TextL1Receipt/1",
+  "baseline_commit": "878a14d98510a9138e87df6d59378ce3ec3beab5",
+  "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+  "source_scene_sha256": "52bc9e3e3a02c4c77187b40a8faf8431d089ce5729912ff0444828b03a7ff1ba",
+  "automatic_scan_report": "outputs\\r1205-scan-final\\scan-9bd6c8a9414e49643b7ea28e.json",
+  "automatic_scan_report_sha256": "1a2e455e12d3d79456c355f2f063973f21d884e65f8b314af1d72a556f8e1dd7",
+  "total_source_text_objects": 39,
+  "state_counts": {
+    "BLOCKED": 30,
+    "VERIFIED_REUSED": 4,
+    "STAGED_LOCAL": 5
+  },
+  "failure_counts": {
+    "OWNER_CONFLICT": 12,
+    "BACKGROUND_REPAIR_FAILED": 5,
+    "MASK_INCOMPLETE": 13
+  },
+  "newly_staged_regions": [
+    {
+      "object_id": "t-14",
+      "text": "企业",
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-dbed385d94c6cd1b6b768c10\\backgrounds\\semantic_completion--layerd-2",
+      "residual_report_sha256": "bb4f5a2e16a49a194fdba95b25bf71e47234b3ddb653d7cea85f033d1d952e43",
+      "staged_ir_sha256": "3f0e4325dcbf889cef63102351beaf6a6d9c737d25c437d2a8d8fb22963ceb2b",
+      "candidate_hashes": {
+        "difference_map.png": "fffbec8a5e062dd98c843347fa0a202a554c780d7fc2d45d9816ae52881c26c7",
+        "mask.png": "afac3528ca4b91fe0d92ab826733c38e15afb4f2411428a5b4d19fc12205ba3e",
+        "raw_crop.png": "4d761f664f684ce94d2e5f402466d9134e1f6d3cc997c71b16ebc9c38b089963",
+        "raw_inpaint.png": "00aca87af8a40c0d03081fa4ecb0f16ba115dfae139837a1a403a32db86706e8",
+        "residual_map.png": "d66092c2077b9ed12b0d01ac313e28ff8ea20d55d288e875eea46e1d7f491535",
+        "residual_report.json": "bb4f5a2e16a49a194fdba95b25bf71e47234b3ddb653d7cea85f033d1d952e43",
+        "source.png": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+        "source_crop.png": "fc85df3de1432024fb00b86b91952a6333aba1c8e5437ffa55d169afd3b821a9",
+        "written_back.png": "92163153d00e4e41f82b71931b4d1965ffeea5ebd7f3b05308f5411987a5b56f",
+        "written_crop.png": "176a5984df4d7d8553094dfc646a5ee9ae9ed5d60a03a772b3d1119e9f2ce2ce"
+      }
+    },
+    {
+      "object_id": "t-20",
+      "text": "算力按需配置",
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-d6a673b2f49c7b3a3ee49eca\\backgrounds\\semantic_completion--layerd-0",
+      "residual_report_sha256": "bb7554fdabdc311c74575e6ba2f79f3531c36b439fa56ed93c9ae3dc0aa3aff8",
+      "staged_ir_sha256": "3023ba7c174a1437568db158c987b477ede90bebfade4dca1b40fd9cf7ec80ba",
+      "candidate_hashes": {
+        "difference_map.png": "7f629fb96d27a4bff4785a0d5bd16ccef15902d57ddf8a4f39f40f62fa2d22ea",
+        "mask.png": "9366ad807ac553a3601d382a34c82194d604d9c68ffede91a86c7865a3f8bc00",
+        "raw_crop.png": "19125e474c6a885cada12ed267790951c1f19bbb4725f49aff1e286e797f6f16",
+        "raw_inpaint.png": "69eb41076818677e63a58bf2401605142f134f88f7eb5143c8c6ec8ed9314c41",
+        "residual_map.png": "d66092c2077b9ed12b0d01ac313e28ff8ea20d55d288e875eea46e1d7f491535",
+        "residual_report.json": "bb7554fdabdc311c74575e6ba2f79f3531c36b439fa56ed93c9ae3dc0aa3aff8",
+        "source.png": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+        "source_crop.png": "7166445254007b06bf7aac054a1195657b7309b3adfcc3e2b0d6c765a4866437",
+        "written_back.png": "854bd8894061ed6e705bc64a87f4635d2b12c00a6df4eabe8431c8c896c68322",
+        "written_crop.png": "1dc5bf663c7b70603ba99434510406b48cdddd41a4fc33f3a99db61579570c2d"
+      }
+    },
+    {
+      "object_id": "t-26",
+      "text": "网络随业务适配",
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-9c75eab803ec4a1ea3711055\\backgrounds\\semantic_completion--layerd-0",
+      "residual_report_sha256": "7856a0a7185b1781da506d1ad3b1da2f18514b68c8f1f2dfd96eaaa7ce4f910e",
+      "staged_ir_sha256": "43ccabc4dfcd3f061d8ef8bbe58c867081b6ce7104a2bdd5e54afea65ff6c594",
+      "candidate_hashes": {
+        "difference_map.png": "cc2c2ddfeb955660684e9c5dc112bc5589424376832678efd02bdc9a6620ed48",
+        "mask.png": "ca88c3955b3b2f8846ad2945a44ac561946e639d1d84f67cfdf3e1747b9b632b",
+        "raw_crop.png": "5c8887bfd2d5a71090558e2a0ac3d3d8ac0b5e4207ef680e0ae16103a4983adb",
+        "raw_inpaint.png": "69eb41076818677e63a58bf2401605142f134f88f7eb5143c8c6ec8ed9314c41",
+        "residual_map.png": "d66092c2077b9ed12b0d01ac313e28ff8ea20d55d288e875eea46e1d7f491535",
+        "residual_report.json": "7856a0a7185b1781da506d1ad3b1da2f18514b68c8f1f2dfd96eaaa7ce4f910e",
+        "source.png": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+        "source_crop.png": "e01417d05ed9ecdc421dfd617b11e68d3af2e1567c361dd8d7d327a1b1040369",
+        "written_back.png": "3f0fab58e3f91e31ac19fac4b826dc8952cc47776cd030a3b7246780d38449f2",
+        "written_crop.png": "8ad460ecc49ca71450c3616ea314e56b053f790894bab26f13411bae9d1eb6a6"
+      }
+    },
+    {
+      "object_id": "t-32",
+      "text": "云边协同部署",
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-110f2d0ac006081981a10f28\\backgrounds\\semantic_completion--layerd-0",
+      "residual_report_sha256": "0403ea90a25040f092a7a1e885e03e9fb5745d2c807842229a1458ec57d89378",
+      "staged_ir_sha256": "c49f7eff2fce4c8978df50335e98e5c1764961dcf7922e1ee3cd71c9fc295478",
+      "candidate_hashes": {
+        "difference_map.png": "49066b21ac1193b2d2b9c0cf4bf28e47cc043c20e16375ba4a8fe7e9d083907c",
+        "mask.png": "b379d6135fa4cb36123107a6b72e31f61b6dc1cb584c2e8716afd5ffe1563f0f",
+        "raw_crop.png": "4593781f0083172ce2764caf0c446adac3b101adf12e27ceb32dea025fa1d692",
+        "raw_inpaint.png": "69eb41076818677e63a58bf2401605142f134f88f7eb5143c8c6ec8ed9314c41",
+        "residual_map.png": "d66092c2077b9ed12b0d01ac313e28ff8ea20d55d288e875eea46e1d7f491535",
+        "residual_report.json": "0403ea90a25040f092a7a1e885e03e9fb5745d2c807842229a1458ec57d89378",
+        "source.png": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+        "source_crop.png": "381eab9197bbadbfe120847637f9fdd2bf4275dd40d078f1c11cbc2e86827510",
+        "written_back.png": "74aef9196fb4d396ae56748781f1ae351d13adc111da52f615e54c5573dd0a3b",
+        "written_crop.png": "6bec80594f9c458fa358a5954930558a734c52fd9dffc1bfefcab9a8f816201c"
+      }
+    },
+    {
+      "object_id": "t-36",
+      "text": "结合业务增长和实际用量，做好资源监测、容量调整和\n运行维护。",
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r1204-text\\outputs\\r1205-scan-final\\probes\\text-ff46123687df164ae7d3e501\\backgrounds\\semantic_completion--layerd-0",
+      "residual_report_sha256": "9c2bd89c82c6d8880466aa569fca41d20dafb69defc6dde9a34cf213c4addd75",
+      "staged_ir_sha256": "bb434b1ca78809902b8e05407ab691f6c24579ce1a05a6a593c0aa6cde3f983f",
+      "candidate_hashes": {
+        "difference_map.png": "bfe19953d7ab6cff191fa8af89631424c3e56ce298dc3c8f9feb82eb907f0beb",
+        "mask.png": "dbcde34f8dff264f05cd43e027d4abef04f362c8f90209caa7908a24a481a09b",
+        "raw_crop.png": "ccc5e19f1a9dfca82bc53b895f3bec06781243997e5845ceaa0d3d75be16d7c1",
+        "raw_inpaint.png": "69eb41076818677e63a58bf2401605142f134f88f7eb5143c8c6ec8ed9314c41",
+        "residual_map.png": "d66092c2077b9ed12b0d01ac313e28ff8ea20d55d288e875eea46e1d7f491535",
+        "residual_report.json": "9c2bd89c82c6d8880466aa569fca41d20dafb69defc6dde9a34cf213c4addd75",
+        "source.png": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+        "source_crop.png": "5cce13b5c931dce677aecc52311bdb437af2698a85419ef6ae47cdb445621f96",
+        "written_back.png": "f0828bba9bb0244927fb2159c5991b751fe27badb34c8f8dc734bb610763e630",
+        "written_crop.png": "550029e860ce6b0b65019dfd40c304867d88e031cc5fd0e47aa5b7acb048bb4c"
+      }
+    }
+  ],
+  "existing_verified_regions_reused": [
+    "t-05",
+    "t-06",
+    "t-09",
+    "t-10"
+  ],
+  "mask_completion_tool_case": {
+    "case_selection": "first newly staged region from automatic scan",
+    "object_id": "t-14",
+    "previous_missing_visible_pixels": 237,
+    "previous_source_residual_pixels": 237,
+    "after_source_residual_pixels": 0,
+    "after_protected_changed_pixels": 0,
+    "previous_report": "outputs\\r1205-mask-completion-case\\original-incomplete\\residual_report.json",
+    "previous_report_sha256": "b538fa2328eb9e72da9be8247c23d66c84fc1bf4293266567ec9f85fa1eec91e",
+    "action_receipt": "outputs\\r1205-mask-completion-case\\action-final.json",
+    "action_receipt_sha256": "ac884c045da0b4c76952dc7c0886fe389726d283c66a8c8b909f8b1d7619384d",
+    "action_implementation_sha256": "b27da47500aab25e0e0d799774ba82176343d429c0e2ecd94b7ad7a9ac4c6dac",
+    "after_candidate_hashes": {
+      "difference_map.png": "fffbec8a5e062dd98c843347fa0a202a554c780d7fc2d45d9816ae52881c26c7",
+      "mask.png": "afac3528ca4b91fe0d92ab826733c38e15afb4f2411428a5b4d19fc12205ba3e",
+      "raw_crop.png": "4d761f664f684ce94d2e5f402466d9134e1f6d3cc997c71b16ebc9c38b089963",
+      "raw_inpaint.png": "00aca87af8a40c0d03081fa4ecb0f16ba115dfae139837a1a403a32db86706e8",
+      "residual_map.png": "d66092c2077b9ed12b0d01ac313e28ff8ea20d55d288e875eea46e1d7f491535",
+      "residual_report.json": "bb4f5a2e16a49a194fdba95b25bf71e47234b3ddb653d7cea85f033d1d952e43",
+      "source.png": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+      "source_crop.png": "fc85df3de1432024fb00b86b91952a6333aba1c8e5437ffa55d169afd3b821a9",
+      "written_back.png": "92163153d00e4e41f82b71931b4d1965ffeea5ebd7f3b05308f5411987a5b56f",
+      "written_crop.png": "176a5984df4d7d8553094dfc646a5ee9ae9ed5d60a03a772b3d1119e9f2ce2ce"
+    },
+    "state": "STAGED_LOCAL"
+  },
+  "focused_tests": {
+    "passed": 8,
+    "command": "python -m pytest services/product/tests/test_r1204_text_probe.py services/product/tests/test_r1205_text_actions.py -q --tb=short --basetemp=outputs/t502"
+  },
+  "external_model_calls": 0,
+  "compiler_calls": 0,
+  "office_calls": 0,
+  "automatic_publication": false,
+  "required_next_gate": "L2 actual Office and independent visual review"
+}
