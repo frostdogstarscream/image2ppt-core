@@ -10,6 +10,18 @@ Go 或 Office 基础设施故障会保留独立区域候选并记录 UNKNOWN。�
 
 `run_r12_product_regression.py` 调用同一正式入口，可通过源图／三分支／OCR 哈希回放已有感知证据。其记录明确标注 `hash-bound-recorded-branches`，不计作一次新的上传感知验收。故障注入参数只存在于此测试驱动中。
 
+## R12-06 三分支归属与失败路由
+
+融合层按同一 OCR 行的水平阅读顺序核对序号与标题。背景素材可通过完整 parts 分别与多个 Surface 对应，记录逐底板关系。背景面板关系由源图连续背景样本继续验证，前景图标与不确定复合区域保留独立归属。Surface 本身继续作为原生背景候选接受现有像素门禁。
+
+`peer_evidence.py` 提供只读采样保护和实际清除保护。前景优先使用绑定源图、父场景和 Owner 文件哈希的完整 Mask。具备背景关系及源像素连续性证据的面板允许参与独立局部背景拟合，目标文字仍由既有 TextMaskCompletion 证明完整笔画范围。未知对比像素继续受保护。每个区域保存 `peer-protection.json`、NPZ 与局部预览，记录对应对象、角色、Mask、采样和冲突像素。
+
+`run_r1206_ab.py` 复用冻结证据执行 A 文字／Surface、B 旧三分支保护、C 修正三分支保护对照。此入口只做 L1，模型和 Office 调用为零。实际交付继续使用 `product.parallel_pipeline.run`，经原固定编译器及真实 Office 验证。
+
+正式区域入口启用 `regional_agent` 与 `agent_skill` 时，可按 OWNER、Mask、背景或素材失败归因接入现有受控 Agent。先判断是否存在支持新策略的实际收据，基础设施 UNKNOWN 和已经尝试过的同证据素材策略保留原结果。每页默认最多一个文字修复 Agent 会话，两次决策、一次工具执行，模型调用继续使用全任务预算。新增 `recheck_text_ownership` 只重融合现有独立 OCR 和三分支证据，全部候选仍须经过原有暂存、Office 及最终 Go。失败工具保留当前区域回退，其他成功区域继续组合。
+
+已验证种子可同步不影响已选 Owner 闭包的归属关系。源图、文字定义、字体或已选闭包不兼容时，记录 `verified-seed-reanalysis.json` 并继续受控区域重建，历史交付继续保留。第 2 页新上传采用本轮独立感知，分组底板修正后复用同次原始收据继续执行。实际结果与未解决对象见 `docs/acceptance/r12-06.json`，复核入口为 `summarize_r1206.py`。
+
 ## R12-05 局部扩展与工具目录
 
 冻结扩展可用 `run_r1204_regression.py --from-job <verified-job> --reuse-verified --retry-assets --text-region-goal 8`。复用前核对不可变 generation、源图、文字定义、Owner、依赖关系、已用字体文件与原 PNG 字节。旧文字候选直接载入，最终组合继续执行实际 Office 和 Go。`--retry-assets` 顺序使用最新父场景重提取完整独立 icon，通过源组件、受限 halo 与 Owner 复算后暂存，再批量检查新增图片。缺少或 UNKNOWN 的编辑／残影收据保留暂存状态，明确失败按依赖闭包局部回退。

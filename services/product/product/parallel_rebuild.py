@@ -17,7 +17,7 @@ from .resource_lease import lease
 
 ROOT=Path(__file__).resolve().parents[3]
 CODE_SHA=key({str(p.relative_to(ROOT)):digest(p) for p in [Path(__file__),
-    *[Path(__file__).with_name(n+'.py') for n in ('parallel_fusion','parallel_typography','parallel_font_match','parallel_text_anchor','parallel_pixels','object_closure','parallel_regions','parallel_region_gate')],
+    *[Path(__file__).with_name(n+'.py') for n in ('parallel_fusion','peer_evidence','parallel_text_candidates','parallel_typography','parallel_font_match','parallel_text_anchor','parallel_pixels','object_closure','parallel_regions','parallel_region_gate')],
     ROOT/'ppt-rebuild/src/reconstruction.py']})
 sys.path.insert(0,str(ROOT/'ppt-rebuild/src'))
 from reconstruction import background_model,extract_rgba

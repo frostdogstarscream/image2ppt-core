@@ -31,6 +31,7 @@ from .remote_gpu_lease import remote_gpu_lease
 
 def failure(exc,stage):
     code=getattr(exc,'code','')
+    if 'native font frame allowance' in str(exc).lower():return 'FONT_LAYOUT_FAILED'
     if isinstance(exc,(TimeoutError,OSError)) or type(exc).__name__ in ('BudgetExceeded','UnknownCall'):
         return 'QA_INFRASTRUCTURE_UNAVAILABLE'
     if code in ('QA_INFRASTRUCTURE_UNAVAILABLE','INPAINT_RESPONSE_UNKNOWN'):return 'QA_INFRASTRUCTURE_UNAVAILABLE'
@@ -101,7 +102,7 @@ def select_adaptive(graph,identifier,snap,source,saved,folder,current,fonts,font
     # The upstream page-level calibration has already matched installed fonts.
     # Reuse that decision and its emphasis spans instead of searching again.
     proposals=[font_choices.get(text.style)]
-    stream=adaptive_candidates(graph,identifier,snap['path'],saved,folder/identifier,inpaint=inpaint,budget=budget)
+    stream=adaptive_candidates(graph,identifier,snap['path'],saved,folder/identifier,inpaint=inpaint,budget=budget,baseline_directory=current.parent)
     try:
         for number,row in enumerate(stream):
             if row['status']!='PRECHECK_PASS':
@@ -155,7 +156,7 @@ def select_adaptive(graph,identifier,snap,source,saved,folder,current,fonts,font
         stream.close()
 
 
-def expand_assets(graph, current, source, layers, folder, fonts, compiler, office):
+def expand_assets(graph, current, source, layers, folder, fonts, compiler, office, failure_router=None):
     """Stage independent complete icons sequentially, then batch changed-object QA."""
     from .asset_retry import retry_asset_extraction
     from .agent_asset_stage import stage_asset_candidate
@@ -169,7 +170,9 @@ def expand_assets(graph, current, source, layers, folder, fonts, compiler, offic
         try:
             result=retry_asset_extraction(latest,obj.id,source,layers,current.parent,root/'c')
             row.update(result)
-            if result['status']!='CANDIDATE_READY':continue
+            if result['status']!='CANDIDATE_READY':
+                if failure_router:row['agent_route']=failure_router(latest,obj.id,result,root)
+                continue
             current=stage_asset_candidate(result['candidate_directory'],latest,current.parent,root/'s',layer_directory=layers)
             row.update(state='STAGED_LOCAL',ir=str(current))
             added.append(obj.id)
@@ -208,7 +211,7 @@ def expand_assets(graph, current, source, layers, folder, fonts, compiler, offic
     return current,rows
 
 
-def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,reviewer,office=None,progress=None,shadow=False):
+def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,reviewer,repair_provider=None,office=None,progress=None,shadow=False):
     from ..pipeline import effective_findings
     adaptive=request.get('regional_strategy','adaptive')=='adaptive'
     if request.get('regional_strategy','adaptive') not in ('adaptive','exhaustive'):
@@ -247,6 +250,7 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
                 from ..parallel_branches import layer_evidence
                 saved,_=layer_evidence(snap,root/'layer-cache')
             except Exception:saved=None
+        agent_count=0
         current=ir;state=[];font_choices={};region_records,by_id=regions(graph)
         seed_file=job/f'page-{index+1:02d}'/'verified-seed.json'
         if seed_file.is_file():
@@ -259,7 +263,14 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
                 font_choices[next(t.style for t in graph.text.texts if t.id==prior['object_id'])]=prior.get('font')
             targets=[identifier for identifier in targets if identifier not in {r['object_id'] for r in state}]
         if request.get('retry_assets') and saved and not shadow:
-            current,asset_rows=expand_assets(graph,current,snap['path'],saved,folder,fonts,compiler,office)
+            def route_asset_failure(latest,identifier,result,root):
+                from .failure_agent import run as run_failure_agent
+                return run_failure_agent(latest,identifier,'asset',snap['path'],saved,
+                    Path(result['baseline_directory']),fonts,[root/'c/result.json'],root/'a',
+                    failure='ASSET_EXTRACTION_UNCERTAIN',provider=repair_provider,store=store,cache=shared_cache,
+                    skill=request.get('agent_skill') or os.environ.get('IMAGE2PPT_AGENT_SKILL'),attempted=('retry_asset_extraction',))
+            router=route_asset_failure if request.get('regional_agent') and repair_provider else None
+            current,asset_rows=expand_assets(graph,current,snap['path'],saved,folder,fonts,compiler,office,failure_router=router)
         write(folder/'dependencies.json',region_records)
         for identifier in targets:
             if goal is not None and sum(r['state']=='VERIFIED_LOCAL' for r in state)>=goal:
@@ -357,6 +368,40 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
             except Exception as exc:
                 record.update(failure=failure(exc,'generation'),error_type=type(exc).__name__,reason=str(exc)[:400])
             finally:
+                if (record['state']=='LOCAL_FALLBACK' and request.get('regional_agent') and repair_provider
+                        and agent_count<int(request.get('agent_region_budget',1))):
+                    from .failure_agent import route,run as run_failure_agent
+                    evidence=[p for p in (folder/identifier).rglob('*.json') if p.name in ('residual_report.json','peer-protection.json','mask-completion.json')]
+                    attempted=[a['background'] for a in record['attempts'] if 'background' in a]
+                    plan=route(record.get('failure'),'text',evidence,already_attempted=attempted)
+                    record['agent_route']=plan
+                    if evidence and plan['status']=='ELIGIBLE':
+                        agent_count+=1
+                        try:
+                            agent_folder=folder/'fa'/str(agent_count)
+                            repaired=run_failure_agent(graph,identifier,'text',snap['path'],saved,current.parent,fonts,evidence,
+                                agent_folder,failure=record.get('failure'),provider=repair_provider,store=store,
+                                cache=shared_cache,skill=request.get('agent_skill') or os.environ.get('IMAGE2PPT_AGENT_SKILL'),attempted=attempted,inpaint=inpaint)
+                            record['agent_result']={'status':repaired['status'],'directory':str(agent_folder)}
+                            if repaired['status']=='CANDIDATE_READY':
+                                proposed=SceneGraph.model_validate_json(Path(repaired['selected']['candidate_scene']).read_text('utf8'))
+                                trial=Path(repaired['selected']['candidate_directory']);output=agent_folder/'v'
+                                proposal=font_choices.get(next(t.style for t in proposed.text.texts if t.id==identifier))
+                                checked=stage_and_verify(trial,proposed,current.parent,fonts,output,office=True,
+                                    typography=proposal,compiler=compiler,office_probe=office,include_long=False)
+                                if checked.get('regional_automatic_checks')=='PASS':
+                                    actual=np.array(Image.open(output/'office/page-01-before.png').convert('RGB'))
+                                    bx,by,bw,bh=json.loads((trial/'residual_report.json').read_text('utf8'))['reference_context']['bbox']
+                                    score=float(np.abs(actual[by:by+bh,bx:bx+bw].astype(float)-source[by:by+bh,bx:bx+bw]).mean())
+                                    current=output/'region/slideir.json';proof=output/'acceptance.json'
+                                    record.update(state='VERIFIED_LOCAL',ir=str(current),acceptance=str(proof),font=proposal,
+                                        source_ppt_mae=score,selected_background=trial.name,candidate_state='GENERATED',
+                                        regional_commit='VERIFIED_LOCAL',quality='PENDING_FINAL_REVIEW',
+                                        selection_reason='failure-driven Agent tool passed original stage and actual Office gates')
+                                    record.pop('failure',None)
+                                    record['verified_files']={str(p.resolve()):digest(p) for p in output.rglob('*') if p.is_file()}
+                        except Exception as exc:
+                            record['agent_result']={'status':'UNKNOWN' if failure(exc,'qa')=='QA_INFRASTRUCTURE_UNAVAILABLE' else 'REVIEW_REQUIRED','reason':str(exc)[:400]}
                 if binding and record['state']=='LOCAL_FALLBACK' and not record.get('resumed_from_failure_receipt'):
                     record.update(reconstruction_binding=binding,parent_ir_sha256=parent_ir_sha)
                     proof=folder/(identifier+'-failure.json')

@@ -10,7 +10,7 @@ def fuse(snap,branches,ocr):
     text,asset,surface=(branches[k] for k in ('text','asset','surface'))
     ownership={n.id:'RESOLVED' for n in [*text.texts,*asset.objects,*surface.shapes]};relations=[]
     lines={n['id']:n for n in ocr.get('lines',[])}
-    users={i:sorted([t for t in text.texts if i in text.members.get(t.id,[])],key=lambda t:(t.bbox[1],t.bbox[0])) for i in lines}
+    users={i:sorted([t for t in text.texts if i in text.members.get(t.id,[])],key=lambda t:(t.bbox[0],t.bbox[1])) for i in lines}
     styles={s.id for s in text.styles};w,h=snap['image_size']
     for n in [*text.texts,*asset.objects,*surface.shapes]:
         x,y,bw,bh=n.bbox
@@ -58,6 +58,25 @@ def fuse(snap,branches,ocr):
                 ownership[a.id]='UNOWNED'
                 relations.append(Relation(source=a.id,target=b.id,kind='part_of',status='RESOLVED',evidence=['asset-background-intent','surface-geometry','source']))
                 break
+        if ownership[a.id]=='UNOWNED' or len(a.parts)<2:continue
+        # A grouped set of backing panels can correspond to several native
+        # Surface proposals. Each declared part needs its own corroboration.
+        matches=[]
+        for part in a.parts:
+            candidates=[]
+            for b in surface.shapes:
+                if ownership[b.id]!='RESOLVED' or b.geometry not in ('rect','roundRect'):continue
+                overlap=intersection(part.bbox,b.bbox)
+                union=part.bbox[2]*part.bbox[3]+b.bbox[2]*b.bbox[3]-overlap
+                ratios=[part.bbox[i]/b.bbox[i] for i in (2,3)]
+                if overlap/max(1,union)>=.6 and all(.8<=ratio<=1.25 for ratio in ratios):candidates.append((overlap/union,b))
+            if not candidates:break
+            matches.append(max(candidates,key=lambda pair:pair[0])[1])
+        if len(matches)==len(a.parts) and len({b.id for b in matches})==len(matches):
+            ownership[a.id]='UNOWNED'
+            for b in matches:
+                relations.append(Relation(source=a.id,target=b.id,kind='part_of',status='RESOLVED',
+                    evidence=['asset-background-intent','surface-geometry','source','complete-background-parts']))
     # Connectivity and 2D overlap alone are not semantic contradictions.
     return SceneGraph.model_validate({'schema':'SceneGraph/1',**{k:snap[k] for k in ('source_sha256','image_size','transform')},
         'method_version':'r10-fusion/1','text':text.model_dump(),'asset':asset.model_dump(),'surface':surface.model_dump(),

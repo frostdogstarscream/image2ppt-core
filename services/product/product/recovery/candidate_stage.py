@@ -101,15 +101,16 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
     if region['member_ids'] != [text.id]:
         raise ValueError('indivisible region cannot be split')
     styles = {s.id: s for s in graph.text.styles}
-    protected = peer_protection(text, graph, source, np.zeros(source.shape[:2], bool))
+    protected = peer_protection(text, graph, source, np.zeros(source.shape[:2], bool),baseline_directory=baseline_directory)
     x, y, w, h = map(round, text.bbox)
     box = [x-3, y-3, w+6, h+6]
     bx, by, bw, bh = box
-    backing, _ = background_model(source, box, protected)
+    context_protected=peer_protection(text,graph,source,np.zeros(source.shape[:2],bool),purpose='context',baseline_directory=baseline_directory)
+    backing, _ = background_model(source, box, context_protected)
     ink, _ = glyph_evidence(source, box, styles[text.style].color, backing)
     original = np.zeros(source.shape[:2], bool)
     original[by:by+bh, bx:bx+bw] = ink
-    reference, fit_report = fit_gradient(source, box, protected)
+    reference, fit_report = fit_gradient(source, box, context_protected)
     completion = TextMaskCompletion.analyze(source, original, protected, box, reference,
                                              glyph_height=styles[text.style].size_px)
     wanted = completion.masks[saved['mask_variant']]

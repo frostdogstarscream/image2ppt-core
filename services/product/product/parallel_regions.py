@@ -32,12 +32,12 @@ def regions(graph):
                 'status':'PENDING','fallback':'SOURCE_PLATE_LOCAL_PIXELS'}
         records.append(record)
         for i in members:by_id[i]=record
-    aliases={r.source:r.target for r in graph.relations if r.kind=='part_of' and r.status=='RESOLVED' and r.target in surfaces}
+    aliases={(r.source,r.target) for r in graph.relations if r.kind=='part_of' and r.status=='RESOLVED' and r.target in surfaces}
     for s in graph.surface.shapes:
         # An intersecting rectangle is a conservative erasure veto, never a
         # reason to merge neighboring logical objects or discard their pixels.
         deps={by_id[n.id]['region_id'] for n in [*graph.text.texts,*graph.asset.objects]
-              if intersection(s.bbox,n.bbox)>0 and aliases.get(n.id)!=s.id}
+              if intersection(s.bbox,n.bbox)>0 and (n.id,s.id) not in aliases}
         by_id[s.id]['dependencies']=sorted(deps)
     return records,by_id
 

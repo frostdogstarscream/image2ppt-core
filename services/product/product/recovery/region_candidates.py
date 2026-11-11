@@ -14,7 +14,7 @@ from .diagnostics import save_trial
 from .background_adapter import RecoveryBlocked
 
 
-def adaptive_candidates(graph, identifier, source_file, layer_directory, directory, *, inpaint=None, budget=None):
+def adaptive_candidates(graph, identifier, source_file, layer_directory, directory, *, inpaint=None, budget=None, baseline_directory=None):
     """Lazy tool routing. The consumer advances only after a concrete defect.
 
     Incomplete masks are discarded before expensive background generation.
@@ -24,21 +24,23 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
     if digest(source_file) != graph.source_sha256:
         raise RecoveryBlocked('SOURCE_BINDING', 'source changed')
     text = next(t for t in graph.text.texts if t.id == identifier)
-    if graph.ownership[text.id] != 'RESOLVED':
-        raise RecoveryBlocked('OWNER_CONFLICT', 'unresolved source owner')
     source = np.array(Image.open(source_file).convert('RGB'))
-    protected = peer_protection(text,graph,source,np.zeros(source.shape[:2],bool))
+    details=[]
+    protected,context_protected=peer_protection(text,graph,source,np.zeros(source.shape[:2],bool),baseline_directory=baseline_directory,purpose='both',diagnostics=details)
+    from ..peer_evidence import save_diagnostics
+    save_diagnostics(directory,text,graph,source,protected,context_protected,details)
+    if graph.ownership[text.id]!='RESOLVED':raise RecoveryBlocked('OWNER_CONFLICT','unresolved source owner')
     x,y,w,h = map(round,text.bbox)
     box = [x-3,y-3,w+6,h+6]
     bx,by,bw,bh = box
     if min(bx,by)<0 or bx+bw>source.shape[1] or by+bh>source.shape[0]:
         raise RecoveryBlocked('MASK_INCOMPLETE','text scope leaves source')
-    backing,_ = background_model(source,box,protected)
+    backing,_ = background_model(source,box,context_protected)
     style = next(s for s in graph.text.styles if s.id==text.style)
     ink,_ = glyph_evidence(source,box,style.color,backing)
     original = np.zeros(source.shape[:2],bool)
     original[by:by+bh,bx:bx+bw] = ink
-    reference,fit = fit_gradient(source,box,protected)
+    reference,fit = fit_gradient(source,box,context_protected)
     completion = TextMaskCompletion.analyze(source,original,protected,box,reference,glyph_height=style.size_px)
     write(directory/'mask-completion.json',completion.report)
     np.savez_compressed(directory/'mask-evidence.npz',**completion.evidence,**completion.masks)
@@ -103,21 +105,24 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
         receipt()
 
 
-def generate(graph,identifier,source_file,layer_directory,directory,*,inpaint=None,force_inpaint=False):
+def generate(graph,identifier,source_file,layer_directory,directory,*,inpaint=None,force_inpaint=False,baseline_directory=None):
     directory.mkdir(parents=True,exist_ok=False)
     if digest(source_file)!=graph.source_sha256:raise RecoveryBlocked('SOURCE_BINDING','source changed')
     text=next(t for t in graph.text.texts if t.id==identifier)
-    if graph.ownership[text.id]!='RESOLVED':raise RecoveryBlocked('OWNER_CONFLICT','unresolved source owner')
     source=np.array(Image.open(source_file).convert('RGB'))
-    protected=peer_protection(text,graph,source,np.zeros(source.shape[:2],bool))
+    details=[]
+    protected,context_protected=peer_protection(text,graph,source,np.zeros(source.shape[:2],bool),baseline_directory=baseline_directory,purpose='both',diagnostics=details)
+    from ..peer_evidence import save_diagnostics
+    save_diagnostics(directory,text,graph,source,protected,context_protected,details)
+    if graph.ownership[text.id]!='RESOLVED':raise RecoveryBlocked('OWNER_CONFLICT','unresolved source owner')
     x,y,w,h=map(round,text.bbox);box=[x-3,y-3,w+6,h+6];bx,by,bw,bh=box
     if min(bx,by)<0 or bx+bw>source.shape[1] or by+bh>source.shape[0]:
         raise RecoveryBlocked('MASK_INCOMPLETE','text scope leaves source')
-    backing,_=background_model(source,box,protected)
+    backing,_=background_model(source,box,context_protected)
     style=next(s for s in graph.text.styles if s.id==text.style)
     ink,_=glyph_evidence(source,box,style.color,backing)
     original=np.zeros(source.shape[:2],bool);original[by:by+bh,bx:bx+bw]=ink
-    reference,fit=fit_gradient(source,box,protected)
+    reference,fit=fit_gradient(source,box,context_protected)
     completion=TextMaskCompletion.analyze(source,original,protected,box,reference,glyph_height=style.size_px)
     write(directory/'mask-completion.json',completion.report)
     np.savez_compressed(directory/'mask-evidence.npz',**completion.evidence,**completion.masks)

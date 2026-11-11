@@ -32,7 +32,7 @@ def read_trial_receipt(graph, identifier, directory):
 
 
 def retry_text_mask_completion(graph, identifier, source_file, layer_directory,
-                               baseline_directory, fonts, directory, *, previous_receipt):
+                               baseline_directory, fonts, directory, *, previous_receipt, inpaint=None):
     """Complete a proved partial glyph mask, or reuse an unchanged failure."""
     previous_file = Path(previous_receipt)
     payload = json.loads(previous_file.read_text('utf8'))
@@ -44,7 +44,7 @@ def retry_text_mask_completion(graph, identifier, source_file, layer_directory,
                 or not previous['visible_source_pixels_outside_mask']):
             raise ValueError('mask completion retry requires proved missing original glyph pixels')
         result = probe_one(graph, identifier, source_file, layer_directory,
-                           baseline_directory, fonts, directory)
+                           baseline_directory, fonts, directory,inpaint=inpaint)
         return {**result, 'action': 'retry_text_mask_completion',
                 'action_implementation_sha256': digest(__file__),
                 'strategy_changed': previous['mask_variant']+' to TextMaskCompletion',
@@ -61,7 +61,7 @@ def retry_text_mask_completion(graph, identifier, source_file, layer_directory,
     changed = any(current[field] != old[field] for field in fields)
     if changed:
         result = probe_one(graph, identifier, source_file, layer_directory,
-                           baseline_directory, fonts, directory)
+                           baseline_directory, fonts, directory,inpaint=inpaint)
     else:
         result = {**previous['result'], 'cache_hit': True,
                   'stop_reason': 'mask evidence and strategy unchanged; preserved incomplete-mask result'}
@@ -72,7 +72,7 @@ def retry_text_mask_completion(graph, identifier, source_file, layer_directory,
 
 def switch_background_candidate(graph, identifier, source_file, layer_directory,
                                 baseline_directory, fonts, directory, *,
-                                rejected_candidate_directory, rejection_report):
+                                rejected_candidate_directory, rejection_report, excluded_candidates=(), inpaint=None):
     """Advance past a background rejected by bound source or Office checks."""
     candidate = Path(rejected_candidate_directory).resolve()
     files, residual = read_trial_receipt(graph, identifier, candidate)
@@ -97,7 +97,7 @@ def switch_background_candidate(graph, identifier, source_file, layer_directory,
         raise ValueError('unsupported background rejection receipt')
     result = probe_one(graph, identifier, source_file, layer_directory,
                        baseline_directory, fonts, directory,
-                       excluded_candidates=[residual['candidate']])
+                       excluded_candidates=[residual['candidate'],*excluded_candidates],inpaint=inpaint)
     return {**result, 'action': 'switch_background_candidate',
             'action_implementation_sha256': digest(__file__),
             'rejected_candidate': residual['candidate'],

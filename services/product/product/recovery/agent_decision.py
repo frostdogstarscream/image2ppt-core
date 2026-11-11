@@ -88,7 +88,7 @@ def verify_candidate(candidate, original, object_id, source_file, output):
         raise ValueError('candidate source or mask changed')
     mask=mask>0
     text=next(t for t in scene.text.texts if t.id==object_id)
-    protected=peer_protection(text,scene,source,np.zeros(source.shape[:2],bool))
+    protected=peer_protection(text,scene,source,np.zeros(source.shape[:2],bool),baseline_directory=candidate.baseline_directory)
     changed=(written!=source).any(2)
     if (scene.ownership[object_id]!='RESOLVED' or (mask&protected).any()
             or (changed&~mask).any() or not np.array_equal(written[mask],raw[mask])):
@@ -108,11 +108,12 @@ def verify_candidate(candidate, original, object_id, source_file, output):
 class RegionalRepairAgent:
     """VLM chooses and interprets; registered adapters own actual execution."""
     def __init__(self, graph, object_id, source_file, failure_files, *, tools, gateway, policy, store,
-                 output, max_decisions=3, max_tools=2):
+                 output, max_decisions=3, max_tools=2, diagnostic_images=()):
         self.graph=SceneGraph.model_validate(graph.model_dump())
         self.object_id=object_id;self.source=Path(source_file).resolve()
         if object_id not in graph.ownership or digest(self.source)!=graph.source_sha256:
             raise ValueError('invalid source-bound target')
+        self.diagnostic_images={str(Path(p).resolve()):digest(p) for p in diagnostic_images}
         self.failures={str(Path(p).resolve()):digest(p) for p in failure_files}
         if not self.failures:raise ValueError('actual failure evidence required')
         self.tools={tool.name:tool for tool in tools}
@@ -123,10 +124,10 @@ class RegionalRepairAgent:
         if not 1<=max_decisions<=6 or not 1<=max_tools<=3:raise ValueError('invalid regional agent budget')
         self.binding={'source_sha256':graph.source_sha256,'scene_sha256':key(self.graph.model_dump()),
             'object_id':object_id,'failure_hashes':sorted(self.failures.values()),
-            'skill_sha256':policy.version,'runtime_sha256':digest(__file__),
+            'diagnostic_images':self.diagnostic_images,'skill_sha256':policy.version,'runtime_sha256':digest(__file__),
             'tools':{name:tool.implementation_sha256 for name,tool in self.tools.items()}}
         package=Path(__file__).resolve().parents[1]
-        dependencies=[Path(__file__).with_name('agent_asset_validation.py'),
+        dependencies=[Path(__file__).with_name('agent_asset_validation.py'),package/'peer_evidence.py',
                       *[package/(name+'.py') for name in ('parallel_rebuild','parallel_text_candidates',
                                                          'parallel_candidate_contracts','parallel_regions')]]
         self.binding['validation_sha256']=key({str(p.relative_to(package)):digest(p) for p in dependencies})
@@ -136,6 +137,7 @@ class RegionalRepairAgent:
     def checked(self):
         if digest(self.source)!=self.binding['source_sha256'] or key(self.graph.model_dump())!=self.binding['scene_sha256']:
             raise ValueError('agent source or scene changed')
+        if any(digest(p)!=sha for p,sha in self.diagnostic_images.items()):raise ValueError('diagnostic image changed')
         if any(digest(p)!=sha for p,sha in self.failures.items()):raise ValueError('failure evidence changed')
 
     def execute(self, name):
@@ -196,9 +198,9 @@ class RegionalRepairAgent:
             if latest and any(digest(p)!=sha for p,sha in latest.get('files',{}).items()):
                 raise ValueError('executed tool evidence changed before decision')
             previews=latest.get('preview_files',[]) if latest else []
-            images=[str(self.source),*[p['path'] for p in previews]]
+            images=[str(self.source),*self.diagnostic_images,*[p['path'] for p in previews]]
             request={**context,'events':events,'decision_index':step,
-                     'image_roles':['full_page_source',*[p['role'] for p in previews]],
+                     'image_roles':['full_page_source',*['source_bound_failure_diagnostic' for _ in self.diagnostic_images],*[p['role'] for p in previews]],
                      'can_accept_candidate':bool(latest and latest['status']=='CANDIDATE_READY')}
             try:
                 requested+=1

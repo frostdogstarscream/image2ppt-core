@@ -50,8 +50,8 @@ def stage_and_verify(trial, graph, baseline, fonts, output, *, office=False, typ
         text = next(t for t in graph.text.texts if t.id == identifier)
         x, y, w, h = map(round, text.bbox)
         box = [x-3, y-3, w+6, h+6]
-        protected = peer_protection(text, graph, source, np.zeros(source.shape[:2], bool))
-        reference, fit = fit_gradient(source, box, protected)
+        protected = peer_protection(text, graph, source, np.zeros(source.shape[:2], bool),baseline_directory=baseline)
+        reference, fit = fit_gradient(source, box, peer_protection(text,graph,source,np.zeros(source.shape[:2],bool),purpose='context',baseline_directory=baseline))
         deleted = output/'office'/f'01-{identifier}-delete.png'
         actual = np.array(Image.open(deleted).convert('RGB'))
         if actual.shape != source.shape:

@@ -12,17 +12,9 @@ class TextUncertainty(ValueError):
         self.artifacts=artifacts or {}
 
 
-def peer_protection(text, graph, source, blocked):
-    protected = blocked.copy()
-    size = (source.shape[1], source.shape[0])
-    for peer in graph.text.texts:
-        if peer.id != text.id:
-            protected |= rectangle(peer.bbox, size)
-    # Search boxes only veto erasure; they never grant ownership. Backing aliases
-    # remain conservative here until joint region transactions are proven.
-    for peer in graph.asset.objects:
-        protected |= rectangle(peer.bbox, size)
-    return protected
+def peer_protection(text, graph, source, blocked, *, baseline_directory=None, diagnostics=None, purpose='erase'):
+    from .peer_evidence import protection
+    return protection(text,graph,source,blocked,baseline_directory,purpose=purpose,diagnostics=diagnostics)
 
 
 def perimeter_background(source, box, protected):

@@ -3,6 +3,10 @@ from .agent_decision import RegisteredTool
 
 
 TOOLS = {
+    'recheck_text_ownership': {
+        'kind':'text',
+        'description':'Re-fuse source-bound existing OCR and three branches, validate backing relationships and rerun the safe text probe. Use for OWNER_CONFLICT or SEMANTIC_ROLE_CONFLICT. No new wording, source pixels or unproved owner rights are granted.',
+    },
     'retry_text_mask_completion': {
         'kind': 'text',
         'description': 'Retry source-bound TextMaskCompletion using changed source/scene/layer/code evidence, '

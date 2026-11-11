@@ -152,13 +152,17 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             graph=fuse(snap,branches,ocr)
             if candidate_engine=='r12-regional' and request.get('reuse_verified_from'):
                 from .recovery.verified_seed import load as load_verified_seed,materialize as materialize_seed
-                seed=load_verified_seed(request['reuse_verified_from'],graph,fonts)
-                ir=materialize_seed(seed,folder)
-                write(folder/'barrier-1.json',graph.model_dump())
-                report=json.loads((ir.parent/'transactions.json').read_text('utf8'))
-                store.task('scene-'+snap['source_sha256'],'scene','STAGED',{'ir':str(ir),'failures':failures,
-                    'reused_verified_delivery':seed['source_job']})
-                return graph,ir,report,failures
+                try:
+                    seed=load_verified_seed(request['reuse_verified_from'],graph,fonts)
+                    ir=materialize_seed(seed,folder)
+                    write(folder/'barrier-1.json',graph.model_dump())
+                    report=json.loads((ir.parent/'transactions.json').read_text('utf8'))
+                    store.task('scene-'+snap['source_sha256'],'scene','STAGED',{'ir':str(ir),'failures':failures,
+                        'reused_verified_delivery':seed['source_job']})
+                    return graph,ir,report,failures
+                except ValueError as exc:
+                    write(folder/'verified-seed-reanalysis.json',{'source_sha256':graph.source_sha256,'reason':str(exc),
+                        'action':'continue source-bound regional reconstruction; prior delivery retained','whole_page_fallback':False})
             from .parallel_typography import calibrate
             from .parallel_text_anchor import anchor
             import numpy as np
@@ -241,7 +245,7 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
     if candidate_engine in ('r12-regional','r12-shadow'):
         from .recovery.product_pipeline import run as regional_run
         return regional_run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,
-            compiler=compiler,reviewer=review_provider,office=office,progress=update,shadow=candidate_engine=='r12-shadow')
+            compiler=compiler,reviewer=review_provider,repair_provider=provider,office=office,progress=update,shadow=candidate_engine=='r12-shadow')
     if candidate_engine=='r11-shadow':
         for i,(graph,snap) in enumerate(zip(graphs,snaps)):
             try:

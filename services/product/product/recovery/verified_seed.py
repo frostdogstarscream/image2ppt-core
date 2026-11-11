@@ -44,6 +44,7 @@ def load(job,graph,fonts):
     regions=[dict(row) for page in result['regions'] for row in page
              if row['state']=='VERIFIED_LOCAL' and row['object_id'] in baseline.selected]
     return {'source_job':str(prior),'source_ir':str(source),'source_sha256':graph.source_sha256,
+        'semantics':{'ownership':graph.ownership,'relations':[r.model_dump() for r in graph.relations]},
         'selected_ids':list(baseline.selected),'regions':regions,'office_pptx_sha256':result['artifacts']['result.pptx'],
         'files':{path:sha for path,sha in commit['files'].items() if Path(path).is_relative_to(source.parent)}}
 
@@ -54,5 +55,18 @@ def materialize(seed,folder):
     if not seed['files'] or any(digest(p)!=sha for p,sha in seed['files'].items()):
         raise ValueError('verified seed bytes changed before reuse')
     target=folder/'seed';shutil.copytree(source,target)
+    semantics=seed.get('semantics')
+    composed=SceneGraph.model_validate_json((target/'scene.json').read_text('utf8'))
+    if semantics and (composed.ownership!=semantics['ownership'] or [r.model_dump() for r in composed.relations]!=semantics['relations']):
+        from ..parallel_contracts import Relation
+        from ..parallel_regions import regions,finish_regions
+        composed.ownership=dict(semantics['ownership'])
+        composed.relations=[Relation.model_validate(r) for r in semantics['relations']]
+        write(target/'scene.json',composed.model_dump())
+        reports=json.loads((target/'transactions.json').read_text('utf8'))
+        write(target/'region-transactions.json',finish_regions(regions(composed)[0],reports))
+        write(target/'build-binding.json',{'trial_only':True,'scene_sha256':digest(target/'scene.json'),
+            'ir_sha256':digest(target/'slideir.json'),'parent_scene_sha256':digest(source/'scene.json'),
+            'semantic_update_only':True,'selected_owner_closures_unchanged':True})
     write(folder/'verified-seed.json',seed)
     return target/'slideir.json'

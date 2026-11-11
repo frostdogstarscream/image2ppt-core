@@ -31,7 +31,7 @@ def input_binding(graph, identifier, source_file, layer_directory, baseline_dire
             'parallel_candidate_stage', 'parallel_regions',
             'parallel_candidate_contracts', 'parallel_candidate_engine',
             'contracts', 'parallel_contracts', 'object_extract', 'object_contracts',
-            'materialize')],
+            'materialize','peer_evidence')],
         root/'ppt-rebuild/src/reconstruction.py',
     ]
     layers = {}
@@ -55,7 +55,7 @@ def input_binding(graph, identifier, source_file, layer_directory, baseline_dire
 
 
 def probe_one(graph, identifier, source_file, layer_directory, baseline_directory, fonts, directory,
-              *, excluded_candidates=()):
+              *, excluded_candidates=(), inpaint=None):
     """Generate and stage the first safe local candidate without compile/QA.
 
     A complete receipt can be reused only while every candidate, baseline,
@@ -63,6 +63,7 @@ def probe_one(graph, identifier, source_file, layer_directory, baseline_director
     independent visual acceptance remain explicit subsequent tool operations.
     """
     binding = input_binding(graph, identifier, source_file, layer_directory, baseline_directory, fonts)
+    binding['inpaint_model_binding']=getattr(inpaint,'config',{}).get('model_binding') if inpaint else None
     binding['excluded_candidates'] = sorted(set(excluded_candidates))
     target = Path(directory).resolve()/('text-'+key(binding)[:24])
     receipt = target/'probe.json'
@@ -80,7 +81,7 @@ def probe_one(graph, identifier, source_file, layer_directory, baseline_director
               'state': 'BLOCKED', 'office': 'NOT_RUN', 'visual': 'NOT_RUN',
               'automatic_publication': False, 'attempts': [], 'cache_hit': False,
               'receipt_file': str(receipt)}
-    stream = adaptive_candidates(graph, identifier, source_file, layer_directory, target/'backgrounds')
+    stream = adaptive_candidates(graph, identifier, source_file, layer_directory, target/'backgrounds',baseline_directory=baseline_directory,inpaint=inpaint)
     try:
         for row in stream:
             result['attempts'].append({'candidate': row['candidate'], 'status': row['status']})
