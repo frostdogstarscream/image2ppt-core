@@ -2,14 +2,34 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
+import pytest
 
-from _helpers import dump, load_config, page_dir
+from _helpers import ROOT, dump, load_config, page_dir
 
 from layerd_loader import detect_alpha_mode, load_page, recompose, region_candidates, to_record, verify
 
 
+def _provenance_installed() -> bool:
+    """The loader refuses a pack without a receipt: request.json or the baseline catalog.
+
+    Review packs copied by hand from a service job are missing request.json, and
+    fabricating the receipt would defeat the check, so those tests skip the same way
+    the other private-dataset tests do.
+    """
+    directory: Path = page_dir("03")
+    return (directory / "request.json").exists() or (ROOT / "configs" / "layerd-baseline.json").exists()
+
+
+requires_provenance = pytest.mark.skipif(
+    not _provenance_installed(),
+    reason="LayerD provenance receipt not installed (request.json or configs/layerd-baseline.json)",
+)
+
+
+@requires_provenance
 def test_m1_page_loads_with_manifest():
     page = load_page(page_dir("03"))
     assert page.size == (1672, 941)
@@ -22,6 +42,7 @@ def test_m1_page_loads_with_manifest():
     assert len(record["layers"]) == len(page.layers)
 
 
+@requires_provenance
 def test_m1_recomposition_matches_service_composite():
     """If we cannot reproduce composite.png we have misread the layers."""
     cfg = load_config()
@@ -32,6 +53,7 @@ def test_m1_recomposition_matches_service_composite():
     assert report["psnr"] > 25, dump(report)
 
 
+@requires_provenance
 def test_m1_regions_are_pixel_evidence_not_objects():
     page = load_page(page_dir("03"))
     for layer in page.layers:
@@ -59,6 +81,7 @@ def test_m1_alpha_mode_detection():
     assert detect_alpha_mode(opaque) == "straight"
 
 
+@requires_provenance
 def test_m1_recompose_is_deterministic():
     page = load_page(page_dir("03"))
     first = recompose(page)
