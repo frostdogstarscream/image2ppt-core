@@ -70,8 +70,7 @@ def shared_styles(plans,global_result,page):
             original=lookup[member]
             # Preserve clear source hierarchy; model grouping cannot silently
             # erase real emphasis or unite materially different source sizes.
-            compatible=(original['bold']==s['bold'] and
-                        abs(original['font_size_px']-s['font_size_px'])<=max(1,original['font_size_px']*.06) and
+            compatible=(abs(original['font_size_px']-s['font_size_px'])<=max(1,original['font_size_px']*.06) and
                         max(abs(int(original['color'][i:i+2],16)-int(s['color'][i:i+2],16)) for i in (0,2,4))<=16)
             mapping[sid]=s if compatible else original
     return mapping

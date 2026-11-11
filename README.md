@@ -1,4 +1,14 @@
-# image2PPT Codex 原型
+# image2PPT 半自动工作链路
+
+本分支 `codex/semi-automatic-workflow` 保存基于 r7.1 的 Codex 协作重建与整页字体修正链路。Codex 在对话中查看源图、判断文字角色和样式分组，脚本执行字体候选拟合、组级应用、固定 PPTX 编译和检查。最终页面通过 PowerPoint 导出后，再由 Codex 查看并调整。
+
+整页字体修正入口为 `ppt-rebuild/src/page_typography.py`，输入是已有交付场景、源图和对话中编写的页内样式分组。完整输入约定和运行方式见 [字体修正说明](docs/page-font-fidelity.md)。该入口按本地计划执行，视觉角色与分组由对话提供。独立上传后的自动视觉规划属于 `product.parallel_pipeline.run` 所在的 r10 产品工作树。
+
+当前流程为 源图与已有场景 → Codex 视觉判断和分组 → 本地字体拟合与组级应用 → 固定编译器 → 文件与渲染检查 → PowerPoint 编辑、保存重开和页面导出 → Codex 视觉复核 → 交付。
+
+这是一份可复用执行器和历史工作流的代码快照。已知限制包括部分编号与标题被历史识别结果合并，现有字体分组不能自动纠正这种结构。编号拆分、颜色恢复和列对齐仍需要后续结构修正。视觉保真、可编辑性、人工验收和 WPS 验收分别记录。
+
+下面保留原有核心工具的使用说明。
 
 现已增加 **image2ppt-core M1**：共享 Python 引擎、保存产物离线回放、不可变修订、阶段恢复、最终 PPTX 对象检查及直接编辑探针。入口是 `python -m image2ppt` / `image2ppt-core`。完整安装与调用说明见 [核心引擎说明](docs/core-m1.md)。SlideIR 仍为 0.1，旧 PowerShell 命令继续可用。
 

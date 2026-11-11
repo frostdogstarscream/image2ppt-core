@@ -9,6 +9,55 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from typography_plan import targets,read,write,digest
+from typography_groups import choose_groups
+
+
+def rank_group_candidates(ir, members, families, bold, size_pt, manifest, source, background):
+    """Rank shared faces/sizes; never return an independently fitted member.
+
+    Pixel/stroke scores are soft ranking only. Explicit source-reviewed weight
+    and family candidates are not inferred from the old per-object bold flags.
+    """
+    from typography_groups import paragraphs
+    mapping=paragraphs(ir); scale=ir['canvas']['target_px'][0]/ir['canvas']['source_px'][0]
+    samples=[]
+    for key in members:
+        n,p=mapping[key]
+        if p.get('runs'): continue
+        pi=int(key.rsplit('/p',1)[1]); x,y,w,h=map(int,source_boxes(ir,n)[pi])
+        delta=np.abs(source[y:y+h,x:x+w].astype(float)-background[y:y+h,x:x+w]).max(axis=2)
+        mask=delta>45
+        if mask.sum()<8: continue
+        yy,xx=np.nonzero(mask)
+        samples.append((p['text'],mask[yy.min():yy.max()+1,xx.min():xx.max()+1]))
+    # Longer, clear strings discriminate faces better than punctuation/digits.
+    samples=sorted(samples,key=lambda s:len(s[0]),reverse=True)[:8]
+    ranked=[]
+    for family in families:
+        description={'font_family':family,'font_latin':'Arial','bold':bold}
+        for pt in sorted({round((size_pt+d)*4)/4 for d in (-.75,-.5,-.25,0,.25,.5,.75)}):
+            scores=[]
+            try:
+                for text,truth in samples:
+                    ink,_=glyph(text,description,manifest,pt/.75/scale)
+                    rendered=ink>80
+                    h=max(truth.shape[0],rendered.shape[0]);w=max(truth.shape[1],rendered.shape[1])
+                    a=np.zeros((h,w),np.uint8);b=a.copy()
+                    a[:truth.shape[0],:truth.shape[1]]=truth
+                    b[:rendered.shape[0],:rendered.shape[1]]=rendered
+                    # Both directions penalize wrong strokes, but do not gate a
+                    # whole group on a single member's previous pixel score.
+                    da=cv2.distanceTransform(1-a,cv2.DIST_L2,3)
+                    db=cv2.distanceTransform(1-b,cv2.DIST_L2,3)
+                    shape=float(da[b>0].mean()+db[a>0].mean())
+                    dimensions=abs(truth.shape[1]-rendered.shape[1])/max(1,len(text))
+                    mass=abs(math.log(max(1,b.sum())/max(1,a.sum())))
+                    scores.append(shape+dimensions+mass)
+            except ValueError: continue
+            score=float(np.mean(scores)) if scores else 0
+            ranked.append((score,abs(pt-size_pt),families.index(family),
+                           {'ea':family,'latin':'Arial','bold':bold,'size_pt':pt}))
+    return [r[-1] for r in sorted(ranked,key=lambda r:r[:3])]
 
 STYLE_FIELDS={'font','bold','color','line_spacing_pt'}
 
