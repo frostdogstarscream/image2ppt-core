@@ -20,7 +20,8 @@ from ..parallel_edit_probe import inspect_text
 from ..parallel_residual_gate import inspect_residuals
 from ..resource_lease import lease
 from .background_adapter import RecoveryBlocked
-from .region_candidates import generate
+from .region_candidates import generate, adaptive_candidates
+from .adaptive_policy import AdaptiveBudget, QualityReview, QUALITY_PROMPT, quality_status
 from .font_candidates import compare
 from .region_state import rollback
 from .validation import stage_and_verify
@@ -30,6 +31,9 @@ from .remote_gpu_lease import remote_gpu_lease
 
 def failure(exc,stage):
     code=getattr(exc,'code','')
+    if isinstance(exc,(TimeoutError,OSError)) or type(exc).__name__ in ('BudgetExceeded','UnknownCall'):
+        return 'QA_INFRASTRUCTURE_UNAVAILABLE'
+    if code in ('QA_INFRASTRUCTURE_UNAVAILABLE','INPAINT_RESPONSE_UNKNOWN'):return 'QA_INFRASTRUCTURE_UNAVAILABLE'
     if code in ('MASK_INCOMPLETE','INVALID_MASK','EMPTY_WRITE_MASK'):return 'MASK_INCOMPLETE'
     if code in ('OWNER_CONFLICT','PROTECTED_NEIGHBOR','MASK_OUTSIDE_SCOPE') or any(
         word in str(exc).lower() for word in ('owner','indivisible','source-authorized','protected peer')):return 'OWNER_CONFLICT'
@@ -58,8 +62,12 @@ def office_frame_feedback(output,identifier):
 
 
 class InpaintService:
-    def __init__(self,config,cache):
-        self.config=config;self.client=LamaClient(config['url'],config['model_binding'],cache)
+    def __init__(self,config,cache,budget=None):
+        def dispatch(identity):
+            if budget and not budget.reserve('model_calls',{'tool':'big-lama','request_id':identity}):
+                from ..parallel_store import BudgetExceeded
+                raise BudgetExceeded('identical LaMa dispatch already reserved')
+        self.config=config;self.client=LamaClient(config['url'],config['model_binding'],cache,on_dispatch=dispatch)
         self.receipt=None
     def __call__(self,source,mask):
         with remote_gpu_lease(self.config['gpu_lease']) as receipt:
@@ -75,19 +83,84 @@ class UnavailableReviewer:
         raise RuntimeError('Go review infrastructure is unconfigured')
 
 
-def review(store,reviewer,snap,ir,preview,office_dir,page,output):
+def review(store,reviewer,snap,ir,preview,office_dir,page,output,*,adaptive=False):
     details,refs=panels(snap['path'],preview,ir,office_dir,page,output)
     context={'source_sha256':snap['source_sha256'],'plan_sha256':digest(ir),'preview_sha256':digest(preview),
         'scene':json.loads(ir.read_text('utf8')),'transactions':json.loads((ir.parent/'transactions.json').read_text('utf8')),
         'actual_edit_evidence':refs,'office_pass':True,'raster_remainder_is_explicit_fallback':True}
-    result=store.call('r12-final-review',reviewer,PROMPT,context,[snap['path'],str(preview),*details],Review,lease('go'))
+    result=store.call('r12-final-review',reviewer,PROMPT+('\n'+QUALITY_PROMPT if adaptive else ''),context,
+        [snap['path'],str(preview),*details],QualityReview if adaptive else Review,lease('go'))
     if any(getattr(result,k)!=context[k] for k in ('source_sha256','plan_sha256','preview_sha256')):
         raise ValueError('independent review binding mismatch')
     return result.model_dump()
 
 
+def select_adaptive(graph,identifier,snap,source,saved,folder,current,fonts,font_choices,record,budget,inpaint,compiler,office):
+    """Advance only on a classified defect, and stop at the first local pass."""
+    text=next(t for t in graph.text.texts if t.id==identifier)
+    # The upstream page-level calibration has already matched installed fonts.
+    # Reuse that decision and its emphasis spans instead of searching again.
+    proposals=[font_choices.get(text.style)]
+    stream=adaptive_candidates(graph,identifier,snap['path'],saved,folder/identifier,inpaint=inpaint,budget=budget)
+    try:
+        for number,row in enumerate(stream):
+            if row['status']!='PRECHECK_PASS':
+                record['attempts'].append({'background':row['candidate'],'failure':'BACKGROUND_REPAIR_FAILED',
+                                           'checks':row['checks']})
+                continue
+            trial=folder/identifier/row['candidate']
+            proposal=proposals[0]
+            output=folder/(identifier+'-candidate-'+str(number))
+            for repair_round in range(int(budget.limits['repair_rounds'])+1):
+                try:
+                    options={'typography':proposal,'compiler':compiler,'office_probe':office,'include_long':False}
+                    if repair_round:options['frame_minimum']=feedback
+                    acceptance=stage_and_verify(trial,graph,current.parent,fonts,output,office=True,**options)
+                    if acceptance.get('regional_automatic_checks')=='PASS':
+                        actual=np.array(Image.open(output/'office/page-01-before.png').convert('RGB'))
+                        bx,by,bw,bh=row['reference_context']['bbox']
+                        score=float(np.abs(actual[by:by+bh,bx:bx+bw].astype(float)-source[by:by+bh,bx:bx+bw]).mean())
+                        record['attempts'].append({'font':proposal,'background':row['candidate'],
+                            'status':'VERIFIED_LOCAL','source_ppt_mae':score,'acceptance':str(output/'acceptance.json')})
+                        record['early_stop']={'reason':'hard gates and real editing passed',
+                            'background_candidates_consumed':number+1,'further_candidates_requested':False}
+                        return score,output/'region/slideir.json',output/'acceptance.json',proposal,row['candidate']
+                    cause=acceptance.get('failure','FONT_LAYOUT_FAILED')
+                    record['attempts'].append({'background':row['candidate'],'failure':cause,'acceptance':str(output/'acceptance.json')})
+                    # New frame parameters must come from actual failed Office
+                    # bounds. No blind repeats of the same strategy are allowed.
+                    feedback=office_frame_feedback(output,identifier) if cause=='FONT_LAYOUT_FAILED' else None
+                    if not feedback:break
+                    record['attempts'][-1]['office_frame_feedback']=feedback
+                    output=folder/(identifier+'-candidate-'+str(number)+'-repair-'+str(repair_round+1))
+                except Exception as exc:
+                    code=failure(exc,'font')
+                    record['attempts'].append({'failure':code,'error_type':type(exc).__name__,'reason':str(exc)[:400]})
+                    if code in ('OWNER_CONFLICT','MASK_INCOMPLETE','QA_INFRASTRUCTURE_UNAVAILABLE'):
+                        record['failure']=code
+                        return None
+                    break
+            if record['attempts'][-1].get('failure') not in ('BACKGROUND_REPAIR_FAILED',):
+                # Another background cannot repair content, font layout or an
+                # unavailable Office installation. Keep that failure specific.
+                break
+        index=folder/identifier/'index.json'
+        background= json.loads(index.read_text('utf8')) if index.is_file() else {}
+        record['background_failures']=background.get('failures',[])
+        unavailable=any(r.get('status')=='UNKNOWN' for r in record['background_failures'])
+        record['failure']='QA_INFRASTRUCTURE_UNAVAILABLE' if unavailable else next(
+            (a['failure'] for a in reversed(record['attempts']) if 'failure' in a),'BACKGROUND_REPAIR_FAILED')
+        return None
+    finally:
+        stream.close()
+
+
 def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,reviewer,office=None,progress=None,shadow=False):
     from ..pipeline import effective_findings
+    adaptive=request.get('regional_strategy','adaptive')=='adaptive'
+    if request.get('regional_strategy','adaptive') not in ('adaptive','exhaustive'):
+        raise ValueError('unsupported regional strategy')
+    budget=AdaptiveBudget(store,request.get('adaptive_budget')) if adaptive else None
     root=job/'r12';root.mkdir(exist_ok=True)
     attempt=root/('attempt-'+key({'request':request,'code':digest(__file__)})[:16])
     if attempt.exists():
@@ -102,7 +175,7 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
     config_file=Path(__file__).resolve().parents[4]/'.runtime/parallel-services.json'
     config=json.loads(config_file.read_text('utf8')).get('lama') if config_file.exists() else None
     shared_cache=Path(os.environ.get('IMAGE2PPT_PARALLEL_CACHE',str(Path(__file__).resolve().parents[4]/'.runtime/parallel-cache')))
-    inpaint=InpaintService(config,shared_cache/'r12-lama') if config and not shadow else None
+    inpaint=InpaintService(config,shared_cache/'r12-lama',budget) if config and not shadow else None
     states=[];original_irs=list(irs);all_regions=[]
     for index,(graph,snap,ir) in enumerate(zip(graphs,snaps,irs)):
         graph=SceneGraph.model_validate(graph.model_dump());graphs[index]=graph
@@ -112,7 +185,7 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
         targets=[t.id for t in graph.text.texts if (requested is not None and t.id in requested)
                  or (requested is None and graph.ownership[t.id]=='RESOLVED')]
         source=np.array(Image.open(snap['path']).convert('RGB'))
-        with lease('cpu'):typography=compare(graph,set(targets),source,fonts,folder)
+        with lease('cpu'):typography={} if adaptive else compare(graph,set(targets),source,fonts,folder)
         saved=next((p['layers'] for p in baseline['pages'] if p['source']['sha256']==snap['source_sha256']),None)
         if saved is None:
             try:
@@ -123,77 +196,106 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
         write(folder/'dependencies.json',region_records)
         for identifier in targets:
             record={'object_id':identifier,'region_id':by_id[identifier]['region_id'],
-                    'dependencies':by_id[identifier]['dependencies'],'state':'LOCAL_FALLBACK','attempts':[]}
+                    'dependencies':by_id[identifier]['dependencies'],'state':'LOCAL_FALLBACK','attempts':[],
+                    'candidate_state':'NOT_GENERATED','regional_commit':'NOT_COMMITTED'}
             state.append(record)
+            binding=None;parent_ir_sha=digest(current)
             try:
                 binding=key({'scene':graph.model_dump(),'object':identifier,'fonts':fonts,
                     'engine':digest(__file__),'generation':digest(Path(__file__).with_name('region_candidates.py')),
                     'stage':digest(Path(__file__).with_name('candidate_stage.py')),
-                    'validation':digest(Path(__file__).with_name('validation.py')),'shadow':shadow})
+                    'validation':digest(Path(__file__).with_name('validation.py')),
+                    'adaptive_policy':digest(Path(__file__).with_name('adaptive_policy.py')),
+                    'code_binding':key({str(p):digest(p) for p in code_files}),
+                    'policy':request.get('regional_strategy','adaptive'),'budget':request.get('adaptive_budget'),
+                    'retry_revision':request.get('retry_revision'),'shadow':shadow})
                 with store.db() as db:
-                    prior=db.execute('SELECT payload FROM tasks WHERE k=? AND state=?',
-                                     (record['region_id'],'VERIFIED_LOCAL')).fetchone()
+                    prior=db.execute('SELECT payload FROM tasks WHERE k=?',(record['region_id'],)).fetchone()
                 if prior and not shadow:
                     prior=json.loads(prior[0])
                     references=prior.get('verified_files',{})
                     if (prior.get('reconstruction_binding')==binding and prior.get('parent_ir_sha256')==digest(current)
                             and references and all(Path(p).is_file() and digest(p)==sha for p,sha in references.items())):
+                        if prior['state']=='LOCAL_FALLBACK':
+                            record.update(prior,resumed_from_failure_receipt=True)
+                            continue
                         record.update(prior,resumed_from_verified_receipt=True)
                         text=next(t for t in graph.text.texts if t.id==identifier)
                         font_choices[text.style]=record.get('font')
                         current=Path(prior['ir']);continue
                 parent_ir_sha=digest(current)
-                with lease('cpu'):
-                    passed,failures=generate(graph,identifier,snap['path'],saved,folder/identifier,inpaint=inpaint)
-                record['background_failures']=failures
-                if not passed:
-                    report=json.loads((folder/identifier/'mask-completion.json').read_text('utf8'))
-                    record['failure']='MASK_INCOMPLETE' if report['unassigned_contrast_pixels'] else 'BACKGROUND_REPAIR_FAILED'
-                    continue
-                if shadow:
-                    record.update(state='SHADOW_PRECHECK_PASS',candidates=[r['candidate'] for r in passed]);continue
-                text=next(t for t in graph.text.texts if t.id==identifier)
-                proposals=([font_choices[text.style]] if text.style in font_choices else
-                           typography.get(text.style,{}).get('proposals',[])[:3]+[None])
-                alternatives=[]
-                for number,proposal in enumerate(proposals):
-                    trial=folder/identifier/passed[0]['candidate'];output=folder/(identifier+'-font-'+str(number))
-                    try:
-                        acceptance=stage_and_verify(trial,graph,current.parent,fonts,output,office=True,
-                            typography=proposal,compiler=compiler,office_probe=office)
-                        if acceptance.get('regional_automatic_checks')!='PASS':
-                            feedback=office_frame_feedback(output,identifier)
-                            if feedback:
-                                previous=output;output=folder/(identifier+'-font-'+str(number)+'-bounds-fit')
-                                acceptance=stage_and_verify(trial,graph,current.parent,fonts,output,office=True,
-                                    typography=proposal,compiler=compiler,office_probe=office,frame_minimum=feedback)
-                                record['attempts'].append({'font':proposal,'initial_bounds_report':str(previous/'acceptance.json'),
-                                                          'office_frame_feedback':feedback})
-                        if acceptance.get('regional_automatic_checks')!='PASS':
-                            record['attempts'].append({'font':proposal,'failure':acceptance.get('failure','FONT_LAYOUT_FAILED'),'acceptance':str(output/'acceptance.json')});continue
-                        actual=np.array(Image.open(output/'office/page-01-before.png').convert('RGB'))
-                        bx,by,bw,bh=json.loads((trial/'residual_report.json').read_text('utf8'))['reference_context']['bbox']
-                        score=float(np.abs(actual[by:by+bh,bx:bx+bw].astype(float)-source[by:by+bh,bx:bx+bw]).mean())
-                        alternatives.append((score,output/'region/slideir.json',output/'acceptance.json',proposal))
-                        record['attempts'].append({'font':proposal,'status':'VERIFIED_LOCAL','source_ppt_mae':score,'acceptance':str(output/'acceptance.json')})
-                    except Exception as exc:
-                        record['attempts'].append({'font':proposal,'failure':failure(exc,'font'),'error_type':type(exc).__name__,'reason':str(exc)[:400]})
-                if not alternatives:
-                    causes=[a['failure'] for a in record['attempts'] if 'failure' in a]
-                    specific=[cause for cause in causes if cause!='FONT_LAYOUT_FAILED']
-                    record['failure']=specific[0] if specific else 'FONT_LAYOUT_FAILED'
-                    continue
-                score,current,acceptance,proposal=min(alternatives,key=lambda row:row[0])
-                font_choices[text.style]=proposal
+                if adaptive and not shadow:
+                    selected=select_adaptive(graph,identifier,snap,source,saved,folder,current,fonts,
+                        font_choices,record,budget,inpaint,compiler,office)
+                    if selected is None:continue
+                    score,current,acceptance,proposal,background=selected
+                    record.update(selected_background=background,
+                        selection_reason='first candidate passing hard regional gates; final independent QA pending')
+                else:
+                    with lease('cpu'):
+                        passed,failures=generate(graph,identifier,snap['path'],saved,folder/identifier,inpaint=inpaint)
+                    record['background_failures']=failures
+                    if not passed:
+                        report=json.loads((folder/identifier/'mask-completion.json').read_text('utf8'))
+                        record['failure']='MASK_INCOMPLETE' if report['unassigned_contrast_pixels'] else 'BACKGROUND_REPAIR_FAILED'
+                        continue
+                    if shadow:
+                        record.update(state='SHADOW_PRECHECK_PASS',candidates=[r['candidate'] for r in passed]);continue
+                    text=next(t for t in graph.text.texts if t.id==identifier)
+                    proposals=([font_choices[text.style]] if text.style in font_choices else
+                               typography.get(text.style,{}).get('proposals',[])[:3]+[None])
+                    alternatives=[]
+                    for number,proposal in enumerate(proposals):
+                        trial=folder/identifier/passed[0]['candidate'];output=folder/(identifier+'-font-'+str(number))
+                        try:
+                            acceptance=stage_and_verify(trial,graph,current.parent,fonts,output,office=True,
+                                typography=proposal,compiler=compiler,office_probe=office)
+                            if acceptance.get('regional_automatic_checks')!='PASS':
+                                feedback=office_frame_feedback(output,identifier)
+                                if feedback:
+                                    previous=output;output=folder/(identifier+'-font-'+str(number)+'-bounds-fit')
+                                    acceptance=stage_and_verify(trial,graph,current.parent,fonts,output,office=True,
+                                        typography=proposal,compiler=compiler,office_probe=office,frame_minimum=feedback)
+                                    record['attempts'].append({'font':proposal,'initial_bounds_report':str(previous/'acceptance.json'),
+                                                              'office_frame_feedback':feedback})
+                            if acceptance.get('regional_automatic_checks')!='PASS':
+                                record['attempts'].append({'font':proposal,'failure':acceptance.get('failure','FONT_LAYOUT_FAILED'),'acceptance':str(output/'acceptance.json')});continue
+                            actual=np.array(Image.open(output/'office/page-01-before.png').convert('RGB'))
+                            bx,by,bw,bh=json.loads((trial/'residual_report.json').read_text('utf8'))['reference_context']['bbox']
+                            score=float(np.abs(actual[by:by+bh,bx:bx+bw].astype(float)-source[by:by+bh,bx:bx+bw]).mean())
+                            alternatives.append((score,output/'region/slideir.json',output/'acceptance.json',proposal))
+                            record['attempts'].append({'font':proposal,'status':'VERIFIED_LOCAL','source_ppt_mae':score,'acceptance':str(output/'acceptance.json')})
+                        except Exception as exc:
+                            record['attempts'].append({'font':proposal,'failure':failure(exc,'font'),'error_type':type(exc).__name__,'reason':str(exc)[:400]})
+                    if not alternatives:
+                        causes=[a['failure'] for a in record['attempts'] if 'failure' in a]
+                        specific=[cause for cause in causes if cause!='FONT_LAYOUT_FAILED']
+                        record['failure']=specific[0] if specific else 'FONT_LAYOUT_FAILED'
+                        continue
+                    score,current,acceptance,proposal=min(alternatives,key=lambda row:row[0])
+                    font_choices[text.style]=proposal
+                    record.update(state='VERIFIED_LOCAL',ir=str(current),acceptance=str(acceptance),font=proposal,
+                        selected_background=passed[0]['candidate'],source_ppt_mae=score,
+                        reconstruction_binding=binding,parent_ir_sha256=parent_ir_sha,
+                        selection_reason='hard gates and actual Office edits passed; minimum source-to-PowerPoint pixel error')
+                font_choices[next(t.style for t in graph.text.texts if t.id==identifier)]=proposal
                 record.update(state='VERIFIED_LOCAL',ir=str(current),acceptance=str(acceptance),font=proposal,
-                    selected_background=passed[0]['candidate'],source_ppt_mae=score,
-                    reconstruction_binding=binding,parent_ir_sha256=parent_ir_sha,
-                    selection_reason='hard gates and actual Office edits passed; minimum source-to-PowerPoint pixel error')
+                    source_ppt_mae=score,reconstruction_binding=binding,parent_ir_sha256=parent_ir_sha,
+                    quality='PENDING_FINAL_REVIEW',candidate_state='GENERATED',regional_commit='VERIFIED_LOCAL')
                 proof_root=acceptance.parent
                 record['verified_files']={str(p.resolve()):digest(p) for p in proof_root.rglob('*') if p.is_file()}
             except Exception as exc:
                 record.update(failure=failure(exc,'generation'),error_type=type(exc).__name__)
             finally:
+                if binding and record['state']=='LOCAL_FALLBACK' and not record.get('resumed_from_failure_receipt'):
+                    record.update(reconstruction_binding=binding,parent_ir_sha256=parent_ir_sha)
+                    proof=folder/(identifier+'-failure.json')
+                    write(proof,{'source_sha256':graph.source_sha256,'binding':binding,
+                        'parent_ir_sha256':parent_ir_sha,'failure':record.get('failure'),'attempts':record['attempts'],
+                        'retry_requires':'changed input, code, strategy or explicit retry_revision'})
+                    paths=[proof,*[p for p in (folder/identifier).rglob('*') if p.is_file()]]
+                    record['verified_files']={str(p.resolve()):digest(p) for p in paths}
+                    if (folder/identifier/'index.json').is_file():record['candidate_state']='GENERATED'
                 write(folder/'regions.json',state)
                 store.task(record['region_id'],'region',record['state'],record,record['dependencies'])
         irs[index]=current;states.append(state);all_regions.extend(state)
@@ -214,7 +316,7 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
     try:
         with lease('office'):
             office_receipt=(office or inspect)(artifacts['pptx'],irs,office_dir)
-            replacements=inspect_text(artifacts['pptx'],irs,attempt/'replacements')
+            replacements=inspect_text(artifacts['pptx'],irs,attempt/'replacements',**({'include_long':False} if adaptive else {}))
         if office_receipt.get('status')!='PASS_APP_AUTOMATED':raise ValueError('combined Office failed')
         residuals=[inspect_residuals(ir,office_dir,i+1,attempt/f'residuals-{i+1:02d}.json') for i,ir in enumerate(irs)]
         owner_ok=all(r['residual_check_status']=='PASS' for rows in residuals for r in rows)
@@ -237,8 +339,8 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
     for i,(snap,ir,preview) in enumerate(zip(snaps,irs,previews)):
         try:
             if not office_ok:raise RuntimeError('Office evidence unavailable')
-            visual=review(store,reviewer,snap,ir,preview,office_dir,i+1,attempt/f'review-panels-{i+1:02d}')
-            findings=effective_findings(Review.model_validate(visual))
+            visual=review(store,reviewer,snap,ir,preview,office_dir,i+1,attempt/f'review-panels-{i+1:02d}',adaptive=adaptive)
+            findings=effective_findings((QualityReview if adaptive else Review).model_validate(visual))
             affected={n for finding in findings for n in finding.get('node_ids',[])}
             if affected:
                 irs[i]=rollback(graphs[i],ir.parent,affected,attempt/f'visual-rollback-{i+1:02d}','VISUAL_REVIEW_FAILED')
@@ -259,14 +361,16 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
         try:
             with lease('office'):
                 office_receipt=(office or inspect)(artifacts['pptx'],irs,office_dir)
-                replacement=inspect_text(artifacts['pptx'],irs,attempt/'replacement-local-rollback')
+                replacement=inspect_text(artifacts['pptx'],irs,attempt/'replacement-local-rollback',**({'include_long':False} if adaptive else {}))
             office_ok=office_receipt.get('status')=='PASS_APP_AUTOMATED' and replacement['status']=='PASS'
             if not office_ok:raise ValueError('final rollback package Office checks failed')
             previews=[office_dir/f'page-{i+1:02d}-before.png' for i in range(len(snaps))]
             residuals=[]
             for i,(snap,ir,preview) in enumerate(zip(snaps,irs,previews)):
                 residuals.append(inspect_residuals(ir,office_dir,i+1,attempt/f'rollback-residuals-{i+1:02d}.json'))
-                try:reviews[i]=review(store,reviewer,snap,ir,preview,office_dir,i+1,attempt/f'rollback-review-panels-{i+1:02d}')
+                if any(r['residual_check_status']!='PASS' for r in residuals[-1]):
+                    raise ValueError('rollback source-owner residual check failed')
+                try:reviews[i]=review(store,reviewer,snap,ir,preview,office_dir,i+1,attempt/f'rollback-review-panels-{i+1:02d}',adaptive=adaptive)
                 except Exception as exc:reviews[i]={'status':'UNKNOWN','failure':failure(exc,'qa'),'verified_regions_retained':True}
         except Exception as exc:
             office_ok=False
@@ -281,6 +385,9 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
         visual_pass=visual.get('status')=='PASS' or (visual.get('passed') is True and not visual.get('findings'))
         for record in page:
             record['final_ir_sha256']=digest(irs[index])
+            regional_visual={**visual,'minor_deviations':[r for r in visual.get('minor_deviations',[]) if record['object_id'] in r.get('node_ids',[])]}
+            record['quality']='UNKNOWN' if record.get('failure')=='QA_INFRASTRUCTURE_UNAVAILABLE' else quality_status(office_ok and record['state']=='VERIFIED_LOCAL',regional_visual)
+            record['minor_deviations']=[r for r in visual.get('minor_deviations',[]) if record['object_id'] in r.get('node_ids',[])]
             record['visual_review']='PASS' if visual_pass else 'UNKNOWN' if visual.get('status')=='UNKNOWN' else 'REVIEW_REQUIRED'
             store.task(record['region_id'],'region',record['state'],record,record['dependencies'])
     write(attempt/'regions-final.json',states)
@@ -311,6 +418,12 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
         'reconstructed_pages':sum(bool(SceneGraph.model_validate_json((p.parent/'scene.json').read_text('utf8')).selected) for p in irs),
         'slide_irs':[str(p) for p in irs],'human_acceptance':False,'automatic_publication':False,
         'artifacts':{p.name:digest(p) for p in delivery.iterdir() if p.is_file()}}
+    result['workflow_states']={'candidate_generation':'COMPLETED','regional_commit':'COMPLETED',
+        'final_qa':'PASS' if office_ok and all(r.get('passed') is True and not r.get('findings') for r in reviews) else 'UNKNOWN_OR_REVIEW_REQUIRED',
+        'automatic_publication':'GATED'}
+    if budget:
+        write(attempt/'cost-report.json',budget.report())
+        result['execution_cost']=budget.report()
     write(job/'result.json',result)
     files={str(p.resolve()):digest(p) for p in [*attempt.rglob('*'),*delivery.iterdir(),job/'qa.json',job/'request.json',
            job/'provenance.json',job/'fonts.json'] if p.is_file()}

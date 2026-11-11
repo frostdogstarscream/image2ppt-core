@@ -22,7 +22,7 @@ def layout_result(frame, bounds, lines, original_lines):
             'frame':list(frame),'text_bounds':list(bounds)}
 
 
-def inspect_text(pptx, irs, output, target_ids=None):
+def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True):
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=False)
     pptx=Path(pptx).resolve();original=digest(pptx);records=[];deck=None;initialized=False
     result={'schema':'TextEditProbe/1','status':'UNKNOWN','pptx_sha256':original,'records':records,'human_acceptance':False}
@@ -38,7 +38,7 @@ def inspect_text(pptx, irs, output, target_ids=None):
             ir=json.loads(Path(irfile).read_text(encoding='utf-8'))
             for node in ir['nodes']:
                 if node['type']!='text' or (target_ids is not None and node['id'] not in target_ids):continue
-                for variant in ('short','equal','long'):
+                for variant in (('short','equal','long') if include_long else ('short','equal')):
                     action='replace-'+variant;name=node['id'];longer=variant=='long'
                     file=output/f'{page:02d}-{name}-{action}.pptx';shutil.copyfile(pptx,file)
                     deck=app.Presentations.Open(str(file),ReadOnly=False,Untitled=False,WithWindow=False)
@@ -68,7 +68,7 @@ def inspect_text(pptx, irs, output, target_ids=None):
                     deck.Close();deck=None
         required=[r for r in records if r['action'] in ('replace-equal','replace-short')]
         result.update(status='PASS' if required and all(r['status']=='PASS' for r in required) else 'FAIL',
-                      powerpoint_version=app.Version,long_text_supported=bool(records) and all(r['status']=='PASS' for r in records))
+                      powerpoint_version=app.Version,long_text_supported=(bool(records) and all(r['status']=='PASS' for r in records)) if include_long else None)
     except Exception as exc:
         result.update(status='UNKNOWN',reason=type(exc).__name__+': '+str(exc))
     finally:

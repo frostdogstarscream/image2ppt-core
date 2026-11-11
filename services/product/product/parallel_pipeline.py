@@ -59,6 +59,22 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             from .recovery.product_pipeline import UnavailableReviewer
             review_provider=UnavailableReviewer()
     compiler=compiler or compile_pages;fonts=fonts or font_manifest([]);write(job/'fonts.json',fonts)
+    if candidate_engine.startswith('r12-') and request.get('regional_strategy','adaptive')=='adaptive':
+        from .recovery.adaptive_policy import AdaptiveBudget,BudgetedActor
+        budget=AdaptiveBudget(store,request.get('adaptive_budget'))
+        provider=BudgetedActor(provider,budget);review_provider=BudgetedActor(review_provider,budget)
+        original_compiler=compiler
+        def counted_compiler(paths,output,texts):
+            budget.reserve('compiler_calls',{'output':str(output),'inputs':[digest(p) for p in paths]})
+            return original_compiler(paths,output,texts)
+        compiler=counted_compiler
+        from .parallel_office import inspect as default_office
+        original_office=office or default_office
+        def counted_office(pptx,paths,output,**options):
+            budget.reserve('office_validations',{'pptx':digest(pptx),'output':str(output),'options':sorted(options.get('target_ids',[]))})
+            return original_office(pptx,paths,output,**options)
+        office=counted_office
+
     models=os.environ.get('IMAGE2PPT_OCR_MANIFEST',str(ROOT/'.runtime/ocr-models.json'))
     baseline=json.loads(Path(request['frozen_baseline']).read_text(encoding='utf-8')) if request.get('frozen_baseline') else {'pages':[],'stable_assets':[]}
     snaps=[snapshot(job/'inputs'/name,job/'snapshots') for name in request['sources']]
@@ -69,7 +85,7 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
         write(job/'progress.json',value)
         if progress:progress(**value)
     write(job/'provenance.json',{'pipeline_mode':pipeline_mode,'architecture':'text-asset-surface/'+('r12' if candidate_engine.startswith('r12-') else 'r10'),'serial_executed':False,
-        'perception_mode':'hash-bound-recorded-branches' if request.get('perception_replay') else 'live-or-cache',
+        'perception_mode':'hash-bound-recorded-branches' if request.get('perception_replay') else 'fresh-three-branch' if request.get('fresh_perception_requested') else 'live-or-cache',
         'source_sha256s':[s['source_sha256'] for s in snaps],'moma_model':provider.model,'review_model':review_provider.model,
         'human_acceptance':False,'stable_baseline_is_pixel_truth':False,'candidate_engine':candidate_engine})
     def _page(i):
@@ -124,6 +140,9 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
                                       existing=existing,targets=set(('text','asset','surface'))-set(existing))
             try:ocr=replay_ocr if replay_ocr is not None else local_ocr(snap,cache,models)
             except Exception:ocr={'lines':[]}
+            if candidate_engine=='r12-regional' and request.get('regional_strategy','adaptive')=='adaptive':
+                from .recovery.text_groups import coalesce
+                branches=coalesce(branches,ocr,store)
             graph=fuse(snap,branches,ocr)
             from .parallel_typography import calibrate
             from .parallel_text_anchor import anchor
@@ -132,7 +151,8 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             pixels=np.array(Image.open(snap['path']).convert('RGB'))
             with lease('cpu'):
                 graph=anchor(graph,ocr,pixels,fonts,store)
-                graph=calibrate(graph,pixels,fonts,store,ocr=ocr,stable=stable)
+                graph=calibrate(graph,pixels,fonts,store,ocr=ocr,stable=stable,
+                    **({'adaptive':True} if candidate_engine=='r12-regional' and request.get('regional_strategy','adaptive')=='adaptive' else {}))
                 graph=anchor(graph,ocr,pixels,fonts,store,fitted=True)
             write(folder/'barrier-1.json',graph.model_dump())
             try:

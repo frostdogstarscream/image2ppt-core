@@ -10,6 +10,18 @@ Go 或 Office 基础设施故障会保留独立区域候选并记录 UNKNOWN。�
 
 `run_r12_product_regression.py` 调用同一正式入口，可通过源图／三分支／OCR 哈希回放已有感知证据。其记录明确标注 `hash-bound-recorded-branches`，不计作一次新的上传感知验收。故障注入参数只存在于此测试驱动中。
 
+## R12-03 自适应执行
+
+`r12-regional` 默认采用 `regional_strategy=adaptive`。可信 LayerD 下层、连续背景拟合、Big LaMa 按需推进，首个通过源像素、邻居保护、实际 Office 编辑与残影门禁的区域候选即停止搜索。页内文字优先使用三分支已经选择并统一校准的已安装字体，不再为每段正文运行多字体 Office 排名。最终组合仍须独立验收。`regional_strategy=exhaustive` 保留上一版完整比较路径，`r12-shadow` 继续保留原交付基础。
+
+轻微字体、行距、颜色与位置差异由独立 Go 记录到 `minor_deviations`，相关区域可获得 `ACCEPT_WITH_MINOR_DEVIATION`。内容、邻居、源归属、残影、裁切和实际编辑检查继续是硬约束。外部超时和预算耗尽记录 `UNKNOWN`。`workflow_states` 分别记录候选生成、内部区域提交、最终 QA 和正式发布资格，内部 generation 提交不授予自动发布资格。
+
+`adaptive_budget` 支持 `region_candidates`、`complex_region_candidates`、`repair_rounds`、`model_calls`、`office_validations`、`max_seconds`、`cost_units`。默认分别为 2、4、1、12、60、2400、120。复杂区域增加额度须附实际语义笔画补全证据。成本单位为记录在 `cost-report.json` 中的操作权重，不代表金额。模型调用在实际发送前持久预留，缓存响应不再次计费；LaMa 请求共用此预算。相同代码、父场景、字体和输入的成功及失败收据均可恢复，不盲目重复失败。输入或策略改变会使缓存失效；有意恢复基础设施检查可更改请求中的 `retry_revision`。
+
+新图验收使用 `run_local.py --image <source.png> --output <new-output> --candidate-engine r12-regional --fresh-perception --prompt-key`，该选项使用独立空缓存，三条分支重新调用 MoMA，本地 OCR 重新执行。正文被感知为多个连续行时，产品依据相同文字角色、独立 OCR 行和同一小卡片证据合并为逻辑段落，保存原始行、成员和新对象映射，随后才进行 SceneGraph 归属仲裁。强调 run 不参与这种合并。中断后的修复可以复用本轮原始模型收据，继续经正式入口融合与重建。
+
+`run_r1203_visual_control.py` 使用实际 Office 删除预览构造缺字负对照，检验 Go 能否拒绝严重缺陷。`summarize_r1203.py` 校验 generation 哈希并统计候选、编译包、Office 包、替换包、耗时和实际可编辑对象；区域耗时与新感知耗时分别列出。独立空缓存的新图与带七个稳定素材锚点的回放具有不同素材编辑数量，必须明确报告。现有配置、GPU 部署、固定编译器和公共 SlideIR 协议沿用既有路径。
+
 ## AI 开发规范与实现状态
 
 主规范为 `skills/image2ppt/SKILL.md`，细则见其 `references/parallel-product.md`；根目录 `AGENTS.md` 采用同一自动产品入口。Codex 负责开发、调试和验证，不得手写 SlideIR、替换后台规划结果或手工拼装交付来冒充自动生成。旧手工流程保存在 `skills/image2ppt/references/legacy-manual-workflow.md`，固定编译与历史代码继续保留。

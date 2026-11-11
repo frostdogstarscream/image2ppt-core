@@ -82,11 +82,11 @@ def test_formal_entry_region_isolation(product_fixture,monkeypatch,scenario):
     from product.parallel_pipeline import run
     f=product_fixture
     if scenario=='region-failure':
-        original=regional.generate
+        original=regional.adaptive_candidates
         def fail_region(graph,identifier,*args,**kwargs):
             if identifier=='b':raise RecoveryBlocked('MASK_INCOMPLETE','injected incomplete mask')
             return original(graph,identifier,*args,**kwargs)
-        monkeypatch.setattr(regional,'generate',fail_region)
+        monkeypatch.setattr(regional,'adaptive_candidates',fail_region)
     if scenario=='go-unavailable':
         monkeypatch.setattr(f.actor,'ask',lambda *args:(_ for _ in ()).throw(TimeoutError('injected Go unavailable')))
     office=f.office

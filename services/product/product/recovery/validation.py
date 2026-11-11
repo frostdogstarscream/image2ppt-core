@@ -8,6 +8,7 @@ from PIL import Image
 from ..materialize import digest, write
 from ..object_extract import rectangle
 from ..parallel_contracts import SceneGraph
+from ..parallel_store import BudgetExceeded
 from ..parallel_edit_probe import inspect_text
 from ..parallel_office import inspect
 from ..parallel_pipeline import effective_texts
@@ -19,7 +20,7 @@ from .gradient_backing import fit_gradient
 from .background_adapter import RecoveryBlocked
 
 
-def stage_and_verify(trial, graph, baseline, fonts, output, *, office=False, typography=None, compiler=None, office_probe=None,frame_minimum=None):
+def stage_and_verify(trial, graph, baseline, fonts, output, *, office=False, typography=None, compiler=None, office_probe=None,frame_minimum=None,include_long=True):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     baseline = Path(baseline)
@@ -39,7 +40,9 @@ def stage_and_verify(trial, graph, baseline, fonts, output, *, office=False, typ
         try:
             with lease('office'):
                 result['office'] = (office_probe or inspect)(artifacts['pptx'], [ir], output/'office',target_ids={identifier})
-                result['replacement'] = inspect_text(artifacts['pptx'], [ir], output/'replacement', target_ids={identifier})
+                result['replacement'] = inspect_text(artifacts['pptx'], [ir], output/'replacement', target_ids={identifier},include_long=include_long)
+        except (TimeoutError,OSError,BudgetExceeded) as exc:
+            raise RecoveryBlocked('QA_INFRASTRUCTURE_UNAVAILABLE',type(exc).__name__) from None
         except Exception as exc:
             raise RecoveryBlocked('OFFICE_VALIDATION_FAILED',type(exc).__name__) from None
         result['owner_residual'] = inspect_residuals(ir, output/'office', 1, output/'owner-residual.json')

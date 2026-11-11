@@ -1,0 +1,277 @@
+{
+  "schema": "R1203VerifiedReceipt/1",
+  "baseline_commit": "753399bfcc470269417d1ddfabb64df305f834d3",
+  "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+  "product_tests": {
+    "passed": 218,
+    "command": "python -m pytest services/product/tests -q --tb=short --basetemp=outputs/t311"
+  },
+  "protocol_tests": {
+    "passed": 39,
+    "command": "./image2ppt.ps1 test"
+  },
+  "jobs": {
+    "previous": {
+      "perception_mode": "hash-bound-recorded-branches",
+      "background_candidates": 24,
+      "lower_hypotheses_assessed": 0,
+      "lama_candidates": 0,
+      "compiler_packages": 11,
+      "office_packages": 10,
+      "replacement_packages": 10,
+      "regional_wall_seconds": 382.72,
+      "editable_texts": 2,
+      "editable_images": 7,
+      "office_pass": true,
+      "final_office_actions": 18,
+      "outside_pixels": 0,
+      "local_hard_gate_receipts": [
+        {
+          "id": "t-06",
+          "acceptance_sha256": "9d611c3cbb005a5eec02abef2a46e17e5ea24970654e636066f38034d6ab9bad",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-10",
+          "acceptance_sha256": "a60a679ba63f4817008ae6a5c482e01647c9fcb02736908d396f0f2bafc48a57",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        }
+      ],
+      "artifacts": {
+        "page-01.png": "40fb5ffbdd74de47c99bde74f528f445e45a0bd878cf7b72411269029b860f80",
+        "result.pptx": "3c5af2199626b99fd04974acd8cb4a8ab758def6e428e23070dbf52eb749bb02",
+        "stable-fallback.pptx": "cb9b31bfbf7f70ef8b726c08e2a59d451c5c54117148f891dc169837164934c1"
+      },
+      "code_manifest_matches_current": false,
+      "visual_pass": [
+        true
+      ],
+      "minor_deviations": [
+        []
+      ],
+      "local_output": "outputs\\r12-product-delivery"
+    },
+    "current": {
+      "perception_mode": "live-or-cache",
+      "background_candidates": 2,
+      "lower_hypotheses_assessed": 6,
+      "lama_candidates": 0,
+      "compiler_packages": 4,
+      "office_packages": 3,
+      "replacement_packages": 3,
+      "regional_wall_seconds": 143.94,
+      "editable_texts": 2,
+      "editable_images": 0,
+      "office_pass": true,
+      "final_office_actions": 4,
+      "outside_pixels": 0,
+      "local_hard_gate_receipts": [
+        {
+          "id": "t-06",
+          "acceptance_sha256": "096c558d9538ebbe52d2b28e6d54063c2114973237bd1eb4a7b2af28abe34649",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-09",
+          "acceptance_sha256": "ce1d1799d23f701a82e464fd815bfb9a56ca75dc74e7a6ae176fee5a4eda201a",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        }
+      ],
+      "artifacts": {
+        "page-01.png": "adb8da555be457f98e37b9fd871fd00a7307e65a21b49fccde769ae488d471d2",
+        "result.pptx": "1f2ed86859499c9897aa92e50b7fbdefc8f20533881a938d1f752300bf05ed04",
+        "stable-fallback.pptx": "bc5e6a8ac6fe81a8c7efc2e7e30bfeacd83de32cd070e6d887d8f8f411d58393"
+      },
+      "code_manifest_matches_current": true,
+      "visual_pass": [
+        true
+      ],
+      "minor_deviations": [
+        [
+          {
+            "category": "font",
+            "description": "t-06/t-09 原生文字字形与源图略有差异，笔画略细、字距稍紧，属字体渲染差异。",
+            "node_ids": [
+              "t-06",
+              "t-09"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              285.0,
+              161.0,
+              189.0,
+              57.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "风格接近的字体与轻微字重字距差异，普通用户不易察觉，不影响阅读。"
+          },
+          {
+            "category": "layout",
+            "description": "t-06/t-09 文本框高度较源图略增（53→57、54→57），文字基线有约1-2px偏移。",
+            "node_ids": [
+              "t-06",
+              "t-09"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              285.0,
+              161.0,
+              189.0,
+              57.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "由安装字体行距导致，位置差异极小，无碰撞或裁切。"
+          }
+        ]
+      ],
+      "local_output": "outputs\\r1203-release"
+    },
+    "replay": {
+      "perception_mode": "hash-bound-recorded-branches",
+      "background_candidates": 2,
+      "lower_hypotheses_assessed": 6,
+      "lama_candidates": 0,
+      "compiler_packages": 4,
+      "office_packages": 3,
+      "replacement_packages": 3,
+      "regional_wall_seconds": 142.01,
+      "editable_texts": 2,
+      "editable_images": 7,
+      "office_pass": true,
+      "final_office_actions": 18,
+      "outside_pixels": 0,
+      "local_hard_gate_receipts": [
+        {
+          "id": "t-06",
+          "acceptance_sha256": "f586018cf874cac2b3d1c2e912cc7fbb02b84e5b003e6757363def28af845b5f",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        },
+        {
+          "id": "t-10",
+          "acceptance_sha256": "42abe1f228920e3d3d0fc3f0aed5b3cac72c06797775367cfb7026bce5940755",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        }
+      ],
+      "artifacts": {
+        "page-01.png": "7bf24102c763012f4734afc4537f48ba6eacc1f971352f860c4dfb7dc60f3f89",
+        "result.pptx": "440b14f6908a45060cae3e81183e36dcf83d6f66622dbc0c6e4aca6759e83f70",
+        "stable-fallback.pptx": "01741a1519827674c02937a2f8b5853475604e4f5c12831c514883e80bebbb0a"
+      },
+      "code_manifest_matches_current": true,
+      "visual_pass": [
+        true
+      ],
+      "minor_deviations": [
+        [
+          {
+            "category": "font",
+            "description": "t-06/t-10 原生文字字重较源图略轻，笔画略细，字形风格接近但非完全一致。",
+            "node_ids": [
+              "t-06",
+              "t-10"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              285.0,
+              165.0,
+              189.0,
+              51.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "风格接近的字体与轻微字重差异，普通用户不易察觉，不影响阅读与内容。"
+          },
+          {
+            "category": "layout",
+            "description": "t-06 原生文字行距与源图存在轻微差异，第二行基线略低。",
+            "node_ids": [
+              "t-06"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              286.0,
+              165.0,
+              188.0,
+              51.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "位置差异小，无碰撞、裁切或溢出，阅读不受影响。"
+          }
+        ]
+      ],
+      "local_output": "outputs\\r1203-release-replay"
+    },
+    "fault": {
+      "perception_mode": "hash-bound-recorded-branches",
+      "background_candidates": 1,
+      "lower_hypotheses_assessed": 3,
+      "lama_candidates": 0,
+      "compiler_packages": 3,
+      "office_packages": 2,
+      "replacement_packages": 2,
+      "regional_wall_seconds": 41.39,
+      "editable_texts": 1,
+      "editable_images": 0,
+      "office_pass": true,
+      "final_office_actions": 2,
+      "outside_pixels": 0,
+      "local_hard_gate_receipts": [
+        {
+          "id": "t-06",
+          "acceptance_sha256": "ac7c87127038ebc7f25f380bbf34e9796ad4f5a68f225c09e92c78848d5d3adc",
+          "actual_deleted_source_signal_pixels": 0,
+          "replacement_status": "PASS"
+        }
+      ],
+      "artifacts": {
+        "page-01.png": "0e0f070e6c547e07feb2637c34544c5f79bec806f4a00326c912246bccd999c9",
+        "result.pptx": "4d47c49d97dbc483c0cf519d738524126f63e84752fff6de4bba22a970f4d095",
+        "stable-fallback.pptx": "8e861ab972f181ec4f95d0b2aa95c58eb8f9ba0ea61f9b27c31a696e3a61cf92"
+      },
+      "code_manifest_matches_current": true,
+      "visual_pass": [
+        null
+      ],
+      "minor_deviations": [
+        []
+      ],
+      "local_output": "outputs\\r1203-release-fault"
+    }
+  },
+  "fresh_perception": {
+    "current_task_live_branches": [
+      "text",
+      "asset",
+      "surface"
+    ],
+    "planning_calls": 3,
+    "raw_receipts_reused_for_generic_grouping_repair": true,
+    "frozen_scene_or_ocr_input": false,
+    "preset_region_ids": false,
+    "branch_evidence_sha256": {
+      "surface": "b09ac101650b7d66171f112ee76a6e2eacd7634aa90ba98acef2235f3137ef12",
+      "asset": "75288aa94d92809ddca560b6cc171c52daa80d0fb02b380df0c1b19c8f3cb2f9",
+      "text": "6c6b4d154eea0023ecadea64eaa6ec9d7c349dc805d36282aa3f492b6ff2c4e1"
+    }
+  },
+  "severe_visual_control": {
+    "detected": true,
+    "plan_sha256": "9e55799b2b8f9f0c9dc7c98e5c22cab2b7ae27e9e80b86706aa91e4395f66fcf",
+    "preview_sha256": "7c7cb8c48313b8c3ef0997ef1d07265153a164f4cd1d7e87bbdf6cd880ded298"
+  },
+  "full_local_acceptance": "outputs/r1203-release-evidence/acceptance.json",
+  "acceptance_sha256": "fdda250edbb84efcc677a3eb999b23c7d239a0c9e7f6debe2808e6f79997647d",
+  "human_acceptance": false,
+  "automatic_publication": false,
+  "limits": [
+    "Fresh upload currently reconstructs two body regions; other content remains safe raster backing.",
+    "The frozen comparison reuses seven verified images. Compare editable images separately.",
+    "Minor font/spacing differences are explicitly accepted by independent Go review.",
+    "Cost units are operation weights, not a currency quote. Regional times exclude perception."
+  ]
+}

@@ -74,6 +74,7 @@ def main():
         from product.recovery import product_pipeline
         from product.recovery.background_adapter import RecoveryBlocked
         original=product_pipeline.generate
+        original_adaptive=product_pipeline.adaptive_candidates
         def inject(graph,identifier,*positional,**keywords):
             if identifier==args.inject_region_failure:
                 raise RecoveryBlocked('MASK_INCOMPLETE','fault-injected regional mask failure')
@@ -82,6 +83,11 @@ def main():
                 keywords.update(inpaint=timeout,force_inpaint=True)
             return original(graph,identifier,*positional,**keywords)
         product_pipeline.generate=inject
+        def inject_adaptive(graph,identifier,*positional,**keywords):
+            if identifier==args.inject_region_failure:
+                raise RecoveryBlocked('MASK_INCOMPLETE','fault-injected regional mask failure')
+            return original_adaptive(graph,identifier,*positional,**keywords)
+        product_pipeline.adaptive_candidates=inject_adaptive
         write(output/'fault-injection.json',{'region':args.inject_region_failure,'failure':'MASK_INCOMPLETE',
               'lama_timeout':args.inject_lama_timeout,'go_unavailable':args.go_unavailable,'external_lama_dispatch':False})
     from product.parallel_provider import Reviewer

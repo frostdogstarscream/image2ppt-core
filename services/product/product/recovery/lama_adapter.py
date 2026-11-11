@@ -14,7 +14,7 @@ from .background_adapter import RecoveryBlocked, _sha
 
 
 class LamaClient:
-    def __init__(self, url, model_binding, cache, timeout=300):
+    def __init__(self, url, model_binding, cache, timeout=300, *, on_dispatch=None):
         endpoint = urlsplit(url)
         if (endpoint.scheme not in ('http', 'https') or not endpoint.hostname
                 or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment):
@@ -26,6 +26,7 @@ class LamaClient:
         self.cache = Path(cache)
         self.timeout = timeout
         self.receipt = None
+        self.on_dispatch = on_dispatch
 
     def __call__(self, source, mask):
         self.receipt = None
@@ -53,6 +54,7 @@ class LamaClient:
                 if receipt.get('identity') != identity or digest(directory / 'response.png') != receipt['response_sha256']:
                     raise RecoveryBlocked('INPAINT_CACHE_MISMATCH', 'Cached response binding changed')
             else:
+                if self.on_dispatch:self.on_dispatch(request_id)
                 directory.mkdir()
                 receipt = {'identity': identity, 'request_id': request_id, 'status': 'RESERVED',
                            'automatic_retry': False, 'quality': 'UNKNOWN'}

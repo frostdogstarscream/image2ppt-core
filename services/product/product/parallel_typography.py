@@ -9,13 +9,13 @@ from .parallel_branches import canonical_fonts
 from .parallel_store import key
 
 
-def calibrate(graph,source,fonts,store,ocr=None,stable=()):
+def calibrate(graph,source,fonts,store,ocr=None,stable=(),*,adaptive=False):
     from reconstruction import background_model
     graph=graph.model_copy(deep=True);graph.text=canonical_fonts(graph.text,fonts,store)
     binding=key({'source':graph.source_sha256,'fonts':[(r['family'],r['bold'],r.get('sha256')) for r in fonts['fonts']],
                  'stable_rgba':[(r['sha256'],r['bbox']) for r in stable],
                  'members':[(t.text,t.bbox,t.style,[s.model_dump() for s in t.spans],graph.ownership[t.id]) for t in graph.text.texts],
-                 'method':'r10-group-calibration/4'})
+                 'method':'r10-group-calibration/4','adaptive':adaptive})
     for reference in graph.references:
         file=Path(reference)
         if not file.is_file():continue
@@ -76,7 +76,8 @@ def calibrate(graph,source,fonts,store,ocr=None,stable=()):
         ratio=float(np.median([r[1] for r in rows]));s.size_px=round(s.size_px*ratio,2)
         from .parallel_font_match import match
         representatives=sorted(visual[sid],key=lambda r:-len(r['text']))[:2]
-        selection=match(representatives,fonts,s)
+        choices={'fonts':[f for f in fonts['fonts'] if f['family'] in (s.ea,s.latin)]} if adaptive else fonts
+        selection=match(representatives,choices,s)
         if selection is not None:
             if selection['cjk']:s.ea=selection['family']
             else:s.latin=selection['family']

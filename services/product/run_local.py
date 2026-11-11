@@ -16,6 +16,9 @@ def main():
     parser.add_argument('--output',required=True)
     parser.add_argument('--prompt-key',action='store_true')
     parser.add_argument('--opencode-profile')
+    parser.add_argument('--regional-strategy',choices=['adaptive','exhaustive'],default='adaptive')
+    parser.add_argument('--adaptive-budget',type=json.loads,default={})
+    parser.add_argument('--fresh-perception',action='store_true',help='isolate model evidence cache for a real fresh three-branch run')
     parser.add_argument('--pipeline-mode',choices=['parallel_review','parallel_shadow'],default='parallel_review')
     parser.add_argument('--object-extraction',choices=['default','auto','off','alpha','sam3','sam3.1'],default='default')
     parser.add_argument('--candidate-engine',choices=['off','r11-shadow','r12-shadow','r12-regional'],default='off')
@@ -25,6 +28,8 @@ def main():
         load_profile(args.opencode_profile)
     output=Path(args.output).resolve()
     if not output.is_relative_to(ROOT):parser.error('output must stay under compiler workspace')
+    if args.fresh_perception:
+        os.environ['IMAGE2PPT_PARALLEL_CACHE']=str(output/'fresh-cache')
     if args.prompt_key:
         key=getpass.getpass('MoMA API key (hidden): ')
         os.environ['MOMA_API_KEY']=key
@@ -39,7 +44,8 @@ def main():
         names.append(name)
     write(output/'request.json',{'sources':names,'max_calls':None,'italic_difference_ignored':True,
                                'pipeline_mode':args.pipeline_mode,'object_extraction':args.object_extraction,
-                               'candidate_engine':args.candidate_engine})
+                               'candidate_engine':args.candidate_engine,'regional_strategy':args.regional_strategy,
+                               'adaptive_budget':args.adaptive_budget,'fresh_perception_requested':args.fresh_perception})
     def progress(**kw):
         write(output/'progress.json',kw)
         print(json.dumps(kw),flush=True)
