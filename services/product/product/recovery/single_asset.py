@@ -6,24 +6,20 @@ from ..parallel_store import key
 from ..parallel_contracts import SceneGraph
 from ..object_registry import SAM_BINDING
 from .asset_retry import retry_asset_extraction
+from .asset_cache import l1_binding, l2_binding
 
 
 def probe(graph,identifier,source,layers,baseline,output,*,strategy='sam'):
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=True)
     baseline=Path(baseline).resolve();layers=Path(layers).resolve()
     obj=next(a for a in graph.asset.objects if a.id==identifier)
-    dependencies=[Path(__file__),*[Path(__file__).with_name(n+'.py') for n in ('asset_retry','agent_asset_validation')],
-        *[Path(__file__).parents[1]/(n+'.py') for n in ('peer_evidence','parallel_rebuild','object_closure','object_unmix','object_extract','object_stage','sam_jobs','object_registry')]]
-    binding={'source_sha256':digest(source),'scene_sha256':key(graph.model_dump()),'object':obj.model_dump(),
-        'baseline':{str(p.resolve()):digest(p) for p in baseline.rglob('*') if p.is_file()},
-        'layers':{str(p.resolve()):digest(p) for p in layers.iterdir() if p.is_file()},
-        'code':{str(p):digest(p) for p in dependencies},'strategy':strategy,'sam_model':SAM_BINDING if strategy=='sam' else None}
+    binding=l1_binding(graph,obj,source,layers,baseline,strategy,SAM_BINDING if strategy=='sam' else None)
     if binding['source_sha256']!=graph.source_sha256:raise ValueError('single-object source changed')
     root=output/'runs'/key(binding)[:16];receipt=root/'receipt.json'
     if receipt.exists():
         saved=json.loads(receipt.read_text('utf8'))
         if saved['binding']!=binding or any(digest(p)!=sha for p,sha in saved['files'].items()):raise ValueError('single-object cache evidence changed')
-        return {**saved['result'],'cache_hit':True,'receipt':str(receipt)}
+        return {**saved['result'],'cache_hit':True,'model_calls':0,'receipt':str(receipt)}
     root.mkdir(parents=True,exist_ok=False);start=time.monotonic()
     result={'object_id':identifier,'strategy':strategy,'status':'REVIEW_REQUIRED','cache_hit':False,
         'model_calls':0,'office':'NOT_RUN','go':'NOT_RUN','automatic_publication':False}
@@ -75,11 +71,11 @@ def verify_office(result,graph,source,layers,baseline,fonts,output):
     from ..parallel_office import inspect
     from ..parallel_residual_gate import inspect_residuals
     from ..resource_lease import lease
-    output=Path(output).resolve();binding={'candidate':result['candidate_hashes'],'stage':digest(Path(__file__).with_name('agent_asset_stage.py')),'code':digest(__file__)}
+    output=Path(output).resolve();binding=l2_binding(result,graph,source,layers,baseline,fonts)
     root=output/'office'/key(binding)[:16];receipt=root/'l2.json'
     if receipt.exists():
         record=json.loads(receipt.read_text('utf8'))
-        if any(digest(p)!=sha for p,sha in record['files'].items()):raise ValueError('Office receipt evidence changed')
+        if record['binding']!=binding or any(digest(p)!=sha for p,sha in record['files'].items()):raise ValueError('Office receipt evidence changed')
         return {**record['result'],'cache_hit':True}
     root.mkdir(parents=True,exist_ok=False);start=time.monotonic()
     ir=stage_asset_candidate(result['candidate_directory'],graph,baseline,root/'s',layer_directory=layers)

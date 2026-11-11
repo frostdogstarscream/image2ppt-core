@@ -150,12 +150,28 @@ def complete_source_halo(obj, seed_rgba, source, protected, surface):
 def sam_source_candidates(obj,source,protected,surface,masks,source_seeds):
     """SAM selects entire source-derived components, retaining their soft Alpha."""
     source_seed=next(((rgba,meta) for rgba,meta in source_seeds if meta['method']=='source-unmix'),None)
-    if source_seed is None:raise ValueError('SAM has no independently derived source matte')
-    rgba,metadata=source_seed
-    support=rgba[...,3]>0
-    _,labels,_,_=cv2.connectedComponentsWithStats(support.astype('uint8'),8)
     results=[]
+    failures=[]
     for candidate in masks:
+        selected_seed=source_seed
+        if selected_seed is None:
+            # An ambiguous LayerD assembly cannot supply the Unmix extent.
+            # A real SAM-supported assembly can supply that prior to the SAME
+            # source estimator. It still grants no writeback authority.
+            prior=next((rgba for rgba,meta in source_seeds
+                        if meta['method']=='sam3' and meta['mask_index']==candidate['index']),None)
+            if prior is None:
+                failures.append('mask '+str(candidate['index'])+': no complete LayerD/SAM assembly')
+                continue
+            from ..object_unmix import candidate_from_evidence
+            try:
+                selected_seed=candidate_from_evidence(obj,source,protected,original_alpha=prior,surface=surface)
+            except ValueError as exc:
+                failures.append('mask '+str(candidate['index'])+': '+str(exc))
+                continue
+        rgba,metadata=selected_seed
+        support=rgba[...,3]>0
+        _,labels,_,_=cv2.connectedComponentsWithStats(support.astype('uint8'),8)
         touched=np.unique(labels[support&candidate['mask']]);touched=touched[touched>0]
         keep=np.isin(labels,touched)&support
         if not keep.any():continue
@@ -164,6 +180,7 @@ def sam_source_candidates(obj,source,protected,surface,masks,source_seeds):
             'mask_score':candidate['score'],'source_unmix':metadata,
             'component_selection':'whole source components intersecting real SAM evidence',
             'selected_source_pixels':int(keep.sum())}))
+    if not results:raise ValueError('SAM has no independently derived complete source matte; '+'; '.join(failures))
     return results
 
 

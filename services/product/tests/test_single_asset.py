@@ -42,3 +42,21 @@ def test_new_sam_evidence_upgrades_asset_route():
     old=route('ASSET_EXTRACTION_UNCERTAIN','asset',[],already_attempted=['source-halo'])
     new=route('ASSET_EXTRACTION_UNCERTAIN','asset',[],already_attempted=['source-halo'],new_sam_evidence=True)
     assert old['status']=='NO_CHANGED_EVIDENCE' and new['strategy']=='sam'
+
+
+def test_sam_assembly_supplies_extent_to_existing_unmix_without_granting_ownership(tmp_path, monkeypatch):
+    graph, _, _ = scene(tmp_path)
+    source = np.full((50, 70, 3), 240, np.uint8)
+    prior = np.zeros((50, 70, 4), np.uint8)
+    prior[10:20, 10:20] = [20, 40, 100, 255]
+    mask = prior[..., 3] > 0
+    calls = []
+    def unmix(obj, pixels, protected, *, original_alpha, surface):
+        calls.append(original_alpha)
+        assert pixels is source and np.array_equal(original_alpha, prior)
+        return prior.copy(), {'method': 'source-unmix', 'scope': [6, 6, 18, 18]}
+    monkeypatch.setattr('product.object_unmix.candidate_from_evidence', unmix)
+    candidates = sam_source_candidates(graph.asset.objects[0], source, np.zeros((50, 70), bool),
+        None, [{'mask': mask, 'index': 0, 'score': .9}], [(prior, {'method': 'sam3', 'mask_index': 0})])
+    assert len(calls) == 1 and np.array_equal(candidates[0][0], prior)
+    assert candidates[0][1]['method'] == 'sam-source-unmix'

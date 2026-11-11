@@ -1,0 +1,1511 @@
+{
+  "schema": "R1208BatchAssetAcceptance/1",
+  "baseline_commit": "00f577849822a66cb65e0a4a4baf80e9cd22857e",
+  "branch": "codex/r12-08-batch-asset-generalization",
+  "entrypoint": "product.parallel_pipeline.run",
+  "perception": "real new-upload evidence reused; no new three-branch inference",
+  "counts": {
+    "attempted_new_icons": 5,
+    "new_verified_pngs": 2,
+    "blocked_icons": 3,
+    "final_textboxes": 7,
+    "final_pngs": 3,
+    "target_all_3_to_5_new_icons_recovered": false
+  },
+  "cache": {
+    "l1": "local Python closure including reconstruction and shared resource lease; source, scene, object, parent, LayerD files, model pins, Python/runtime versions",
+    "l2": "L1 relevant inputs plus all candidate files, font configuration and actual font bytes, fixed compiler scripts and sources, loaded engine/finalizer files, node/python executable hashes and PowerPoint executable hash",
+    "invalidation_tests": [
+      "changed transitive dependency",
+      "added/removed dependency",
+      "font configuration",
+      "font bytes",
+      "LayerD manifest",
+      "source",
+      "SceneGraph",
+      "compiler/Office implementation",
+      "runtime"
+    ],
+    "identical_batch_seconds": 7.922,
+    "all_l1_cache_hits": true,
+    "all_l2_cache_hits": true,
+    "new_model_calls_on_cache_run": 0,
+    "new_office_calls_on_cache_run": 0,
+    "compiler_transitive_packages": 10,
+    "compiler_transitive_file_hashes": 214
+  },
+  "inventory": {
+    "file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\failure-inventory.json",
+    "sha256": "2074db1aa560ccba6e2f7352a0c1544c498c0df7485f2e8afa998c5c31a8a352",
+    "objects": [
+      {
+        "object_id": "a-logo-china-mobile",
+        "kind": "logo",
+        "owner": "RESOLVED",
+        "members": [
+          "a-logo-china-mobile"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {},
+        "eligible": false
+      },
+      {
+        "object_id": "a-icon-cloud-server",
+        "kind": "icon",
+        "owner": "RESOLVED",
+        "members": [
+          "a-icon-cloud-server"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SOURCE_UNMIX_FAILED",
+          "BACKGROUND_INSUFFICIENT",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\2\\c\\result.json",
+          "sha256": "d1c764c2ba3307132e976a6e6731fc8ae6eedff652da8f193b3d9b17db757296",
+          "status": "BLOCKED",
+          "object_id": "a-icon-cloud-server",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\2\\c\\scene.json",
+          "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\page-01\\seed",
+          "attempts": [],
+          "published": false,
+          "office": "NOT_RUN",
+          "go": "NOT_RUN",
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "seed_diagnostics": {
+            "alpha_ambiguities": {
+              "layer-02.png": [
+                20
+              ]
+            },
+            "missing_parts": [],
+            "alpha_visible_pixels": 2485,
+            "sam": "NOT_SUPPLIED",
+            "source_unmix_failure": "insufficient unprotected lateral background samples"
+          }
+        },
+        "eligible": true
+      },
+      {
+        "object_id": "a-icon-database-sync",
+        "kind": "icon",
+        "owner": "RESOLVED",
+        "members": [
+          "a-icon-database-sync"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SOURCE_UNMIX_FAILED",
+          "BACKGROUND_INSUFFICIENT",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\3\\c\\result.json",
+          "sha256": "af15f7dd6ecb79a78c410e18340bd9b103755d50940cff924f2ecd173f00a887",
+          "status": "BLOCKED",
+          "object_id": "a-icon-database-sync",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\3\\c\\scene.json",
+          "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\page-01\\seed",
+          "attempts": [],
+          "published": false,
+          "office": "NOT_RUN",
+          "go": "NOT_RUN",
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "seed_diagnostics": {
+            "alpha_ambiguities": {
+              "layer-02.png": [
+                32
+              ]
+            },
+            "missing_parts": [],
+            "alpha_visible_pixels": 2610,
+            "sam": "NOT_SUPPLIED",
+            "source_unmix_failure": "insufficient unprotected lateral background samples"
+          }
+        },
+        "eligible": true
+      },
+      {
+        "object_id": "a-icon-buildings",
+        "kind": "icon",
+        "owner": "RESOLVED",
+        "members": [
+          "a-icon-buildings"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SOURCE_UNMIX_FAILED",
+          "BACKGROUND_INSUFFICIENT",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\4\\c\\result.json",
+          "sha256": "220c1faba20ef88e261cc03061a9a62ea1bf50327c2dee805dc0001d12243fa3",
+          "status": "BLOCKED",
+          "object_id": "a-icon-buildings",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\4\\c\\scene.json",
+          "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\page-01\\seed",
+          "attempts": [],
+          "published": false,
+          "office": "NOT_RUN",
+          "go": "NOT_RUN",
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "seed_diagnostics": {
+            "alpha_ambiguities": {
+              "layer-02.png": [
+                42
+              ]
+            },
+            "missing_parts": [
+              "building shapes"
+            ],
+            "alpha_visible_pixels": 0,
+            "sam": "NOT_SUPPLIED",
+            "source_unmix_failure": "insufficient unprotected lateral background samples"
+          }
+        },
+        "eligible": true
+      },
+      {
+        "object_id": "a-icon-handshake",
+        "kind": "icon",
+        "owner": "RESOLVED",
+        "members": [
+          "a-icon-handshake"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SOURCE_UNMIX_FAILED",
+          "BACKGROUND_INSUFFICIENT",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\5\\c\\result.json",
+          "sha256": "87f7a608f08ea4fc6ece557e37e27e9283f35722a1425c454ef528ef1565436b",
+          "status": "BLOCKED",
+          "object_id": "a-icon-handshake",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\5\\c\\scene.json",
+          "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\page-01\\seed",
+          "attempts": [],
+          "published": false,
+          "office": "NOT_RUN",
+          "go": "NOT_RUN",
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "seed_diagnostics": {
+            "alpha_ambiguities": {
+              "layer-02.png": [
+                55
+              ]
+            },
+            "missing_parts": [
+              "handshake shape"
+            ],
+            "alpha_visible_pixels": 0,
+            "sam": "NOT_SUPPLIED",
+            "source_unmix_failure": "insufficient unprotected lateral background samples"
+          }
+        },
+        "eligible": true
+      },
+      {
+        "object_id": "a-icon-compute",
+        "kind": "icon",
+        "owner": "RESOLVED",
+        "members": [
+          "a-icon-compute"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SOURCE_UNMIX_FAILED",
+          "BACKGROUND_INSUFFICIENT",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\6\\c\\result.json",
+          "sha256": "d9af360b99e2be9fabedcd2ba47f049e25a60640475ed0e61c2691ba0b17f01f",
+          "status": "BLOCKED",
+          "object_id": "a-icon-compute",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\6\\c\\scene.json",
+          "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\page-01\\seed",
+          "attempts": [],
+          "published": false,
+          "office": "NOT_RUN",
+          "go": "NOT_RUN",
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "seed_diagnostics": {
+            "alpha_ambiguities": {
+              "layer-02.png": [
+                52
+              ]
+            },
+            "missing_parts": [],
+            "alpha_visible_pixels": 1429,
+            "sam": "NOT_SUPPLIED",
+            "source_unmix_failure": "insufficient unprotected lateral background samples"
+          }
+        },
+        "eligible": true
+      },
+      {
+        "object_id": "a-icon-collaboration",
+        "kind": "icon",
+        "owner": "RESOLVED",
+        "members": [
+          "a-icon-collaboration"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SOURCE_UNMIX_FAILED",
+          "BACKGROUND_INSUFFICIENT",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\7\\c\\result.json",
+          "sha256": "01e64a0083f729f4ec53379788f422da7240950b072953e69bce814687e854ae",
+          "status": "BLOCKED",
+          "object_id": "a-icon-collaboration",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\7\\c\\scene.json",
+          "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\page-01\\seed",
+          "attempts": [],
+          "published": false,
+          "office": "NOT_RUN",
+          "go": "NOT_RUN",
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "seed_diagnostics": {
+            "alpha_ambiguities": {
+              "layer-02.png": [
+                50
+              ]
+            },
+            "missing_parts": [],
+            "alpha_visible_pixels": 1536,
+            "sam": "NOT_SUPPLIED",
+            "source_unmix_failure": "insufficient unprotected lateral background samples"
+          }
+        },
+        "eligible": true
+      },
+      {
+        "object_id": "a-icon-application",
+        "kind": "icon",
+        "owner": "RESOLVED",
+        "members": [
+          "a-icon-application"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SOURCE_UNMIX_FAILED",
+          "BACKGROUND_INSUFFICIENT",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\8\\c\\result.json",
+          "sha256": "c1f9a81afbb3ff327f75bd996f1c5ce788499a811041267253d38460f535fa55",
+          "status": "BLOCKED",
+          "object_id": "a-icon-application",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\8\\c\\scene.json",
+          "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\page-01\\seed",
+          "attempts": [],
+          "published": false,
+          "office": "NOT_RUN",
+          "go": "NOT_RUN",
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "seed_diagnostics": {
+            "alpha_ambiguities": {
+              "layer-02.png": [
+                51
+              ]
+            },
+            "missing_parts": [],
+            "alpha_visible_pixels": 1520,
+            "sam": "NOT_SUPPLIED",
+            "source_unmix_failure": "insufficient unprotected lateral background samples"
+          }
+        },
+        "eligible": true
+      },
+      {
+        "object_id": "a-deco-title-bars",
+        "kind": "decoration",
+        "owner": "RESOLVED",
+        "members": [
+          "a-deco-title-bars"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {},
+        "eligible": false
+      },
+      {
+        "object_id": "a-deco-bottom-waves",
+        "kind": "decoration",
+        "owner": "RESOLVED",
+        "members": [
+          "a-deco-bottom-waves"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {},
+        "eligible": false
+      },
+      {
+        "object_id": "a-deco-footer-bar",
+        "kind": "decoration",
+        "owner": "RESOLVED",
+        "members": [
+          "a-deco-footer-bar"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {},
+        "eligible": false
+      },
+      {
+        "object_id": "a-deco-sidebar-bg",
+        "kind": "decoration",
+        "owner": "UNOWNED",
+        "members": [
+          "a-deco-sidebar-bg"
+        ],
+        "failure_categories": [
+          "OWNER_UNRESOLVED",
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {},
+        "eligible": false
+      },
+      {
+        "object_id": "a-deco-row-bgs",
+        "kind": "decoration",
+        "owner": "UNOWNED",
+        "members": [
+          "a-deco-row-bgs"
+        ],
+        "failure_categories": [
+          "OWNER_UNRESOLVED",
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {},
+        "eligible": false
+      },
+      {
+        "object_id": "a-deco-tag-bg",
+        "kind": "decoration",
+        "owner": "RESOLVED",
+        "members": [
+          "a-deco-tag-bg"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {},
+        "eligible": false
+      },
+      {
+        "object_id": "a-deco-checkmarks",
+        "kind": "icon",
+        "owner": "RESOLVED",
+        "members": [
+          "a-deco-checkmarks"
+        ],
+        "failure_categories": [
+          "ALPHA_MISSING_OR_UNVERIFIED",
+          "SOURCE_UNMIX_FAILED",
+          "BACKGROUND_INSUFFICIENT",
+          "SAM_EVIDENCE_INSUFFICIENT"
+        ],
+        "prior_failure": {
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\15\\c\\result.json",
+          "sha256": "9d938735bccc43a54579f2fd6dfdee61718acc3f8c8dff0b7abf305a7eedc35c",
+          "status": "BLOCKED",
+          "object_id": "a-deco-checkmarks",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\15\\c\\scene.json",
+          "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\page-01\\seed",
+          "attempts": [],
+          "published": false,
+          "office": "NOT_RUN",
+          "go": "NOT_RUN",
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "seed_diagnostics": {
+            "alpha_ambiguities": {
+              "layer-02.png": [
+                49
+              ]
+            },
+            "missing_parts": [
+              "checkbox 3"
+            ],
+            "alpha_visible_pixels": 2253,
+            "sam": "NOT_SUPPLIED",
+            "source_unmix_failure": "insufficient unprotected lateral background samples"
+          }
+        },
+        "eligible": true
+      }
+    ]
+  },
+  "objects": [
+    {
+      "object_id": "a-icon-cloud-server",
+      "status": "VERIFIED_LOCAL",
+      "strategy": "sam",
+      "reason": null,
+      "stop_reason": "FIRST_ACCEPTABLE_CANDIDATE",
+      "failure_evidence": {
+        "strategy": "verified-backing",
+        "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+        "seed_diagnostics": {
+          "alpha_ambiguities": {
+            "layer-02.png": [
+              20
+            ]
+          },
+          "missing_parts": [],
+          "alpha_visible_pixels": 2485,
+          "sam": "NOT_SUPPLIED",
+          "source_unmix_failure": "unmix scope cuts foreground"
+        },
+        "attempts": [],
+        "sam_source_failure": null
+      },
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-cloud-server\\sam\\runs\\5d3c922f216353e2\\c\\candidate-1",
+      "attempts": [
+        {
+          "strategy": "source-halo",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-cloud-server\\source-halo\\runs\\2bb4fea29f7ab1da\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": null
+        },
+        {
+          "strategy": "verified-backing",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-cloud-server\\verified-backing\\runs\\8de29aedc8f4e735\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": null
+        },
+        {
+          "strategy": "sam",
+          "status": "CANDIDATE_READY",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-cloud-server\\sam\\runs\\5d3c922f216353e2\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [
+            {
+              "seed_method": "sam3",
+              "seed_rgba_sha256": "9bb4b7a085148f64b5e5b34c3aa8c6524d8f988e968090d3adebf61239dbc399",
+              "background_error": 1.0,
+              "source_recomposition_p95": 36.92941176470588,
+              "status": "BLOCKED",
+              "reason": "existing background/recomposition gates failed"
+            },
+            {
+              "seed_method": "sam-source-unmix",
+              "seed_rgba_sha256": "4327fbedcf211bb81bb622b2d82339ce9f92d9a0b34e6bcd66a859743c45036f",
+              "background_error": 1.0,
+              "source_recomposition_p95": 5.07058823529411,
+              "status": "CANDIDATE_READY",
+              "added_source_halo_pixels": 21
+            }
+          ],
+          "reason": null,
+          "sam_source_failure": null
+        }
+      ],
+      "office": {
+        "status": "PASS",
+        "original_seconds": 11.594,
+        "ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-cloud-server\\sam\\office\\1068ecbbfd322414\\s\\slideir.json",
+        "target_residual": {
+          "id": "a-icon-cloud-server",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "2408a28f8eaf8271b9ac2b4b0b6358c6c45ac692ae11986cde115238498af16e",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 2078,
+          "delete_sha256": "004f1880ec9b1a434a92a5304a4157b0ed4acbea6210b159c69ef8bb7ff01abe",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        }
+      }
+    },
+    {
+      "object_id": "a-icon-database-sync",
+      "status": "VERIFIED_LOCAL",
+      "strategy": "sam",
+      "reason": null,
+      "stop_reason": "FIRST_ACCEPTABLE_CANDIDATE",
+      "failure_evidence": {
+        "strategy": "verified-backing",
+        "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+        "seed_diagnostics": {
+          "alpha_ambiguities": {
+            "layer-02.png": [
+              32
+            ]
+          },
+          "missing_parts": [],
+          "alpha_visible_pixels": 2610,
+          "sam": "NOT_SUPPLIED",
+          "source_unmix_failure": "unmix scope cuts foreground"
+        },
+        "attempts": [],
+        "sam_source_failure": null
+      },
+      "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-database-sync\\sam\\runs\\3e8a0ecbb75041e3\\c\\candidate-1",
+      "attempts": [
+        {
+          "strategy": "source-halo",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-database-sync\\source-halo\\runs\\5efb788e6b8a2df4\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": null
+        },
+        {
+          "strategy": "verified-backing",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-database-sync\\verified-backing\\runs\\2fe3a9ccb186eab8\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": null
+        },
+        {
+          "strategy": "sam",
+          "status": "CANDIDATE_READY",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-database-sync\\sam\\runs\\3e8a0ecbb75041e3\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [
+            {
+              "seed_method": "sam3",
+              "seed_rgba_sha256": "62f063f8f9391d694021366de118da62b70989ba157230e217eacceec4f12d31",
+              "background_error": 1.0,
+              "source_recomposition_p95": 28.933333333333337,
+              "status": "BLOCKED",
+              "reason": "existing background/recomposition gates failed"
+            },
+            {
+              "seed_method": "sam-source-unmix",
+              "seed_rgba_sha256": "99a41c8177afa701ff82355a12e107bb858d512edb19fd3e8df07a50d79200c9",
+              "background_error": 1.0,
+              "source_recomposition_p95": 5.058823529411768,
+              "status": "CANDIDATE_READY",
+              "added_source_halo_pixels": 0
+            }
+          ],
+          "reason": null,
+          "sam_source_failure": null
+        }
+      ],
+      "office": {
+        "status": "PASS",
+        "original_seconds": 14.812,
+        "ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-database-sync\\sam\\office\\021e2f0964f72f84\\s\\slideir.json",
+        "target_residual": {
+          "id": "a-icon-database-sync",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "15f5a84a99d65abef30f404e52f68d797487414f62e0f72886832a4dfe71c6d7",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 2223,
+          "delete_sha256": "f485573e3baad0e8967af3d4ed1441985d81fa95d5c18a1fd461b8d553e8d732",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        }
+      }
+    },
+    {
+      "object_id": "a-icon-buildings",
+      "status": "LOCAL_FALLBACK",
+      "strategy": null,
+      "reason": "SAM has no independently derived complete source matte; mask 1: unmix scope cuts foreground",
+      "stop_reason": null,
+      "failure_evidence": {
+        "strategy": "sam",
+        "reason": null,
+        "seed_diagnostics": null,
+        "attempts": [
+          {
+            "seed_method": "sam3",
+            "seed_rgba_sha256": "1870b065015fa34c3092f1c544fc55ddb8b167afb8f690e51e3e806639e1d43a",
+            "status": "BLOCKED",
+            "reason": "candidate is missing independently observed strong strokes"
+          }
+        ],
+        "sam_source_failure": "SAM has no independently derived complete source matte; mask 1: unmix scope cuts foreground"
+      },
+      "candidate_directory": null,
+      "attempts": [
+        {
+          "strategy": "source-halo",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-buildings\\source-halo\\runs\\743c6373c2fe25c6\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": null
+        },
+        {
+          "strategy": "verified-backing",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-buildings\\verified-backing\\runs\\e72787309fd43f65\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": null
+        },
+        {
+          "strategy": "sam",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-buildings\\sam\\runs\\4a58fbc464b3dc2a\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [
+            {
+              "seed_method": "sam3",
+              "seed_rgba_sha256": "1870b065015fa34c3092f1c544fc55ddb8b167afb8f690e51e3e806639e1d43a",
+              "status": "BLOCKED",
+              "reason": "candidate is missing independently observed strong strokes"
+            }
+          ],
+          "reason": null,
+          "sam_source_failure": "SAM has no independently derived complete source matte; mask 1: unmix scope cuts foreground"
+        }
+      ]
+    },
+    {
+      "object_id": "a-icon-handshake",
+      "status": "LOCAL_FALLBACK",
+      "strategy": null,
+      "reason": "SAM has no independently derived complete source matte; mask 0: unmix scope cuts foreground",
+      "stop_reason": null,
+      "failure_evidence": {
+        "strategy": "sam",
+        "reason": null,
+        "seed_diagnostics": null,
+        "attempts": [
+          {
+            "seed_method": "sam3",
+            "seed_rgba_sha256": "04969e27d503b5211e9efe8f6b15114a9db6a9832db979d0e99709fac321465f",
+            "status": "BLOCKED",
+            "reason": "source owner component escapes localization"
+          }
+        ],
+        "sam_source_failure": "SAM has no independently derived complete source matte; mask 0: unmix scope cuts foreground"
+      },
+      "candidate_directory": null,
+      "attempts": [
+        {
+          "strategy": "source-halo",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-handshake\\source-halo\\runs\\15dc2385352b7ef4\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": null
+        },
+        {
+          "strategy": "verified-backing",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-handshake\\verified-backing\\runs\\9a9ff635390241dc\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": null
+        },
+        {
+          "strategy": "sam",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-handshake\\sam\\runs\\e33b8d666475ce6f\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [
+            {
+              "seed_method": "sam3",
+              "seed_rgba_sha256": "04969e27d503b5211e9efe8f6b15114a9db6a9832db979d0e99709fac321465f",
+              "status": "BLOCKED",
+              "reason": "source owner component escapes localization"
+            }
+          ],
+          "reason": null,
+          "sam_source_failure": "SAM has no independently derived complete source matte; mask 0: unmix scope cuts foreground"
+        }
+      ]
+    },
+    {
+      "object_id": "a-icon-compute",
+      "status": "LOCAL_FALLBACK",
+      "strategy": null,
+      "reason": "SAM has no independently derived complete source matte; mask 0: no complete LayerD/SAM assembly",
+      "stop_reason": null,
+      "failure_evidence": {
+        "strategy": "sam",
+        "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+        "seed_diagnostics": {
+          "alpha_ambiguities": {
+            "layer-02.png": [
+              52
+            ]
+          },
+          "missing_parts": [],
+          "alpha_visible_pixels": 1429,
+          "sam": "NOT_SUPPLIED",
+          "source_unmix_failure": "unmix scope cuts foreground"
+        },
+        "attempts": [],
+        "sam_source_failure": "SAM has no independently derived complete source matte; mask 0: no complete LayerD/SAM assembly"
+      },
+      "candidate_directory": null,
+      "attempts": [
+        {
+          "strategy": "source-halo",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-compute\\source-halo\\runs\\96f28185d9d4cc6b\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": null
+        },
+        {
+          "strategy": "verified-backing",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-compute\\verified-backing\\runs\\93e43e3871003864\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": null
+        },
+        {
+          "strategy": "sam",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-compute\\sam\\runs\\301bed16ab47b1ed\\receipt.json",
+          "cache_hit": true,
+          "candidate_attempts": [],
+          "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+          "sam_source_failure": "SAM has no independently derived complete source matte; mask 0: no complete LayerD/SAM assembly"
+        }
+      ]
+    }
+  ],
+  "sam_jobs": {
+    "42bcf2abaa2e3f1e59d31b17bcff464f0d61652c2810318f02a71e036780c676": {
+      "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-buildings\\sam\\sam\\f160f083005d8abc5913\\remote-job.json",
+      "sha256": "31b4171bf0a393ef3bb0cb98efdb5515bdf886d7de145752c12bfc858d2ead58"
+    },
+    "155ba209ec56c1e4400cf54ebda235dec94ddc202ffe041aecc33cc78efc0590": {
+      "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-cloud-server\\sam\\sam\\4f74023c9abb63cedebe\\remote-job.json",
+      "sha256": "ea22d8e579e911214d8637839b2235e30d1119aeb1e57da3a5e209de291a1073"
+    },
+    "b18ba2e853ff81af85e1c1dabf7bbd4c0cc5f7e634348b4a6fe88d04d35ddf87": {
+      "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-compute\\sam\\sam\\aefbf994c89dae1bd8fd\\remote-job.json",
+      "sha256": "4dfdcd4f1afb45a20e3c952e66717f8c48ea3a88bbc015c188ca834bfaf7ab67"
+    },
+    "6ad469161a5740c08a2afd4789ea0bea9da0270ccdd7708fe34baaea0c43497e": {
+      "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-database-sync\\sam\\sam\\de36c6f3d025d705eb4d\\remote-job.json",
+      "sha256": "2ef200c7ed5cf8b747e0af60687269f6d4d78d3050073c72431212be200dbaa3"
+    },
+    "679e0f46d4cdede4c0bba390358ffdd319f077fe6175637b7a3e60889fe0d7cb": {
+      "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-handshake\\sam\\sam\\20dd18083fdb3dd6ef3d\\remote-job.json",
+      "sha256": "8bdcbb6610d70d35e01895f07c5a5a842028c05157464b2bd8c08367b1f98799"
+    }
+  },
+  "first_sam_dispatch_receipts": [
+    {
+      "object_id": "a-icon-buildings",
+      "seconds": 18.703,
+      "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-buildings\\sam\\runs\\c83b6442467b2aa2\\receipt.json",
+      "sha256": "0062302b8b4fb2263d44fc256aa8354fa1de6e0e460bad41725430b680cff33a"
+    },
+    {
+      "object_id": "a-icon-cloud-server",
+      "seconds": 18.89,
+      "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-cloud-server\\sam\\runs\\9506b527016fdfaa\\receipt.json",
+      "sha256": "19d853d45be0b6406a596e084a45d54081940349cf7871a331c4884d3aacd203"
+    },
+    {
+      "object_id": "a-icon-compute",
+      "seconds": 19.047,
+      "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-compute\\sam\\runs\\2115598239ac3eb0\\receipt.json",
+      "sha256": "14002781a4c48b5bad8afabaccbceff68a7915f56e99ecb66099d92e91c6ca4d"
+    },
+    {
+      "object_id": "a-icon-database-sync",
+      "seconds": 18.984,
+      "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-database-sync\\sam\\runs\\7abecce047e6b0c0\\receipt.json",
+      "sha256": "c0fccc89631ad42c5c8b21892e991aed0f783afec3e0f8ce110e70c31c29b05b"
+    },
+    {
+      "object_id": "a-icon-handshake",
+      "seconds": 18.594,
+      "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-batch\\objects\\a-icon-handshake\\sam\\runs\\89a855388acf338b\\receipt.json",
+      "sha256": "19a8b6d23f5b4d8e301ce025387db32d37c6eaf738e7b74bcee60bb072e7182e"
+    }
+  ],
+  "phase_times": {
+    "initial_local_scan_seconds": 16.735,
+    "initial_five_object_sam_and_failed_validation_seconds": 98.578,
+    "source_extent_routing_l1_seconds": 36.0,
+    "first_current_code_l1_and_l2_seconds": 65.735,
+    "identical_cached_l1_and_l2_seconds": 7.922,
+    "final_formal_combination_seconds": 125.61,
+    "latest_code_l1_and_l2_seconds": 64.422,
+    "latest_code_formal_replay_seconds": 123.93
+  },
+  "calls": {
+    "three_branch_models": 0,
+    "sam_jobs": 5,
+    "big_lama": 0,
+    "final_go": 1,
+    "new_object_office_packages": 2,
+    "formal_asset_batch_office_actions": 4,
+    "formal_combined_office_actions": 20,
+    "formal_text_replacement_actions": 14,
+    "all_development_go_calls": 2,
+    "all_development_new_object_office_packages": 4,
+    "all_development_formal_runs": 2
+  },
+  "final": {
+    "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-final",
+    "committed_files_verified": 527,
+    "code_manifest_matches_current": false,
+    "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+    "perception_mode": "hash-bound-recorded-branches",
+    "background_candidates": 0,
+    "lower_hypotheses_assessed": 0,
+    "lama_candidates": 0,
+    "compiler_packages": 3,
+    "office_packages": 1,
+    "replacement_packages": 1,
+    "regional_wall_seconds": 125.61,
+    "editable_texts": 7,
+    "editable_images": 3,
+    "office_pass": true,
+    "final_office_actions": 20,
+    "local_hard_gate_receipts": [
+      {
+        "id": "t-28",
+        "acceptance_sha256": "915fb590b00fd055708148517a14ae2a06d33720724842fec565aeaefc0ebfc2",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-09",
+        "acceptance_sha256": "65181cf947a2768bb47fcc5bae5156aa13c7e34ade3897e94fcfa8472a5d2767",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-11",
+        "acceptance_sha256": "e658e0459944d3c74f02518d5156510a07b8c76f56fe2cda50cc217ee39b220a",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-14",
+        "acceptance_sha256": "415bb17adff4a54dca8f6adaa76e868488d4179c77ea3255d9ea690f389a1a51",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-20",
+        "acceptance_sha256": "57380f959ca75706eb8c4f5ce01af5f383a73d5e0a6ee372b7dbc28b88f68b6f",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-21",
+        "acceptance_sha256": "239207732b7f82e27b382ee48c211de2a4baa3ccfc4f3791e28d66b0c7f8b129",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-22",
+        "acceptance_sha256": "463d502afd6a1bfee4d23738f4944de69d96b5a502a5cb0bd55e76f372df2e19",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      }
+    ],
+    "outside_pixels": 0,
+    "visual": [
+      {
+        "schema": "VisualReview/1",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "plan_sha256": "2a4f25a9a6a5d60bff7ec01ecaa519728b65584f0d5d6a5a5fa731c8ea32378d",
+        "preview_sha256": "1d1fa1e0df77cc6c1cc167d05bce4b381c56f557545c2ac740d17d4808bdb076",
+        "passed": true,
+        "checked": [
+          "wording",
+          "structure",
+          "font",
+          "emphasis",
+          "layout",
+          "graphics"
+        ],
+        "findings": [],
+        "minor_deviations": [
+          {
+            "category": "font",
+            "description": "t-09/t-21 数字“01”“05”在最终 PPT 中字形略窄、笔画略细，与源图粗体数字存在轻微字重/字距差异。",
+            "node_ids": [
+              "t-09",
+              "t-21"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              633.0,
+              186.0,
+              58.0,
+              55.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "风格接近，普通阅读不易察觉，不影响内容与层级。"
+          },
+          {
+            "category": "layout",
+            "description": "t-11/t-14/t-20 等描述文字在最终 PPT 中行高与基线有约 1-2px 的轻微偏移，整体位置与对齐保持一致。",
+            "node_ids": [
+              "t-11",
+              "t-14",
+              "t-20"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              1113.0,
+              192.0,
+              418.0,
+              41.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "无碰撞、裁切或溢出，阅读无影响。"
+          },
+          {
+            "category": "graphics",
+            "description": "a-icon-layers、a-icon-cloud-server、a-icon-database-sync 的透明 PNG 边缘抗锯齿与源图存在极轻微差异，删除测试未见旧笔画残留。",
+            "node_ids": [
+              "a-icon-layers",
+              "a-icon-cloud-server",
+              "a-icon-database-sync"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              498.0,
+              187.0,
+              69.0,
+              57.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "图形完整、颜色一致，无可见残影或重复对象。"
+          }
+        ],
+        "status": "PASS"
+      }
+    ],
+    "execution_cost": {
+      "limits": {
+        "region_candidates": 2,
+        "complex_region_candidates": 4,
+        "repair_rounds": 1,
+        "model_calls": 12,
+        "office_validations": 60,
+        "max_seconds": 2400,
+        "cost_units": 120.0
+      },
+      "counts": {
+        "model_calls": 1,
+        "office_validations": 2,
+        "background_candidates": 0,
+        "compiler_calls": 3
+      },
+      "cost_units": 7.0,
+      "cost_unit_definition": {
+        "model_calls": 5.0,
+        "office_validations": 1.0,
+        "background_candidates": 0.05,
+        "compiler_calls": 0.0
+      },
+      "elapsed_seconds": 120.74108743667603
+    },
+    "workflow_states": {
+      "candidate_generation": "COMPLETED",
+      "regional_commit": "COMPLETED",
+      "final_qa": "PASS",
+      "automatic_publication": "GATED"
+    },
+    "verified_regions": [
+      {
+        "object_id": "t-28",
+        "quality": "ACCEPT",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-09",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-11",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-14",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-20",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-21",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-22",
+        "quality": "ACCEPT",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      }
+    ],
+    "artifacts": {
+      "page-01.png": "1d1fa1e0df77cc6c1cc167d05bce4b381c56f557545c2ac740d17d4808bdb076",
+      "result.pptx": "c74e31cb2bbc6bf9b57f486b59e948eecd8f9cadef457cf78f2caf7b190f567e",
+      "stable-fallback.pptx": "0f33c0b201645608082d62041d37aa82c1e37520321099f7423b4ad9a252ca66"
+    }
+  },
+  "residuals": {
+    "schema": "SourceOwnerResiduals/1",
+    "records": [
+      {
+        "id": "t-28",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "c4fe93f73b7ec21f1eedd6c36a15ceeca24299f42ff03b3d61d50fd43448ee6a",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 495,
+        "delete_sha256": "233cb3ab87812c030b2a5a8aa304f5dc038953b229955bef912348ed3f838561",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-09",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "1958e8d8f593859272e09210f943fb28e9313848a0cad139e44dc4d9a14759ef",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 1418,
+        "delete_sha256": "af8cff222857cacfde2e54095c4be61e5269eddfa821aebbb27d60ba3201f28f",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-11",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "ff986d671729a022f99afd58773f98fbeedca941b3e129110a856dbe45531838",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 9889,
+        "delete_sha256": "7b2deed430d7cd02875b5173de0301ebfed46a4853369cdbdeeae8ab1aa5ee74",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-14",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "5a3dac8514229cec736c42765cd4a2e29253b22d558309d442f643ffbfc12185",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 11954,
+        "delete_sha256": "129b91a4e2b97a713432df2c9cfcdcc06dd5aa7e06a7221e7ccf6fca665c2e9f",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-20",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "32dcc8645e7a39dfb26756c2aedbd8a97a25feaf169ab0fb3e14d7eaebf0dd4d",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 10499,
+        "delete_sha256": "f2d4b4a14e64fe61be37fac26038bfbced22f6e065f206b045c75380ab45e37a",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-21",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "f07db209772363c881f676d5611179e98ac2711b705db0e991cab22c0cd401c2",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 1648,
+        "delete_sha256": "3feeade05337e44671f19acda94c08325429ef40414b8e680dbcf95be1beadcf",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-22",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "408d754b674266121d2d9313b7bcbbaea403d579c64e8435d33f4a9de4850ca3",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 10912,
+        "delete_sha256": "16ad51516822ac7030402ca05b32b7b40443600ee2440777141c02eb2505d057",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "a-icon-layers",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "0c57809d821fd56ef3fa81de3fa98b3a94f237f4799e39530ef054659a3413e2",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 1774,
+        "delete_sha256": "6101c95510825f2d3a551831914c544c972916584adbf721716ffe0bf658e493",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "a-icon-cloud-server",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "2408a28f8eaf8271b9ac2b4b0b6358c6c45ac692ae11986cde115238498af16e",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 2078,
+        "delete_sha256": "d3e23f56baf2af725028e7535022849012a71339197854a720442ba453bacdc3",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "a-icon-database-sync",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "15f5a84a99d65abef30f404e52f68d797487414f62e0f72886832a4dfe71c6d7",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 2223,
+        "delete_sha256": "f485573e3baad0e8967af3d4ed1441985d81fa95d5c18a1fd461b8d553e8d732",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      }
+    ],
+    "human_acceptance": false
+  },
+  "preservation": {
+    "prior_text_evidence_equal": true,
+    "all_prior_selected_records_equal": true,
+    "all_prior_native_ir_nodes_equal": true,
+    "prior_png_hashes": {
+      "a-icon-layers": "5c7b9604967452c8bd1d91a6ec7d76be4ef2751721688bd7cde1e0db83761fda"
+    },
+    "r1207_commit_files_verified": 458,
+    "page5_committed_files_verified": 739,
+    "page5_native_texts": 8,
+    "page5_pngs": 9,
+    "page5_scene_sha256": "16b8b29898e0dac6e0e5f2d9dee4a1d9cb7fcdec13e7f67f3f7fc493de4e19cb",
+    "page5_pptx_sha256": "a899258ad6eab791b073f29fd76b496863ef5f2d6399bed7360af0e97339a718",
+    "page5_office_go_new_calls": 0
+  },
+  "comparison": {
+    "r1207": {
+      "textboxes": 7,
+      "pngs": 1,
+      "formal_seconds": 120.36,
+      "formal_office_actions": 16,
+      "final_go_calls": 1
+    },
+    "r1208": {
+      "textboxes": 7,
+      "pngs": 3,
+      "formal_seconds": 125.61,
+      "formal_office_actions": 20,
+      "final_go_calls": 1
+    }
+  },
+  "validation": {
+    "product_tests_passed": 289,
+    "product_tests_seconds": 44.17,
+    "core_tests_passed": 39,
+    "independent_visual_review": "PASS",
+    "human_acceptance": false,
+    "wps_acceptance": false,
+    "automatic_publication": false,
+    "current_code_replay_go": "UNKNOWN_PROTOCOL_VALIDATION",
+    "delivery_go": "PASS"
+  },
+  "limitations": [
+    "Two new icons passed; three of the five targets remain blocked by unchanged completeness/ownership gates.",
+    "Frozen real new-upload evidence was replayed. Full fresh perception was not rerun.",
+    "Page-5 immutable artifacts were hash-verified without repeating historical Office/Go calls.",
+    "Small font, baseline and antialiasing differences were accepted by Go.",
+    "Current cache-code formal replay Office passed, but its new Go response failed existing schema validation. The selected earlier approved delivery has identical source, IR, final preview and PNG hashes. Latest job remains UNKNOWN."
+  ],
+  "current_code_replay": {
+    "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-verified-final",
+    "committed_files_verified": 526,
+    "code_manifest_matches_current": true,
+    "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+    "perception_mode": "hash-bound-recorded-branches",
+    "background_candidates": 0,
+    "lower_hypotheses_assessed": 0,
+    "lama_candidates": 0,
+    "compiler_packages": 3,
+    "office_packages": 1,
+    "replacement_packages": 1,
+    "regional_wall_seconds": 123.93,
+    "editable_texts": 7,
+    "editable_images": 3,
+    "office_pass": true,
+    "final_office_actions": 20,
+    "local_hard_gate_receipts": [
+      {
+        "id": "t-28",
+        "acceptance_sha256": "915fb590b00fd055708148517a14ae2a06d33720724842fec565aeaefc0ebfc2",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-09",
+        "acceptance_sha256": "65181cf947a2768bb47fcc5bae5156aa13c7e34ade3897e94fcfa8472a5d2767",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-11",
+        "acceptance_sha256": "e658e0459944d3c74f02518d5156510a07b8c76f56fe2cda50cc217ee39b220a",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-14",
+        "acceptance_sha256": "415bb17adff4a54dca8f6adaa76e868488d4179c77ea3255d9ea690f389a1a51",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-20",
+        "acceptance_sha256": "57380f959ca75706eb8c4f5ce01af5f383a73d5e0a6ee372b7dbc28b88f68b6f",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-21",
+        "acceptance_sha256": "239207732b7f82e27b382ee48c211de2a4baa3ccfc4f3791e28d66b0c7f8b129",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-22",
+        "acceptance_sha256": "463d502afd6a1bfee4d23738f4944de69d96b5a502a5cb0bd55e76f372df2e19",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      }
+    ],
+    "outside_pixels": 0,
+    "visual": [
+      {
+        "status": "UNKNOWN",
+        "failure": "QA_INFRASTRUCTURE_UNAVAILABLE",
+        "error_type": "ValidationError",
+        "verified_regions_retained": true,
+        "automatic_retry": false
+      }
+    ],
+    "execution_cost": {
+      "limits": {
+        "region_candidates": 2,
+        "complex_region_candidates": 4,
+        "repair_rounds": 1,
+        "model_calls": 12,
+        "office_validations": 60,
+        "max_seconds": 2400,
+        "cost_units": 120.0
+      },
+      "counts": {
+        "model_calls": 1,
+        "office_validations": 2,
+        "background_candidates": 0,
+        "compiler_calls": 3
+      },
+      "cost_units": 7.0,
+      "cost_unit_definition": {
+        "model_calls": 5.0,
+        "office_validations": 1.0,
+        "background_candidates": 0.05,
+        "compiler_calls": 0.0
+      },
+      "elapsed_seconds": 118.9514172077179
+    },
+    "workflow_states": {
+      "candidate_generation": "COMPLETED",
+      "regional_commit": "COMPLETED",
+      "final_qa": "UNKNOWN_OR_REVIEW_REQUIRED",
+      "automatic_publication": "GATED"
+    },
+    "verified_regions": [
+      {
+        "object_id": "t-28",
+        "quality": "UNKNOWN",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-09",
+        "quality": "UNKNOWN",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-11",
+        "quality": "UNKNOWN",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-14",
+        "quality": "UNKNOWN",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-20",
+        "quality": "UNKNOWN",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-21",
+        "quality": "UNKNOWN",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-22",
+        "quality": "UNKNOWN",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      }
+    ],
+    "artifacts": {
+      "page-01.png": "1d1fa1e0df77cc6c1cc167d05bce4b381c56f557545c2ac740d17d4808bdb076",
+      "result.pptx": "3257df28f4437eb13b067cefffc6a8068c9a8ab38e87a3da291ea5a3b221e185",
+      "stable-fallback.pptx": "33d726407ef0046d33612ef450ff0888afdaebba38a6eedde1e6af9373f6554e"
+    }
+  },
+  "current_code_go_protocol_failure": {
+    "raw": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-verified-final\\cache\\model-calls\\raw\\a74436e0b574425121c6084aefbda4133ef055bdbf70bdef1c92ecc80d41711e.json",
+    "sha256": "00f4b81e67fc2926b216104ba935d9ceea486482d01ece1fd164d642718970dd",
+    "error": "1 validation error for QualityReview\n  Value error, italic exemption is not a new minor quality waiver [type=value_error, input_value={'schema': 'VisualReview/...', 'aspect': 'other'}]}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.10/v/value_error",
+    "automatic_retry": false
+  },
+  "delivery_selection": {
+    "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-final",
+    "reason": "Previously committed complete Office and Go PASS; current cache-only code replay has identical source, IR, PNG bytes and final preview but its new Go response violates existing italic-only minor-deviation schema.",
+    "source_equal": true,
+    "ir_equal": true,
+    "preview_equal": true,
+    "all_png_bytes_equal": true,
+    "prior_go_binding_matches_current_output": true,
+    "latest_job_qa_state": "UNKNOWN_OR_REVIEW_REQUIRED",
+    "latest_job_gate_unchanged": true
+  }
+}
