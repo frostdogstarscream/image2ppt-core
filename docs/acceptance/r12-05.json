@@ -3648,5 +3648,6 @@
       }
     ],
     "cause": "initial local forward reached legacy LayerD without expected model_binding; seed rejected unresolved ownership; corrected local target to existing remote port18847; no server deployment changed"
-  }
+  },
+  "agent_trigger_scope": "new tools verified through bounded run_r1205_agent host entry; upload automatic Agent trigger retains existing coordinate-diagnosis policy"
 }

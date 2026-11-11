@@ -97,7 +97,7 @@ def main():
         'baseline_commit':'878a14d98510a9138e87df6d59378ce3ec3beab5','jobs':jobs,
         'old_png_sha256_preserved':old_assets,'old_native_text_definitions_preserved':list(old_texts),
         'asset_expansion':assets,'full_text_scan':{'path':str(scan.resolve()),'sha256':digest(scan),'report':blockers},
-        'agent_loops':agents,'fresh_heldout_branches':fresh,'heldout_original_page':2,
+        'agent_loops':agents,'agent_trigger_scope':'new tools verified through bounded run_r1205_agent host entry; upload automatic Agent trigger retains existing coordinate-diagnosis policy','fresh_heldout_branches':fresh,'heldout_original_page':2,
         'unresolved_issues':['page5 pc-gear/cloud-sync/database-gear complete foreground crosses semantic scope; no new SAM evidence','page5 30 text regions blocked in full L1 scan; one further L1-ready body deferred at goal8','heldout page2 asset/surface overlap expands peer protection and blocks all native text recovery','heldout full run has no native text replacement records; TextEditProbe FAIL; final Go NOT_RUN'],
         'source_boundaries':'page5 expanded from frozen evidence; page2 initial fresh text/surface plus recovered asset branch from the same upload; no prior-page scene or OCR used',
         'final_recheck_reason':'fault-injection found missing/UNKNOWN asset QA receipts; fail-closed fix retested, existing candidates reused for final combination QA',
