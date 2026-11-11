@@ -8,6 +8,19 @@ from PIL import Image
 from .materialize import digest,write
 
 
+def scale_text(tr, factor):
+    """Scale absolute paragraph pitch together with glyph size in an edit probe."""
+    for index in range(1, tr.Runs().Count+1):
+        tr.Runs(index).Font.Size *= factor
+    for index in range(1, tr.Paragraphs().Count+1):
+        paragraph = tr.Paragraphs(index).ParagraphFormat
+        for rule, spacing in (('LineRuleWithin', 'SpaceWithin'),
+                              ('LineRuleBefore', 'SpaceBefore'), ('LineRuleAfter', 'SpaceAfter')):
+            value = getattr(paragraph, spacing)
+            if getattr(paragraph, rule) == 0 and value > 0:
+                setattr(paragraph, spacing, value*factor)
+
+
 def verify_pictures(pptx,irs,deleted=None):
     ns={'p':'http://schemas.openxmlformats.org/presentationml/2006/main','a':'http://schemas.openxmlformats.org/drawingml/2006/main',
         'r':'http://schemas.openxmlformats.org/officeDocument/2006/relationships'}
@@ -69,7 +82,7 @@ def inspect(pptx,irs,output,*,render_only=False):
                         if s.HasTextFrame and s.TextFrame.HasText:
                             tr=s.TextFrame.TextRange
                             # A scale probe includes glyphs, not just the frame.
-                            for j in range(1,tr.Runs().Count+1):tr.Runs(j).Font.Size*=.9
+                            scale_text(tr,.9)
                         wanted=signature(slide)[name]
                     deck.Save();deck.Close();deck=None
                     verify_pictures(file,irs,(i,name) if action=='delete' else None)

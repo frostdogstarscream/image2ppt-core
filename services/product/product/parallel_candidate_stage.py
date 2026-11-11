@@ -52,7 +52,8 @@ def stage(candidate_dir, graph, baseline_dir, output):
     record.update(state='STAGED',quality='REVIEW_REQUIRED',candidate_id=candidate.candidate_id,
         region_id=candidate.region_id,source_sha256=candidate.source_sha256,original_owner='source-plate',
         complete_owner_scope=True,human_acceptance=False,mask_sha256=array_sha(mask.astype('uint8')),
-        owner_evidence={'file':proof.name,'sha256':digest(proof),'method':'source-derived-four-sided-backing-and-ink/1'})
+        owner_evidence={'file':proof.name,'sha256':digest(proof),
+                        'method':record.get('owner_method','source-derived-four-sided-backing-and-ink/1')})
     baseline.selected[identifier]=record;baseline.transactions.append(record)
     # Layout proposals are private SceneGraph changes; the existing adapter is
     # still the only writer of public SlideIR.
