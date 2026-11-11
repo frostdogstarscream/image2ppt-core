@@ -16,7 +16,7 @@ from ..parallel_regions import regions
 from ..parallel_store import key
 
 
-def protected_for_asset(graph, baseline_directory, object_id=None):
+def protected_for_asset(graph, baseline_directory, object_id=None, *, background_context=False, evidence=None):
     """Reconstruct conservative peer protection from hash-bound host evidence."""
     baseline=Path(baseline_directory).resolve()
     if digest(baseline/'source.png')!=graph.source_sha256:
@@ -43,10 +43,29 @@ def protected_for_asset(graph, baseline_directory, object_id=None):
         protected|=mask
     for text in graph.text.texts:
         protected|=rectangle(text.bbox,tuple(graph.image_size))
+    classified={};source=None;surfaces={}
+    if background_context:
+        from ..peer_evidence import roles
+        classified=roles(graph);source=np.array(Image.open(baseline/'source.png').convert('RGB'))
+        surfaces={s.id:s for s in graph.surface.shapes}
+    target=next((a for a in graph.asset.objects if a.id==object_id),None)
     if object_id is not None:
         for peer in graph.asset.objects:
-            if peer.id!=object_id:
-                protected|=rectangle(peer.bbox,tuple(graph.image_size))
+            if peer.id==object_id:continue
+            verified=False
+            if background_context and classified[peer.id]['role']=='BACKGROUND_PANEL_CANDIDATE':
+                from ..peer_evidence import panel_evidence
+                from ..contracts import intersection
+                for surface_id in classified[peer.id]['surface_ids']:
+                    surface=surfaces[surface_id]
+                    if not intersection(surface.bbox,target.bbox):continue
+                    backing,proof=panel_evidence(peer,surface,graph,source)
+                    if backing is not None:
+                        verified=True
+                        if evidence is not None:evidence.append({'object_id':peer.id,'surface_id':surface_id,**proof,
+                            'authority':'read-only backing context; PNG and source owner independently rechecked'})
+                        break
+            if not verified:protected|=rectangle(peer.bbox,tuple(graph.image_size))
     return protected
 
 
@@ -128,8 +147,29 @@ def complete_source_halo(obj, seed_rgba, source, protected, surface):
     return result,report
 
 
-def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_directory,output):
+def sam_source_candidates(obj,source,protected,surface,masks,source_seeds):
+    """SAM selects entire source-derived components, retaining their soft Alpha."""
+    source_seed=next(((rgba,meta) for rgba,meta in source_seeds if meta['method']=='source-unmix'),None)
+    if source_seed is None:raise ValueError('SAM has no independently derived source matte')
+    rgba,metadata=source_seed
+    support=rgba[...,3]>0
+    _,labels,_,_=cv2.connectedComponentsWithStats(support.astype('uint8'),8)
+    results=[]
+    for candidate in masks:
+        touched=np.unique(labels[support&candidate['mask']]);touched=touched[touched>0]
+        keep=np.isin(labels,touched)&support
+        if not keep.any():continue
+        selected=rgba.copy();selected[~keep]=0
+        results.append((selected,{'method':'sam-source-unmix','mask_index':candidate['index'],
+            'mask_score':candidate['score'],'source_unmix':metadata,
+            'component_selection':'whole source components intersecting real SAM evidence',
+            'selected_source_pixels':int(keep.sum())}))
+    return results
+
+
+def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_directory,output,*,strategy='source-halo',sam_directory=None,sam_plan=None):
     """Return one private candidate package, or retain explicit blocking evidence."""
+    if strategy not in ('source-halo','verified-backing','sam'):raise ValueError('unsupported asset repair strategy')
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=False)
     baseline=Path(baseline_directory).resolve();source_file=Path(source_file).resolve()
     if digest(source_file)!=graph.source_sha256:
@@ -151,10 +191,26 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
         write(output/'result.json',result)
         return result
     source=np.array(Image.open(source_file).convert('RGB'))
-    protected=protected_for_asset(graph,baseline,object_id)
+    protection=[]
+    protected=protected_for_asset(graph,baseline,object_id,background_context=strategy!='source-halo',evidence=protection)
+    write(output/'protection.json',{'strategy':strategy,'relations':protection,'protected_pixels':int(protected.sum()),'mask_sha256':array_sha(protected)})
+    np.savez_compressed(output/'protection.npz',mask=protected)
     surface=resolved_surface(graph)
     layers=load_page(layer_directory)
-    seeds=asset_candidates(obj,source,layers,protected,(),'auto',surface=surface)
+    sam=None;sam_binding=None
+    if strategy=='sam':
+        from ..object_extract import load_sam
+        if sam_directory is None or sam_plan is None:raise ValueError('SAM strategy requires bound model evidence and plan')
+        sam,error=load_sam(sam_directory,obj,graph.source_sha256,digest(sam_plan),tuple(graph.image_size),'sam3',individual=True)
+        if error:raise ValueError(error)
+        sam_binding={'directory':str(Path(sam_directory).resolve()),'plan':str(Path(sam_plan).resolve()),
+            'files':{str(p.resolve()):digest(p) for p in [Path(sam_plan),*[p for p in Path(sam_directory).iterdir() if p.is_file()]]}}
+    seeds=asset_candidates(obj,source,layers,protected,(),'auto',sam=sam,surface=surface)
+    if strategy=='sam':
+        source_seeds=list(seeds)
+        seeds=[(seed,meta) for seed,meta in seeds if meta['method']=='sam3']
+        try:seeds.extend(sam_source_candidates(obj,source,protected,surface,sam,source_seeds))
+        except ValueError as exc:result['sam_source_failure']=str(exc)
     for index,(seed,metadata) in enumerate(seeds):
         folder=output/('candidate-'+str(index));folder.mkdir()
         attempt={'seed_method':metadata['method'],'seed_rgba_sha256':array_sha(seed)}
@@ -167,6 +223,12 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
             patch=source[y:y+height,x:x+width].copy()
             patch[mask[y:y+height,x:x+width]]=backing[mask[y:y+height,x:x+width]]
             crop=rgba[by:by+bh,bx:bx+bw]
+            checked_backing,error,_=backing_from_evidence(source,[bx,by,bw,bh],protected,surface)
+            alpha=crop[...,3:4]/255;visible=crop[...,3]>0
+            recomposed=crop[...,:3]*alpha+checked_backing*(1-alpha)
+            p95=float(np.percentile(np.abs(recomposed-source[by:by+bh,bx:bx+bw]).max(2)[visible],95))
+            attempt.update(background_error=float(error),source_recomposition_p95=p95)
+            if not np.isfinite(error) or error>6 or p95>24:raise ValueError('existing background/recomposition gates failed')
             Image.fromarray(crop).save(folder/'asset.png')
             Image.fromarray(source).save(folder/'source.png')
             Image.fromarray(source[y:y+height,x:x+width]).save(folder/'source_crop.png')
@@ -175,6 +237,7 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
                                 rgba=crop,rgba_bbox=[bx,by,bw,bh],seed_rgba=seed,protected=protected)
             payload={'id':object_id,'kind':'asset','bbox':[bx,by,bw,bh],'restore_bbox':restore_box,
                 'payload':{**metadata,**proof,'method':'source-halo-completion','segmentation':segmentation},
+                'protection_strategy':strategy,'protection_evidence':protection,'sam_evidence':sam_binding,
                 'source_asset_definition':obj.model_dump(),'proposed_asset_definition':obj.model_dump(),
                 'baseline_directory':str(baseline),'baseline_scene_sha256':digest(baseline/'scene.json'),
                 'layer_directory':str(Path(layer_directory).resolve()),
@@ -188,7 +251,7 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
                       'references':references,'implementation_sha256':digest(__file__)}
             candidate=ReconstructionCandidate(candidate_id='c-'+key(identity),source_sha256=graph.source_sha256,
                 scene_sha256=original_scene,region_id=region['region_id'],object_ids=[object_id],
-                representation='TRANSPARENT_PNG',strategy='source-halo-completion',references=references,
+                representation='TRANSPARENT_PNG',strategy='source-halo-completion' if strategy=='source-halo' else strategy+'-'+metadata['method'],references=references,
                 provenance={'version':'r12-05-asset-retry/1','input_binding':key(identity)},hard_gate='PASS')
             candidate=transition(candidate,'PRECHECK_PASS')
             preflight=PreflightResult(candidate_id=candidate.candidate_id,status='PASS',

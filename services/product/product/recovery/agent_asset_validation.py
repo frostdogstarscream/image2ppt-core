@@ -68,7 +68,8 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
             or rgba.dtype!=np.uint8 or patch.dtype!=np.uint8
             or seed.dtype!=np.uint8 or seed.shape!=(*source.shape[:2],4)):
         raise ValueError('invalid asset pixel evidence')
-    protected=protected_for_asset(scene,baseline,object_id)
+    strategy=payload.get('protection_strategy','source-halo')
+    protected=protected_for_asset(scene,baseline,object_id,background_context=strategy!='source-halo')
     if not np.array_equal(protected,saved_protected) or (mask&protected).any():
         raise ValueError('asset candidate altered protected peers')
     surface=scene.surface.model_copy(deep=True)
@@ -78,7 +79,25 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
     layers=load_page(layer_directory)
     if not np.array_equal(np.array(Image.open(layers.source_path).convert('RGB')),source):
         raise ValueError('asset LayerD evidence belongs to different source pixels')
-    seeds=asset_candidates(obj,source,layers,protected,(),'auto',surface=surface)
+    sam=None
+    if strategy=='sam':
+        from ..object_extract import load_sam
+        evidence=payload['sam_evidence']
+        for name,sha in evidence['files'].items():
+            if digest(name)!=sha:raise ValueError('SAM evidence changed')
+        from ..object_registry import SAM_BINDING
+        meta=_load(Path(evidence['directory'])/(object_id+'.json'))
+        if any(meta.get(name)!=SAM_BINDING[name] for name in ('checkpoint_sha256','code_revision')):
+            raise ValueError('SAM model provenance differs from pinned model')
+        sam,error=load_sam(evidence['directory'],obj,scene.source_sha256,digest(evidence['plan']),tuple(scene.image_size),'sam3',individual=True)
+        if error:raise ValueError(error)
+    seeds=asset_candidates(obj,source,layers,protected,(),'auto',sam=sam,surface=surface)
+    if strategy=='sam':
+        from .asset_retry import sam_source_candidates
+        source_seeds=list(seeds)
+        seeds=[(rgba,meta) for rgba,meta in seeds if meta['method']=='sam3']
+        try:seeds.extend(sam_source_candidates(obj,source,protected,surface,sam,source_seeds))
+        except ValueError:pass
     if not any(np.array_equal(seed,proposal) for proposal,_ in seeds):
         raise ValueError('asset segmentation seed lacks original LayerD/source evidence')
     completed,halo=complete_source_halo(obj,seed,source,protected,surface)

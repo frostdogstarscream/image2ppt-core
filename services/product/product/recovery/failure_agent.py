@@ -14,7 +14,7 @@ from .text_actions import retry_text_mask_completion,switch_background_candidate
 from .text_probe import probe_one
 
 
-def route(failure,kind,files,*,already_attempted=()):
+def route(failure,kind,files,*,already_attempted=(),new_sam_evidence=False):
     """A retry needs a real bound failure and a strategy not already exhausted."""
     if failure in ('QA_INFRASTRUCTURE_UNAVAILABLE','TOOL_UNAVAILABLE'):
         return {'status':'UNKNOWN','reason':'external response unavailable; automatic retry disabled','tools':[]}
@@ -24,6 +24,7 @@ def route(failure,kind,files,*,already_attempted=()):
         report=json.loads(Path(path).read_text('utf8'))
         reports.append((Path(path),report))
     if kind=='asset':
+        if new_sam_evidence:return {'status':'ELIGIBLE','tools':['retry_asset_extraction'],'strategy':'sam'}
         return {'status':'ELIGIBLE','tools':['retry_asset_extraction']} if not already_attempted else {
             'status':'NO_CHANGED_EVIDENCE','reason':'source-halo adapter already tried against these inputs','tools':[]}
     if failure in ('OWNER_CONFLICT','SEMANTIC_ROLE_CONFLICT'):
@@ -37,9 +38,9 @@ def route(failure,kind,files,*,already_attempted=()):
 
 
 def run(graph,identifier,kind,source,layers,baseline,fonts,files,output,*,failure,provider,store,cache,skill,
-        attempted=(),inpaint=None,max_decisions=2):
+        attempted=(),inpaint=None,max_decisions=2,sam_evidence=None,sam_plan=None):
     output=Path(output);output.mkdir(parents=True,exist_ok=False)
-    plan=route(failure,kind,files,already_attempted=attempted)
+    plan=route(failure,kind,files,already_attempted=attempted,new_sam_evidence=sam_evidence is not None)
     write(output/'route.json',{'failure':failure,'object_id':identifier,'source_sha256':graph.source_sha256,**plan})
     if plan['status']!='ELIGIBLE' or not skill:return {**plan,'status':plan['status'] if skill else 'UNKNOWN'}
     callbacks={};implementation={};package=Path(__file__).parent
@@ -78,7 +79,8 @@ def run(graph,identifier,kind,source,layers,baseline,fonts,files,output,*,failur
         else:
             def execute(directory):
                 from .asset_retry import retry_asset_extraction
-                result=retry_asset_extraction(graph,identifier,source,layers,baseline,directory/'p')
+                result=retry_asset_extraction(graph,identifier,source,layers,baseline,directory/'p',
+                    strategy='sam' if sam_evidence else 'verified-backing',sam_directory=sam_evidence,sam_plan=sam_plan)
                 write(directory/'execution.json',result)
                 if result['status']!='CANDIDATE_READY':raise RecoveryBlocked('OWNER_CONFLICT',result.get('reason','asset owner remains unresolved'))
                 current=SceneGraph.model_validate_json(Path(result['scene_file']).read_text('utf8'))

@@ -1,0 +1,522 @@
+{
+  "schema": "R12SingleObjectAcceptance/1",
+  "baseline_commit": "21caac6faf660b528eb647927eb32c0f4b05ca32",
+  "branch": "codex/r12-single-object-sam-repair",
+  "entrypoint": "product.parallel_pipeline.run",
+  "scope": "one previously blocked complete icon on real page-2 fresh-upload perception receipts, replayed without new perception calls",
+  "object_id": "a-icon-layers",
+  "old_failure": {
+    "file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\1\\c\\result.json",
+    "sha256": "36ede3fecea1d1b38d51b43a2daa52bd42a684dbd799ce922f82e8d1d29273c2",
+    "result": {
+      "status": "BLOCKED",
+      "object_id": "a-icon-layers",
+      "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+      "scene_file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\r12\\attempt-97120b41ba071071\\page-01\\ax\\1\\c\\scene.json",
+      "baseline_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1206-fresh-final\\page-01\\seed",
+      "attempts": [],
+      "published": false,
+      "office": "NOT_RUN",
+      "go": "NOT_RUN",
+      "reason": "no safe source Alpha or unmix seed; segmentation evidence is missing",
+      "seed_diagnostics": {
+        "alpha_ambiguities": {},
+        "missing_parts": [],
+        "alpha_visible_pixels": 2040,
+        "sam": "NOT_SUPPLIED",
+        "source_unmix_failure": "insufficient unprotected lateral background samples"
+      }
+    }
+  },
+  "root_cause": "Grouped background-panel bbox vetoed source background sampling in asset retries. Source/Surface-verified backing context is now distinguished while text, stable owners and uncertain peers remain protected. Erasure still requires original source_owner.",
+  "strategies": {
+    "original": "source-halo",
+    "context_only": "verified-backing",
+    "selected": "sam-source-unmix",
+    "raw_sam_layerd_recomposition_p95": 37.30156862745098,
+    "selected_recomposition_p95": 4.515294117647059,
+    "unchanged_limits": {
+      "background_error": 6,
+      "recomposition_p95": 24
+    },
+    "sam_is_erase_authority": false
+  },
+  "local": {
+    "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon\\runs\\35f1364441cefb9a\\receipt.json",
+    "sha256": "60c8c23ee8d230acd184620c5623dddbc4f4aab05048fb7cf3a962d09207a69d",
+    "elapsed_seconds": 4.046,
+    "cache_wall_seconds": 0.046,
+    "cache_hit": true,
+    "cached_run_new_model_calls": 0,
+    "cached_run_new_office_calls": 0,
+    "candidate_hashes": {
+      "asset.png": "5c7b9604967452c8bd1d91a6ec7d76be4ef2751721688bd7cde1e0db83761fda",
+      "candidate.json": "263cd49413fb11747fb2f4e135cf31c885f6e7c5bf063b048602166c2b4ebfae",
+      "payload.json": "547f53baa23f19a03227721f4d9886b5f399e188a17f54fe4f2dc8c6a0f1efaa",
+      "pixels.npz": "826e1e5b98763ba750290790585575642cee8ea19a1f83919987be843bfe0514",
+      "preflight.json": "fd0ca2bd866046c2930160ab9de2488120811724c43f1d7fab36938349ba8e29",
+      "segmentation.json": "ac47f4f4e5221b5d38f48d54457fe4860fbd750f07bbf4f812bdd35793621f07",
+      "source.png": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+      "source_crop.png": "19e316883c09f8c7186adfec5d1d8dc16a358e0c0ce575290eb6c6f7e2789351",
+      "written_crop.png": "ae44dbfe8f042793ecfbe3b1be52e97b903761a4b83fc8d52e7bd6b2603a73f3"
+    }
+  },
+  "sam": {
+    "directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon\\sam\\ac0c98df49fb72f1dd1e",
+    "plan": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon\\runs\\35f1364441cefb9a\\sam-plan.json",
+    "files": {
+      "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon\\runs\\35f1364441cefb9a\\sam-plan.json": "360890c87690e8ffb80369cadf2a34bd3591d2d829e35eace69be778e79989e9",
+      "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon\\sam\\ac0c98df49fb72f1dd1e\\a-icon-layers.json": "b7d0c689d5d0574173eb5d5bd1ab7ada924f686b16b55f2cbab9c41bc9705d20",
+      "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon\\sam\\ac0c98df49fb72f1dd1e\\a-icon-layers.npz": "0177b45736bbd5459d01f558b48e991bcec2ba730488e5d6195fd1b83717bfdd",
+      "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon\\sam\\ac0c98df49fb72f1dd1e\\raw-a-icon-layers.json": "4a83254999ee61b2474a449570ad62cd98ee0606c1cffca61bbd19e721a06f6f",
+      "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon\\sam\\ac0c98df49fb72f1dd1e\\remote-job.json": "479b956debe79309d45b89a163940969cb9da89688f8db6a69dc8af1d334da94",
+      "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon\\sam\\ac0c98df49fb72f1dd1e\\remote-status.json": "2fb3a9aedb9c05d5c92b217b26aa7589b10cd1c61cc7efeedc20e691499cb55c"
+    }
+  },
+  "protection": {
+    "strategy": "sam",
+    "relations": [
+      {
+        "object_id": "a-deco-row-bgs",
+        "surface_id": "b-row-1-bg",
+        "status": "SOURCE_BACKING_VERIFIED",
+        "agreement": 0.988056460369164,
+        "support_pixels": 3640,
+        "background_pixels": 78237,
+        "coefficients": [
+          [
+            238.31688024317353,
+            245.4345006928214,
+            251.8098130590674
+          ],
+          [
+            0.24066012483224175,
+            -0.19715644699572238,
+            -0.37392082025978146
+          ],
+          [
+            -0.5797562987586802,
+            -0.436801002539428,
+            -0.372826912607833
+          ]
+        ],
+        "method": "surface-intent+source-planar-inliers/1",
+        "authority": "read-only backing context; PNG and source owner independently rechecked"
+      }
+    ],
+    "protected_pixels": 632032,
+    "mask_sha256": "6a7f1c2c4930813cebdbfcbe6aedeba785e0191bb5356632765ce276db688bc1"
+  },
+  "final": {
+    "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon-final",
+    "committed_files_verified": 458,
+    "code_manifest_matches_current": true,
+    "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+    "perception_mode": "hash-bound-recorded-branches",
+    "background_candidates": 0,
+    "lower_hypotheses_assessed": 0,
+    "lama_candidates": 0,
+    "compiler_packages": 3,
+    "office_packages": 1,
+    "replacement_packages": 1,
+    "regional_wall_seconds": 120.36,
+    "editable_texts": 7,
+    "editable_images": 1,
+    "office_pass": true,
+    "final_office_actions": 16,
+    "local_hard_gate_receipts": [
+      {
+        "id": "t-28",
+        "acceptance_sha256": "915fb590b00fd055708148517a14ae2a06d33720724842fec565aeaefc0ebfc2",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-09",
+        "acceptance_sha256": "65181cf947a2768bb47fcc5bae5156aa13c7e34ade3897e94fcfa8472a5d2767",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-11",
+        "acceptance_sha256": "e658e0459944d3c74f02518d5156510a07b8c76f56fe2cda50cc217ee39b220a",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-14",
+        "acceptance_sha256": "415bb17adff4a54dca8f6adaa76e868488d4179c77ea3255d9ea690f389a1a51",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-20",
+        "acceptance_sha256": "57380f959ca75706eb8c4f5ce01af5f383a73d5e0a6ee372b7dbc28b88f68b6f",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-21",
+        "acceptance_sha256": "239207732b7f82e27b382ee48c211de2a4baa3ccfc4f3791e28d66b0c7f8b129",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-22",
+        "acceptance_sha256": "463d502afd6a1bfee4d23738f4944de69d96b5a502a5cb0bd55e76f372df2e19",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      }
+    ],
+    "outside_pixels": 0,
+    "visual": [
+      {
+        "schema": "VisualReview/1",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "plan_sha256": "e1e52033717de8af7c2d5b84e23a42971a4bca728ae2aed7dd9d50b75585e0cb",
+        "preview_sha256": "0353e1bfc119a9963c707397d7f74096441731e3314718f7db8f7d4270fca003",
+        "passed": true,
+        "checked": [
+          "wording",
+          "structure",
+          "font",
+          "emphasis",
+          "layout",
+          "graphics"
+        ],
+        "findings": [],
+        "minor_deviations": [
+          {
+            "category": "font",
+            "description": "t-09 与 t-21 的“01”“05”在最终 PPT 中为常规字重，源图为较粗的斜体数字；字形宽度与位置基本一致。",
+            "node_ids": [
+              "t-09",
+              "t-21"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              633.0,
+              186.0,
+              58.0,
+              55.0
+            ],
+            "suggested_fix": "如需完全一致可将数字设为粗斜体。",
+            "reason_to_accept": "仅字重/斜体风格差异，数字内容、颜色、大小与位置一致，普通阅读不易察觉。"
+          },
+          {
+            "category": "layout",
+            "description": "t-22“服务保障与合作建议”在最终图中字距略紧、整体宽度略窄于源图，右端未完全对齐源图。",
+            "node_ids": [
+              "t-22"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              719.0,
+              632.0,
+              326.0,
+              52.0
+            ],
+            "suggested_fix": "可微调字距或文本框宽度以贴合源图。",
+            "reason_to_accept": "文字内容、字号、颜色与基线位置一致，差异为字体渲染字距，无碰撞或裁切。"
+          },
+          {
+            "category": "graphics",
+            "description": "a-icon-layers 图标在最终图中线条略细、颜色略浅，与源图粗描边略有差异。",
+            "node_ids": [
+              "a-icon-layers"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              498.0,
+              187.0,
+              69.0,
+              57.0
+            ],
+            "suggested_fix": "可适当加粗描边或加深颜色。",
+            "reason_to_accept": "图标形状、层数、位置与透明背景完整，无残留或缺失，视觉差异轻微。"
+          }
+        ],
+        "status": "PASS"
+      }
+    ],
+    "execution_cost": {
+      "limits": {
+        "region_candidates": 2,
+        "complex_region_candidates": 4,
+        "repair_rounds": 1,
+        "model_calls": 12,
+        "office_validations": 60,
+        "max_seconds": 2400,
+        "cost_units": 120.0
+      },
+      "counts": {
+        "model_calls": 1,
+        "office_validations": 2,
+        "background_candidates": 0,
+        "compiler_calls": 3
+      },
+      "cost_units": 7.0,
+      "cost_unit_definition": {
+        "model_calls": 5.0,
+        "office_validations": 1.0,
+        "background_candidates": 0.05,
+        "compiler_calls": 0.0
+      },
+      "elapsed_seconds": 117.89138054847717
+    },
+    "workflow_states": {
+      "candidate_generation": "COMPLETED",
+      "regional_commit": "COMPLETED",
+      "final_qa": "PASS",
+      "automatic_publication": "GATED"
+    },
+    "verified_regions": [
+      {
+        "object_id": "t-28",
+        "quality": "ACCEPT",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-09",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-11",
+        "quality": "ACCEPT",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-14",
+        "quality": "ACCEPT",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-20",
+        "quality": "ACCEPT",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-21",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-22",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      }
+    ],
+    "artifacts": {
+      "page-01.png": "0353e1bfc119a9963c707397d7f74096441731e3314718f7db8f7d4270fca003",
+      "result.pptx": "7f762ffd7422124c14bd9036198f7bb68b2781f8f51f321cbda1ead4d37aaa5f",
+      "stable-fallback.pptx": "c35ae1634cb6802eed9611cf5c4eef2af504b713e66c745072eba89c50568f3d"
+    }
+  },
+  "preservation": {
+    "page2_text_definitions_equal": true,
+    "page2_all_prior_selected_records_equal": true,
+    "page5_committed_files_verified": 739,
+    "page5_texts": 8,
+    "page5_pngs": 9,
+    "page5_png_hashes": {
+      "a-icon-camera": "2f41bf6a3e13450fc702be9b3f1aca3efe540e5cb76fa79cef52fc557ac75f62",
+      "a-icon-bank": "efd608e48aa8d5fe337dfad93e1676efe382887b2d1b76931de8238dedebd913",
+      "a-icon-factory": "39232aa54a7859e9654b77d6992914ba7708dfc5441498ac6da24cd8725a9609",
+      "a-deco-title-bars": "cc4ae7062a356526e7f82d226059ddf1d1911a438052da3d20ca62629c6c83cd",
+      "a-deco-subtitle-arrows": "8eb261dc6ad97230ad00a848fcb530882e56189584cfbd251fec4d4d23b88530",
+      "a-icon-monitor-chart": "218c534bc237450cae7a24706dc2c725a3dbbeffe9795a65c9f7912d585f17fc",
+      "a-icon-network-tree": "7a281b10ee5a490b7dd14febc1395e45edfcada2f616118942814f9f6d726f90",
+      "a-icon-layers": "9b6075bbb0e09a28a3e440fcea4cb5caaa76cfce29d7c0a400f238f4267c34de",
+      "a-icon-antenna": "5dbba88e432f17a752f4764547dc73ebe9f5c44f4c963cc74bfb6db5c2302370"
+    },
+    "page5_scene_sha256": "16b8b29898e0dac6e0e5f2d9dee4a1d9cb7fcdec13e7f67f3f7fc493de4e19cb",
+    "page5_new_office_or_go_calls": 0
+  },
+  "final_text_replacement": {
+    "status": "PASS",
+    "actions": 14,
+    "outside_pixels": 0
+  },
+  "final_residuals": {
+    "schema": "SourceOwnerResiduals/1",
+    "records": [
+      {
+        "id": "t-28",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "c4fe93f73b7ec21f1eedd6c36a15ceeca24299f42ff03b3d61d50fd43448ee6a",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 495,
+        "delete_sha256": "258b0438cc081f591b8bfc162dd87995d2cca443513bc93c2a265b02656ad933",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-09",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "1958e8d8f593859272e09210f943fb28e9313848a0cad139e44dc4d9a14759ef",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 1418,
+        "delete_sha256": "3d4ca1cdbe2a59d0dcb2d509748292a40601563f1fea635f0a821658e5e513c4",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-11",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "ff986d671729a022f99afd58773f98fbeedca941b3e129110a856dbe45531838",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 9889,
+        "delete_sha256": "f821b54a3fe3bf43831b8a99d669b2ab201ab22bb5170d8a1eb2108705d08796",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-14",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "5a3dac8514229cec736c42765cd4a2e29253b22d558309d442f643ffbfc12185",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 11954,
+        "delete_sha256": "c64de0bdbe653f5b852ca8dc25d41af2f4f9d40c5b3de971e9f8e7f9e094ca45",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-20",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "32dcc8645e7a39dfb26756c2aedbd8a97a25feaf169ab0fb3e14d7eaebf0dd4d",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 10499,
+        "delete_sha256": "02b3b95c8335981ca906a589aacb42621b08ed875c496d30f1ffaa4cdb168c79",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-21",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "f07db209772363c881f676d5611179e98ac2711b705db0e991cab22c0cd401c2",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 1648,
+        "delete_sha256": "793242cd9fdc652af56794e0b690eb88c1e2973872cee64107fb7f173b2a3440",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-22",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "408d754b674266121d2d9313b7bcbbaea403d579c64e8435d33f4a9de4850ca3",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 10912,
+        "delete_sha256": "0dcbd6013edd14ad60022d11d05397b0ee4f457a8e65ec8a3ce98606821205ba",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "a-icon-layers",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "0c57809d821fd56ef3fa81de3fa98b3a94f237f4799e39530ef054659a3413e2",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 1774,
+        "delete_sha256": "d109b3f3690f71298453ec69bdc435c34c4272eef4a9af959e50c557bbbb8c93",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      }
+    ],
+    "human_acceptance": false
+  },
+  "calls": {
+    "new_text_asset_surface_model_calls": 0,
+    "real_sam_jobs": 1,
+    "final_go_calls": 1,
+    "final_targeted_office_actions": 2,
+    "final_combined_office_actions": 16,
+    "final_text_replacement_actions": 14,
+    "separate_exploratory_targeted_l2_actions": 2
+  },
+  "validation": {
+    "product_tests": {
+      "passed": 274,
+      "seconds": 36.42
+    },
+    "core_tests": {
+      "passed": 39
+    },
+    "human_acceptance": false,
+    "wps_acceptance": false,
+    "automatic_publication": false
+  },
+  "limitations": [
+    "Only the selected complete icon was repaired in this acceptance. Other blocked assets remain fallback.",
+    "New-upload perception evidence was replayed. No fresh three-model inference was requested this round.",
+    "Page-5 regression verifies immutable committed files and hashes. Its historical Office and Go checks were retained without new calls.",
+    "Go accepted small font, spacing and icon line-weight differences."
+  ],
+  "exploratory_l2": {
+    "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r12-icon\\office\\7fbbed6d790b4d57\\l2.json",
+    "status": "PASS",
+    "elapsed_seconds": 13.094,
+    "candidate_hashes": {
+      "asset.png": "5c7b9604967452c8bd1d91a6ec7d76be4ef2751721688bd7cde1e0db83761fda",
+      "candidate.json": "04f433419903115adc014babcbc151f880d359a71b206b88b6c5dbabcc2957ec",
+      "payload.json": "ee7eca7475338ef4e973d452367ad61b92a8151a141e1d6ff857007357a04023",
+      "pixels.npz": "826e1e5b98763ba750290790585575642cee8ea19a1f83919987be843bfe0514",
+      "preflight.json": "ad92d4eca8481d2ee58aee3ac36b27b8b3e1a9a082fccc1c1f8dfc6ad165b49f",
+      "segmentation.json": "15d36b01fb286cbd0504b4ccd207633b3942217e7625376894e095d11680c18d",
+      "source.png": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+      "source_crop.png": "19e316883c09f8c7186adfec5d1d8dc16a358e0c0ce575290eb6c6f7e2789351",
+      "written_crop.png": "ae44dbfe8f042793ecfbe3b1be52e97b903761a4b83fc8d52e7bd6b2603a73f3"
+    },
+    "final_current_candidate_also_office_verified": true
+  }
+}

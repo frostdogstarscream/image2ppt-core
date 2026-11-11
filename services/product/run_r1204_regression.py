@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--text-region-goal',type=int,default=4)
     parser.add_argument('--reuse-verified',action='store_true')
     parser.add_argument('--retry-assets',action='store_true')
+    parser.add_argument('--asset-candidate',action='append',default=[])
     parser.add_argument('--regional-agent',action='store_true')
     parser.add_argument('--agent-skill')
     parser.add_argument('--prompt-key',action='store_true')
@@ -48,7 +49,7 @@ def main():
         'layers':str(Path(args.layers).resolve())}],'stable_assets':[]})
     write(output/'request.json',{'sources':['01.png'],'pipeline_mode':'parallel_review','object_extraction':'auto',
         'candidate_engine':'r12-regional','regional_strategy':'adaptive','text_region_goal':args.text_region_goal,
-        'retry_assets':args.retry_assets,'regional_agent':args.regional_agent,'agent_skill':args.agent_skill,
+        'regional_asset_candidates':args.asset_candidate,'retry_assets':args.retry_assets,'regional_agent':args.regional_agent,'agent_skill':args.agent_skill,
         'perception_replay':str(output/'replay.json'),'frozen_baseline':str(output/'baseline.json')})
     if args.reuse_verified:
         request=json.loads((output/'request.json').read_text('utf8'))

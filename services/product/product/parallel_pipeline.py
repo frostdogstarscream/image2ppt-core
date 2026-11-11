@@ -186,7 +186,7 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             with lease('cpu'):ir,report=build(graph,snap,fonts,stage,layers=layers,stable=stable,strategy=route,pixel_cache=cache/'pixels',
                 text_candidates=candidate_engine!='r12-regional')
             difficult=[r['id'] for r in report if r['state']=='FALLBACK' and r['id'] in {o.id for o in graph.asset.objects}]
-            if difficult and route in ('auto','sam3','sam3.1'):
+            if difficult and route in ('auto','sam3','sam3.1') and candidate_engine!='r12-regional':
                 from .object_stage import infer_sam
                 from .object_extract import load_sam
                 samplan=folder/'sam-plan.json'

@@ -156,19 +156,40 @@ def select_adaptive(graph,identifier,snap,source,saved,folder,current,fonts,font
         stream.close()
 
 
-def expand_assets(graph, current, source, layers, folder, fonts, compiler, office, failure_router=None):
+def expand_assets(graph, current, source, layers, folder, fonts, compiler, office, failure_router=None, supplied_candidates=(), sam_budget=0):
     """Stage independent complete icons sequentially, then batch changed-object QA."""
     from .asset_retry import retry_asset_extraction
     from .agent_asset_stage import stage_asset_candidate
-    rows=[];added=[]
+    rows=[];added=[];sam_used=0
+    supplied={}
+    for directory in supplied_candidates:
+        candidate=json.loads((Path(directory)/'candidate.json').read_text('utf8'))
+        if len(candidate['object_ids'])!=1:raise ValueError('one complete asset per supplied candidate required')
+        identifier=candidate['object_ids'][0]
+        if identifier in supplied:raise ValueError('duplicate supplied asset candidate')
+        supplied[identifier]=Path(directory)
     for number,obj in enumerate(graph.asset.objects):
         latest=SceneGraph.model_validate_json((current.parent/'scene.json').read_text('utf8'))
-        if obj.id in latest.selected or obj.kind!='icon':continue
+        if obj.id in latest.selected or obj.kind!='icon' or (supplied and obj.id not in supplied):continue
         root=folder/'ax'/str(number)
         row={'object_id':obj.id,'state':'LOCAL_FALLBACK','office':'NOT_RUN'}
         rows.append(row)
         try:
-            result=retry_asset_extraction(latest,obj.id,source,layers,current.parent,root/'c')
+            if obj.id in supplied:
+                result={'status':'CANDIDATE_READY','candidate_directory':str(supplied[obj.id]),'strategy':'supplied-bound-candidate'}
+            else:
+                result=retry_asset_extraction(latest,obj.id,source,layers,current.parent,root/'c')
+                if result['status']=='BLOCKED':
+                    original_protection=json.loads((root/'c/protection.json').read_text('utf8')) if (root/'c/protection.json').exists() else {}
+                    from .asset_retry import protected_for_asset
+                    corrected=protected_for_asset(latest,current.parent,obj.id,background_context=True)
+                    from ..parallel_rebuild import array_sha
+                    if original_protection.get('mask_sha256') and array_sha(corrected)!=original_protection['mask_sha256']:
+                        result=retry_asset_extraction(latest,obj.id,source,layers,current.parent,root/'b',strategy='verified-backing')
+                    if result['status']=='BLOCKED' and sam_used<sam_budget:
+                        from .single_asset import probe
+                        sam_used+=1
+                        result=probe(latest,obj.id,source,layers,current.parent,folder/'sam-single',strategy='sam')
             row.update(result)
             if result['status']!='CANDIDATE_READY':
                 if failure_router:row['agent_route']=failure_router(latest,obj.id,result,root)
@@ -270,7 +291,8 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
                     failure='ASSET_EXTRACTION_UNCERTAIN',provider=repair_provider,store=store,cache=shared_cache,
                     skill=request.get('agent_skill') or os.environ.get('IMAGE2PPT_AGENT_SKILL'),attempted=('retry_asset_extraction',))
             router=route_asset_failure if request.get('regional_agent') and repair_provider else None
-            current,asset_rows=expand_assets(graph,current,snap['path'],saved,folder,fonts,compiler,office,failure_router=router)
+            current,asset_rows=expand_assets(graph,current,snap['path'],saved,folder,fonts,compiler,office,failure_router=router,supplied_candidates=request.get('regional_asset_candidates',()),
+                sam_budget=int(request.get('sam_object_budget',1)))
         write(folder/'dependencies.json',region_records)
         for identifier in targets:
             if goal is not None and sum(r['state']=='VERIFIED_LOCAL' for r in state)>=goal:
