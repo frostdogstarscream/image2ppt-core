@@ -428,7 +428,14 @@ class PrimitiveTools:
             raise ValueError('mask must be source-sized binary image')
         wanted = mask > 0
         passed = not (wanted & ~legal).any() and not (wanted & protected).any() and wanted.any()
+        refs={}
+        for name,pixels in {'validation_reference_mask':legal,'unauthorized_mask':wanted & ~legal,'protected_mask':protected}.items():
+            path=directory/(name+'.png')
+            Image.fromarray(pixels.astype('uint8')*255).save(path)
+            refs[name]=self.artifact(state,path,name)
         return {'status': 'PASS' if passed else 'REVIEW_REQUIRED', 'mask_pixels': int(wanted.sum()),
+                'evidence':refs,'protected_overlap_pixels':int((wanted & protected).sum()),
+                'note':'Reference mask is derived from current source and independent sampling. It is evidence, not delivery approval; inspect differences before changing a candidate.',
                 'unauthorized_pixels': int((wanted & ~legal).sum()),
                 'unassigned_contrast_pixels': completion.report['unassigned_contrast_pixels']}
 
