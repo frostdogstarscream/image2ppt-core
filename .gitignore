@@ -32,3 +32,4 @@ exports/*
 .chart-data-*/
 
 .ptmp/
+.tmp-test/
