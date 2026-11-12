@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from model_slideir_loop import compiler, digest, mae, seal, write_json
+from model_text_layout import calibrate, write_comparisons
 
 
 def replay(run_dir: Path, response_path: Path, output: Path,
@@ -49,22 +50,30 @@ def replay(run_dir: Path, response_path: Path, output: Path,
                 ir["nodes"].remove(owners[0])
                 ir["background"]["asset_id"] = asset["id"]
                 normalizations.append("full-page cleaned plate node -> background.asset_id")
+    ir, text_layout = calibrate(ir, source, run_dir)
     output.mkdir(parents=True)
     shutil.copytree(run_dir / "source", output / "source")
     shutil.copytree(run_dir / "assets", output / "assets")
     ir_file = output / "slideir.json"
     write_json(ir_file, ir)
+    write_json(output / "text-layout.json", text_layout)
     write_json(output / "authoring.json", {"format_version": "1",
                                             "tool": "recorded-model-response-replay",
                                             "model_id": response["model"],
                                             "created_at": datetime.now(timezone.utc).isoformat(),
                                             "ir_sha256": digest(ir_file),
                                             "source_response_sha256": digest(response_path),
-                                            "normalization": normalizations})
+                                            "normalization": normalizations +
+                                            (["source-bound text fitting and evidence-preserving index split"]
+                                             if text_layout["status"] == "MEASURED" else [])})
     try:
         validation = compiler(ir_file, "validate")
         build = compiler(ir_file, "compile")
         score = mae(source, Path(build["preview"]))
+        if text_layout["status"] == "MEASURED":
+            write_comparisons(source, Path(build["preview"]), text_layout,
+                              output / "text-comparisons")
+            write_json(output / "text-layout.json", text_layout)
         result = {"status": "REVIEW_REQUIRED", "ir": str(ir_file), "build": build,
                   "validation": validation, "page_mae": score,
                   "human_acceptance": False, "model_calls": 0}

@@ -4,6 +4,10 @@
 
 第一阶段输入一页原图、已有 OCR JSON、已有 PNG/JPEG 素材目录。执行器复制输入到新目录，记录哈希、尺寸和素材 ID，将原图及素材缩略图发给 OpenAI 兼容视觉模型。首次回复必须是完整 SlideIR 0.1 JSON，后两次回复只能修改已有节点的局部外观字段。每个有效候选都经过固定 `validate` 和 `compile`，后者从最终 PPTX 回渲染 `preview.png`。渲染图、原图、当前 IR 和整页 MAE 会送回模型；最多两轮修正。MAE 仅供比较，不是自动验收。`result.json` 以 `REVIEW_REQUIRED` 结束；PowerPoint/WPS 实际编辑、文字残影和人工审阅仍需分别检查。
 
+录制模型回复的离线回放可用 `scripts/replay_model_response.py`，不会重新调用模型。若哈希匹配的 IR 声明了 `cleaned_background`，`scripts/model_text_layout.py` 会以原图与清字背景板的差值测量每个文字区，按实际源/目标画布比例换算 `size_pt`，并记录候选字体的几何和笔画密度。只有 OCR 证据与模型文字完全一致、两位序号后有足够宽的真实墨迹空隙时，才将合并节点拆成序号与标题；拆分保持字符拼接与证据归属。无清字背景板或拟合不确定时保留模型字段并记录原因。输出包括 `text-layout.json` 和 `text-comparisons/`（每图左侧原图，右侧回渲染）。模型修正回复中的局部 `font` 更新会合并到已有字体字段，不会丢失字体名称。
+
+可运行 `scripts/compare_model_text_previews.py --source <source.png> --before <old-preview.png> --after <new-preview.png> --layout <text-layout.json> --output <new-directory>` 生成逐区前后对照；每图依次为原图、旧回渲染、新回渲染。像素差异只用于定位，不能替代实际 PowerPoint 编辑和人工视觉验收。
+
 ```powershell
 # 只做输入封存和接口检查，绝不调用模型
 python scripts/model_slideir_loop.py --source C:\path\page.png --ocr C:\path\ocr.json --assets-dir C:\path\assets --output .tmp-test\page01-offline

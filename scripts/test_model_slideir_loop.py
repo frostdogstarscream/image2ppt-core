@@ -5,9 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from model_slideir_loop import ROOT, digest, patch, run, seal
+from model_text_layout import calibrate
 
 SCRATCH = ROOT / ".tmp-test"
 SCRATCH.mkdir(exist_ok=True)
@@ -22,6 +23,55 @@ class ModelLoopTest(unittest.TestCase):
         self.assertEqual(changed["nodes"][0]["bbox"][0], 2)
         with self.assertRaises(ValueError):
             patch(original, {"patches": [{"id": "t", "changes": {"text": "invented"}}]})
+
+    def test_font_patch_preserves_other_font_fields(self):
+        original = {"nodes": [{"id": "t", "type": "text", "text": "source",
+                               "font": {"latin": "Arial", "ea": "Microsoft YaHei",
+                                        "size_pt": 20}}], "review_notes": []}
+        changed = patch(original, {"patches": [{"id": "t", "changes":
+                          {"font": {"size_pt": 18}}}]})
+        self.assertEqual(changed["nodes"][0]["font"],
+                         {"latin": "Arial", "ea": "Microsoft YaHei", "size_pt": 18})
+        self.assertEqual(original["nodes"][0]["font"]["size_pt"], 20)
+        with self.assertRaisesRegex(ValueError, "invalid local font patch"):
+            patch(original, {"patches": [{"id": "t", "changes":
+                         {"font": {"text": "invented"}}}]})
+
+    def test_source_bound_split_keeps_exact_text_and_unique_evidence(self):
+        font_file = Path("C:/Windows/Fonts/msyhbd.ttc")
+        if not font_file.exists():
+            self.skipTest("font matcher needs the installed Microsoft YaHei font")
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as tmp:
+            root = Path(tmp)
+            (root / "assets").mkdir()
+            plate = root / "assets/plate.png"
+            source = root / "page.png"
+            Image.new("RGB", (400, 100), "white").save(plate)
+            image = Image.new("RGB", (400, 100), "white")
+            draw = ImageDraw.Draw(image)
+            draw.text((30, 25), "02", font=ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 35),
+                      fill="#004080")
+            draw.text((115, 25), "标题", font=ImageFont.truetype(str(font_file), 35),
+                      fill="#004080")
+            image.save(source)
+            ir = {"source_sha256": digest(source), "canvas": {"source_px": [400, 100],
+                  "target_px": [400, 100]}, "background": {"asset_id": "plate"},
+                  "assets": [{"id": "plate", "purpose": "cleaned_background",
+                              "path": "assets/plate.png", "sha256": digest(plate)}],
+                  "evidence": [{"id": "e", "kind": "text", "text": "02标题",
+                                "bbox": [30, 20, 250, 50]}], "groups": [],
+                  "nodes": [{"id": "merged", "type": "text", "text": "02标题",
+                             "bbox": [30, 20, 250, 50], "z": 1,
+                             "evidence_ids": ["e"],
+                             "font": {"latin": "Arial", "ea": "Microsoft YaHei",
+                                      "size_pt": 40}}], "review_notes": []}
+            calibrated, report = calibrate(ir, source, root)
+            self.assertEqual(len(report["splits"]), 1)
+            self.assertEqual([n["text"] for n in calibrated["nodes"]], ["02", "标题"])
+            self.assertEqual([e["text"] for e in calibrated["evidence"]], ["02", "标题"])
+            self.assertEqual({e for n in calibrated["nodes"] for e in n["evidence_ids"]},
+                             {e["id"] for e in calibrated["evidence"]})
+            self.assertEqual(ir["nodes"][0]["text"], "02标题")
 
     def test_seal_rejects_model_provenance_change(self):
         with tempfile.TemporaryDirectory(dir=SCRATCH) as tmp:

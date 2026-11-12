@@ -23,6 +23,8 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageOps, ImageStat
 
+from model_text_layout import calibrate, write_comparisons
+
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM = ("You reconstruct one screenshot as editable SlideIR 0.1 JSON. Preserve all visible "
           "wording, numbers, layout and proportions. Use native text and shapes only for evidence "
@@ -197,7 +199,19 @@ def patch(ir: dict, answer: dict) -> dict:
         if nid in seen or nid not in nodes or not isinstance(changes, dict) or set(changes) - PATCH_FIELDS:
             raise ValueError("invalid or duplicate local patch")
         seen.add(nid)
-        nodes[nid].update(changes)
+        if "font" in changes:
+            font = changes["font"]
+            if (nodes[nid].get("type") != "text" or not isinstance(font, dict)
+                    or not font or set(font) - {"latin", "ea", "size_pt"}):
+                raise ValueError("invalid local font patch")
+            if "size_pt" in font and (not isinstance(font["size_pt"], (int, float))
+                                      or not 0 < font["size_pt"] <= 400):
+                raise ValueError("invalid local font size")
+            if any(not isinstance(font[k], str) or not font[k].strip()
+                   for k in ("latin", "ea") if k in font):
+                raise ValueError("invalid local font family")
+            nodes[nid]["font"] = {**nodes[nid]["font"], **font}
+        nodes[nid].update({key: value for key, value in changes.items() if key != "font"})
     notes = answer.get("review_notes", [])
     if not isinstance(notes, list) or not all(isinstance(n, str) for n in notes):
         raise ValueError("invalid review notes")
@@ -332,6 +346,10 @@ def run(args, model_call=request_model) -> dict:
             break
         try:
             candidate = seal(reply["answer"], page, assets) if turn == 0 else patch(current, reply["answer"])
+            text_layout = None
+            if turn == 0:
+                candidate, text_layout = calibrate(candidate, page, output)
+                write_json(folder / "text-layout.json", text_layout)
             if current is None:
                 current = candidate
             ir_file = folder / "slideir.json"
@@ -349,6 +367,9 @@ def run(args, model_call=request_model) -> dict:
             if not preview.is_file():
                 raise ValueError("compiler returned no final PPTX preview")
             score = mae(page, preview)
+            if text_layout and text_layout["status"] == "MEASURED":
+                write_comparisons(page, preview, text_layout, folder / "text-comparisons")
+                write_json(folder / "text-layout.json", text_layout)
             current = candidate
             record = {"turn": turn, "status": "COMPILED", "ir": str(ir_file), "build": build,
                       "validation": validation, "page_mae": score}
