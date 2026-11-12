@@ -1,0 +1,35 @@
+{
+  "job_id": "f7611179379f46e5bce54c7bce03ec69",
+  "result": {
+    "status": "CANCELLED",
+    "orchestrator": "opencode",
+    "visual_review_backend": "opencode",
+    "reason": "cancelled",
+    "automatic_publication": false,
+    "final_qa": "UNKNOWN"
+  },
+  "source_sha256": "f39a7c200e789625333425cfe12a1153042de639a6005c1c09855fa4dcf075b5",
+  "model": "qwen3.8-flash",
+  "runtime_seconds_budget": 7200,
+  "elapsed_until_collection_seconds": 4651,
+  "event_elapsed_seconds": 4320.708906173706,
+  "model_messages": 70,
+  "tokens": {
+    "input": 231672,
+    "output": 56942,
+    "reasoning": 0
+  },
+  "tool_calls": 69,
+  "tool_states": {
+    "completed": 49,
+    "error": 20
+  },
+  "independent_go_reviews": 0,
+  "office_requests": 1,
+  "native_texts": 0,
+  "recovered_images": 0,
+  "pptx_sha256": "c92780f0b56fd8c32726d4d1a545acfb6ad7e6ecbf4bfaf03c76be1d77ef04a6",
+  "code_commit": "3ccd774b4287ded938b0890300e6338025041388",
+  "termination": "operator stopped after no successful editable candidate and repeated protocol/identity errors; not a natural Agent completion",
+  "unattended_acceptance": false
+}
