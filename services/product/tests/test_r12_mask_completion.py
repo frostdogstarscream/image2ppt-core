@@ -89,6 +89,12 @@ def test_whole_scope_residual_and_raw_brightness_are_separate():
     good, _, _ = assess_trial(source, completed, backing, protected, box, backing, reference, {})
     assert good['status'] == 'PRECHECK_PASS'
     assert good['remaining_source_signal_pixels'] == 0
+    unreliable, _, _ = assess_trial(source, completed, backing, protected, box, backing,
+                                    {'validation_p95_rgb':217}, {})
+    assert unreliable['status']=='REVIEW_REQUIRED'
+    assert unreliable['measurement_interpretation']['reference_dependent_quality']=='UNKNOWN'
+    assert unreliable['checks']['protected_integrity'] and unreliable['checks']['outside_mask_integrity']
+    assert good['measurement_interpretation']['reference_dependent_quality']=='MEASURED'
 
 
 def staged_fixture(fixture, monkeypatch):

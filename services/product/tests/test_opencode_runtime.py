@@ -199,6 +199,17 @@ def test_basic_mask_background_composition_with_source_reference(job,monkeypatch
     preview=call(service,identifier,'compile_pptx',candidate_id=draft['id'])
     assert preview['status']=='COMPILED' and not preview['delivery_approval']
     assert not service.state(identifier).read().get('composition')
+    # Retained formal-check receipts must not consume additional exploration routes.
+    current=state.read()
+    for index in range(3):
+        receipt={**draft,'id':f'formal-{index}','fingerprint':f'formal-{index}',
+                 'exploratory':False,'submission_of':draft['id']}
+        current['candidates'][receipt['id']]=receipt
+    write(state.root/'state.json',current)
+    another=call(service,identifier,'create_candidate',page=1,object_id='text',
+        mask_id=masks['masks']['semantic_completion']['id'],background_id=backing['background']['id'],
+        frame_minimum=[100,30])
+    assert another['status']=='EXPLORATORY'
 
 
 def test_visual_self_review_requires_provided_images_and_current_hashes(job):

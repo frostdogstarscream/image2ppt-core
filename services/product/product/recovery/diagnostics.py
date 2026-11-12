@@ -51,6 +51,11 @@ def assess_trial(source, mask, raw, protected, bbox, reference, reference_report
               'raw_mask_luma_bias': float((raw[mask].astype(float)-reference[mask].astype(float)).mean()),
               'writeback_raw_max_difference': int(np.abs(written[mask].astype(int)-raw[mask].astype(int)).max()),
               'reference_context': reference_report,
+              'measurement_interpretation': {
+                  'reference_dependent_quality': 'MEASURED' if checks['reference_context'] else 'UNKNOWN',
+                  'remaining_source_signal_pixels': 'Difference from the estimated reference inside the search scope; not a count of missing mask pixels or proof of antialiasing.',
+                  'visible_source_pixels_outside_mask': 'Source contrast outside the erase mask, relative to the estimated reference.',
+                  'limitation': 'If reference_context fails, residual, colour, seam and visible-scope estimates cannot establish actual visual defects. Independent reliable background evidence is required; pixel ownership checks remain binding.'},
               'publication': 'REVIEW_REQUIRED', 'human_acceptance': False,
               'reference_limit': 'Source-context interpolation and source text geometry; original unoccluded pixels are unavailable'}
     return report, written, residual

@@ -110,7 +110,8 @@ class ExplorationTools(PrimitiveTools):
                 self.check_candidate(current, prior)
                 return {**prior, 'cache_hit': True}
         limit = json.loads((state.job/'request.json').read_text('utf8')).get('adaptive_budget', {}).get('complex_region_candidates', 4)
-        if sum(c['page'] == page and c['object_id'] == object_id for c in current['candidates'].values()) >= limit:
+        if sum(c['page'] == page and c['object_id'] == object_id and not c.get('submission_of')
+               for c in current['candidates'].values()) >= limit:
             return {'status': 'RESOURCE_LIMIT', 'reason': 'candidate budget exhausted'}
         folder = directory/'preview'
         shutil.copytree(Path(row['ir']).parent, folder)

@@ -354,6 +354,9 @@ class RuntimeService(ExplorationTools):
             approval = directory/'submission'
             approval.mkdir(parents=True)
             staged = PrimitiveTools.create_candidate(self, state, current, approval, **candidate['proposal'])
+            # A formal check of an existing proposal is not a second candidate route.
+            if staged.get('id') in current['candidates']:
+                current['candidates'][staged['id']]['submission_of'] = candidate_id
             if staged.get('status') != 'STAGED_LOCAL':
                 return {'status': 'SUBMISSION_BLOCKED', 'checks': staged, 'preview_candidate_id': candidate_id}
             checked = self.validate_candidate(state, current, directory/'submission-check', candidate_id=staged['id'])
