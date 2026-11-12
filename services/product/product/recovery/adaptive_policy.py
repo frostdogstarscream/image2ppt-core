@@ -22,14 +22,15 @@ class QualityReview(Review):
     def minor_is_visual_only(self):
         # Content, ownership, residual and real-edit failures are supplied by
         # deterministic gates, independently of this visual assessment.
-        if any(row.aspect == 'italic_only' for row in self.minor_deviations):
-            raise ValueError('italic exemption is not a new minor quality waiver')
+        if any(row.aspect == 'italic_only' and row.category != 'font' for row in self.minor_deviations):
+            raise ValueError('italic-only deviation must describe a font difference')
         return self
 
 
 QUALITY_PROMPT = '''本次采用足够好即停止策略。仍须逐项完成全部六维检查。
 findings 只列出影响实际使用的明显错误，例如内容或标点错误、旧文字残影、邻居损坏、严重裁切、溢出、结构错误。出现这些问题时 passed=false。
 风格接近的字体、轻微字重字距行距、普通用户不易察觉的背景色或抗锯齿、无阅读影响的小位置差异允许接受。把这些差异写入 minor_deviations，填写具体 node_ids、description、reason_to_accept 和证据位置，passed=true 且 findings=[]。没有差异时 minor_deviations=[]。
+纯斜体／非斜体差异属于已有可接受字体偏差，使用 category=font、aspect=italic_only，在 minor_deviations 中保留记录及接受理由。其他内容、图标缺失或归属问题不得使用该标记。
 只根据源图、最终实际 Office 图和删除编辑证据判断。不得凭自动指标声称无残影。内容、安全归属和实际编辑硬性门禁永远不能由轻微差异判断豁免。不要为了理论像素最优建议继续生成候选。'''
 
 

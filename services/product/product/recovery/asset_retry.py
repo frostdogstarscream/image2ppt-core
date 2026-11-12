@@ -147,6 +147,66 @@ def complete_source_halo(obj, seed_rgba, source, protected, surface):
     return result,report
 
 
+def sam_extent_unmix(obj, source, protected, surface, candidate):
+    """Use whole source components to propose an Unmix scope, never an erase mask."""
+    from ..object_unmix import candidate_from_evidence
+    if len(obj.parts) != 1:
+        raise ValueError('independent multi-part scope needs separate semantic evidence')
+    size = source.shape[1::-1]
+    anchor = rectangle(obj.bbox, size) | candidate['mask']
+    failures = []
+    for padding in (8, 24, 48):
+        window = rectangle(bounds(anchor), size, pad=padding)
+        x, y, width, height = bounds(window)
+        if width > 256 or height > 256:
+            failures.append('bounded component search exceeded 256 pixels')
+            break
+        backing, error, evidence = backing_from_evidence(source, [x, y, width, height], protected, surface)
+        if not np.isfinite(error) or error > 6:
+            failures.append('source component background uncertain')
+            continue
+        # Use the existing strong-stroke contrast for localization only. The
+        # unchanged Unmix and source_owner still recover/check soft edges.
+        observed = np.abs(source[y:y+height, x:x+width].astype(float)-backing).max(2) > 40
+        _, labels, _, _ = cv2.connectedComponentsWithStats(observed.astype('uint8'), 8)
+        local_protected = protected[y:y+height, x:x+width]
+        seed = candidate['mask'][y:y+height, x:x+width] & observed
+        selected = np.zeros_like(observed)
+        escaped = False
+        for label in np.unique(labels[seed]):
+            if not label:continue
+            component = labels == label
+            if (component & local_protected).any():
+                if (component & ~local_protected).any():
+                    raise ValueError('SAM source component crosses protected peer')
+                continue
+            if component[0].any() or component[-1].any() or component[:, 0].any() or component[:, -1].any():
+                escaped = True
+                break
+            selected |= component
+        if escaped or not selected.any():
+            failures.append('source component escapes search window or no independent component')
+            continue
+        local_box = bounds(selected)
+        box = [local_box[0]+x, local_box[1]+y, local_box[2], local_box[3]]
+        # Only this estimator's search hypothesis changes. The original object,
+        # all protected pixels and source_owner's semantic checks stay intact.
+        scoped = obj.model_copy(update={'bbox': box,
+            'parts': [obj.parts[0].model_copy(update={'bbox': box})]})
+        try:
+            rgba, metadata = candidate_from_evidence(scoped, source, protected, surface=surface)
+        except ValueError as exc:
+            failures.append(str(exc))
+            continue
+        metadata['source_extent_evidence'] = {'padding': padding, 'search_bbox': [x, y, width, height],
+            'source_component_bbox': box, 'source_component_pixels': int(selected.sum()),
+            'sam_mask_sha256': array_sha(candidate['mask']), 'background': evidence,
+            'search_signal_threshold': 40,
+            'scope_only': True, 'source_owner_gate_relaxed': False, 'failed_scales': failures}
+        return rgba, metadata
+    raise ValueError('source/SAM extent unresolved: '+'; '.join(failures))
+
+
 def sam_source_candidates(obj,source,protected,surface,masks,source_seeds):
     """SAM selects entire source-derived components, retaining their soft Alpha."""
     source_seed=next(((rgba,meta) for rgba,meta in source_seeds if meta['method']=='source-unmix'),None)
@@ -160,20 +220,22 @@ def sam_source_candidates(obj,source,protected,surface,masks,source_seeds):
             # source estimator. It still grants no writeback authority.
             prior=next((rgba for rgba,meta in source_seeds
                         if meta['method']=='sam3' and meta['mask_index']==candidate['index']),None)
-            if prior is None:
-                failures.append('mask '+str(candidate['index'])+': no complete LayerD/SAM assembly')
-                continue
             from ..object_unmix import candidate_from_evidence
             try:
-                selected_seed=candidate_from_evidence(obj,source,protected,original_alpha=prior,surface=surface)
+                if prior is not None:
+                    selected_seed=candidate_from_evidence(obj,source,protected,original_alpha=prior,surface=surface)
             except ValueError as exc:
                 failures.append('mask '+str(candidate['index'])+': '+str(exc))
-                continue
+            if selected_seed is None:
+                try:selected_seed=sam_extent_unmix(obj,source,protected,surface,candidate)
+                except ValueError as exc:
+                    failures.append('mask '+str(candidate['index'])+': '+str(exc))
+                    continue
         rgba,metadata=selected_seed
         support=rgba[...,3]>0
         _,labels,_,_=cv2.connectedComponentsWithStats(support.astype('uint8'),8)
         touched=np.unique(labels[support&candidate['mask']]);touched=touched[touched>0]
-        keep=np.isin(labels,touched)&support
+        keep=support if metadata.get('source_extent_evidence') else np.isin(labels,touched)&support
         if not keep.any():continue
         selected=rgba.copy();selected[~keep]=0
         results.append((selected,{'method':'sam-source-unmix','mask_index':candidate['index'],
@@ -182,6 +244,34 @@ def sam_source_candidates(obj,source,protected,surface,masks,source_seeds):
             'selected_source_pixels':int(keep.sum())}))
     if not results:raise ValueError('SAM has no independently derived complete source matte; '+'; '.join(failures))
     return results
+
+
+def localized_owner_object(obj, metadata):
+    """Recomputed source scope corrects localization without changing scene content."""
+    extent=metadata.get('source_unmix',{}).get('source_extent_evidence')
+    if not extent:return obj
+    box=extent['source_component_bbox']
+    return obj.model_copy(update={'bbox':box,'parts':[obj.parts[0].model_copy(update={'bbox':box})]})
+
+
+def asset_background(source, box, mask, protected, layers, fitted):
+    """Reuse the existing lower-background adapter after source ownership is proved."""
+    from .layerd_adapter import lower_backgrounds
+    from .background_adapter import generate_background_candidates
+    x,y,width,height=box
+    reports=[]
+    for lower in lower_backgrounds(source,layers,mask):
+        candidates,issues=generate_background_candidates(source,mask,protected,
+            lower_rgb=lower.image,lower_provenance_verified=True)
+        reports.append({'provenance':lower.provenance,'issues':issues})
+        if candidates:
+            return candidates[0].image[y:y+height,x:x+width].copy(),{
+                'method':'layerd_lower','metrics':candidates[0].diagnostics,'lower_hypotheses':reports},lower.image[y:y+height,x:x+width]
+    patch=source[y:y+height,x:x+width].copy()
+    local=mask[y:y+height,x:x+width]
+    patch[local]=fitted[local]
+    return patch,{'method':'source_verified_continuous_fit','lower_hypotheses':reports,
+                  'big_lama_calls':0},fitted
 
 
 def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_directory,output,*,strategy='source-halo',sam_directory=None,sam_plan=None):
@@ -232,15 +322,18 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
         folder=output/('candidate-'+str(index));folder.mkdir()
         attempt={'seed_method':metadata['method'],'seed_rgba_sha256':array_sha(seed)}
         try:
-            rgba,segmentation=complete_source_halo(obj,seed,source,protected,surface)
+            owner_obj=localized_owner_object(obj,metadata)
+            rgba,segmentation=complete_source_halo(owner_obj,seed,source,protected,surface)
             write(folder/'segmentation.json',segmentation)
-            restore_box,backing,mask,proof=source_owner(obj,rgba,source,protected,surface)
+            restore_box,backing,mask,proof=source_owner(owner_obj,rgba,source,protected,surface)
+            proof['owner_localization_bbox']=owner_obj.bbox
             bx,by,bw,bh=bounds(rgba[...,3]>0)
             x,y,width,height=restore_box
-            patch=source[y:y+height,x:x+width].copy()
-            patch[mask[y:y+height,x:x+width]]=backing[mask[y:y+height,x:x+width]]
+            patch,background_selection,chosen_background=asset_background(source,restore_box,mask,protected,layer_directory,backing)
             crop=rgba[by:by+bh,bx:bx+bw]
             checked_backing,error,_=backing_from_evidence(source,[bx,by,bw,bh],protected,surface)
+            if background_selection['method']=='layerd_lower':
+                checked_backing=chosen_background[by-y:by-y+bh,bx-x:bx-x+bw]
             alpha=crop[...,3:4]/255;visible=crop[...,3]>0
             recomposed=crop[...,:3]*alpha+checked_backing*(1-alpha)
             p95=float(np.percentile(np.abs(recomposed-source[by:by+bh,bx:bx+bw]).max(2)[visible],95))
@@ -250,11 +343,16 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
             Image.fromarray(source).save(folder/'source.png')
             Image.fromarray(source[y:y+height,x:x+width]).save(folder/'source_crop.png')
             Image.fromarray(patch).save(folder/'written_crop.png')
+            Image.fromarray(chosen_background).save(folder/'background.png')
+            Image.fromarray((mask[y:y+height,x:x+width]*255).astype('uint8')).save(folder/'mask.png')
+            Image.fromarray(crop[...,3]).save(folder/'alpha.png')
+            Image.fromarray(np.clip(np.rint(recomposed),0,255).astype('uint8')).save(folder/'recomposed.png')
             np.savez_compressed(folder/'pixels.npz',mask=mask,patch=patch,bbox=restore_box,
                                 rgba=crop,rgba_bbox=[bx,by,bw,bh],seed_rgba=seed,protected=protected)
             payload={'id':object_id,'kind':'asset','bbox':[bx,by,bw,bh],'restore_bbox':restore_box,
                 'payload':{**metadata,**proof,'method':'source-halo-completion','segmentation':segmentation},
                 'protection_strategy':strategy,'protection_evidence':protection,'sam_evidence':sam_binding,
+                'background_selection':background_selection,
                 'source_asset_definition':obj.model_dump(),'proposed_asset_definition':obj.model_dump(),
                 'baseline_directory':str(baseline),'baseline_scene_sha256':digest(baseline/'scene.json'),
                 'layer_directory':str(Path(layer_directory).resolve()),

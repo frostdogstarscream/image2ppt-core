@@ -1,0 +1,2676 @@
+{
+  "schema": "R1209Acceptance/1",
+  "baseline_commit": "3a370fe6b186970962c6c7ddf54aeda87f74097b",
+  "branch": "codex/r12-09-remaining-asset-recovery",
+  "entrypoint": "product.parallel_pipeline.run",
+  "primary_status": "PASS",
+  "primary_goal": {
+    "textboxes": 7,
+    "retained_pngs": 3,
+    "new_pngs": 3,
+    "total_pngs": 6
+  },
+  "objects": [
+    {
+      "object_id": "a-icon-buildings",
+      "status": "VERIFIED_LOCAL",
+      "strategy": "sam",
+      "seconds": 31.391,
+      "routes": [
+        {
+          "strategy": "source-halo",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-buildings\\source-halo\\runs\\c11df8e700489444\\receipt.json",
+          "attempts": [],
+          "model_calls": 0,
+          "sam_reused_from": null
+        },
+        {
+          "strategy": "verified-backing",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-buildings\\verified-backing\\runs\\9762b713ffc4c7d5\\receipt.json",
+          "attempts": [],
+          "model_calls": 0,
+          "sam_reused_from": null
+        },
+        {
+          "strategy": "sam",
+          "status": "CANDIDATE_READY",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-buildings\\sam\\runs\\a5e57073c7b24144\\receipt.json",
+          "attempts": [
+            {
+              "seed_method": "sam3",
+              "seed_rgba_sha256": "1870b065015fa34c3092f1c544fc55ddb8b167afb8f690e51e3e806639e1d43a",
+              "status": "BLOCKED",
+              "reason": "candidate is missing independently observed strong strokes"
+            },
+            {
+              "seed_method": "sam-source-unmix",
+              "seed_rgba_sha256": "218f7f8c600bb3632e7fa038e2ede3808622d6a142d156e89fe8ec549a5678c6",
+              "background_error": 1.0,
+              "source_recomposition_p95": 3.2494117647058807,
+              "status": "CANDIDATE_READY",
+              "added_source_halo_pixels": 12
+            }
+          ],
+          "model_calls": 0,
+          "sam_reused_from": null
+        }
+      ],
+      "source_definition": {
+        "id": "a-icon-buildings",
+        "description": "Blue outline icon representing city buildings or an industrial park.",
+        "prompt_en": "blue outline icon of city buildings",
+        "bbox": [
+          498,
+          552,
+          68,
+          58
+        ],
+        "layers": [
+          "layer-02.png"
+        ],
+        "text_policy": "exclude_independent_text",
+        "intrinsic_text": "",
+        "replaces": [],
+        "components": [
+          "building shapes"
+        ],
+        "kind": "icon",
+        "parts": [
+          {
+            "name": "building shapes",
+            "bbox": [
+              498,
+              552,
+              68,
+              58
+            ],
+            "layers": [
+              "layer-02.png"
+            ]
+          }
+        ],
+        "exclusions": [],
+        "required_owners": []
+      },
+      "source_unmix": {
+        "method": "source-unmix",
+        "scope": [
+          494,
+          515,
+          82,
+          65
+        ],
+        "ring_error": 1.0,
+        "background_evidence": {
+          "method": "source_lateral_samples"
+        },
+        "old_owner_ids": [],
+        "independent_review_required": true,
+        "source_extent_evidence": {
+          "padding": 8,
+          "search_bbox": [
+            490,
+            516,
+            89,
+            102
+          ],
+          "source_component_bbox": [
+            498,
+            519,
+            74,
+            57
+          ],
+          "source_component_pixels": 1253,
+          "sam_mask_sha256": "3b0b9c08ac345b5181a9e78e90903371fe5e6b431fb9b0943410b771d336cf76",
+          "background": {
+            "method": "source_lateral_samples"
+          },
+          "search_signal_threshold": 40,
+          "scope_only": true,
+          "source_owner_gate_relaxed": false,
+          "failed_scales": []
+        }
+      },
+      "owner_localization_bbox": [
+        498,
+        519,
+        74,
+        57
+      ],
+      "rgba_bbox": [
+        496,
+        517,
+        77,
+        61
+      ],
+      "background": {
+        "method": "layerd_lower",
+        "metrics": {
+          "status": "PASS",
+          "ring_mae": 2.481,
+          "ring_p95": 5.3333,
+          "source_stroke_pixels": 1987,
+          "residual_fraction": 0.0,
+          "reference_note": "Old r7.1 thresholds are migration baselines, not production calibration"
+        },
+        "lower_hypotheses": [
+          {
+            "provenance": {
+              "manifest_sha256": "47b8b1ea2ce737dc39e84e853f6786f098c50bea3532008d65f8a34296363be5",
+              "source_file_sha256": "8110866d8307289d0ebf03559e28626ff312edad9671a86a9ed9b9b5feb4810c",
+              "layers": [
+                {
+                  "file": "layer-00.png",
+                  "sha256": "38d320d6fca0d682784c07aa0225efeee8ac1625262f19d34420202599a2a527",
+                  "z": 0
+                }
+              ],
+              "below_z": 1,
+              "recomposition_mae": 1.252033450450588,
+              "mask_opaque_coverage": 1.0
+            },
+            "issues": []
+          }
+        ]
+      },
+      "rgba_sha256": "2e96f3489de51f9edcb930cfd46b669c53f26b4092177c8c451781e4f42c7aae",
+      "candidate_files": {
+        "alpha.png": "34a1e551b631ca1ab47d347a823852bfeecc971eb5b6147f546ebdc0b8eed9fd",
+        "asset.png": "2e96f3489de51f9edcb930cfd46b669c53f26b4092177c8c451781e4f42c7aae",
+        "background.png": "d629a4836a020a6c09d1f51d70084471ff1e1d18b006d5927205f2cc0cb52dbe",
+        "candidate.json": "67f83edcbc71ce58109c60541b89a8cd8ea46aa5b2380de31d2cc0986c4602ba",
+        "mask.png": "76409ed836bba21639cb17f98add0b50e69ae362585610268e552cb785553ccf",
+        "payload.json": "45e458f0f5735aa78523a9d7a95b5dfe2e98513a6aef509e4fc626295ead5fbb",
+        "pixels.npz": "9d6ef08a7b23685e15b7431a570d89461a301096691cee7113e5042678334ed8",
+        "preflight.json": "9a4ce8099bad5fff18e73ee4da3c04835dc96b7d002a5860434be53e1ff83788",
+        "recomposed.png": "7673ca50637732a6fe9722a5bc4d31e02ba46e213ebd164dea9288739edc03fa",
+        "segmentation.json": "4286327ac232e5522650c56964d8968d1d190c59e14e83f6ee389402fb40b886",
+        "source.png": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "source_crop.png": "b8e9583041022a55154815f6fc22e6109f59b2ec96915278fc8f6f58a7e538d5",
+        "written_crop.png": "662457a3a18c38086227e0989ad175cf78dfaf5eccced1b20c5b3bbae4622a90"
+      },
+      "office": {
+        "status": "PASS",
+        "object_id": "a-icon-buildings",
+        "ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-buildings\\sam\\office\\269b59d4fbab923a\\s\\slideir.json",
+        "artifacts": {
+          "output_dir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-buildings\\sam\\office\\269b59d4fbab923a\\compiled\\2026-11-12T00-52-06-929Z-79c7e4fb",
+          "pptx": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-buildings\\sam\\office\\269b59d4fbab923a\\compiled\\2026-11-12T00-52-06-929Z-79c7e4fb\\deck.pptx",
+          "pptx_sha256": "71b05e8a9ae71637db50a1e7570c56cbd30d3f82deab9ef06b3f94dfc5afadaa",
+          "quality": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-buildings\\sam\\office\\269b59d4fbab923a\\compiled\\2026-11-12T00-52-06-929Z-79c7e4fb\\quality.json",
+          "preview": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-buildings\\sam\\office\\269b59d4fbab923a\\compiled\\2026-11-12T00-52-06-929Z-79c7e4fb\\preview",
+          "slide_count": 1,
+          "preview_origin": "reimported_final_pptx"
+        },
+        "office": {
+          "status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "71b05e8a9ae71637db50a1e7570c56cbd30d3f82deab9ef06b3f94dfc5afadaa",
+          "records": [
+            {
+              "page": 1,
+              "id": "a-icon-buildings",
+              "action": "move-scale",
+              "saved_reopened": true,
+              "outside_pixels": 0
+            },
+            {
+              "page": 1,
+              "id": "a-icon-buildings",
+              "action": "delete",
+              "saved_reopened": true,
+              "outside_pixels": 0
+            }
+          ],
+          "human_acceptance": false,
+          "edit_checked": true,
+          "embedded_alpha_and_visible_rgb_checked": true,
+          "powerpoint_version": "16.0"
+        },
+        "target_residual": {
+          "id": "a-icon-buildings",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "f9f63c69a133388f769959ddc507d650fef239d6b9267edb945adccfcecfc30f",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 2491,
+          "delete_sha256": "c1e19c4b7f000b6c80e1887baab24b6038b19e6f8754375e669b4be5e671bb98",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        "old_text_definitions_preserved": true,
+        "elapsed_seconds": 15.438,
+        "go": "NOT_RUN",
+        "automatic_publication": false
+      }
+    },
+    {
+      "object_id": "a-icon-handshake",
+      "status": "VERIFIED_LOCAL",
+      "strategy": "sam",
+      "seconds": 30.547,
+      "routes": [
+        {
+          "strategy": "source-halo",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-handshake\\source-halo\\runs\\1986e12228df993c\\receipt.json",
+          "attempts": [],
+          "model_calls": 0,
+          "sam_reused_from": null
+        },
+        {
+          "strategy": "verified-backing",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-handshake\\verified-backing\\runs\\28932314ab576a4a\\receipt.json",
+          "attempts": [],
+          "model_calls": 0,
+          "sam_reused_from": null
+        },
+        {
+          "strategy": "sam",
+          "status": "CANDIDATE_READY",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-handshake\\sam\\runs\\262fc892e59e6c29\\receipt.json",
+          "attempts": [
+            {
+              "seed_method": "sam3",
+              "seed_rgba_sha256": "04969e27d503b5211e9efe8f6b15114a9db6a9832db979d0e99709fac321465f",
+              "status": "BLOCKED",
+              "reason": "source owner component escapes localization"
+            },
+            {
+              "seed_method": "sam-source-unmix",
+              "seed_rgba_sha256": "ac39cd2faa4e94e4f5bfee28b16a3561b7142905596c93450322999563a1dc66",
+              "background_error": 1.0,
+              "source_recomposition_p95": 2.8235294117647074,
+              "status": "CANDIDATE_READY",
+              "added_source_halo_pixels": 15
+            }
+          ],
+          "model_calls": 0,
+          "sam_reused_from": null
+        }
+      ],
+      "source_definition": {
+        "id": "a-icon-handshake",
+        "description": "Blue outline icon of a handshake representing cooperation.",
+        "prompt_en": "blue outline icon of a handshake",
+        "bbox": [
+          496,
+          670,
+          76,
+          52
+        ],
+        "layers": [
+          "layer-02.png"
+        ],
+        "text_policy": "exclude_independent_text",
+        "intrinsic_text": "",
+        "replaces": [],
+        "components": [
+          "handshake shape"
+        ],
+        "kind": "icon",
+        "parts": [
+          {
+            "name": "handshake shape",
+            "bbox": [
+              496,
+              670,
+              76,
+              52
+            ],
+            "layers": [
+              "layer-02.png"
+            ]
+          }
+        ],
+        "exclusions": [],
+        "required_owners": []
+      },
+      "source_unmix": {
+        "method": "source-unmix",
+        "scope": [
+          493,
+          632,
+          84,
+          55
+        ],
+        "ring_error": 1.0,
+        "background_evidence": {
+          "method": "source_lateral_samples"
+        },
+        "old_owner_ids": [],
+        "independent_review_required": true,
+        "source_extent_evidence": {
+          "padding": 48,
+          "search_bbox": [
+            447,
+            622,
+            173,
+            148
+          ],
+          "source_component_bbox": [
+            497,
+            636,
+            76,
+            47
+          ],
+          "source_component_pixels": 1199,
+          "sam_mask_sha256": "ec1a8bdfe571379efa8869ac85cb97686ac338b011e7b40803cb53c8ec6f5da2",
+          "background": {
+            "method": "source_lateral_samples"
+          },
+          "search_signal_threshold": 40,
+          "scope_only": true,
+          "source_owner_gate_relaxed": false,
+          "failed_scales": [
+            "source component escapes search window or no independent component",
+            "source component escapes search window or no independent component"
+          ]
+        }
+      },
+      "owner_localization_bbox": [
+        497,
+        636,
+        76,
+        47
+      ],
+      "rgba_bbox": [
+        495,
+        634,
+        80,
+        51
+      ],
+      "background": {
+        "method": "layerd_lower",
+        "metrics": {
+          "status": "PASS",
+          "ring_mae": 2.6421,
+          "ring_p95": 5.3333,
+          "source_stroke_pixels": 1695,
+          "residual_fraction": 0.0,
+          "reference_note": "Old r7.1 thresholds are migration baselines, not production calibration"
+        },
+        "lower_hypotheses": [
+          {
+            "provenance": {
+              "manifest_sha256": "47b8b1ea2ce737dc39e84e853f6786f098c50bea3532008d65f8a34296363be5",
+              "source_file_sha256": "8110866d8307289d0ebf03559e28626ff312edad9671a86a9ed9b9b5feb4810c",
+              "layers": [
+                {
+                  "file": "layer-00.png",
+                  "sha256": "38d320d6fca0d682784c07aa0225efeee8ac1625262f19d34420202599a2a527",
+                  "z": 0
+                }
+              ],
+              "below_z": 1,
+              "recomposition_mae": 1.252033450450588,
+              "mask_opaque_coverage": 1.0
+            },
+            "issues": []
+          }
+        ]
+      },
+      "rgba_sha256": "9ba6ebe6073677b232985c18cc328793997e402fc6cd8184d297d8e3281fd9b0",
+      "candidate_files": {
+        "alpha.png": "9f566a0e772ab71b35c38e3a54de8efe77b164c64087b0026b6fc1e6d848c467",
+        "asset.png": "9ba6ebe6073677b232985c18cc328793997e402fc6cd8184d297d8e3281fd9b0",
+        "background.png": "8d4462b80641b990ffa4de9686e20af170b9a6d8c3347c5285e2016fc911a4ee",
+        "candidate.json": "cd4830e03c2c7237b872b495df3facb787cea61e5715b6930bfb2c623ffcc090",
+        "mask.png": "96e4d568f016b8b726ee79177c721a6a2269780bb1ef7046025858144844c9b6",
+        "payload.json": "3cc68376a973e54a7296e7b34c22659621eb38339182e9ac0f6742b5fcfa994a",
+        "pixels.npz": "7d49aea02e91d7163295529455c2700bc0b39bd8843431672afd23047ce622d1",
+        "preflight.json": "725fe91975a83674f93dbf3d2224efbc5f40e88c5b23589ae2d7e9cd2e940dc4",
+        "recomposed.png": "4d739373a2505da7247d20c6ded7cb7e32315cf69abff48621ead47052f68ab5",
+        "segmentation.json": "9c781e75f9b2152c62df3000fa68cc7b5a7d645665865cd7bb9db65e986bf503",
+        "source.png": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "source_crop.png": "88f70c308902e71bc254bae2900268db12e79d2b93eab99bd52a154b5eec251e",
+        "written_crop.png": "0af7e936a004a61b6da67fb10ee763c3b3e4031f6e6f80a4c5693295310d9f82"
+      },
+      "office": {
+        "status": "PASS",
+        "object_id": "a-icon-handshake",
+        "ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-handshake\\sam\\office\\02e28a8a1e5e9dec\\s\\slideir.json",
+        "artifacts": {
+          "output_dir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-handshake\\sam\\office\\02e28a8a1e5e9dec\\compiled\\2026-11-12T00-52-37-833Z-302cc6ab",
+          "pptx": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-handshake\\sam\\office\\02e28a8a1e5e9dec\\compiled\\2026-11-12T00-52-37-833Z-302cc6ab\\deck.pptx",
+          "pptx_sha256": "6b29b244777745a33eb949c4bca783545db4f8a8cd4633ddf8e94423005eebe9",
+          "quality": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-handshake\\sam\\office\\02e28a8a1e5e9dec\\compiled\\2026-11-12T00-52-37-833Z-302cc6ab\\quality.json",
+          "preview": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-handshake\\sam\\office\\02e28a8a1e5e9dec\\compiled\\2026-11-12T00-52-37-833Z-302cc6ab\\preview",
+          "slide_count": 1,
+          "preview_origin": "reimported_final_pptx"
+        },
+        "office": {
+          "status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "6b29b244777745a33eb949c4bca783545db4f8a8cd4633ddf8e94423005eebe9",
+          "records": [
+            {
+              "page": 1,
+              "id": "a-icon-handshake",
+              "action": "move-scale",
+              "saved_reopened": true,
+              "outside_pixels": 0
+            },
+            {
+              "page": 1,
+              "id": "a-icon-handshake",
+              "action": "delete",
+              "saved_reopened": true,
+              "outside_pixels": 0
+            }
+          ],
+          "human_acceptance": false,
+          "edit_checked": true,
+          "embedded_alpha_and_visible_rgb_checked": true,
+          "powerpoint_version": "16.0"
+        },
+        "target_residual": {
+          "id": "a-icon-handshake",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "00665297e31661dd75b1dbadb3e641851f3940c87e656080fe54cee27eff6e8a",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 2104,
+          "delete_sha256": "ebdf238547d0b4825d80dca94542c458a1062b5ad61918d697c8a7743e0e8753",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        "old_text_definitions_preserved": true,
+        "elapsed_seconds": 15.109,
+        "go": "NOT_RUN",
+        "automatic_publication": false
+      }
+    },
+    {
+      "object_id": "a-icon-compute",
+      "status": "VERIFIED_LOCAL",
+      "strategy": "sam",
+      "seconds": 32.203,
+      "routes": [
+        {
+          "strategy": "source-halo",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-compute\\source-halo\\runs\\2c384fdb3d65fb4f\\receipt.json",
+          "attempts": [],
+          "model_calls": 0,
+          "sam_reused_from": null
+        },
+        {
+          "strategy": "verified-backing",
+          "status": "BLOCKED",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-compute\\verified-backing\\runs\\070825758db773be\\receipt.json",
+          "attempts": [],
+          "model_calls": 0,
+          "sam_reused_from": null
+        },
+        {
+          "strategy": "sam",
+          "status": "CANDIDATE_READY",
+          "receipt": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-compute\\sam\\runs\\39ff2deca15492f1\\receipt.json",
+          "attempts": [
+            {
+              "seed_method": "sam-source-unmix",
+              "seed_rgba_sha256": "5423fc3df90a761eeea66f778a3ca45fa6f5a5a2dce25e355f4be5a3581d4c12",
+              "background_error": 1.5,
+              "source_recomposition_p95": 4.458823529411745,
+              "status": "CANDIDATE_READY",
+              "added_source_halo_pixels": 0
+            }
+          ],
+          "model_calls": 0,
+          "sam_reused_from": null
+        }
+      ],
+      "source_definition": {
+        "id": "a-icon-compute",
+        "description": "Blue outline icon of a server unit representing computing power.",
+        "prompt_en": "blue outline icon of a server unit",
+        "bbox": [
+          76,
+          658,
+          56,
+          48
+        ],
+        "layers": [
+          "layer-02.png"
+        ],
+        "text_policy": "exclude_independent_text",
+        "intrinsic_text": "",
+        "replaces": [],
+        "components": [
+          "server unit shape"
+        ],
+        "kind": "icon",
+        "parts": [
+          {
+            "name": "server unit shape",
+            "bbox": [
+              76,
+              658,
+              56,
+              48
+            ],
+            "layers": [
+              "layer-02.png"
+            ]
+          }
+        ],
+        "exclusions": [],
+        "required_owners": []
+      },
+      "source_unmix": {
+        "method": "source-unmix",
+        "scope": [
+          73,
+          619,
+          67,
+          51
+        ],
+        "ring_error": 1.5,
+        "background_evidence": {
+          "method": "source_lateral_samples"
+        },
+        "old_owner_ids": [],
+        "independent_review_required": true,
+        "source_extent_evidence": {
+          "padding": 8,
+          "search_bbox": [
+            68,
+            615,
+            77,
+            104
+          ],
+          "source_component_bbox": [
+            77,
+            623,
+            59,
+            43
+          ],
+          "source_component_pixels": 1157,
+          "sam_mask_sha256": "0d32b09d674d40b30a1830e063f38826b472d1abf6cd64d49cd545e1fa846a0b",
+          "background": {
+            "method": "source_lateral_samples"
+          },
+          "search_signal_threshold": 40,
+          "scope_only": true,
+          "source_owner_gate_relaxed": false,
+          "failed_scales": []
+        }
+      },
+      "owner_localization_bbox": [
+        77,
+        623,
+        59,
+        43
+      ],
+      "rgba_bbox": [
+        74,
+        621,
+        65,
+        48
+      ],
+      "background": {
+        "method": "layerd_lower",
+        "metrics": {
+          "status": "PASS",
+          "ring_mae": 2.525,
+          "ring_p95": 5.0,
+          "source_stroke_pixels": 1828,
+          "residual_fraction": 0.0,
+          "reference_note": "Old r7.1 thresholds are migration baselines, not production calibration"
+        },
+        "lower_hypotheses": [
+          {
+            "provenance": {
+              "manifest_sha256": "47b8b1ea2ce737dc39e84e853f6786f098c50bea3532008d65f8a34296363be5",
+              "source_file_sha256": "8110866d8307289d0ebf03559e28626ff312edad9671a86a9ed9b9b5feb4810c",
+              "layers": [
+                {
+                  "file": "layer-00.png",
+                  "sha256": "38d320d6fca0d682784c07aa0225efeee8ac1625262f19d34420202599a2a527",
+                  "z": 0
+                }
+              ],
+              "below_z": 1,
+              "recomposition_mae": 1.252033450450588,
+              "mask_opaque_coverage": 1.0
+            },
+            "issues": []
+          }
+        ]
+      },
+      "rgba_sha256": "0761d7cc45451d4e8aa0fb13e3218c10d6f72f8c9abfacfd4c7efb1c919d55f5",
+      "candidate_files": {
+        "alpha.png": "2c572a4caa1c37a740f2c4db7c342a12e9231f2e8188ccc8eeb0010c6c130ec3",
+        "asset.png": "0761d7cc45451d4e8aa0fb13e3218c10d6f72f8c9abfacfd4c7efb1c919d55f5",
+        "background.png": "29e7e6e4b2b561dc2d0ea231d6190f96df31772a4170343f44216ba9c0f6f6ac",
+        "candidate.json": "cb6f826f5a5998361a15a4014dfc4a8602ac57a5d4af93c82be4bec5243e494e",
+        "mask.png": "f1fdd3e948a847b1fbd2ba5a101e7204158ffa32209bf033d93c4d8461213423",
+        "payload.json": "568d5ec34d7c8e2f0909ed4c32fa335c715679b42d1b5441be9411579aeb6e6d",
+        "pixels.npz": "b946040ae3af50a60e928966f3c7169367a3dff62a7a1945df39e26fa3e47d40",
+        "preflight.json": "15d61a263938d86364be263fd390764b5aec65d84071bb8f2e2f69c4b767963d",
+        "recomposed.png": "59109e0ec5b6a5538feaddc44867fcb6fe5ef5a16c45004cfa30537449503205",
+        "segmentation.json": "f07051051f7b27ea42a126c98df9934a85566d368674e9cf73bf4efb2039525a",
+        "source.png": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "source_crop.png": "36c7a7a349589074128922dedb489c36b824e0f2e6aec9cc290b374705ef1f96",
+        "written_crop.png": "a470404dd9411bc6acbd496f8ec0cf78bcf5d59fa08941fdb3a921b05d14e735"
+      },
+      "office": {
+        "status": "PASS",
+        "object_id": "a-icon-compute",
+        "ir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-compute\\sam\\office\\7a421442d3e1bdd8\\s\\slideir.json",
+        "artifacts": {
+          "output_dir": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-compute\\sam\\office\\7a421442d3e1bdd8\\compiled\\2026-11-12T00-53-08-936Z-cdefdca4",
+          "pptx": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-compute\\sam\\office\\7a421442d3e1bdd8\\compiled\\2026-11-12T00-53-08-936Z-cdefdca4\\deck.pptx",
+          "pptx_sha256": "6b63a7c6d8e062f35b8c990dfc157072e3ab70c16bc30c4bc8b33d9eb03972de",
+          "quality": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-compute\\sam\\office\\7a421442d3e1bdd8\\compiled\\2026-11-12T00-53-08-936Z-cdefdca4\\quality.json",
+          "preview": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-batch\\objects\\a-icon-compute\\sam\\office\\7a421442d3e1bdd8\\compiled\\2026-11-12T00-53-08-936Z-cdefdca4\\preview",
+          "slide_count": 1,
+          "preview_origin": "reimported_final_pptx"
+        },
+        "office": {
+          "status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "6b63a7c6d8e062f35b8c990dfc157072e3ab70c16bc30c4bc8b33d9eb03972de",
+          "records": [
+            {
+              "page": 1,
+              "id": "a-icon-compute",
+              "action": "move-scale",
+              "saved_reopened": true,
+              "outside_pixels": 0
+            },
+            {
+              "page": 1,
+              "id": "a-icon-compute",
+              "action": "delete",
+              "saved_reopened": true,
+              "outside_pixels": 0
+            }
+          ],
+          "human_acceptance": false,
+          "edit_checked": true,
+          "embedded_alpha_and_visible_rgb_checked": true,
+          "powerpoint_version": "16.0"
+        },
+        "target_residual": {
+          "id": "a-icon-compute",
+          "residual_check_status": "PASS",
+          "residual_pixels_confirmed": 0,
+          "reference_sha256": "7023e5174c0a4cdb5718e26679d52b93a13b2ba47f99663a44df7c5c5e6651e1",
+          "unexplained_pixels": 0,
+          "checked_owner_pixels": 2313,
+          "delete_sha256": "42f459f7d7be5fbd02a5e088ac28bb6ad449e1fcc0349aef1d722dd1520b7614",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "tolerance_rgb": 8,
+          "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+        },
+        "old_text_definitions_preserved": true,
+        "elapsed_seconds": 16.218,
+        "go": "NOT_RUN",
+        "automatic_publication": false
+      }
+    }
+  ],
+  "preservation": {
+    "all_text_evidence_equal": true,
+    "all_prior_selected_records_equal": true,
+    "all_prior_native_nodes_equal": true,
+    "prior_png_hashes": {
+      "a-icon-layers": "5c7b9604967452c8bd1d91a6ec7d76be4ef2751721688bd7cde1e0db83761fda",
+      "a-icon-cloud-server": "7f54826cdbc45be74ac2eb5d7cd5bc888317edcfebd28a8be0c35866b75cb2dd",
+      "a-icon-database-sync": "2b0beb46d5fffa80f6fcd096b82907c2e69d9e1b8858555f75797ddcf69443fa"
+    },
+    "prior_committed_files": 527
+  },
+  "page5_preservation": {
+    "committed_files_verified": 739,
+    "textboxes": 8,
+    "pngs": 9,
+    "new_office_or_go_calls": 0,
+    "pptx_sha256": "a899258ad6eab791b073f29fd76b496863ef5f2d6399bed7360af0e97339a718"
+  },
+  "quality_arbitration": {
+    "schema_fields_added": false,
+    "italic_font_minor_accepted": true,
+    "graphic_italic_waiver_rejected": true,
+    "original_raw_replay": {
+      "raw": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1208-verified-final\\cache\\model-calls\\raw\\a74436e0b574425121c6084aefbda4133ef055bdbf70bdef1c92ecc80d41711e.json",
+      "sha256": "00f4b81e67fc2926b216104ba935d9ceea486482d01ece1fd164d642718970dd",
+      "parsed": {
+        "schema": "VisualReview/1",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "plan_sha256": "2a4f25a9a6a5d60bff7ec01ecaa519728b65584f0d5d6a5a5fa731c8ea32378d",
+        "preview_sha256": "1d1fa1e0df77cc6c1cc167d05bce4b381c56f557545c2ac740d17d4808bdb076",
+        "passed": true,
+        "checked": [
+          "wording",
+          "structure",
+          "font",
+          "emphasis",
+          "layout",
+          "graphics"
+        ],
+        "findings": [],
+        "minor_deviations": [
+          {
+            "category": "font",
+            "description": "t-09、t-21 的“01/05”数字字形与源图斜体数字略有差异，最终为直立粗体，字重与颜色一致。",
+            "node_ids": [
+              "t-09",
+              "t-21"
+            ],
+            "aspect": "italic_only",
+            "source_bbox": [
+              633.0,
+              186.0,
+              58.0,
+              55.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "仅斜体差异，用户已豁免；不影响阅读与识别。"
+          },
+          {
+            "category": "layout",
+            "description": "t-11、t-14、t-20 等描述文字在最终渲染中行高略增，文字基线有 1-2px 级偏移。",
+            "node_ids": [
+              "t-11",
+              "t-14",
+              "t-20"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              1113.0,
+              192.0,
+              418.0,
+              41.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "普通用户不易察觉的微小位置差异，无碰撞或裁切。"
+          },
+          {
+            "category": "graphics",
+            "description": "三个图标 PNG 边缘抗锯齿与源图有极轻微差异，删除测试右列无残留字形或半图。",
+            "node_ids": [
+              "a-icon-layers",
+              "a-icon-cloud-server",
+              "a-icon-database-sync"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              498.0,
+              187.0,
+              69.0,
+              57.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "抗锯齿级别差异，图形完整、颜色正确、透明背景正常。"
+          }
+        ]
+      },
+      "model_calls": 0,
+      "status": "SCHEMA_VALIDATED",
+      "published": false
+    }
+  },
+  "agent": {
+    "status": "CANDIDATE_READY",
+    "model_calls": 2,
+    "session": {
+      "schema": "RegionalRepairSession/1",
+      "binding": {
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "scene_sha256": "ec273bcfbb78ac617ad32e1f699a8c692595d85d5d8df2f66cf062ddf11a6be3",
+        "object_id": "a-icon-handshake",
+        "failure_hashes": [
+          "3ec49c709042e83d8529aafd58467e5286bd7c78dc504ab1257f7d436e2782ef"
+        ],
+        "diagnostic_images": {},
+        "skill_sha256": "0d009bbb1c3ce219abe28d5880d0b3eed050bf1426bc0bd801ebcd96424fdf28",
+        "runtime_sha256": "91315a8cf94f06ae24ebef11083bf6e5227edbb531b9d735feca0e445fc029a0",
+        "tools": {
+          "retry_asset_extraction": "5bf4a141530ba45ec4175f1f4275f4690783dd3868e9c196d357ff52dbf5566b"
+        },
+        "validation_sha256": "7ba43c7082f2672b9de1ba2097f0d636d5d088bf594be89454657aa17bc9f4fd"
+      },
+      "events": [
+        {
+          "decision": {
+            "schema": "RegionalRepairDecision/1",
+            "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+            "scene_sha256": "ec273bcfbb78ac617ad32e1f699a8c692595d85d5d8df2f66cf062ddf11a6be3",
+            "evidence_sha256": "dbab959fd31e6fc61fac5e4db871e75f04f0dc978b71f2f700401ed6cfa16b8d",
+            "object_id": "a-icon-handshake",
+            "action": "execute_tool",
+            "tool": "retry_asset_extraction",
+            "reason": "The previous SAM extraction was blocked because the source owner component escaped localization and the mask cut the foreground. The handshake icon is a complete semantic asset that requires an independent transparent PNG with verified source coverage. Retrying asset extraction allows the host to re-evaluate the LayerD/source evidence to establish a complete matte that includes the full handshake shape without clipping, resolving the 'source owner component escapes localization' failure."
+          },
+          "tool": "retry_asset_extraction",
+          "result": {
+            "status": "CANDIDATE_READY",
+            "representation": "TRANSPARENT_PNG",
+            "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1",
+            "candidate_scene": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\candidate-scene.json",
+            "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+            "scene_sha256": "ec273bcfbb78ac617ad32e1f699a8c692595d85d5d8df2f66cf062ddf11a6be3",
+            "checks": {
+              "source_binding": "PASS",
+              "content_verification": "PASS",
+              "owner_coverage": "PASS",
+              "protected_peer_integrity": "PASS",
+              "background_proof": "PASS",
+              "region_atomicity": "PASS"
+            },
+            "preview_files": [
+              {
+                "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\source-region.png",
+                "role": "source_region"
+              },
+              {
+                "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\asset-preview.png",
+                "role": "transparent_asset_preview"
+              },
+              {
+                "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\deleted-region.png",
+                "role": "backing_after_asset_removal"
+              }
+            ],
+            "office": "NOT_RUN",
+            "independent_visual_review": "NOT_RUN",
+            "published": false,
+            "files": {
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\action-result.json": "599d6c6595cd34b2460c6583c945616b9dedc083f27f91cc1f2fff6ab6365358",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\asset-independent-checks.json": "b20d1bb1e6a235904bfb33e2b3a5cd82e0b4d510e1cf3806163f55807228fe62",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\asset-preview.png": "3bd46c0c6016a6b6f939ff0fd261f12605766a93235ed8d54a09eb1ebe039249",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\candidate-scene.json": "8cdeb686932a4ac283b73cb5e91a69c2cbfb0436f5b83aa69cdc5747f1d80aec",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\deleted-region.png": "8ae0fc8a1bfeba150076e6362eed72a087f7e4af6940dba9e02ce11238a48854",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\source-region.png": "5fe6a0fee456fdf395b4c51d1e596591e68488c0369034aa396b55fd98eeb5d5",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\tool-result.json": "ccaed20d3a6588c1a46bb6714c786cb3ff9b3ff947df6d991a9437a4be2ea6ab",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\latest.json": "76f7ee4ad919c8cdb1388ee8b9fb7c01dd9fff25df54b4ff37fb7b9660b7fae6",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\asset-independent-checks.json": "b20d1bb1e6a235904bfb33e2b3a5cd82e0b4d510e1cf3806163f55807228fe62",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\asset-preview.png": "3bd46c0c6016a6b6f939ff0fd261f12605766a93235ed8d54a09eb1ebe039249",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\candidate-scene.json": "8cdeb686932a4ac283b73cb5e91a69c2cbfb0436f5b83aa69cdc5747f1d80aec",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\deleted-region.png": "8ae0fc8a1bfeba150076e6362eed72a087f7e4af6940dba9e02ce11238a48854",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\difference.json": "1d02cd64b517c5c717f8be8bbdb6c860cd8594ed72ae86349b2effa67acad923",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\receipt.json": "2bfedf336ce54bcd4f1eed44698b0435ea4749c28b1f5cba3605b33abfb806a7",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\sam-plan.json": "8111095db8d21402ecb922c0e622a4946f90a89e0bc090e707e701e89a046b80",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\source-region.png": "5fe6a0fee456fdf395b4c51d1e596591e68488c0369034aa396b55fd98eeb5d5",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\hashes.json": "00b6d7bb49a596648ca43a26bfb4b2e0c36a9b0276821ebdaf968f937b3c4f22",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\protection.json": "e2a330314dfb9374817428db24886d6aa4d26c05f5f1394d5382416e7248a634",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\protection.npz": "2041e8cc0c3065e3cec3bc50bb9fe5b119740c8d4274aafb49ab51c2d34a1939",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\result.json": "b782a4854487550cb884c18e3d6e259689e9e5e47ad49309eb2b2641b5e0d6c8",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\scene.json": "8cdeb686932a4ac283b73cb5e91a69c2cbfb0436f5b83aa69cdc5747f1d80aec",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-0\\blocked.json": "a1765b111cf04c5a7cafa1d16dee89c198bd961af19113c5ee3014f63791cb8b",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-0\\segmentation.json": "6f77d5dc90506d9381aa4fe00dc862295836357e28b2814abf73e0931a92820e",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\alpha.png": "9f566a0e772ab71b35c38e3a54de8efe77b164c64087b0026b6fc1e6d848c467",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\asset.png": "9ba6ebe6073677b232985c18cc328793997e402fc6cd8184d297d8e3281fd9b0",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\background.png": "8d4462b80641b990ffa4de9686e20af170b9a6d8c3347c5285e2016fc911a4ee",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\candidate.json": "ee7ca3573af3ed764e85b5bfd44305a330887045bf03a6d15df29b0a5ba092d8",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\mask.png": "96e4d568f016b8b726ee79177c721a6a2269780bb1ef7046025858144844c9b6",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\payload.json": "322dca94379fae4c44b2dcb3fa1655faaa1f57a6f8157cdf57432b02995f6c91",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\pixels.npz": "48d9ee44f9cabed75212f61c6bb22f290aa9eca9aa7f6715336fab1d61711fff",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\preflight.json": "fd7677c63f685579ad91fc8dce54ddd881847cf25f01260cb7ba99decd9316e6",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\recomposed.png": "4d739373a2505da7247d20c6ded7cb7e32315cf69abff48621ead47052f68ab5",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\segmentation.json": "b79524efb097b710b1b15776c1b581d2add2517d7efd9b3dd89c84d9b38b6bc1",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\source.png": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\source_crop.png": "88f70c308902e71bc254bae2900268db12e79d2b93eab99bd52a154b5eec251e",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\written_crop.png": "0af7e936a004a61b6da67fb10ee763c3b3e4031f6e6f80a4c5693295310d9f82",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\sam\\20dd18083fdb3dd6ef3d\\a-icon-handshake.json": "3aab09c3d4b0df9d3a92b180c02a236684ebfd0bed0d11aab99ad29050f9917e",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\sam\\20dd18083fdb3dd6ef3d\\a-icon-handshake.npz": "7017001008d9aca1a9250f3a4af034975be14fa5a4f902de1fade41f6311a55b",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\sam\\20dd18083fdb3dd6ef3d\\raw-a-icon-handshake.json": "f63723a7dee0a30d6ebd1cfd5b27040a2cf8a79a48ae75c98cb9b09598757be0",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\sam\\20dd18083fdb3dd6ef3d\\remote-job.json": "8bdcbb6610d70d35e01895f07c5a5a842028c05157464b2bd8c08367b1f98799",
+              "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\sam\\20dd18083fdb3dd6ef3d\\remote-status.json": "2c3537f10c7f2249930c912f8e1b344d8b808e767ba9112fb17a54f09d2fa998"
+            }
+          }
+        },
+        {
+          "decision": {
+            "schema": "RegionalRepairDecision/1",
+            "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+            "scene_sha256": "ec273bcfbb78ac617ad32e1f699a8c692595d85d5d8df2f66cf062ddf11a6be3",
+            "evidence_sha256": "dbab959fd31e6fc61fac5e4db871e75f04f0dc978b71f2f700401ed6cfa16b8d",
+            "object_id": "a-icon-handshake",
+            "action": "accept_candidate",
+            "tool": null,
+            "reason": "The retry_asset_extraction tool returned CANDIDATE_READY with all independent checks (source_binding, content_verification, owner_coverage, protected_peer_integrity, background_proof, region_atomicity) passing. The transparent_asset_preview shows the complete handshake icon without clipping, and the backing_after_asset_removal preview confirms clean removal from the source region. Per policy, when a tool reports CANDIDATE_READY, the next step is to accept the candidate pending Office and Go validation."
+          }
+        }
+      ],
+      "result": {
+        "status": "CANDIDATE_READY",
+        "published": false,
+        "human_acceptance": false,
+        "selected": {
+          "status": "CANDIDATE_READY",
+          "representation": "TRANSPARENT_PNG",
+          "candidate_directory": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1",
+          "candidate_scene": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\candidate-scene.json",
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "scene_sha256": "ec273bcfbb78ac617ad32e1f699a8c692595d85d5d8df2f66cf062ddf11a6be3",
+          "checks": {
+            "source_binding": "PASS",
+            "content_verification": "PASS",
+            "owner_coverage": "PASS",
+            "protected_peer_integrity": "PASS",
+            "background_proof": "PASS",
+            "region_atomicity": "PASS"
+          },
+          "preview_files": [
+            {
+              "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\source-region.png",
+              "role": "source_region"
+            },
+            {
+              "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\asset-preview.png",
+              "role": "transparent_asset_preview"
+            },
+            {
+              "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\deleted-region.png",
+              "role": "backing_after_asset_removal"
+            }
+          ],
+          "office": "NOT_RUN",
+          "independent_visual_review": "NOT_RUN",
+          "published": false,
+          "files": {
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\action-result.json": "599d6c6595cd34b2460c6583c945616b9dedc083f27f91cc1f2fff6ab6365358",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\asset-independent-checks.json": "b20d1bb1e6a235904bfb33e2b3a5cd82e0b4d510e1cf3806163f55807228fe62",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\asset-preview.png": "3bd46c0c6016a6b6f939ff0fd261f12605766a93235ed8d54a09eb1ebe039249",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\candidate-scene.json": "8cdeb686932a4ac283b73cb5e91a69c2cbfb0436f5b83aa69cdc5747f1d80aec",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\deleted-region.png": "8ae0fc8a1bfeba150076e6362eed72a087f7e4af6940dba9e02ce11238a48854",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\source-region.png": "5fe6a0fee456fdf395b4c51d1e596591e68488c0369034aa396b55fd98eeb5d5",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\tool-result.json": "ccaed20d3a6588c1a46bb6714c786cb3ff9b3ff947df6d991a9437a4be2ea6ab",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\latest.json": "76f7ee4ad919c8cdb1388ee8b9fb7c01dd9fff25df54b4ff37fb7b9660b7fae6",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\asset-independent-checks.json": "b20d1bb1e6a235904bfb33e2b3a5cd82e0b4d510e1cf3806163f55807228fe62",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\asset-preview.png": "3bd46c0c6016a6b6f939ff0fd261f12605766a93235ed8d54a09eb1ebe039249",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\candidate-scene.json": "8cdeb686932a4ac283b73cb5e91a69c2cbfb0436f5b83aa69cdc5747f1d80aec",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\deleted-region.png": "8ae0fc8a1bfeba150076e6362eed72a087f7e4af6940dba9e02ce11238a48854",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\difference.json": "1d02cd64b517c5c717f8be8bbdb6c860cd8594ed72ae86349b2effa67acad923",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\receipt.json": "2bfedf336ce54bcd4f1eed44698b0435ea4749c28b1f5cba3605b33abfb806a7",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\sam-plan.json": "8111095db8d21402ecb922c0e622a4946f90a89e0bc090e707e701e89a046b80",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\source-region.png": "5fe6a0fee456fdf395b4c51d1e596591e68488c0369034aa396b55fd98eeb5d5",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\hashes.json": "00b6d7bb49a596648ca43a26bfb4b2e0c36a9b0276821ebdaf968f937b3c4f22",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\protection.json": "e2a330314dfb9374817428db24886d6aa4d26c05f5f1394d5382416e7248a634",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\protection.npz": "2041e8cc0c3065e3cec3bc50bb9fe5b119740c8d4274aafb49ab51c2d34a1939",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\result.json": "b782a4854487550cb884c18e3d6e259689e9e5e47ad49309eb2b2641b5e0d6c8",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\scene.json": "8cdeb686932a4ac283b73cb5e91a69c2cbfb0436f5b83aa69cdc5747f1d80aec",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-0\\blocked.json": "a1765b111cf04c5a7cafa1d16dee89c198bd961af19113c5ee3014f63791cb8b",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-0\\segmentation.json": "6f77d5dc90506d9381aa4fe00dc862295836357e28b2814abf73e0931a92820e",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\alpha.png": "9f566a0e772ab71b35c38e3a54de8efe77b164c64087b0026b6fc1e6d848c467",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\asset.png": "9ba6ebe6073677b232985c18cc328793997e402fc6cd8184d297d8e3281fd9b0",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\background.png": "8d4462b80641b990ffa4de9686e20af170b9a6d8c3347c5285e2016fc911a4ee",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\candidate.json": "ee7ca3573af3ed764e85b5bfd44305a330887045bf03a6d15df29b0a5ba092d8",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\mask.png": "96e4d568f016b8b726ee79177c721a6a2269780bb1ef7046025858144844c9b6",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\payload.json": "322dca94379fae4c44b2dcb3fa1655faaa1f57a6f8157cdf57432b02995f6c91",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\pixels.npz": "48d9ee44f9cabed75212f61c6bb22f290aa9eca9aa7f6715336fab1d61711fff",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\preflight.json": "fd7677c63f685579ad91fc8dce54ddd881847cf25f01260cb7ba99decd9316e6",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\recomposed.png": "4d739373a2505da7247d20c6ded7cb7e32315cf69abff48621ead47052f68ab5",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\segmentation.json": "b79524efb097b710b1b15776c1b581d2add2517d7efd9b3dd89c84d9b38b6bc1",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\source.png": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\source_crop.png": "88f70c308902e71bc254bae2900268db12e79d2b93eab99bd52a154b5eec251e",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\runs\\dc2c8f7741fe06a4\\c\\candidate-1\\written_crop.png": "0af7e936a004a61b6da67fb10ee763c3b3e4031f6e6f80a4c5693295310d9f82",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\sam\\20dd18083fdb3dd6ef3d\\a-icon-handshake.json": "3aab09c3d4b0df9d3a92b180c02a236684ebfd0bed0d11aab99ad29050f9917e",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\sam\\20dd18083fdb3dd6ef3d\\a-icon-handshake.npz": "7017001008d9aca1a9250f3a4af034975be14fa5a4f902de1fade41f6311a55b",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\sam\\20dd18083fdb3dd6ef3d\\raw-a-icon-handshake.json": "f63723a7dee0a30d6ebd1cfd5b27040a2cf8a79a48ae75c98cb9b09598757be0",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\sam\\20dd18083fdb3dd6ef3d\\remote-job.json": "8bdcbb6610d70d35e01895f07c5a5a842028c05157464b2bd8c08367b1f98799",
+            "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-agent\\agent\\t-7e3febcbb470\\retry\\sam\\20dd18083fdb3dd6ef3d\\remote-status.json": "2c3537f10c7f2249930c912f8e1b344d8b808e767ba9112fb17a54f09d2fa998"
+          }
+        },
+        "reason": "The retry_asset_extraction tool returned CANDIDATE_READY with all independent checks (source_binding, content_verification, owner_coverage, protected_peer_integrity, background_proof, region_atomicity) passing. The transparent_asset_preview shows the complete handshake icon without clipping, and the backing_after_asset_removal preview confirms clean removal from the source region. Per policy, when a tool reports CANDIDATE_READY, the next step is to accept the candidate pending Office and Go validation."
+      },
+      "model_decisions": 2,
+      "decisions_requested": 2,
+      "tools_executed": 1
+    },
+    "office_or_publication_authority": false
+  },
+  "cache": {
+    "first_l1_l2_seconds": 94.141,
+    "identical_l1_l2_seconds": 8.922,
+    "l1_hits": 9,
+    "l1_lookups": 9,
+    "l2_hits": 3,
+    "l2_lookups": 3,
+    "new_model_calls_on_hit": 0,
+    "new_office_calls_on_hit": 0,
+    "external_sam_files_hash_bound": true
+  },
+  "primary": {
+    "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-final",
+    "committed_files_verified": 647,
+    "code_manifest_matches_current": true,
+    "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+    "perception_mode": "hash-bound-recorded-branches",
+    "background_candidates": 0,
+    "lower_hypotheses_assessed": 0,
+    "lama_candidates": 0,
+    "compiler_packages": 3,
+    "office_packages": 1,
+    "replacement_packages": 1,
+    "regional_wall_seconds": 153.4,
+    "editable_texts": 7,
+    "editable_images": 6,
+    "office_pass": true,
+    "final_office_actions": 26,
+    "local_hard_gate_receipts": [
+      {
+        "id": "t-28",
+        "acceptance_sha256": "915fb590b00fd055708148517a14ae2a06d33720724842fec565aeaefc0ebfc2",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-09",
+        "acceptance_sha256": "65181cf947a2768bb47fcc5bae5156aa13c7e34ade3897e94fcfa8472a5d2767",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-11",
+        "acceptance_sha256": "e658e0459944d3c74f02518d5156510a07b8c76f56fe2cda50cc217ee39b220a",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-14",
+        "acceptance_sha256": "415bb17adff4a54dca8f6adaa76e868488d4179c77ea3255d9ea690f389a1a51",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-20",
+        "acceptance_sha256": "57380f959ca75706eb8c4f5ce01af5f383a73d5e0a6ee372b7dbc28b88f68b6f",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-21",
+        "acceptance_sha256": "239207732b7f82e27b382ee48c211de2a4baa3ccfc4f3791e28d66b0c7f8b129",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      },
+      {
+        "id": "t-22",
+        "acceptance_sha256": "463d502afd6a1bfee4d23738f4944de69d96b5a502a5cb0bd55e76f372df2e19",
+        "actual_deleted_source_signal_pixels": 0,
+        "replacement_status": "PASS"
+      }
+    ],
+    "outside_pixels": 0,
+    "visual": [
+      {
+        "schema": "VisualReview/1",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "plan_sha256": "98d6dc89b13f77b125ba5dfaccd2bb4b0dfdf5b2ea9e6ded3acacd642984f457",
+        "preview_sha256": "602b83d1cc24421651e14f819e0aad2366b598e4336a932deb9c0a60e20fa8ec",
+        "passed": true,
+        "checked": [
+          "wording",
+          "structure",
+          "font",
+          "emphasis",
+          "layout",
+          "graphics"
+        ],
+        "findings": [],
+        "minor_deviations": [
+          {
+            "category": "font",
+            "description": "t-09、t-21 的“01”“05”在最终 PPT 中为常规字重，源图为较粗的斜体数字；t-28 的“02”字重与源图接近。",
+            "node_ids": [
+              "t-09",
+              "t-21"
+            ],
+            "aspect": "italic_only",
+            "source_bbox": [
+              633.0,
+              186.0,
+              58.0,
+              55.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "属于已获用户豁免的斜体/非斜体字体差异，数字内容、颜色、位置与层级均正确，不影响阅读。"
+          },
+          {
+            "category": "layout",
+            "description": "t-09、t-21、t-22 的原生文本框较源图字形范围略高/略宽（如 t-22 高度 52 对源 43），文字基线基本对齐。",
+            "node_ids": [
+              "t-09",
+              "t-21",
+              "t-22"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              719.0,
+              632.0,
+              326.0,
+              52.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "差异来自安装字体行距与字面框，实际渲染文字位置与源图一致，无碰撞、裁切或溢出。"
+          },
+          {
+            "category": "graphics",
+            "description": "a-icon-layers、a-icon-cloud-server、a-icon-database-sync、a-icon-buildings、a-icon-handshake、a-icon-compute 的透明 PNG 在最终图中与源图轮廓、颜色一致，删除测试右列仅余极淡背景残影，无原始字形或半图残留。",
+            "node_ids": [
+              "a-icon-layers",
+              "a-icon-cloud-server",
+              "a-icon-database-sync",
+              "a-icon-buildings",
+              "a-icon-handshake",
+              "a-icon-compute"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              495.0,
+              296.0,
+              77.0,
+              61.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "残影为源图抗锯齿/背景纹理的极低对比度痕迹，普通用户不可察觉，不影响图标完整性与归属。"
+          }
+        ],
+        "status": "PASS"
+      }
+    ],
+    "execution_cost": {
+      "limits": {
+        "region_candidates": 2,
+        "complex_region_candidates": 4,
+        "repair_rounds": 1,
+        "model_calls": 12,
+        "office_validations": 60,
+        "max_seconds": 2400,
+        "cost_units": 120.0
+      },
+      "counts": {
+        "model_calls": 1,
+        "office_validations": 2,
+        "background_candidates": 0,
+        "compiler_calls": 3
+      },
+      "cost_units": 7.0,
+      "cost_unit_definition": {
+        "model_calls": 5.0,
+        "office_validations": 1.0,
+        "background_candidates": 0.05,
+        "compiler_calls": 0.0
+      },
+      "elapsed_seconds": 141.8907709121704
+    },
+    "workflow_states": {
+      "candidate_generation": "COMPLETED",
+      "regional_commit": "COMPLETED",
+      "final_qa": "PASS",
+      "automatic_publication": "GATED"
+    },
+    "verified_regions": [
+      {
+        "object_id": "t-28",
+        "quality": "ACCEPT",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-09",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-11",
+        "quality": "ACCEPT",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-14",
+        "quality": "ACCEPT",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-20",
+        "quality": "ACCEPT",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-21",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      },
+      {
+        "object_id": "t-22",
+        "quality": "ACCEPT_WITH_MINOR_DEVIATION",
+        "early_stop": {
+          "reason": "hard gates and real editing passed",
+          "background_candidates_consumed": 1,
+          "further_candidates_requested": false
+        },
+        "failure": null
+      }
+    ],
+    "artifacts": {
+      "page-01.png": "602b83d1cc24421651e14f819e0aad2366b598e4336a932deb9c0a60e20fa8ec",
+      "result.pptx": "eaa6c7660fbe295afc916ed57340aa8c034ef8342c0e198debf766999137ec99",
+      "stable-fallback.pptx": "ca512e4fe11f8b5e6ae14c607bdce746581dbfeb24b31e208351e9c50f42448b"
+    }
+  },
+  "primary_residuals": {
+    "schema": "SourceOwnerResiduals/1",
+    "records": [
+      {
+        "id": "t-28",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "c4fe93f73b7ec21f1eedd6c36a15ceeca24299f42ff03b3d61d50fd43448ee6a",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 495,
+        "delete_sha256": "b615f59407aa0e2075c31d853d26ac536a0931a62548d2df68d8e0b1f56ea1ed",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-09",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "1958e8d8f593859272e09210f943fb28e9313848a0cad139e44dc4d9a14759ef",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 1418,
+        "delete_sha256": "469c42d744f92629deab913f0bd84fc94539c2db170ee53ee5e9e92ee7885de1",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-11",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "ff986d671729a022f99afd58773f98fbeedca941b3e129110a856dbe45531838",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 9889,
+        "delete_sha256": "1a8cf15f936174ce9f4f9e4bdcb29b05350a348fe5d258485f44aa36a46e3b1b",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-14",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "5a3dac8514229cec736c42765cd4a2e29253b22d558309d442f643ffbfc12185",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 11954,
+        "delete_sha256": "3523bc449b6be7411f4ca68eff96ad08005a51263cc7e060f9467d729ef401cf",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-20",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "32dcc8645e7a39dfb26756c2aedbd8a97a25feaf169ab0fb3e14d7eaebf0dd4d",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 10499,
+        "delete_sha256": "f64f47bff1985a5d50fd840a8e35f2785ea799543a68d98c3e1acf4203c969ad",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-21",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "f07db209772363c881f676d5611179e98ac2711b705db0e991cab22c0cd401c2",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 1648,
+        "delete_sha256": "195985cf0fd1856a6d5aacb72f69a302f725368c14a2fccca33ebdebd488b256",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "t-22",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "408d754b674266121d2d9313b7bcbbaea403d579c64e8435d33f4a9de4850ca3",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 10912,
+        "delete_sha256": "0f55459e71d65f1d28d0bc8308e81b7150eda2de4593427767242973cebb8856",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "a-icon-layers",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "0c57809d821fd56ef3fa81de3fa98b3a94f237f4799e39530ef054659a3413e2",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 1774,
+        "delete_sha256": "e3c9542340ee828b3290f2e16438afd7fa320f471284fe6531cf6ac513a006bc",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "a-icon-cloud-server",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "2408a28f8eaf8271b9ac2b4b0b6358c6c45ac692ae11986cde115238498af16e",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 2078,
+        "delete_sha256": "211ee74b0551f6fd15a94f1e9a5975e3b22463c92256b28a4711075cf067c11a",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "a-icon-database-sync",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "15f5a84a99d65abef30f404e52f68d797487414f62e0f72886832a4dfe71c6d7",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 2223,
+        "delete_sha256": "d1d0b43507a32ded46d5904e0b33241fe6fb32a74e2400fc8288fee37d5050c4",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "a-icon-buildings",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "f9f63c69a133388f769959ddc507d650fef239d6b9267edb945adccfcecfc30f",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 2491,
+        "delete_sha256": "1bc15bdbd9dafb1c6ccc79afbc37b96012a89e7cd5bca662a8b80fac95afb9de",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "a-icon-handshake",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "00665297e31661dd75b1dbadb3e641851f3940c87e656080fe54cee27eff6e8a",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 2104,
+        "delete_sha256": "158f64d64891ab0c641f10b6823c98e16a3bd9825f12f8535b5afc7fff2bf5da",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      },
+      {
+        "id": "a-icon-compute",
+        "residual_check_status": "PASS",
+        "residual_pixels_confirmed": 0,
+        "reference_sha256": "7023e5174c0a4cdb5718e26679d52b93a13b2ba47f99663a44df7c5c5e6651e1",
+        "unexplained_pixels": 0,
+        "checked_owner_pixels": 2313,
+        "delete_sha256": "42f459f7d7be5fbd02a5e088ac28bb6ad449e1fcc0349aef1d722dd1520b7614",
+        "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+        "tolerance_rgb": 8,
+        "scope": "proven source-owner pixels excluding other staged owners; semantic completeness needs independent review"
+      }
+    ],
+    "human_acceptance": false
+  },
+  "primary_calls": {
+    "three_branch_models": 0,
+    "sam": 0,
+    "layerd": 0,
+    "big_lama": 0,
+    "strategy_agent_moma": 2,
+    "go": 1,
+    "new_object_office_packages": 3,
+    "new_object_office_actions": 6,
+    "formal_asset_batch_office_actions": 6,
+    "formal_combined_office_actions": 26,
+    "formal_text_replacement_actions": 14
+  },
+  "generalization": {
+    "source": "D:\\Code\\image2PPT\\PPT图片\\03.png",
+    "original_file_sha256": "1b2d88127ee1e24cb2c6589fc25406328ba0e1a95648aed6c54058d807e5273d",
+    "normalized_source_sha256": "e4556b4d9ea3b0f9eb77af42a557698b44f17518badb673ab25410fe056d13a7",
+    "untuned_in_this_stage": true,
+    "text_region_goal": 4,
+    "all_three_branches_completed": true,
+    "ocr_lines": 106,
+    "perceived_texts": 48,
+    "perceived_assets": 46,
+    "perceived_surfaces": 41,
+    "result": {
+      "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete",
+      "committed_files_verified": 670,
+      "code_manifest_matches_current": true,
+      "source_sha256": "e4556b4d9ea3b0f9eb77af42a557698b44f17518badb673ab25410fe056d13a7",
+      "perception_mode": "live-or-cache",
+      "background_candidates": 1,
+      "lower_hypotheses_assessed": 2,
+      "lama_candidates": 0,
+      "compiler_packages": 4,
+      "office_packages": 3,
+      "replacement_packages": 3,
+      "regional_wall_seconds": 137.5,
+      "editable_texts": 0,
+      "editable_images": 6,
+      "office_pass": false,
+      "final_office_actions": 0,
+      "local_hard_gate_receipts": [],
+      "outside_pixels": 0,
+      "visual": [
+        {
+          "status": "UNKNOWN",
+          "failure": "QA_INFRASTRUCTURE_UNAVAILABLE",
+          "error_type": "RuntimeError",
+          "verified_regions_retained": true,
+          "automatic_retry": false
+        }
+      ],
+      "execution_cost": {
+        "limits": {
+          "region_candidates": 2,
+          "complex_region_candidates": 3,
+          "repair_rounds": 1,
+          "model_calls": 8,
+          "office_validations": 14,
+          "max_seconds": 900,
+          "cost_units": 100
+        },
+        "counts": {
+          "model_calls": 1,
+          "office_validations": 3,
+          "background_candidates": 1,
+          "compiler_calls": 4
+        },
+        "cost_units": 8.05,
+        "cost_unit_definition": {
+          "model_calls": 5.0,
+          "office_validations": 1.0,
+          "background_candidates": 0.05,
+          "compiler_calls": 0.0
+        },
+        "elapsed_seconds": 270.33814573287964
+      },
+      "workflow_states": {
+        "candidate_generation": "COMPLETED",
+        "regional_commit": "COMPLETED",
+        "final_qa": "UNKNOWN_OR_REVIEW_REQUIRED",
+        "automatic_publication": "GATED"
+      },
+      "verified_regions": [
+        {
+          "object_id": "t-001",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-004",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-005",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-006",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-008",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-009",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-010",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-011",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-012",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-013",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-014",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-015",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-016",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-017",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-018",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-019",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-021",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-022",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-023",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-024",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-025",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-026",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-027",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-028",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-029",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-030",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-031",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-033",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-034",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-036",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "OWNER_CONFLICT"
+        },
+        {
+          "object_id": "t-037",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-038",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-040",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-041",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-042",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-044",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "BACKGROUND_REPAIR_FAILED"
+        },
+        {
+          "object_id": "t-045",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-047",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "MASK_INCOMPLETE"
+        },
+        {
+          "object_id": "t-048",
+          "quality": "HARD_GATE_FAILED",
+          "early_stop": null,
+          "failure": "FONT_LAYOUT_FAILED"
+        }
+      ],
+      "artifacts": {
+        "page-01.png": "fe5b1a8cc58044c83098720dc66259cebb38cd9071f3bcb848199cf62044e61f",
+        "result.pptx": "b6d287e04ffa211877d6844587d376cdc92b8ed018835c4b637289ca717f1476",
+        "stable-fallback.pptx": "bfa21775b6842004e3074e04f4f69c1168cba61d1e70367174e2b808659f3a62"
+      }
+    },
+    "independent_visual_diagnostic": {
+      "scope": "independent visual diagnostic; formal combined gate unchanged",
+      "review": {
+        "schema": "VisualReview/1",
+        "source_sha256": "e4556b4d9ea3b0f9eb77af42a557698b44f17518badb673ab25410fe056d13a7",
+        "plan_sha256": "d85dd38ea7e0a9524a64b8018d86bb41e8273ea32e49844bf6542f7e2efd3525",
+        "preview_sha256": "d0a22a398df41d52abc62b72e71cdcb61bc62bbc123c2164d1372303f9890679",
+        "passed": true,
+        "checked": [
+          "wording",
+          "structure",
+          "font",
+          "emphasis",
+          "layout",
+          "graphics"
+        ],
+        "findings": [],
+        "minor_deviations": [
+          {
+            "category": "graphics",
+            "description": "a-icon-search-clue 的放大镜圆形底衬在最终 PPT 中右侧弧线略淡、边缘抗锯齿与源图有细微差异，图标主体与颜色完整。",
+            "node_ids": [
+              "a-icon-search-clue"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              1041.0,
+              291.0,
+              67.0,
+              68.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "仅底衬浅色圆环边缘的轻微抗锯齿差异，主体图形、颜色和位置一致，不影响识别与使用。"
+          },
+          {
+            "category": "graphics",
+            "description": "a-icon-chart-analysis 的浅色圆底在最终渲染中边缘略柔和，柱状图主体完整。",
+            "node_ids": [
+              "a-icon-chart-analysis"
+            ],
+            "aspect": "other",
+            "source_bbox": [
+              1193.0,
+              291.0,
+              68.0,
+              68.0
+            ],
+            "suggested_fix": "",
+            "reason_to_accept": "属于透明 PNG 合成后的轻微边缘抗锯齿差异，普通用户不易察觉。"
+          }
+        ]
+      },
+      "image_edit_checks": "PASS_APP_AUTOMATED",
+      "text_edit_gate": "FAIL_NO_NATIVE_TEXT",
+      "formal_final_qa": "UNKNOWN_OR_REVIEW_REQUIRED",
+      "automatic_publication": false
+    },
+    "combined_acceptance": "NOT_PASSED",
+    "formal_gate_unchanged": true,
+    "failure_counts": {
+      "MASK_INCOMPLETE": 13,
+      "OWNER_CONFLICT": 13,
+      "BACKGROUND_REPAIR_FAILED": 12,
+      "FONT_LAYOUT_FAILED": 1
+    },
+    "failure_details": [
+      {
+        "object_id": "t-001",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001-failure.json": "bea2e6c515bdc1b692b84499df0094ba9f5346bc6d017c47cc3ac6a2c95d4580",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001\\confirmed_text.png": "0a59e30dffc664f41590977e62105cad07b474d20ef91bc37054dd8090bae3c0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001\\mask-completion.json": "1472d5308f85365201498e1602ea6cb27f57d9e4b9c91966e63cdd2ab51d56a2",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001\\mask-evidence.npz": "95ed3154756e04dc7e6f236de49e74604a0942f9a0de1919aa428415951ac40c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001\\peer-protection.json": "332f168359dc0895158291c9e88f7a8c6fe625ec9ccc71b4357a879830effa13",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001\\peer-protection.npz": "ad17e3d20788ae79d048d6c20e7df6a18de66fbf5b463dcd0ddbf3f697d2a35d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001\\peer-protection.png": "07593dc3355804f064d9ffe2c6c831abb20fe7b1b2aa9b4b64d6753f3dab8c4a",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001\\possible_text.png": "8f84df4ab6c286d04cc6556cdd11b1ca325007f92cc0913d25e6e4238645ec2c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001\\protected_peer.png": "ef4973a6c3be728da6471efd58bd52e9cd5db07692788f3a6464263953d6d18e",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001\\text_antialias.png": "90655fbfabeb65c7d463cd0e9da0e5b0e9a8bf5a3e2503582f25cce4a2f7a2b4",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-001\\unknown.png": "5fd499b2f991dec79140eb1cd334b43748b5fa0f757d99c175f44dd752fbe9b2"
+        }
+      },
+      {
+        "object_id": "t-004",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-004-failure.json": "de9de0104dbdb076fd04c55255c283044559e5e45f03d17b43142be567d953f2",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-004\\peer-protection.json": "f5c8da0891269a890e6eea930654861139153335f1cae416b597ba1cfa9555b5",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-004\\peer-protection.npz": "d414ce91457b5a4b6918f8954afabbf02e49b11e6b8414a2c685bfb446983811",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-004\\peer-protection.png": "319c559af2a13c514c3b8ee5d7a00a89c572a1770f3e5bb07e838e01d5b3337f"
+        }
+      },
+      {
+        "object_id": "t-005",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "insufficient unprotected lateral background samples",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-005-failure.json": "fd4e9cd07ee1c8b5996c5cdfab1062b88413d2d1fac63d9373c0f293aff1d94c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-005\\peer-protection.json": "050bbe1e71e67e1df086cc8958f1e6c4bb765e6d07e0f862092b5df6f451a136",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-005\\peer-protection.npz": "63a7743d0d01173a7e93a837d1ebc644d4df7f72776c1cd3be807dde8e116af7",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-005\\peer-protection.png": "d184d171be0d51cbeaebe6cab4c65014b4ded3c845ea36f42f05c1eed83efd54"
+        }
+      },
+      {
+        "object_id": "t-006",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "insufficient unprotected lateral background samples",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-006-failure.json": "705ce7361a7f81ce579c27107891d8ef007cc5c7ff46f324f76805863730f1ea",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-006\\peer-protection.json": "9321e6b13a723855a79f48c8dc2f02bf7d7911bea97ecda2badc33a941959375",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-006\\peer-protection.npz": "37a1c26fd6e3f3dfdd519f444e9269bc8b39ab5c73ec730d28b2054a4df66d72",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-006\\peer-protection.png": "781169b185601f0c82fb34eead40588062f8325cca690b94ba701b40c03b7e76"
+        }
+      },
+      {
+        "object_id": "t-008",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-008-failure.json": "0502f464ee04073ee97327781cfa7ee7d68f0be4c833e29096872be25bbae060",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-008\\peer-protection.json": "ed68c37f44843a24407af3718258fca8f2954f9fe4eb8f2d7b640230bc961f73",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-008\\peer-protection.npz": "ccd63790b11b3a6833cbb98bce2aa93ae710d22a55b5d10cc584aea103e2292a",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-008\\peer-protection.png": "6803ca1402abfdf0b00df93bd3dbe5c32da9e9e4d1e557604b0f79f1aae83177"
+        }
+      },
+      {
+        "object_id": "t-009",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-009-failure.json": "4297b44e6fa0e0165f3a5f236938dfdcdef116efbe1041a04750c5d451c553b1",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-009\\peer-protection.json": "1fd7a7f63fbb060e46aff9a22030ae41849581ffeffd5904b38326a61e55d789",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-009\\peer-protection.npz": "6811de8cf558b233ced7c16ece1af565490d6fe4096106f1d12a6e2844eb8f36",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-009\\peer-protection.png": "55435d787d41b6c701841f06b6115119cef7d5c25581b19585da65839bac8e0c"
+        }
+      },
+      {
+        "object_id": "t-010",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-010-failure.json": "bd91fd768948f071968fc50f3c02ad9fc247002169d1a08a9ec8be1ce0eedcd4",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-010\\peer-protection.json": "fb581f732fde7df8dd092b734d94a3b557fedc1c6f6fbf23e6a8fe90527aae21",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-010\\peer-protection.npz": "9bb23e2517e6d5ce53dabcda733f4eebacb5026d53c991bf28bd5962d802805c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-010\\peer-protection.png": "eba686f492d08a5df8a9eb94323cad7e95d628b39cd65b3d78198bb8098246ae"
+        }
+      },
+      {
+        "object_id": "t-011",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-011-failure.json": "9ece24c540cda5acb4844e19256a8cbfc9fb992bf65a9bd74a8e9c59a9455d28",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-011\\peer-protection.json": "6efff97f11a6f8e61a4ecf798c0990e7ea89f21c8b0057095d4ea985a6f96aec",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-011\\peer-protection.npz": "fe2552bba2d35da9cca74763e710674ea0261ef2f385fa0a9abf4de75458069d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-011\\peer-protection.png": "3ab20366607d65067f73d185bb32c32d3de2d925f10b099982efe9d872d0278d"
+        }
+      },
+      {
+        "object_id": "t-012",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-012-failure.json": "aa4566292ede14d997f0cf5e1c5ad4462c57ce738e631231ae26b13349d1b042",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-012\\peer-protection.json": "eb0849a3a4ffb7cef38f6535b0056ab9405498b3a40e072b7422528a2ea511e7",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-012\\peer-protection.npz": "668b909b18afe00782b912386e4e7fb84792e6ffc60a9427f42c5b990a1a0835",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-012\\peer-protection.png": "f1316acfed059f673c13752058c21ff790d7d50b2c3f3daa015539839ef8cb9c"
+        }
+      },
+      {
+        "object_id": "t-013",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-013-failure.json": "743a47945e0d3a2a896ad6b6764bf3f79add14a7564562bd7255a481d73bc318",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-013\\peer-protection.json": "37d0a1f0bf4b027cc3934e349a9ccf5e48c19941f43fc634db70d3c98ca4a040",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-013\\peer-protection.npz": "7f13908569a70b4cad061834b8719cb8eec1480559006f4c0fe4011312578e2f",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-013\\peer-protection.png": "f9d56e14b77d4cd82cb3520569eaf7f1b5edf5476764119a32874f5e258213dd"
+        }
+      },
+      {
+        "object_id": "t-014",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-014-failure.json": "b9723a7139d518825dd8fb896186937e431926c865c130842e7c99c34667c53c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-014\\peer-protection.json": "97ced7c0f09875ce4035033374f4092ae7ef58ee1607b2c8d536afd91f94890d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-014\\peer-protection.npz": "91068d96dd0e16d2445fcd5f7b638f2ee90aa57242213d6e252938953e36b6de",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-014\\peer-protection.png": "959c544d5718a559bf169d03476009e35c0403c321893d053a23b91b3ed47f44"
+        }
+      },
+      {
+        "object_id": "t-015",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-015-failure.json": "0fb40aa886f80458654faf0c13555c1da4a60281e34a3bc36fe02defc138bdab",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-015\\peer-protection.json": "9c423cf567dc5746a546bfdc6bf403d209dcffef8a893af14fc654068dce17ce",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-015\\peer-protection.npz": "21339ead4596a270704f7e4bf0e69407c3ab062577beb2b0dddbf153da444dd0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-015\\peer-protection.png": "13e2b97285d6923a7b5c699715e8d5783860bb9fad6837ac30019465d9d05b68"
+        }
+      },
+      {
+        "object_id": "t-016",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "insufficient unprotected lateral background samples",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-016-failure.json": "ba2c2119f76056d4910b5a4e9cdb5cd56fc839a4d5c7447808d70da72049dca9",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-016\\peer-protection.json": "238fdb20b07bbcdb2c4b32a782a823fa98978a2c57e1bd3fb430241c8e3a4f97",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-016\\peer-protection.npz": "3f74cc5da6a3cf32c433f2562f6f1f6f79067275c95b92ea91f0729ce650fddc",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-016\\peer-protection.png": "e1cbb1cb7d8e61922fa21f934c92d2215d5e10e9676de1ffa337f014359188e7"
+        }
+      },
+      {
+        "object_id": "t-017",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017-failure.json": "56d92caed23fcd9071079058e019704d897ad5c3dbe1e799acb786e720c6ef80",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017\\confirmed_text.png": "1a99151824d388491430d97e2fdaabfdc91882674d861f430d6327eb2307f897",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017\\mask-completion.json": "3f06e7c1d840466a1d7fd36f39be715cf02d11a8fe824655ebfc31d541a5c0c2",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017\\mask-evidence.npz": "904f402ae4302176048969e34bf4150b4fad122587b775938409da97a63e2993",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017\\peer-protection.json": "e0004b4106f6fc16ff953513f78e23593dcd24077ad979d4daa0703290e07b9c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017\\peer-protection.npz": "be1d3ab0c2f75654cf7ef4903b36b028b037fd34c308b4f18d7dbea7652236a7",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017\\peer-protection.png": "b689a9f9118d5e22281f0524e605a709dec39b35849641b98cef52b22071f19f",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017\\possible_text.png": "e06da3d6c174d608031b569c7dae5e3863d41bafe1eda1bd639acde4797e52dc",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017\\protected_peer.png": "e06da3d6c174d608031b569c7dae5e3863d41bafe1eda1bd639acde4797e52dc",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017\\text_antialias.png": "aed0d7335992feff7646737c3ad9a7fde83a474321358a953673315241e18ff2",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-017\\unknown.png": "27b343439e6e033c716adea2f66b3a0ac3de58679b6ce83c5600e12aa3977a8f"
+        }
+      },
+      {
+        "object_id": "t-018",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018-failure.json": "8d010c263e7f3d2905d96ad901fff6a92b4e288baedefff5e37d76a5fbf9bfa4",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018\\confirmed_text.png": "bbcd75fad09846415ae1181038d3fe708b271bd01eb408d001cf886b69d693a1",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018\\mask-completion.json": "7a0346de79b2d3fd32e96050e1d5ba7d3907a328c53a6cb8de763a3f3f7d5007",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018\\mask-evidence.npz": "ec1de145f349e75e65f3b15ad905e60d83e1521ea5837421e3b26af60579a1f0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018\\peer-protection.json": "c75da7b3d9f4a0931262315c75fcf539f9f2620aafcdc1ac60d22588b9559c89",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018\\peer-protection.npz": "309d02416cbec7cbcccc45faac35114ca5fc80ae72481283d145755a9695e058",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018\\peer-protection.png": "a257c68781764155c06552a0d397ddd692553fe2ded7a32b2a13b5a2f36c8871",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018\\possible_text.png": "98e936ad4513b8cdf71583d6983ed3adab092b8c0559e6a3a913b729d24b6b34",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018\\protected_peer.png": "98e936ad4513b8cdf71583d6983ed3adab092b8c0559e6a3a913b729d24b6b34",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018\\text_antialias.png": "20fe0551374a03e8291abe7441f94acd745b80e7ef5a27f4be26f89809857d47",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-018\\unknown.png": "775362912688d88498962526e66553e690f320e28fb5263cf8c483f4151c37b8"
+        }
+      },
+      {
+        "object_id": "t-019",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019-failure.json": "2b45cdb484f5ec418052cd272ee8960041ef012c0c1333f21553b8a6a051485c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019\\confirmed_text.png": "197a8ec36b8f2666d967fddaed1569ab2688236a0ed6375d05acdeba64dbd0c8",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019\\mask-completion.json": "4df6af184a09d9315a6c9fb8f7df7a1e53d3303d5498aa38e103e41b4d6c1656",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019\\mask-evidence.npz": "64aab64842f435dd3335c3a52ea53d0ac24e1490f8aa27c3937a9a1adf26cd8d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019\\peer-protection.json": "1d69ef68fba0d2d2e2ef49384c091a9d5a79230ef7ea740bba9411cfc6bb2d8a",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019\\peer-protection.npz": "bac795c7ed81e6dbd0eefbce6231ca8d9905536e227b64de7f363414865a00e7",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019\\peer-protection.png": "d1bde15bdc5d953518b30b2dce2d5a91d1f2a76d275afdb4eb5426bcf1f1f5a9",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019\\possible_text.png": "62acc323ce129eb4688162908c91bc788acb4ff82633fa9b66243304c7936ff9",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019\\protected_peer.png": "62acc323ce129eb4688162908c91bc788acb4ff82633fa9b66243304c7936ff9",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019\\text_antialias.png": "4493085a99921503b7215e900d042f4088622b31e03d5fa5b8dd34f78750553d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-019\\unknown.png": "da60018a67082d46ab1b5433667ff8c722deafc3c6a4907753a39a1a877dd83d"
+        }
+      },
+      {
+        "object_id": "t-021",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021-failure.json": "2762a66a88e4e4c58e2324cab634cf850b9900dad2021f0651cb91c4c1a73876",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021\\confirmed_text.png": "df735909184dadc97c455237a40c57f451353aef988625834bd4fbc3b76de848",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021\\mask-completion.json": "5473b4f2805ca2ee05342dbc5921395a09afc9f1e52b972b649122cdc1b36ef6",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021\\mask-evidence.npz": "62ab41766283d79b756e4b5025de4e83ad7abc033fcadee526622f5a2b8823b0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021\\peer-protection.json": "6bfa03c55907d494741256bf7fb3f5bea5df045f9a3ce9af62fbc238793148fe",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021\\peer-protection.npz": "1de9fcc927d94fff68dcea65785af8373eb84547d870e63d49e27caf803e3f10",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021\\peer-protection.png": "e6db83b2faba5ed034a2d182c5b2bc95270a4d53c246472b262a53b133082551",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021\\possible_text.png": "e06da3d6c174d608031b569c7dae5e3863d41bafe1eda1bd639acde4797e52dc",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021\\protected_peer.png": "e06da3d6c174d608031b569c7dae5e3863d41bafe1eda1bd639acde4797e52dc",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021\\text_antialias.png": "d9a00ab6b00e39a401631563f71b8e85cd5bcfb8283e69c3b3f911acc59b85d0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-021\\unknown.png": "2c5e402d54137d0947f0056809893a8dd3df1e6f8f4f17e1f41d83d029c1332b"
+        }
+      },
+      {
+        "object_id": "t-022",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "no trusted continuous background reference; expensive tools cannot repair that evidence",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022-failure.json": "1c9eb486f19d192f51577768d6999a36b7ac570efff5b80c1641879d57f7e878",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022\\confirmed_text.png": "ff8681574460c83cdaa0c9f8525e10823c4b846550689ac04a4f90818ce82714",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022\\mask-completion.json": "98f967a07d8fa54b229abe4a5c91cc48f506f94b03cfaa2f4a44c2cb2a39a203",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022\\mask-evidence.npz": "65ea524de961a9cf16c1cb98841ecc61b507108fcb9c6ba386d239565c047ccd",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022\\peer-protection.json": "4380c91d99e12c292e3f869b7d46a8d62d4e0b78c3a5e816be295b4d951abedc",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022\\peer-protection.npz": "1189a19706c6d1d93402c1816d4bb650a918fee842717f4723c75dc486deea86",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022\\peer-protection.png": "ac840366beadc03065fd2f6265a33bdf2808e87659b5016ea17df690b6fed043",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022\\possible_text.png": "7537ecc2e196a12fd2e6f6d0fbbb21af70fa2228b6b27f1b19d884020768293b",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022\\protected_peer.png": "c7ed3e02689ee5c48d4b439342a5fff92f4f49f3d6ad1fdb240e2c133689742d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022\\text_antialias.png": "95b861a0d4af578d3959bdea46a4c4932908facf4873bf864afd8441f88852bd",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-022\\unknown.png": "cc1c9251c1b1cc1402737dedc30aabcbb6eb7228fef3c0f5c1f263bab64d2ca6"
+        }
+      },
+      {
+        "object_id": "t-023",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023-failure.json": "cac4a3be947e4c55c471f0fe18e0fe7db31ba46b01f48462ca9db496a54f79c8",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023\\confirmed_text.png": "400dc4553229e2622e397e982956b8f57b2f712c5f574454e47ace243cf354f0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023\\mask-completion.json": "afeac5005ce390c6d278f63f1abda5db25eb50ca4eb54b45b07ccb17aa3a1769",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023\\mask-evidence.npz": "c0dfb61f5a9ad5b7537e93434a242c4283c67aebf53e9ee14964635f7a5885dc",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023\\peer-protection.json": "d86c9161e3d4c42fab8ef4c76c26ef520be55e29e8ef8764e918dfb29c209377",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023\\peer-protection.npz": "e6766a856af06a44b26106bee82cbc1080ef8df57b8aed6701e8e781f027d6a0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023\\peer-protection.png": "e3a9d823dd59fad239306af17de2b46ea7e1f18c637052beb6a58884a90203e0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023\\possible_text.png": "4f1508eaa7b79bce30ce6473808b61cdd612d1c80f577aa523cecf73e0112025",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023\\protected_peer.png": "4f1508eaa7b79bce30ce6473808b61cdd612d1c80f577aa523cecf73e0112025",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023\\text_antialias.png": "e20c13bf3c5b37c4b7ba7ad00ba38bbe9f570d4ecd902cf64aca29bd260a9735",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-023\\unknown.png": "e1ab394e8eb72e64379cdab10161531d23cfcbe98593d1683ec01365891c3b01"
+        }
+      },
+      {
+        "object_id": "t-024",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024-failure.json": "389d44172eb3afe6d572cdb1f6e5200f389ef2f2d5e0a0e79b76473480a7bfe9",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024\\confirmed_text.png": "31b418285f7f85aa496504e0c9530d847bc359eb847a5653a1fc5c44d7e373cd",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024\\mask-completion.json": "0340d5547269ceacc9c2df54e4db612b4e660e0e16052946ebb51fb6443d591f",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024\\mask-evidence.npz": "57ef5d5e85db74bcc3cbf504319b3345b119c82074aad4370bb4f2f0ffcd0e2a",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024\\peer-protection.json": "30cf9bb9ea9f4f16a533181611dba498709d54801fc0f1fe9513ab17c7db9280",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024\\peer-protection.npz": "4525019dd42d3b10981a7f435cc38b11fc6a281175bdfce0a3aae4281be9c64d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024\\peer-protection.png": "5734f27d8cb549b37b9324384c604a3fb843101f6614abd8487520c7cf18da61",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024\\possible_text.png": "a9497eaa0a0d50ed1573771d1e710dd9920fb43bf625c9d513ee7f6932f36476",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024\\protected_peer.png": "23edfb254bb2f05a97ca7aee68de5b09cfca5e2b06ed6619760b9cfddf57ac5c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024\\text_antialias.png": "f9bcb70b23f4a5a4f5e4fdb9cfaaf80aed39abae7671bbc2c0882863f488303c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-024\\unknown.png": "b11eea0a1739756cdf1626977acb709e860dbc590af0f6ba105319977ae3f602"
+        }
+      },
+      {
+        "object_id": "t-025",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "insufficient unprotected lateral background samples",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-025-failure.json": "371e7337940fbac380f3187506cd9cabcd81e228311e7c7070ee2a5480e8ae6b",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-025\\peer-protection.json": "cb700babafc7afe97ede05dca81ee0442bdde4b92aa023e2ebe6a19db44f52fb",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-025\\peer-protection.npz": "b5fb6381205c57eb7f9c744b91e69083b23b42bfb8ab0d0734060667096c9c05",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-025\\peer-protection.png": "2a3e17cad34594e148c4ebb82def0826df337941a7701ade552407be3848e0cd"
+        }
+      },
+      {
+        "object_id": "t-026",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026-failure.json": "d36a3f273e4141f2f55ec53395bb6074d000d20b4cbc96dd0223c30672612011",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026\\confirmed_text.png": "e1f5a9e43d4167bfb5cf15074da9cc2e6cb2868a54bcb82abf02f3e897b7662e",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026\\mask-completion.json": "16000f9461693016554fa9f024752aef2357166417a9faa239018440b6b6c3c2",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026\\mask-evidence.npz": "1d615ceb30b070469b821da3aaa7c3658a502370407ef3aca3d481b435cc0d22",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026\\peer-protection.json": "d67c6b51e07e0db1d8833b3fc5d72ca52277eb0303b6dfda396c4ef475115d80",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026\\peer-protection.npz": "2d788a984b6e88979a8bd739979188738216ec783d75c1c768184f07ee80e28f",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026\\peer-protection.png": "5682cfab7c704331cbc5e2ea3e7a2ff9689d71770f7b7f1b574c2b12e9980f3e",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026\\possible_text.png": "1c4ce32ef2a0f267d3f1f451ee455713059c9f58ad724917fbf6254e02c14b02",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026\\protected_peer.png": "3ddf0ca9424115fca1c70c535aac1ad6cf5f214c14790a5d92b727ddf1ab316f",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026\\text_antialias.png": "09ff5a57e5932ada8b13bd1353792d030e71520aca8295d5bc302916b878c287",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-026\\unknown.png": "1c8cda545769276eb14e24ec0a1a2c4db69e5938f24b0a7719f0a7796dc21649"
+        }
+      },
+      {
+        "object_id": "t-027",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-027-failure.json": "0299a8d165c636f912e5327a99795b63c270b232ac91b89ff70d9b9976a7c0d7",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-027\\peer-protection.json": "ae6c6192d0ca0ef4353536449b69a7eca0468c82d7c7fc024d71b1f23ab3612e",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-027\\peer-protection.npz": "4f55b5f410f64ca2e2be88c52d6b3cf7ea858d1dcf9be790caec459d6bdbeaed",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-027\\peer-protection.png": "c4ba6b8188c1da512ff2a2b8b74b812a401b68517672978c343ae66f5bd8dcd4"
+        }
+      },
+      {
+        "object_id": "t-028",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-028-failure.json": "c22242f8dbb4ea83fb05d7e5f1390d9852cd5ef1513fadcd97c0e58be95d7a5c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-028\\peer-protection.json": "d966bec8d7c51ecbf8738aedadc9b1ac5d7a6c1d4ecdc09c90eca2a7f5670b67",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-028\\peer-protection.npz": "b31e2a5eb7d50c53107f5f71b35dfe63e386181cb7b2e36102c0a06b5823e020",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-028\\peer-protection.png": "78dc2a950ba6f73f25c8ef738133fc7250d416cbc93bc14f95c8d714d425b665"
+        }
+      },
+      {
+        "object_id": "t-029",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029-failure.json": "4f1524326fb08cf9790521620c77e7dfe35002d211a9b3922d5dede49887f280",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029\\confirmed_text.png": "8c615ca1de186aacb1d1e9d36d1978d9d369f3b4cae3ac1cf9811995a530d1af",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029\\mask-completion.json": "5c34ede0574d5edea062ce599fb20bb6138895b79064b6004f4d517cea150296",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029\\mask-evidence.npz": "f38eb7895c1f01ac64eb50cc167487a767fdcde588555afb700a3d8c06248225",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029\\peer-protection.json": "e2cc1fc236657d6937a9dc77f587f1468ca4848719f5daa584aa37cd39869efd",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029\\peer-protection.npz": "09ded2ca1aa9edf7f24e1d62b6e05315efcb29f9247dc1830b156ac27e2b3651",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029\\peer-protection.png": "cf0d52b4f7f208563ee051aabde22f11a35f9f6dd7f0ff145ebd43b44e0f46ec",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029\\possible_text.png": "05f2ada13f970d6ea6cef3b72e648e965047229081458d4bbdfe0bdea791e8f0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029\\protected_peer.png": "362fd22c0fd726eb3aca6dc2a1e48945aa5677ab692183bf88e2c8d33bac137a",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029\\text_antialias.png": "784881f7b851471dde6c60b7b18d6f40b0f6dccd9d95e2a1a7ed1b7c5a093903",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-029\\unknown.png": "7b4688c65be3e4e9fb38014115b4bb1c6657a9aaea700873120b88142c928d2e"
+        }
+      },
+      {
+        "object_id": "t-030",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030-failure.json": "c97af8275d13315ff65de100d46200cb63b01187911f83b88f0f1ad35ee8d1a6",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030\\confirmed_text.png": "3da7d40e8833321179714a81ad924fed800888be8530613e129fbb3b90f436be",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030\\mask-completion.json": "5933de8659c12ea44d2410af8cd52e74ab9e8d456234f17b784a9205e4e95b73",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030\\mask-evidence.npz": "d6392811eef61ac680f68adfc5fa61435328ee09611e1714e6d8eb69ee28f896",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030\\peer-protection.json": "a15d7881a6ca0d018238999bca4af4815614ff3e5650410efe2ed93cded0eea4",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030\\peer-protection.npz": "349ce4f610c41cacc2c0068be21fe24a356cb1a0a87c0a3f79bca83acd299a0f",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030\\peer-protection.png": "79a70c9600fb486e0aa9daa2cc462715310d786170b5488e87423641d866a0b4",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030\\possible_text.png": "0f1b2027085d283c0891c63e846d02553a9c651fad09772d6f3062d99f002956",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030\\protected_peer.png": "0f1b2027085d283c0891c63e846d02553a9c651fad09772d6f3062d99f002956",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030\\text_antialias.png": "a0854e0f7e5a320b6b8f340c62d545ae092eeacec95e86fca5ec0ef4abd16e19",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-030\\unknown.png": "37f63d3795224b8b8496da6aa8c626569f037aef289bdfa11b6b53b67bfb62f8"
+        }
+      },
+      {
+        "object_id": "t-031",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "insufficient unprotected lateral background samples",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-031-failure.json": "285337e75cef1b4742cad8d9dc4fa4a35f5d629ce82cbcdd250b1d86a39b46e8",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-031\\peer-protection.json": "48be772e6067cc3c44201d0e80462875df1e36f9da48de7975ab2c997d71b98d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-031\\peer-protection.npz": "0f3f18d784f6ed88267275d01d8a3bc557f568ee2eebcfc4effbb49b9928f6f3",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-031\\peer-protection.png": "2da3bf69b4038fb8aa06336945b07d8fe2b25b1ce8eda3c5b07f5415222a55bd"
+        }
+      },
+      {
+        "object_id": "t-033",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "insufficient unprotected lateral background samples",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-033-failure.json": "0b12b005aa2df255de6339fac910cdcaeea2cff9e88bc7486adb439960618b29",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-033\\peer-protection.json": "43177cc6521aefc3d8ecf786729b08bc06115568f27c8a74225326c0fdcfd68d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-033\\peer-protection.npz": "38c6e57837341b961158669db9cddee11122aec852f06a535bf9b7da5c150e22",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-033\\peer-protection.png": "9ce06094e94357489e557995ee738f9f56dd1625116f7c1bcf83712832d53a4a"
+        }
+      },
+      {
+        "object_id": "t-034",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-034-failure.json": "c85754ee5eba51e2f6ae0efad136b0a99fe3ff01acf247a0393573c1b2911d17",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-034\\peer-protection.json": "9817153444b44258703a560a8d889dc6cbc94bb11e5a59d2d1ff47427d464ab5",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-034\\peer-protection.npz": "e1efa3a90cf88438f9c5d1b0779682a4d3dc6384327b16badd0de625573c4b62",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-034\\peer-protection.png": "772d8a8713a956a0bc22d45a185afe5bb16f99399ea123cab80c54c5c0cd9918"
+        }
+      },
+      {
+        "object_id": "t-036",
+        "state": "LOCAL_FALLBACK",
+        "failure": "OWNER_CONFLICT",
+        "reason": "confirmed text overlaps protected peer",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-036-failure.json": "492be6bd84955df57892d737b584b30d3b0adfd2b8f381eea16628d5ff774df2",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-036\\peer-protection.json": "43e143a8af30733f1db2f0264bd905ee02cd94a9937f01656a9c25c9abd2a2c4",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-036\\peer-protection.npz": "a7016cad09853e6f136959849f3f7f1250fceb456e0a863294ed9793fa144357",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-036\\peer-protection.png": "7aa250bc062c321378d3cd0b9f3002e6b0dd61c66c0d7cb4016b7f66160d3768"
+        }
+      },
+      {
+        "object_id": "t-037",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "insufficient unprotected lateral background samples",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-037-failure.json": "854daf9d74b8ab501200c6be4b5aba783e10f7128c4564de76fd088eef3b345c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-037\\peer-protection.json": "3ecb9c59125e2c025650a9e8b0f9501a23c947c457515acf0fb4eb950a2e504d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-037\\peer-protection.npz": "1976fd3f1fbb5dbaddfedbadda4ff1b1f664ff8affb0260a8cd3671e279532e5",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-037\\peer-protection.png": "1d290882c567be7fb60f4854965cbc627671833e3021fec334e5ac878c9be2fb"
+        }
+      },
+      {
+        "object_id": "t-038",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "insufficient unprotected lateral background samples",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-038-failure.json": "2c27b2a76407c106eab787c98082d30f0ecda26f7321500ef409780644854f0c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-038\\peer-protection.json": "0157fe9ba1f9a61440ec6c9ef919b50f0e8979a6cc98bb3219f3598ec57b9b83",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-038\\peer-protection.npz": "1ab98b80ed707a20c960e8f078b57a96a3d6a0154b2549a6f52340a410139393",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-038\\peer-protection.png": "c9e1b456894700e7df1dbabd05cd7d658f60005311c76d078f8a028c9d5eff6d"
+        }
+      },
+      {
+        "object_id": "t-040",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "insufficient unprotected lateral background samples",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-040-failure.json": "1a7ab445f53b38ea03cc4efdee33f874606b8d9d74a25ed35e8ba18cf3ce337e",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-040\\peer-protection.json": "bea739c13894e74ec1e9a0db887d451ca53191c4b93fe902fa67ca93a6119d79",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-040\\peer-protection.npz": "fe7f11e59b2f12c4454595bf8263a2bb035483c1c907592d2c0156bd4e81a4bb",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-040\\peer-protection.png": "825b8a5dc0d8dd175090edc863e7d9709ead87eece2c498c6632b79e03935ae8"
+        }
+      },
+      {
+        "object_id": "t-041",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "no trusted continuous background reference; expensive tools cannot repair that evidence",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041-failure.json": "a101707811ec09206b814119fa06df1025252f7b04bd8d5d8daf9ef045bcc126",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041\\confirmed_text.png": "a465275b7331a9ab9c7620ead79c8b4f3e9c472d1922c2eef1eeb630f5fec6e0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041\\mask-completion.json": "ceca45d7f585852fdb7afc6813024f1f212eb0fc8e2560c9d379751c47c6ced5",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041\\mask-evidence.npz": "c0a943b2ff711e923ad6cbdf0069e2f935382e0e1f3d1692f8e1378ea6c064e4",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041\\peer-protection.json": "461c277fb01327ab91851573e494d0e676e4b9555bf7ad50a824ddd8ecd1b287",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041\\peer-protection.npz": "7ca08db1346eb4d4a3ce8ef97757d39fb36efc72e4a7412f4abfb14746ac0369",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041\\peer-protection.png": "6af996e1ae23f439f33ec7c059d2d8bbe4e9bbc7a48dcdc778ed8198e0394151",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041\\possible_text.png": "722f104877776630ad3860fbe8707d4a57a2cf28e0f06a65ceea85fad5f3f748",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041\\protected_peer.png": "0f1b2027085d283c0891c63e846d02553a9c651fad09772d6f3062d99f002956",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041\\text_antialias.png": "6392e288229eebbd05b9fd220afa78b1bd1feda336d53fe93023c38004a80544",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-041\\unknown.png": "3817c555b20e3445a66a373680061c7dc5a504f287dc4ac195e37f5b90dba217"
+        }
+      },
+      {
+        "object_id": "t-042",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042-failure.json": "4e9fc64022dfeb49f2f22dec4b744c7454609ef2fd9a23da63a660997af14601",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042\\confirmed_text.png": "18c82d26e7a78a33aa3e7c4d9c6a0f967ae654e0be935a3aebebcdc8258fafbd",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042\\mask-completion.json": "113aa4978532b4037fa8bcd8b499c6b6bad592992df55cc2bd5bd21d46a69c61",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042\\mask-evidence.npz": "97b57978d776f9d0923fed736d460502cc6b712d119b02a5aa520fe16df2eb5b",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042\\peer-protection.json": "c974a22d848396e923ebd6139c9a5963b8be15787353efda1c4a5867c68fde3d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042\\peer-protection.npz": "bcb55aa496523021b8512e2faa2fd351e6fc0f1ffdbec3709b52b72caca48203",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042\\peer-protection.png": "3b16e0674b410e1adbb752f89ae0351e03d6477d37d1caafe35269b3008e9a67",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042\\possible_text.png": "c412470298554f52141ecf33b8379f1ee6a4fbdd915eb93361325696cf42691c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042\\protected_peer.png": "a4d60579673a3b07b208378089af799ab08109d964fd975dbe9193c0124fe32a",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042\\text_antialias.png": "492a93c397a533230640c8da36ea3487add8675602517a448368db6ef5d2486d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-042\\unknown.png": "a34906fbee4c6ae6012c2b85feb3b7b3f7cda4c67439d6703320aa7138e8eb0a"
+        }
+      },
+      {
+        "object_id": "t-044",
+        "state": "LOCAL_FALLBACK",
+        "failure": "BACKGROUND_REPAIR_FAILED",
+        "reason": "no trusted continuous background reference; expensive tools cannot repair that evidence",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044-failure.json": "7964916bec01877b61ca360ce4d909b75944f0ac62e007081b4adcdf2cb5b00f",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044\\confirmed_text.png": "d12aa88934f5f85f958aac216c961fe6e99424b3f14bc9c6ecb17d1917d0ea9c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044\\mask-completion.json": "6765bb59fbf61de70cd92eb3744b3e10b04993d5815b7df87189ebbdc3298c67",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044\\mask-evidence.npz": "db7d364e4d1d182c096b4ff387b1862667770cb33771c00719a5cf5a23a3c943",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044\\peer-protection.json": "8af9763cfe793915899c5ab01389c27fc96e7bb03e18ad178a58e17de1e0620f",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044\\peer-protection.npz": "04c82687b7c66ea7eae578f6e6ed29608bee244fc12d7de373898c266627fe65",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044\\peer-protection.png": "970918a0e24849c762197107e7075d216d3afd790133c0933bc55fefcb595629",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044\\possible_text.png": "bc2410b4a90fe92cde18760a8f1f7d5561da8b82c6026a8557f0e70637e03a4d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044\\protected_peer.png": "189326efe6db88c3bf79662a4367780f6185ab20f6024ef83a20a59b63b341d4",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044\\text_antialias.png": "29fa916bf7cf2a2ccc9c2a9a18fd8933622a3837edf5ae834c7c631d681a6312",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-044\\unknown.png": "d239768bb3c081d59890f04f32ed571ef05659c4dc752d1c2724f508cf5baee4"
+        }
+      },
+      {
+        "object_id": "t-045",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045-failure.json": "29364ab69e8d64462daacb2d959f2769100dfd2f9afa719d836ba5561a44bd80",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045\\confirmed_text.png": "3d365f56476bfef81bb321ef26378c00745152c8b87b9b7f596761c65223ae57",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045\\mask-completion.json": "8a47e144840f5946855ad308205b803fbdddfce53579d0a93ad163ec8e07df77",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045\\mask-evidence.npz": "d10bb0a10afa4bf479963adb731ac9069c45c4ad3daceaecf56c90ef9824f88b",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045\\peer-protection.json": "31f72db3714eafe38e593c7eaf0b27f4b0960bc450911bf72faf4bc6761d0d6b",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045\\peer-protection.npz": "1d37ef149841b6e8913949e75471f46ee995d4a7b3df2e6e3208d2e5feb78a7f",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045\\peer-protection.png": "bb589ee1aeceb708be990e0e8b31e1ac82dbb3df9564af591ba0d657bc095744",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045\\possible_text.png": "a7e564526eecdea1e7ff5aa1fa6616f77769f20558ca96d82c5fdb6b7b199421",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045\\protected_peer.png": "b0879dfab9aac2368f2e5facc9dcd6f93963346cbff24d0c668b2da17aff9d56",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045\\text_antialias.png": "1456e3e20d8f74ab27a815839240350de13d63547ad62ed358d1a587a79c5c12",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-045\\unknown.png": "6778689b17f6df118afb8890b111953470bea90a08409303493af5f0226cd084"
+        }
+      },
+      {
+        "object_id": "t-047",
+        "state": "LOCAL_FALLBACK",
+        "failure": "MASK_INCOMPLETE",
+        "reason": "visible unassigned signal blocks repair",
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047-failure.json": "9119d9485f7cbc0d011e8050b462e22f579876f1bcbe70e927a81f0bd2bf58e3",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047\\confirmed_text.png": "216007e28ab7eee9be09a83342f24ad3b7422ed5de17defd58f755e6ff6eaece",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047\\mask-completion.json": "c259a9f9724627541a2103059b102d2a6a3232cfdb3964485260c5b069e8a562",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047\\mask-evidence.npz": "1a6eb3c67de717b417d109346c3e49aa90982ef907544ce465ad11beba0860bb",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047\\peer-protection.json": "ca15bcc4d666ba87e919727265053c4590c3c9cb080f09fbbcd97a56e2cf026a",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047\\peer-protection.npz": "e8458dc5dfcdb631a6090ca938a570f3b81095e91fbd84e8c3ae75dd5c9c773d",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047\\peer-protection.png": "ee39fe12e751240b29ba8b88dfe4f8dbfb541629a9a8b65d1290fa373f7a60c7",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047\\possible_text.png": "305864368468267d40e8810d6c4cbf700b4be1918a2714aea3c3ba67a393dbe8",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047\\protected_peer.png": "305864368468267d40e8810d6c4cbf700b4be1918a2714aea3c3ba67a393dbe8",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047\\text_antialias.png": "701307b4e5fa03fb74ccdfcec2acb6f0bcdcf103d3aaa0ec1ec4c60f52a4e954",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-047\\unknown.png": "1402d7994c064efc4ba8a39ac59ffb6f28142f8199cf80545bbbfc38d71242f8"
+        }
+      },
+      {
+        "object_id": "t-048",
+        "state": "LOCAL_FALLBACK",
+        "failure": "FONT_LAYOUT_FAILED",
+        "reason": null,
+        "receipt": {
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048-failure.json": "23f9b2465c94e7760c16249f71ab92d33952c877fadb289cd43bc3f39c6a7056",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\confirmed_text.png": "513a5f77a99b12921813802bda2adf4a782e787104d53f105ac15ef9000c7783",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\index.json": "b11cabf70967d3ceef3041808b60cf53804bb1e7d90567a46dc9db8d650a8218",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\mask-completion.json": "b10146ede7c82296e90515019035b725aa9b59285d2662e27b406863372fc7eb",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\mask-evidence.npz": "2d0311754b7af373065ca9a6e1f9bcdbed2633d1020635d1734d76c99e539b45",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\peer-protection.json": "ec9817f3541f94521a8238ca878e36a1f3cb295defb766dd9083f8c2e84d9769",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\peer-protection.npz": "ed190c3a4fda54bc76b0fad10f6867db5e0058f1e1b7efad4c71222a1f4588ed",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\peer-protection.png": "95be679a3489f35a6e97fcd30a7409765169e20035e7712f80e139c536597f61",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\possible_text.png": "1113ca3608daaefe7f044a5abc8820ceea4f4bd86ee33adb923dedac24320c80",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\protected_peer.png": "4beaf85a20d1caeb28a3a7e2bda8e53c0ff5d556248aaa22f04376042fb00425",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\text_antialias.png": "427aa2ba7eb54d03e68187e508fbfa25904cc6be4e6a868b1e0e131122d76c95",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\unknown.png": "c6dc34ba0980bd9af69334711212935cd95ebc6256215ee079d48d58c4fc6034",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\difference_map.png": "7fdbc90695b404f785ffbfe4f1475f5dfddb845cab789ee08f99465e3ee79ec5",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\hashes.json": "6e2d2f2425936166aef871034a6bd24fbf1d66bd4f69a66f63660ad675f8cf9c",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\mask.png": "4b1ba5a863c05b35f91d8c8c8ce352bd48fd88d745c0674f4486c9d9141c0ad1",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\raw_crop.png": "5b04adfc18e3bf35517e69215c75fe46285ce6819065400f28cb747d93ce7035",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\raw_inpaint.png": "f0cfe39ed9d8d794fd6ecc7d12bb47fa9c0ce8279b609c8555f09057e38e9623",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\residual_map.png": "d66092c2077b9ed12b0d01ac313e28ff8ea20d55d288e875eea46e1d7f491535",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\residual_report.json": "e3a492f81baedc21f81d87bbb7ec00f530a2d7c479ce30e9c44fac64fb5fa685",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\source.png": "e4556b4d9ea3b0f9eb77af42a557698b44f17518badb673ab25410fe056d13a7",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\source_crop.png": "964b30b99a1cdcdc5c83c2d023d6bb530f2a2e78fb9ad0c6a6ed502caf1814b0",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\written_back.png": "491e0cdd9a0d731397385dc9982090b65480d6f7e02aec64024f1f6445054a65",
+          "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\t-048\\bounded_expansion--layerd-1\\written_crop.png": "cb49ce7e9bff185a196c6db0b3ad898f2e61debdb8c258fa8a83d3491b605583"
+        }
+      }
+    ],
+    "model_receipts": [
+      {
+        "key": "f58b5983481df1a9794439f7bad3fd34c31dd1050599dcac03bfd2b62f56555f",
+        "state": "COMPLETED",
+        "response_sha256": "aaf97c0fb1efaadfdc3896ab6177a544d55182a2307b7abefdb95037fa557042",
+        "created": 1794445275.8434474,
+        "schema": "SurfaceEvidence/1",
+        "file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03\\fresh-cache\\model-calls\\raw\\f58b5983481df1a9794439f7bad3fd34c31dd1050599dcac03bfd2b62f56555f.json",
+        "file_sha256": "aaf97c0fb1efaadfdc3896ab6177a544d55182a2307b7abefdb95037fa557042",
+        "response_seconds": 47.806
+      },
+      {
+        "key": "4f439cf805c55cc5fffe3f183fff1b05c4f01de80ffee652b1af45c4412ead8c",
+        "state": "COMPLETED",
+        "response_sha256": "b4e8ca073dbec1ccb2bf47765cb20d57221d34c34401e190be91f6266d38c8b7",
+        "created": 1794445323.678411,
+        "schema": "SurfaceEvidence/1",
+        "file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03\\fresh-cache\\model-calls\\raw\\4f439cf805c55cc5fffe3f183fff1b05c4f01de80ffee652b1af45c4412ead8c.json",
+        "file_sha256": "b4e8ca073dbec1ccb2bf47765cb20d57221d34c34401e190be91f6266d38c8b7",
+        "response_seconds": 51.122
+      },
+      {
+        "key": "f1db751bcc5f91797b7e1b020f332003609ca1c7bb26032a27a994a0fde422be",
+        "state": "COMPLETED",
+        "response_sha256": "24c0f90b1cf0d2ad9517f3a6df81a18c290f69d41b9473e2e2f6d597776afb7c",
+        "created": 1794445585.1288488,
+        "schema": "AssetEvidence/1",
+        "file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03\\fresh-cache\\model-calls\\raw\\f1db751bcc5f91797b7e1b020f332003609ca1c7bb26032a27a994a0fde422be.json",
+        "file_sha256": "24c0f90b1cf0d2ad9517f3a6df81a18c290f69d41b9473e2e2f6d597776afb7c",
+        "response_seconds": 144.55
+      },
+      {
+        "key": "3626defc62545a7b3ebd609b4ef8823323ec971a56fa8d2f80af72eb03de0624",
+        "state": "COMPLETED",
+        "response_sha256": "8cae0e4f7c4cbe4f494d7b0ea6fd5a21deabbb2bf7dfc571f0c01a1da48b2228",
+        "created": 1794445978.8715858,
+        "schema": "TextEvidence/1",
+        "file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03\\fresh-cache\\model-calls\\raw\\3626defc62545a7b3ebd609b4ef8823323ec971a56fa8d2f80af72eb03de0624.json",
+        "file_sha256": "8cae0e4f7c4cbe4f494d7b0ea6fd5a21deabbb2bf7dfc571f0c01a1da48b2228",
+        "response_seconds": 102.711
+      },
+      {
+        "key": "349572d0810e4546fd899d004b24ff529daf9868f14e97628f7a0a652393b2dc",
+        "state": "COMPLETED",
+        "response_sha256": "4920d84dbdd56d80c7e61a23bf7790ce35c8253201f7465358aa97ec11fbafdf",
+        "created": 1794446466.2515721,
+        "schema": "VisualReview/1",
+        "file": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03\\fresh-cache\\model-calls\\raw\\349572d0810e4546fd899d004b24ff529daf9868f14e97628f7a0a652393b2dc.json",
+        "file_sha256": "4920d84dbdd56d80c7e61a23bf7790ce35c8253201f7465358aa97ec11fbafdf",
+        "response_seconds": 57.02
+      }
+    ],
+    "layerd_manifests": [
+      {
+        "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03\\fresh-cache\\layers\\e4556b4d9ea3b0f9eb77af42a557698b44f17518badb673ab25410fe056d13a7-4228be1a8affda14\\manifest.json",
+        "sha256": "6b13e830de693c07eb0e30696ce7b6b582ae23b83aefd148ecca7237c417e68e"
+      }
+    ],
+    "new_sam_jobs": [
+      {
+        "path": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-complete\\r12\\attempt-e7294ff16058b255\\page-01\\sam-single\\sam\\caeb8e305f3aca618c7d\\remote-job.json",
+        "sha256": "df85ee4e5d9be08cb71b06435795d5633b3f644f317328c325963d0f04e79015"
+      }
+    ],
+    "infrastructure_recovery": {
+      "initial_failures": [
+        "LayerD local SSH forward refused connection",
+        "RapidOCR missing from current worktree runtime path"
+      ],
+      "authorization": "User explicitly authorized local SSH forwarding and page-3 transfer to existing 192.168.1.103:18847 LayerD service",
+      "local_changes": [
+        "hidden SSH forward on 18847",
+        "copied existing verified rapidocr-3.10.0/onnxruntime-1.20.1 bundle into this worktree .runtime and configured ocr_python_path"
+      ],
+      "server_deployment_changed": false,
+      "completed_branch_receipts_reused": true
+    },
+    "lineage": [
+      {
+        "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03",
+        "committed_files_verified": 53,
+        "code_manifest_matches_current": true,
+        "source_sha256": "e4556b4d9ea3b0f9eb77af42a557698b44f17518badb673ab25410fe056d13a7",
+        "perception_mode": "fresh-three-branch",
+        "background_candidates": 0,
+        "lower_hypotheses_assessed": 0,
+        "lama_candidates": 0,
+        "compiler_packages": 2,
+        "office_packages": 1,
+        "replacement_packages": 1,
+        "regional_wall_seconds": 15.56,
+        "editable_texts": 0,
+        "editable_images": 0,
+        "office_pass": false,
+        "final_office_actions": 0,
+        "local_hard_gate_receipts": [],
+        "outside_pixels": 0,
+        "visual": [
+          {
+            "status": "UNKNOWN",
+            "failure": "QA_INFRASTRUCTURE_UNAVAILABLE",
+            "error_type": "RuntimeError",
+            "verified_regions_retained": true,
+            "automatic_retry": false
+          }
+        ],
+        "execution_cost": {
+          "limits": {
+            "region_candidates": 2,
+            "complex_region_candidates": 3,
+            "repair_rounds": 1,
+            "model_calls": 8,
+            "office_validations": 14,
+            "max_seconds": 900,
+            "cost_units": 100
+          },
+          "counts": {
+            "model_calls": 2,
+            "office_validations": 1,
+            "background_candidates": 0,
+            "compiler_calls": 2
+          },
+          "cost_units": 11.0,
+          "cost_unit_definition": {
+            "model_calls": 5.0,
+            "office_validations": 1.0,
+            "background_candidates": 0.05,
+            "compiler_calls": 0.0
+          },
+          "elapsed_seconds": 117.90738320350647
+        },
+        "workflow_states": {
+          "candidate_generation": "COMPLETED",
+          "regional_commit": "COMPLETED",
+          "final_qa": "UNKNOWN_OR_REVIEW_REQUIRED",
+          "automatic_publication": "GATED"
+        },
+        "verified_regions": [],
+        "artifacts": {
+          "page-01.png": "e77faf3edb1dc1c3683c0f00423ce88e19740589373f9fd7f791b3c26da3ac3b",
+          "result.pptx": "dfede11db2eeeb1ff76b5186f43ce005b07e6fb4e2769df8dac1eed4db420056",
+          "stable-fallback.pptx": "f3e442e66e5fcd9a17d8cade0ebd1cf26e7ec3ca0746b995058b0653c40f63e6"
+        }
+      },
+      {
+        "job": "C:\\Users\\83895\\.codex\\worktrees\\279a\\image2PPT\\outputs\\r12-agent-region-recovery\\outputs\\r1209-fresh-page03-resumed",
+        "committed_files_verified": 291,
+        "code_manifest_matches_current": true,
+        "source_sha256": "e4556b4d9ea3b0f9eb77af42a557698b44f17518badb673ab25410fe056d13a7",
+        "perception_mode": "live-or-cache",
+        "background_candidates": 0,
+        "lower_hypotheses_assessed": 0,
+        "lama_candidates": 0,
+        "compiler_packages": 2,
+        "office_packages": 1,
+        "replacement_packages": 1,
+        "regional_wall_seconds": 80.51,
+        "editable_texts": 0,
+        "editable_images": 6,
+        "office_pass": false,
+        "final_office_actions": 0,
+        "local_hard_gate_receipts": [],
+        "outside_pixels": 0,
+        "visual": [
+          {
+            "status": "UNKNOWN",
+            "failure": "QA_INFRASTRUCTURE_UNAVAILABLE",
+            "error_type": "RuntimeError",
+            "verified_regions_retained": true,
+            "automatic_retry": false
+          }
+        ],
+        "execution_cost": {
+          "limits": {
+            "region_candidates": 2,
+            "complex_region_candidates": 3,
+            "repair_rounds": 1,
+            "model_calls": 8,
+            "office_validations": 14,
+            "max_seconds": 900,
+            "cost_units": 100
+          },
+          "counts": {
+            "model_calls": 1,
+            "office_validations": 1,
+            "background_candidates": 0,
+            "compiler_calls": 2
+          },
+          "cost_units": 6.0,
+          "cost_unit_definition": {
+            "model_calls": 5.0,
+            "office_validations": 1.0,
+            "background_candidates": 0.05,
+            "compiler_calls": 0.0
+          },
+          "elapsed_seconds": 254.2370250225067
+        },
+        "workflow_states": {
+          "candidate_generation": "COMPLETED",
+          "regional_commit": "COMPLETED",
+          "final_qa": "UNKNOWN_OR_REVIEW_REQUIRED",
+          "automatic_publication": "GATED"
+        },
+        "verified_regions": [],
+        "artifacts": {
+          "page-01.png": "fe5b1a8cc58044c83098720dc66259cebb38cd9071f3bcb848199cf62044e61f",
+          "result.pptx": "f99b99cae04e7683380a515b719dce8249b2d045380c4b4fd9deb4ccf1f14191",
+          "stable-fallback.pptx": "5d99d0399910da5ff2115acc33424400c898bcb674083361fb3b101721745970"
+        }
+      }
+    ],
+    "limitations": [
+      "No native text survived hard gates on this untuned page. Six PNGs passed actual image edit and residual checks.",
+      "TextEditProbe reported FAIL with no native text records. The formal combined QA remains UNKNOWN_OR_REVIEW_REQUIRED.",
+      "Separate Go visual diagnosis passed and does not change formal combined QA or publication status."
+    ]
+  },
+  "automated_tests": {
+    "product_passed": 297,
+    "core_passed": 39,
+    "product_junit": "outputs/r1209-test-results/product-junit.xml",
+    "product_log": "outputs/r1209-test-results/product.log",
+    "core_log": "outputs/r1209-test-results/core.log",
+    "final_product_seconds": 33.83,
+    "log_hashes": {
+      "core.log": "0ca33cc039d0e09209d951e9b36d0dc9ad54d88f2ce4c7bb4406b63605a28302",
+      "product-junit.xml": "f1283c51cb6014440999be22e9edc311f5d8c3019a7685fe4f92b97ec504a24d",
+      "product.log": "d93704e137932fc3a0670cddda688604aec6260de2aeb772869d00fa5d755912"
+    }
+  },
+  "publication": {
+    "automatic_publication": false,
+    "human_acceptance": false,
+    "wps_acceptance": false
+  }
+}

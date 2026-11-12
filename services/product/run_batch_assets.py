@@ -15,6 +15,7 @@ def main():
     parser.add_argument('--limit', type=int, default=5)
     parser.add_argument('--sam-budget', type=int, default=5)
     parser.add_argument('--office', action='store_true')
+    parser.add_argument('--sam-cache',help='reuse source/plan/model-bound SAM evidence before dispatch')
     args = parser.parse_args()
     job = Path(args.job).resolve()
     committed = Store(job/'state').committed()
@@ -27,7 +28,7 @@ def main():
     graph = SceneGraph.model_validate_json((base/'scene.json').read_text('utf8'))
     report = recover(graph, base/'source.png', args.layers, base, job, args.output,
                      json.loads((job/'fonts.json').read_text('utf8')),
-                     limit=args.limit, office=args.office, sam_budget=args.sam_budget)
+                     limit=args.limit, office=args.office, sam_budget=args.sam_budget,sam_cache=args.sam_cache)
     print(json.dumps({'targets': report['targets'], 'objects': [
         {k: r.get(k) for k in ('object_id', 'status', 'strategy', 'reason', 'elapsed_seconds')}
         for r in report['objects']], 'elapsed_seconds': report['elapsed_seconds'],

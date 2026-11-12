@@ -98,9 +98,12 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
         seeds=[(rgba,meta) for rgba,meta in seeds if meta['method']=='sam3']
         try:seeds.extend(sam_source_candidates(obj,source,protected,surface,sam,source_seeds))
         except ValueError:pass
-    if not any(np.array_equal(seed,proposal) for proposal,_ in seeds):
+    seed_metadata=next((metadata for proposal,metadata in seeds if np.array_equal(seed,proposal)),None)
+    if seed_metadata is None:
         raise ValueError('asset segmentation seed lacks original LayerD/source evidence')
-    completed,halo=complete_source_halo(obj,seed,source,protected,surface)
+    from .asset_retry import localized_owner_object
+    owner_obj=localized_owner_object(obj,seed_metadata)
+    completed,halo=complete_source_halo(owner_obj,seed,source,protected,surface)
     x,y,w,h=rgba_box
     if (min(x,y)<0 or min(w,h)<=0 or x+w>source.shape[1] or y+h>source.shape[0]
             or rgba.shape!=(h,w,4)):
@@ -115,13 +118,21 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
         raise ValueError('asset PNG hash mismatch')
     if not np.array_equal(np.array(Image.open(directory/filename).convert('RGBA')),rgba):
         raise ValueError('asset PNG pixels were resampled or changed')
-    owner_box,backing,owner,owner_proof=source_owner(obj,full,source,protected,surface)
+    owner_box,backing,owner,owner_proof=source_owner(owner_obj,full,source,protected,surface)
     if owner_box!=box or not np.array_equal(owner,mask):
         raise ValueError('asset owner closure differs from independent source components')
     rx,ry,rw,rh=box;local=mask[ry:ry+rh,rx:rx+rw]
-    expected=source[ry:ry+rh,rx:rx+rw].copy();expected[local]=backing[local]
+    if 'background_selection' in payload:
+        from .asset_retry import asset_background
+        expected,background_selection,chosen_background=asset_background(source,box,mask,protected,layer_directory,backing)
+        if background_selection!=payload['background_selection']:
+            raise ValueError('asset background route differs from independent evidence')
+    else:
+        expected=source[ry:ry+rh,rx:rx+rw].copy();expected[local]=backing[local]
     if not np.array_equal(expected,patch):raise ValueError('asset patch changed pixels beyond the proven owner')
     backing_rgba,error,_=backing_from_evidence(source,rgba_box,protected,surface)
+    if payload.get('background_selection',{}).get('method')=='layerd_lower':
+        backing_rgba=chosen_background[y-ry:y-ry+h,x-rx:x-rx+w]
     alpha=rgba[...,3:4]/255
     reconstructed=rgba[...,:3]*alpha+backing_rgba*(1-alpha)
     visible=rgba[...,3]>0

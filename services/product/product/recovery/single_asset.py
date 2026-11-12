@@ -1,5 +1,5 @@
 """One source-bound icon, one changed strategy, cached L1 before any Office work."""
-import json,time
+import json,time,shutil
 from pathlib import Path
 from ..materialize import digest,write
 from ..parallel_store import key
@@ -9,11 +9,18 @@ from .asset_retry import retry_asset_extraction
 from .asset_cache import l1_binding, l2_binding
 
 
-def probe(graph,identifier,source,layers,baseline,output,*,strategy='sam'):
+def probe(graph,identifier,source,layers,baseline,output,*,strategy='sam',sam_cache=None,allow_model_call=True):
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=True)
     baseline=Path(baseline).resolve();layers=Path(layers).resolve()
     obj=next(a for a in graph.asset.objects if a.id==identifier)
     binding=l1_binding(graph,obj,source,layers,baseline,strategy,SAM_BINDING if strategy=='sam' else None)
+    reusable=[]
+    if strategy=='sam' and sam_cache:
+        from .asset_cache import file_hashes
+        reusable=sorted({p.parent for p in Path(sam_cache).resolve().rglob(identifier+'.json')
+                         if p.with_suffix('.npz').is_file()})
+        binding['external_sam']={str(p):file_hashes(p) for p in reusable}
+    binding['allow_model_call']=allow_model_call
     if binding['source_sha256']!=graph.source_sha256:raise ValueError('single-object source changed')
     root=output/'runs'/key(binding)[:16];receipt=root/'receipt.json'
     if receipt.exists():
@@ -37,6 +44,17 @@ def probe(graph,identifier,source,layers,baseline,output,*,strategy='sam'):
             samdir=output/'sam'/key({'plan':digest(plan),'model':SAM_BINDING})[:20]
             masks,error=load_sam(samdir,obj,graph.source_sha256,digest(plan),tuple(graph.image_size),'sam3',individual=True)
             if error:
+                for previous in reusable:
+                    masks,reuse_error=load_sam(previous,obj,graph.source_sha256,digest(plan),tuple(graph.image_size),'sam3',individual=True)
+                    if reuse_error:continue
+                    meta=json.loads((previous/(identifier+'.json')).read_text('utf8'))
+                    if any(meta.get(k)!=SAM_BINDING[k] for k in ('checkpoint_sha256','code_revision')):continue
+                    shutil.copytree(previous,samdir,dirs_exist_ok=True)
+                    result['sam_reused_from']=str(previous)
+                    masks,error=load_sam(samdir,obj,graph.source_sha256,digest(plan),tuple(graph.image_size),'sam3',individual=True)
+                    if not error:break
+            if error:
+                if not allow_model_call:raise RuntimeError('SAM_EVIDENCE_UNAVAILABLE; new inference disabled')
                 samdir=infer_sam(source,plan,samdir,'sam3',[identifier]);result['model_calls']=1
             if samdir is None:raise RuntimeError('SAM_UNCONFIGURED')
         candidate=retry_asset_extraction(graph,identifier,source,layers,baseline,root/'c',strategy=strategy,sam_directory=samdir,sam_plan=plan)

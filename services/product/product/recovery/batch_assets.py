@@ -53,7 +53,8 @@ def failure_inventory(graph, job):
             reasons.append('SAM_EVIDENCE_INSUFFICIENT')
         if not reasons:
             reasons.append('ALPHA_MISSING_OR_UNVERIFIED')
-        rows.append({'object_id': obj.id, 'kind': obj.kind, 'owner': graph.ownership[obj.id],
+        rows.append({'object_id': obj.id, 'description': obj.description, 'prompt_en': obj.prompt_en,
+                     'kind': obj.kind, 'owner': graph.ownership[obj.id],
                      'members': closures[obj.id]['member_ids'], 'failure_categories': reasons,
                      'prior_failure': previous,
                      'eligible': obj.kind == 'icon' and graph.ownership[obj.id] == 'RESOLVED'
@@ -61,7 +62,7 @@ def failure_inventory(graph, job):
     return rows
 
 
-def recover(graph, source, layers, baseline, job, output, fonts, *, limit=5, office=False, sam_budget=5):
+def recover(graph, source, layers, baseline, job, output, fonts, *, limit=5, office=False, sam_budget=5,sam_cache=None):
     if not 1 <= limit <= 5 or sam_budget < 0:
         raise ValueError('batch limit must be 1..5 and SAM budget nonnegative')
     output = Path(output).resolve()
@@ -89,10 +90,11 @@ def recover(graph, source, layers, baseline, job, output, fonts, *, limit=5, off
             if (old_protection == new_protection).all():
                 strategies.remove('verified-backing')
             for strategy in strategies:
-                if strategy == 'sam' and used_sam >= sam_budget:
+                if strategy == 'sam' and used_sam >= sam_budget and sam_cache is None:
                     row['stop_reason'] = 'SAM_BUDGET_EXHAUSTED'
                     break
-                candidate = probe(graph, identifier, source, layers, current, folder/strategy, strategy=strategy)
+                candidate = probe(graph, identifier, source, layers, current, folder/strategy, strategy=strategy,
+                                  sam_cache=sam_cache,allow_model_call=used_sam<sam_budget)
                 row['attempts'].append(candidate)
                 if candidate['status'] != 'CANDIDATE_READY':
                     row['failure_evidence'] = {'strategy': strategy, 'reason': candidate.get('reason'),

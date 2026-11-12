@@ -30,6 +30,7 @@ def main():
     parser.add_argument('--kind',choices=['text','asset'],required=True)
     parser.add_argument('--prompt-key',action='store_true')
     parser.add_argument('--model-cache')
+    parser.add_argument('--sam-cache',help='existing source/plan/model-bound SAM receipts for asset repair')
     parser.add_argument('--rejected-candidate')
     parser.add_argument('--rejection-report')
     args=parser.parse_args()
@@ -100,7 +101,12 @@ def main():
     else:
         from product.recovery.asset_retry import retry_asset_extraction
         def asset_retry(directory):
-            receipt=retry_asset_extraction(graph,identifier,source,layers,baseline,directory/'retry')
+            if args.sam_cache:
+                from product.recovery.single_asset import probe
+                receipt=probe(graph,identifier,source,layers,baseline,directory/'retry',strategy='sam',
+                              sam_cache=args.sam_cache,allow_model_call=False)
+            else:
+                receipt=retry_asset_extraction(graph,identifier,source,layers,baseline,directory/'retry')
             write(directory/'action-result.json',receipt)
             if receipt['status']!='CANDIDATE_READY':
                 raise RecoveryBlocked('ASSET_EXTRACTION_UNCERTAIN',receipt.get('reason','asset extraction remains blocked'))
@@ -108,8 +114,8 @@ def main():
             return ToolCandidate(candidate_graph,Path(receipt['candidate_directory']),
                                  'TRANSPARENT_PNG',baseline,layers)
         callbacks['retry_asset_extraction']=asset_retry
-        bindings['retry_asset_extraction']=key({name:digest(package/name) for name in (
-            'recovery/asset_retry.py','parallel_rebuild.py','object_unmix.py')})
+        from product.recovery.asset_cache import code_fingerprint
+        bindings['retry_asset_extraction']=key(code_fingerprint())
     tools=register_repair_tools(args.kind,callbacks,bindings)
     policy=load_skill(Path(args.skill).resolve())
     output.mkdir(parents=True,exist_ok=False)
@@ -121,6 +127,7 @@ def main():
         'layer_manifest_sha256':digest(layers/'manifest.json'),'skill_sha256':policy.version,
         'max_tools':1,'max_decisions':2,'tool_implementations':bindings,
         'auto_failure_selected':args.failure is None,
+        'sam_cache':args.sam_cache,
         'rejected_candidate':args.rejected_candidate,'rejection_report':args.rejection_report})
     if args.prompt_key:
         credential=getpass.getpass('MoMA credential (hidden): ')
