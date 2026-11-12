@@ -644,3 +644,11 @@ def test_missing_background_inputs_do_not_reserve_idempotency_key(job):
     with service.state(identifier).db() as db:
         assert db.execute('SELECT count(*) FROM operations WHERE id=?',(args['idempotency_key'],)).fetchone()[0]==0
     validate({**args,'page':1,'object_id':'draft'},schema)
+
+
+def test_region_reference_is_not_reserved_as_candidate_submission(job):
+    service,identifier,_=job
+    with pytest.raises(ValueError,match='region IDs and object IDs'):
+        service.call('commit_region',identifier,expected_version=0,idempotency_key='invalid-region-submit',candidate_id='region-not-a-candidate')
+    with service.state(identifier).db() as db:
+        assert db.execute('SELECT count(*) FROM operations').fetchone()[0]==0

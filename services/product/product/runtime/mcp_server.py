@@ -122,7 +122,8 @@ def schemas():
         fields[name]['evidence'] = {'type': 'object', 'properties': branches, 'additionalProperties': False}
     result = []
     for name in TOOLS:
-        properties = {'job_id': string, **fields.get(name, {})}
+        properties = {'job_id': {'type':'string','pattern':'^[a-f0-9]{32}$'}, **fields.get(name, {})}
+        if 'candidate_id' in properties:properties['candidate_id']={'type':'string','pattern':'^c-[a-f0-9]{24}$','description':'Candidate ID returned by create_candidate/rebuild_region. Never a region- ID or object ID.'}
         required = list(properties)
         if name=='list_evidence':required=['job_id']
         if name=='update_scene':required.remove('remove_object_ids')
