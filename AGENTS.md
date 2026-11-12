@@ -1,5 +1,7 @@
 # image2PPT project
 
+- The explicit `orchestrator=opencode`, `visual_review_backend=opencode` path uses the autonomous runtime Skill at `skills/image2ppt-runtime/SKILL.md`. It may compose basic MCP tools or choose the existing pipeline shortcut. The runtime Agent proposes evidence and scenes; the existing private adapter emits public SlideIR. Actual Office and source-pixel safety gates remain required. OpenCode performs visual self-review on this path without Go. The existing pipeline keeps its current default reviewer.
+
 This repository contains a fixed PPTX compiler and the r10 automatic screenshot-to-editable-PPT product. For automatic generation, development, debugging and acceptance, follow `skills/image2ppt/SKILL.md` and the active product worktree's `services/product/PARALLEL_R10.md`.
 
 - The automatic entrypoint is `product.parallel_pipeline.run`, used by the upload service and `services/product/run_local.py`. Default mode is `parallel_review`; `parallel_auto` remains gated. If this checkout lacks the product entrypoint, locate the established product worktree. Do not replace it with legacy serial planning, a hand-authored SlideIR, or a manually assembled deck and report automatic success.

@@ -1,0 +1,183 @@
+"""Image2PPT MCP stdio server. stdout is reserved for MCP frames."""
+import argparse
+import asyncio
+import base64
+import json
+import os
+
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import ImageContent, TextContent, Tool
+
+from ..parallel_config import configure
+from .service import RuntimeService, TOOLS, VisualReview
+
+
+READ_ONLY = {'get_job_context', 'inspect_scene', 'get_evidence'}
+DESCRIPTION = {
+    'get_job_context': 'Read job status, version and immutable original-image evidence references.',
+    'run_perception': 'Run OCR and text/asset/surface perception once and create a source-safe initial scene.',
+    'inspect_scene': 'Read scene, complete object IDs, ownership, dependencies and perception failures.',
+    'rebuild_region': 'Generate one regional text or whole-asset candidate using existing production safety gates.',
+    'repair_region': 'Try a changed strategy after inspecting an actual failed candidate. Same strategy is rejected.',
+    'validate_candidate': 'Verify candidate and run actual PowerPoint edits and source-owner residual checks.',
+    'commit_region': 'Commit a verified region against its exact parent scene; independent regions are retained.',
+    'compose_delivery': 'Compile the current committed scene using the fixed compiler.',
+    'validate_office': 'Validate final PPTX with actual PowerPoint and return required visual evidence IDs.',
+    'get_evidence': 'Receive actual source/candidate/Office images or diagnostic JSON by evidence ID.',
+    'record_visual_review': 'Record your visual review after viewing every required image and hard-check receipt.',
+    'finalize_job': 'Finalize only with current actual editing checks and hash-bound OpenCode visual review.'}
+DESCRIPTION.update({
+    'fit_background':'Fit a continuous background from an image evidence_id and xywh bbox, or from a scene text object. This produces a hypothesis and does not change the source.',
+    'complete_text_mask':'Complete strokes and antialiasing from independent source/mask/backing evidence, or derive them for a RESOLVED scene TEXT ID. Independent outputs grant no erase authority.',
+    'create_scene':'Create a scene proposal from branch evidence. Preserve exact OCR wording and bind text.members to OCR line IDs; inspect unresolved owners in the response.',
+    'update_scene':'Revise scene evidence and add draft objects. Existing accepted objects and their styles are preserved; revising those requires dependency-local rollback.',
+    'create_candidate':'Combine a binary mask and background image for a scene TEXT object. Recomputes legal source stroke ownership and all background gates before staging.',
+    'segment_object':'Obtain SAM evidence for a complete scene asset object. SAM evidence does not authorize source erasure.',
+    'fit_text_layout':'Compute a native text frame using installed font metrics. The result is a proposal; source ownership and candidate validation remain separate.',
+    'run_perception':'Optional high-cost shortcut invoking three model branches and LayerD. Basic evidence tools can be used independently.'})
+
+
+def schemas():
+    from ..parallel_contracts import TextEvidence, AssetEvidence, SurfaceEvidence
+    string = {'type': 'string'}
+    page = {'type': 'integer', 'minimum': 1}
+    strings = {'type': 'array', 'items': string}
+    region = {'page': page, 'object_id': string}
+    fields = {
+        'inspect_scene': {'page': {'type': 'integer', 'minimum': 1}},
+        'rebuild_region': {'page': {'type': 'integer', 'minimum': 1}, 'object_id': string,
+                           'strategy': {'type': 'string', 'enum': ['auto', 'next_background', 'verified-backing', 'source-halo', 'sam']}},
+        'repair_region': {'candidate_id': string, 'strategy': string},
+        'validate_candidate': {'candidate_id': string},
+        'commit_region': {'candidate_id': string},
+        'get_evidence': {'evidence_ids': {'type': 'array', 'items': string, 'minItems': 1, 'maxItems': 8}},
+        'record_visual_review': {'review': VisualReview.model_json_schema()}}
+    fields.update({
+        'inspect_image': {'evidence_id': string},
+        'crop_image': {'evidence_id': string, 'bbox': {'type': 'array', 'items': {'type': 'integer'}, 'minItems': 4, 'maxItems': 4}, 'scale': {'type': 'number', 'minimum': .1, 'maximum': 4}},
+        'compare_images': {'first': string, 'second': string},
+        'run_ocr': {'page': page}, 'analyze_text_regions': {'page': page},
+        'analyze_image': {'evidence_id': string, 'question': string},
+        'decompose_layers': {'page': page}, 'segment_object': dict(region),
+        'extract_background': {**region, 'mask_id': string},
+        'fit_background': dict(region), 'inpaint_background': {**region, 'mask_id': string},
+        'complete_text_mask': dict(region), 'validate_mask': {**region, 'mask_id': string},
+        'unmix_foreground': {**region, 'strategy': string},
+        'validate_rgba': {'candidate_id': string}, 'fit_text_layout': dict(region),
+        'create_scene': {'page': page, 'evidence': {'type': 'object'}},
+        'update_scene': {'page': page, 'evidence': {'type': 'object'}},
+        'create_candidate': {**region, 'mask_id': string, 'background_id': string},
+        'commit_candidate': {'candidate_id': string},
+        'rollback_region': {'page': page, 'object_ids': strings, 'reason': string},
+        'run_image_script': {'script': string, 'inputs': strings}})
+    fields['fit_background'].update(evidence_id=string,bbox={'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},protected_id=string)
+    fields['fit_background']['context_width']={'type':'integer','minimum':8,'maximum':128,
+        'description':'Unprotected source-strip sampling width in pixels. A changed width supplies different background evidence. All original ownership and fit validation thresholds still apply.'}
+    fields['complete_text_mask'].update(evidence_id=string,original_mask_id=string,background_id=string,protected_id=string,
+        bbox={'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},glyph_height={'type':'number','exclusiveMinimum':0})
+    fields['unmix_foreground'].update(object_evidence={'type':'object'},protected_id=string,alpha_id=string)
+    fields['segment_object']=dict(fields['segment_object'],object_evidence={'type':'object'})
+    frame={'type':'array','items':{'type':'number','exclusiveMinimum':0},'minItems':2,'maxItems':2}
+    fields['fit_text_layout']['minimum_size']=frame
+    fields['create_candidate']['frame_minimum']=frame
+    fields['create_candidate']['frame_minimum']['description']='Optional transparent native text frame [width,height] in source pixels. Keeps source origin and erase Mask fixed. Use measured Office bounds when testing a layout repair.'
+    definitions = {}
+    branches = {}
+    for branch, contract in [('text', TextEvidence), ('asset', AssetEvidence), ('surface', SurfaceEvidence)]:
+        schema = contract.model_json_schema()
+        definitions.update(schema.pop('$defs', {}))
+        for name in ('source_sha256', 'image_size', 'transform', 'method_version', 'schema'):
+            schema['properties'].pop(name, None)
+        schema['required'] = [name for name in schema.get('required', []) if name in schema['properties']]
+        if branch=='text':
+            schema['properties']['members']['description']='Map text object IDs to exact OCR line IDs from run_ocr. Content contradictions remain raster. Unique exact wording with matching geometry can be bound by the host.'
+        branches[branch] = schema
+    for name in ('create_scene', 'update_scene'):
+        fields[name]['evidence'] = {'type': 'object', 'properties': branches, 'additionalProperties': False}
+    result = []
+    for name in TOOLS:
+        properties = {'job_id': string, **fields.get(name, {})}
+        required = list(properties)
+        if name in ('rebuild_region', 'unmix_foreground'):
+            required.remove('strategy')
+        if name=='segment_object':
+            required.remove('object_id')
+            required.remove('object_evidence')
+        if name in ('fit_background','complete_text_mask'):
+            required=['job_id']
+        if name=='unmix_foreground':
+            required=['job_id','page']
+        if name=='fit_text_layout':required.remove('minimum_size')
+        if name=='create_candidate':required.remove('frame_minimum')
+        if name == 'crop_image':
+            required.remove('scale')
+        if name not in READ_ONLY:
+            properties.update(expected_version={'type': 'integer', 'minimum': 0},
+                              idempotency_key={'type':'string','minLength':8,'maxLength':100,'pattern':'^[A-Za-z0-9_-]+$'})
+            required.append('idempotency_key')
+            if name in ('commit_candidate', 'commit_region'):
+                required.append('expected_version')
+        result.append(Tool(name=name, description=DESCRIPTION.get(name, name.replace('_', ' ')+'. Independent evidence tool; outputs do not authorize pixel erasure.'), inputSchema={
+            'type': 'object', 'properties': properties, 'required': required, 'additionalProperties': False,
+            **({'$defs': definitions} if name in ('create_scene', 'update_scene') else {})}))
+    return result
+
+
+def create_server(root, bound_job=None):
+    service = RuntimeService(root)
+    server = Server('image2ppt')
+    def catalog():
+        profile='all'
+        if bound_job:
+            request=json.loads((service.state(bound_job).job/'request.json').read_text('utf8'))
+            profile=request.get('tool_profile','all')
+        shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region'} if profile=='basic' else set()
+        return [tool for tool in schemas() if tool.name not in shortcuts]
+
+    @server.list_tools()
+    async def list_tools():
+        return catalog()
+
+    @server.call_tool()
+    async def call_tool(name, arguments):
+        arguments = dict(arguments or {})
+        if bound_job and arguments.get('job_id') != bound_job:
+            raise ValueError('tool is bound to another job')
+        from jsonschema import validate
+        schema = next(t.inputSchema for t in catalog() if t.name == name)
+        validate(arguments, schema)
+        result = await asyncio.to_thread(service.call, name, **arguments)
+        if name != 'get_evidence':
+            return [TextContent(type='text', text=json.dumps(result, ensure_ascii=False))]
+        content = []
+        for path, reference in result:
+            if path.suffix.lower() == '.png':
+                content.append(TextContent(type='text', text=json.dumps(reference)))
+                content.append(ImageContent(type='image', mimeType='image/png',
+                                            data=base64.b64encode(path.read_bytes()).decode('ascii')))
+            else:
+                content.append(TextContent(type='text', text=json.dumps(reference)+'\n'+path.read_text('utf8')))
+        # A supplied-image receipt records transport provision, not proof of model cognition.
+        state = service.state(arguments['job_id'])
+        for identifier in arguments['evidence_ids']:
+            state.evidence(identifier, delivered=True)
+        return content
+
+    return server
+
+
+async def serve(root, bound_job=None):
+    configure()
+    os.environ.setdefault('IMAGE2PPT_LAYERD_TIMEOUT','180')
+    server = create_server(root, bound_job)
+    async with stdio_server() as (reader, writer):
+        await server.run(reader, writer, server.create_initialization_options())
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--root', required=True)
+    parser.add_argument('--job', default=os.environ.get('IMAGE2PPT_BOUND_JOB'))
+    options = parser.parse_args()
+    asyncio.run(serve(options.root, options.job))

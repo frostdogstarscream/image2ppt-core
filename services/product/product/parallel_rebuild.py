@@ -165,7 +165,7 @@ def _asset_candidates(obj,source,layers,protected,stable,strategy,sam=None,cache
     return results
 
 
-def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam_candidates=None,pixel_cache=None,text_candidates=True):
+def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam_candidates=None,pixel_cache=None,text_candidates=True,surface_candidates=True):
     # A legacy build is itself an isolated trial, never a mutation of barrier 1.
     graph=graph.model_copy(deep=True)
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=False)
@@ -307,6 +307,9 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
     accepted_ids={c['id'] for c in chosen}
     intrinsic_ids={r.source for r in graph.relations if r.kind=='intrinsic_text' and r.target in accepted_ids and r.status=='RESOLVED'}
     for s in graph.surface.shapes:
+        if not surface_candidates:
+            report.append({'id':s.id,'state':'FALLBACK','reason':'surface retained for Agent candidate selection'})
+            continue
         if not region_ready(region_by_id[s.id],region_records,accepted_ids|intrinsic_ids):
             report.append({'id':s.id,'state':'FALLBACK','reason':'local surface foreground closure is incomplete','reason_code':'SURFACE_REGION_UNPROVEN'});continue
         if graph.ownership[s.id]!='RESOLVED' or s.fill=='none' or s.fill_gradient or s.geometry!='rect' or s.line_width_pt:

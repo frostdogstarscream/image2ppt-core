@@ -27,13 +27,14 @@ async function poll(id){if(activeJob!==id)return;try{const j=await(await api('/a
 $('status').textContent=(labels[j.status]||j.status)+'\n'+({perceiving:'正在判断文字、素材和背景',planning:'MoMA 正在规划和修改',compiling:'正在生成并渲染 PPT',reviewing:'OpenCode Go 正在对照原图复核'}[p.stage]||'')+(p.page?' · 第 '+p.page+' 页':'');
 if(['QUEUED','RUNNING'].includes(j.status)){pollTimer=setTimeout(()=>poll(id),2000);return}
 $('start').disabled=false;
-if(['SUCCEEDED','REVIEW_REQUIRED'].includes(j.status)){const link=document.createElement('a');link.href=await file(id,'result.pptx');link.download='可编辑演示文稿.pptx';link.textContent='下载 PPTX';$('downloads').append(link);
+if(['SUCCEEDED','REVIEW_REQUIRED'].includes(j.status)&&j.result?.artifacts?.['result.pptx']){const link=document.createElement('a');link.href=await file(id,'result.pptx');link.download='可编辑演示文稿.pptx';link.textContent='下载 PPTX';$('downloads').append(link);
 for(const name of Object.keys(j.result.artifacts).filter(n=>n.endsWith('.png')).sort()){const im=document.createElement('img');im.src=await file(id,name);im.alt=name;$('downloads').append(im)}}
+if(j.result?.reason)$('status').append('\n'+j.result.reason);
 if(j.status==='QUALITY_FAILED')$('status').append('\n仍有问题的页面：'+(j.result.unresolved_pages||[]).join('、'));
 if(j.status==='FAILED')$('status').append('\n错误：'+(j.result?.error||'后台任务失败'));
 }catch(e){$('status').textContent=e.message;$('start').disabled=false}}
 $('form').onsubmit=async e=>{e.preventDefault();$('start').disabled=true;$('downloads').replaceChildren();$('result').hidden=false;try{const data=new FormData();for(const f of $('files').files)data.append('files',f);const strategy=encodeURIComponent($('objectStrategy').value);const j=await(await api('/api/jobs?object_extraction='+strategy,{method:'POST',body:data})).json();sessionStorage.setItem('product-job',j.id);watch(j.id)}catch(e){$('status').textContent=e.message;$('start').disabled=false}};
-function health(){api('/api/health').then(r=>r.json()).then(j=>{$('health').textContent=j.model_ready?'MoMA 与 OpenCode Go 均已配置，可以上传。':'请连接规划与复核模型。';$('provider').hidden=j.model_ready;if(j.moma_configured&&!j.opencode_go_configured)$('keyprovider').value='opencode_go'}).catch(e=>$('health').textContent=e.message)}
+function health(){api('/api/health').then(r=>r.json()).then(j=>{const runtime=j.opencode_runtime_configured;const model=j.agent_inference_provider==='opencode_go'?'OpenCode Go':'MoMA';$('health').textContent=j.model_ready?(runtime?'OpenCode Agent（'+model+'）已连接，可以上传。':'MoMA 与 OpenCode Go 均已配置，可以上传。'):'请连接任务模型。';$('provider').hidden=j.model_ready;$('reconnect').hidden=runtime;if(j.moma_configured&&!j.opencode_go_configured)$('keyprovider').value='opencode_go'}).catch(e=>$('health').textContent=e.message)}
 $('reconnect').onclick=()=>{$('provider').hidden=false;$('key').focus()};
 $('keyform').onsubmit=async e=>{e.preventDefault();try{await api('/api/provider-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:$('key').value,provider:$('keyprovider').value})});$('key').value='';health()}catch(e){$('keymsg').textContent=e.message}};health();
 const previous=sessionStorage.getItem('product-job');if(previous){$('result').hidden=false;watch(previous)}

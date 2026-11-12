@@ -113,11 +113,23 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
     reference, fit_report = fit_gradient(source, box, context_protected)
     completion = TextMaskCompletion.analyze(source, original, protected, box, reference,
                                              glyph_height=styles[text.style].size_px)
-    wanted = completion.masks[saved['mask_variant']]
     selected = np.array(Image.open(trial_directory/'mask.png').convert('L'))
+    if saved['mask_variant']=='source_authorized_subset':
+        if not np.isin(selected,[0,255]).all() or selected.shape!=source.shape[:2]:
+            raise ValueError('invalid source-authorized subset mask')
+        wanted=selected>0
+        if not wanted.any() or (wanted & ~completion.masks['semantic_completion']).any():
+            raise ValueError('trial mask contains pixels without source authorization')
+    else:
+        wanted = completion.masks[saved['mask_variant']]
     if not np.isin(selected, [0, 255]).all() or not np.array_equal(selected > 0, wanted):
         raise ValueError('trial mask is not source-authorized')
     raw = np.array(Image.open(trial_directory/'raw_inpaint.png').convert('RGB'))
+    context_width=(saved.get('provenance') or {}).get('background_context_width',14)
+    if type(context_width) is not int or not 8<=context_width<=128:
+        raise ValueError('invalid source context width')
+    if context_width!=14:
+        reference,fit_report=fit_gradient(source,box,context_protected,context=context_width)
     if saved['method'] == 'gradient' and not np.array_equal(raw, reference):
         raise ValueError('gradient raw backing binding mismatch')
     report, written, _ = assess_trial(source, wanted, raw, protected, box, reference, fit_report, {})

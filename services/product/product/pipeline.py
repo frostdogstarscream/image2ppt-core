@@ -120,7 +120,7 @@ def compile_pages(irs, output, pages):
     for attempt in range(2):
         with (output/'compiler.stdout').open('w',encoding='utf-8') as stdout, (output/'compiler.stderr').open('w',encoding='utf-8') as stderr:
             try:
-                result=subprocess.run(command,cwd=ROOT,stdout=stdout,stderr=stderr,timeout=1800,
+                result=subprocess.run(command,cwd=ROOT,stdin=subprocess.DEVNULL,stdout=stdout,stderr=stderr,timeout=1800,
                                       creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
             except subprocess.TimeoutExpired:
                 raise PipelineError('compiler_timeout') from None

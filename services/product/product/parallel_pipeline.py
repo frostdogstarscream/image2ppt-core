@@ -27,7 +27,7 @@ def safe_graph(graph):
     value.ownership={k:'UNOWNED' for k in value.ownership};return value
 
 
-def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progress=None,office=None):
+def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progress=None,office=None,prepare_only=False):
     from .parallel_config import configure
     configure()
     from .pipeline import Provider,settings,compile_pages,effective_findings
@@ -36,6 +36,9 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
     from .parallel_review import PROMPT as REVIEW,panels
     from .go_provider import GoProvider
     job=Path(job).resolve();request=json.loads((job/'request.json').read_text(encoding='utf-8'))
+    if request.get('orchestrator')=='opencode' and not prepare_only:
+        from .runtime.runner import run as run_agent
+        return run_agent(job)
     from .parallel_candidate_engine import engine_mode,shadow_discover
     candidate_engine=engine_mode(request.get('candidate_engine',os.environ.get('IMAGE2PPT_CANDIDATE_ENGINE','off')))
     pipeline_mode=mode(request.get('pipeline_mode','parallel_review'));route=strategy(request.get('object_extraction','default'))
@@ -52,7 +55,7 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
         result=store.committed()['result'];write(job/'result.json',result);return result
     from .parallel_provider import Planner,Reviewer
     provider=provider or Planner(settings())
-    if review_provider is None:
+    if review_provider is None and not prepare_only:
         try:review_provider=Reviewer(job)
         except RuntimeError:
             if not candidate_engine.startswith('r12-'):raise
@@ -86,7 +89,7 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
         if progress:progress(**value)
     write(job/'provenance.json',{'pipeline_mode':pipeline_mode,'architecture':'text-asset-surface/'+('r12' if candidate_engine.startswith('r12-') else 'r10'),'serial_executed':False,
         'perception_mode':'hash-bound-recorded-branches' if request.get('perception_replay') else 'fresh-three-branch' if request.get('fresh_perception_requested') else 'live-or-cache',
-        'source_sha256s':[s['source_sha256'] for s in snaps],'moma_model':provider.model,'review_model':review_provider.model,
+        'source_sha256s':[s['source_sha256'] for s in snaps],'moma_model':provider.model,'review_model':'opencode' if prepare_only else review_provider.model,
         'human_acceptance':False,'stable_baseline_is_pixel_truth':False,'candidate_engine':candidate_engine})
     def _page(i):
         with lease('page'):
@@ -242,6 +245,15 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
             return graph,ir,report,{'page':reason}
     with ThreadPoolExecutor(max_workers=2) as pool:pages=list(pool.map(page,range(len(snaps))))
     graphs=[p[0] for p in pages];irs=[p[1] for p in pages];reports=[p[2] for p in pages]
+    if prepare_only:
+        if request.get('orchestrator')!='opencode' or request.get('visual_review_backend')!='opencode':
+            raise ValueError('OpenCode preparation requires explicit orchestration and review binding')
+        prepared=[]
+        for graph,snap,ir,(_,_,_,failures) in zip(graphs,snaps,irs,pages):
+            try:layers,_=layer_evidence(snap,cache)
+            except Exception:layers=None
+            prepared.append((graph,snap,ir,failures,str(layers) if layers else None))
+        return prepared
     if candidate_engine in ('r12-regional','r12-shadow'):
         from .recovery.product_pipeline import run as regional_run
         return regional_run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,

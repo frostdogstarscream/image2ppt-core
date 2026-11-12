@@ -33,9 +33,12 @@ def obtain_layers(source,directory,*,resume=False):
     log=directory.with_suffix('.log')
     args=[sys.executable,str(ROOT/'services/layerd/client.py'),'--input',str(source),'--output',str(directory),
           '--url',os.environ.get('LAYERD_URL','http://127.0.0.1:18840'),'--token-file',token]
+    timeout=int(os.environ.get('IMAGE2PPT_LAYERD_TIMEOUT','1200'))
+    if not 1<=timeout<=1200:raise ValueError('invalid LayerD tool timeout')
+    args.extend(['--timeout',str(timeout)])
     if resume:args.append('--resume')
     with log.open('w',encoding='utf-8') as stream:
-        result=subprocess.run(args,stdout=stream,stderr=stream,timeout=1300,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+        result=subprocess.run(args,stdin=subprocess.DEVNULL,stdout=stream,stderr=stream,timeout=timeout+100,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
     if result.returncode:raise RuntimeError('layerd_decomposition_failed')
     manifest=json.loads((directory/'manifest.json').read_text(encoding='utf-8'))
     if manifest['source_sha256']!=digest(source):raise ValueError('layerd_upload_binding_mismatch')
