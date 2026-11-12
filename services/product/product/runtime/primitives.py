@@ -240,13 +240,15 @@ class PrimitiveTools:
         ocr_file = current.get('ocr', {}).get(str(page))
         ocr = json.loads(Path(ocr_file).read_text('utf8')) if ocr_file else {'lines': []}
         branches['text']=bind_exact_ocr_members(branches['text'],ocr)
+        if 'fonts' not in current:
+            self.list_fonts(state, current, directory/'font-input')
+        fonts = json.loads(Path(current['fonts']).read_text('utf8'))
+        from ..parallel_branches import canonical_fonts
+        branches['text']=canonical_fonts(branches['text'],fonts,Store(state.job/'state'))
         graph = fuse(snap, branches, ocr)
         geometry_conflicts=text_geometry_conflicts(graph.text,ocr)
         for identifier in geometry_conflicts-(set(accepted.selected) if accepted else set()):
             if graph.ownership[identifier]=='RESOLVED':graph.ownership[identifier]='AMBIGUOUS'
-        if 'fonts' not in current:
-            self.list_fonts(state, current, directory/'font-input')
-        fonts = json.loads(Path(current['fonts']).read_text('utf8'))
         if accepted:
             from ..parallel_rebuild import adapt
             backing=directory/'backing'
@@ -294,8 +296,17 @@ class PrimitiveTools:
                                     baseline_directory=Path(row['ir']).parent)
         from ..object_extract import rectangle
         scope = rectangle(text.bbox, tuple(graph.image_size), pad=3)
+        fonts=json.loads(Path(current['fonts']).read_text('utf8'))
+        styles={s.id:s for s in graph.text.styles}
+        available={(f['family'],f['bold']) for f in fonts['fonts']}
+        used={text.style,*[span.style for span in text.spans]}
+        missing=[{'family':family,'bold':styles[identifier].bold} for identifier in used
+                 for family in (styles[identifier].ea,styles[identifier].latin)
+                 if (family,styles[identifier].bold) not in available]
+        if missing:
+            return {'status':'MISSING_EVIDENCE','failure':'FONT_UNAVAILABLE','missing_fonts':missing}
         payload = native_frame(text, {s.id: s for s in graph.text.styles},
-            json.loads(Path(current['fonts']).read_text('utf8')), graph.image_size, protected, scope,minimum_size=minimum_size)
+            fonts, graph.image_size, protected, scope,minimum_size=minimum_size)
         write(directory/'layout.json', payload)
         return {'layout': payload, 'evidence': self.artifact(state, directory/'layout.json', 'layout')}
 

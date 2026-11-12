@@ -62,6 +62,9 @@ class RuntimeService(PrimitiveTools):
             shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region'} if request.get('tool_profile')=='basic' else set()
             result['tool_catalog'] = [name for name in TOOLS if name not in shortcuts]
             result['goal'] = json.loads((state.job/'request.json').read_text('utf8')).get('goal', 'Faithful editable PPTX')
+            result['budget']={'remaining_seconds':state.remaining_seconds(),
+                'wall_time_seconds':request.get('runtime_seconds',7200),
+                'agent_turns':request.get('agent_steps',64),'tool_limits':request.get('adaptive_budget',{})}
             return result
         if tool == 'inspect_scene':
             page = self.page(state.read(), arguments['page'])

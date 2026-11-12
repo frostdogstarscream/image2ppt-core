@@ -85,6 +85,11 @@ class OfficeQueue:
                 row = json.loads(file.read_text('utf8'))
                 if row['status'] != 'QUEUED':
                     continue
+                job=self.root/file.relative_to(self.root).parts[0]
+                if (job/'cancel.requested').exists():
+                    row['status']='CANCELLED'
+                    write(file,row)
+                    continue
                 row.update(status='LEASED', token=secrets.token_urlsafe(32))
                 write(file, row)
                 return {'ticket': str(file.parent.relative_to(self.root)).replace('\\', '/'), 'token': row['token']}

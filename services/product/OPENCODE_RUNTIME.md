@@ -34,6 +34,8 @@ The optional `fit_background.context_width` changes the independent source sampl
 
 `agent_steps` bounds OpenCode reasoning turns. `model_calls` bounds model calls inside the Image2PPT tool adapters. Both budgets are recorded separately. `runtime_seconds` is a persisted task deadline. Agent usage reports distinguish reported tokens and provider cost from a verified monetary price. A zero provider-reported cost has no established currency value here.
 
+The driver waits for the job's MCP connection before admitting the Agent prompt. The prompt and tool receipts expose the remaining wall-time budget. Image evidence references include filenames so the Agent can request local comparisons selectively. The Office adapter can return an unverified native-frame size proposal after replacement overflow. That proposal requires a new candidate and the complete existing checks.
+
 Tool outcomes, region commits, final QA and publication qualification have separate receipts. A source-only raster package remains `REVIEW_REQUIRED`. A hash-bound, Office-checked and self-reviewed partial editable package can finish successfully. Session admission with an uncertain response is reconciled through the saved Session and message IDs before another prompt is considered.
 
 ## Office worker

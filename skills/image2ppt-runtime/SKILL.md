@@ -31,7 +31,11 @@ Read the specific failed checks. BACKGROUND_REFERENCE_UNRELIABLE concerns indepe
 
 Make progress toward the user's requested coverage. A useful verified object can establish the method before spending budget fitting many uncommitted objects. When the requested deliverable is satisfied, finish its checks and stop. Preserve other content as raster when further recovery is unjustified.
 
+Read the task budget and remaining_seconds in tool responses. Account for compilation, final Office checks, viewing evidence, self-review and finalization before adding more objects. Once the requested minimum coverage is verified, prioritize completing acceptance. Further coverage must fit the remaining budget together with its required checks.
+
 Observe candidates before accepting them. Tools return evidence IDs for images and receipts. Use get_evidence for close inspection. You may use run_image_script only when its OS sandbox is available; outputs remain unverified candidates. Do not modify product code or manually construct final SlideIR/PPTX. The host's scene adapter and fixed compiler produce deliveries.
+
+Evidence references include names and roles. Choose the source_crop and written_crop images for local comparisons when they answer the question. Use full-page images for page context and final review. This keeps repeated image observations focused.
 
 ## Final result
 

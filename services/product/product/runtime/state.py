@@ -40,6 +40,12 @@ class RuntimeState:
         return json.loads(file.read_text('utf8')) if file.exists() else {
             'version': 0, 'pages': [], 'candidates': {}, 'status': 'RUNNING'}
 
+    def remaining_seconds(self):
+        session=self.root/'session.json'
+        if not session.exists():return None
+        deadline=json.loads(session.read_text('utf8')).get('deadline')
+        return max(0,round(deadline-time.time())) if deadline is not None else None
+
     def event(self, payload):
         with self.db() as db:
             db.execute('INSERT INTO events(created,payload) VALUES(?,?)',
@@ -54,7 +60,7 @@ class RuntimeState:
         with self.db() as db:
             db.execute('INSERT OR IGNORE INTO evidence(id,path,sha,role) VALUES(?,?,?,?)',
                        (identifier, str(path.relative_to(self.job)), sha, role))
-        return {'id': identifier, 'sha256': sha, 'role': role}
+        return {'id': identifier, 'sha256': sha, 'role': role,'name':path.name}
 
     def evidence(self, identifier, delivered=False):
         with self.db() as db:
@@ -66,7 +72,7 @@ class RuntimeState:
                 raise RuntimeConflict('evidence bytes changed')
             if delivered:
                 db.execute('UPDATE evidence SET delivered=1 WHERE id=?', (identifier,))
-        return path, {'id': identifier, 'sha256': row[1], 'role': row[2],
+        return path, {'id': identifier, 'sha256': row[1], 'role': row[2],'name':path.name,
                       'provided_to_agent': bool(row[3]) or delivered}
 
     def operation_directory(self, token):
@@ -97,7 +103,7 @@ class RuntimeState:
                         with self.db() as db:
                             db.execute('UPDATE operations SET state=?,result=? WHERE id=?',
                                        ('COMPLETED', json.dumps(result, ensure_ascii=False), token))
-                    return result['response']
+                    return {**result['response'],'remaining_seconds':self.remaining_seconds()}
                 raise RuntimeConflict('operation outcome UNKNOWN; inspect receipts before a new action')
             current = self.read()
             if expected_version is not None and current['version'] != expected_version:
@@ -116,7 +122,7 @@ class RuntimeState:
             try:
                 result = execute(current, directory)
                 current['version'] += 1
-                result = {**result, 'version': current['version']}
+                result = {**result, 'version': current['version'],'remaining_seconds':self.remaining_seconds()}
                 # A recovery receipt is written before publishing the mutable head.
                 files = {str(p.relative_to(self.job)): digest(p) for p in directory.rglob('*') if p.is_file()}
                 receipt = {'state': current, 'response': result, 'files': files}

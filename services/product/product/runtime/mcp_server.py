@@ -28,6 +28,9 @@ DESCRIPTION = {
     'record_visual_review': 'Record your visual review after viewing every required image and hard-check receipt.',
     'finalize_job': 'Finalize only with current actual editing checks and hash-bound OpenCode visual review.'}
 DESCRIPTION.update({
+    'inspect_image':'Read actual image dimensions, mode and sampled RGB color frequencies. Use get_evidence to view image content.',
+    'crop_image':'Crop an immutable image evidence reference, optionally enlarge its preview, and return measured RGB frequencies from the original crop.',
+    'list_fonts':'List actual installed CJK and common Latin font faces, including real weight availability. Full verified font metadata is returned as evidence.',
     'fit_background':'Fit a continuous background from an image evidence_id and xywh bbox, or from a scene text object. This produces a hypothesis and does not change the source.',
     'complete_text_mask':'Complete strokes and antialiasing from independent source/mask/backing evidence, or derive them for a RESOLVED scene TEXT ID. Independent outputs grant no erase authority.',
     'create_scene':'Create a scene proposal from branch evidence. Preserve exact OCR wording and bind text.members to OCR line IDs; inspect unresolved owners in the response.',

@@ -43,7 +43,7 @@ def execute(state, directory, script, inputs):
         process = subprocess.Popen(command, stdout=log, stderr=log)
         try:
             while process.poll() is None:
-                size = sum(p.stat().st_size for p in directory.rglob('*') if p.is_file())
+                size = sum(p.stat().st_size for p in outgoing.rglob('*') if p.is_file())+(directory/'execution.log').stat().st_size
                 if time.monotonic()-started > 60 or size > 32*1024*1024:
                     raise TimeoutError('sandbox resource budget exceeded')
                 time.sleep(.2)
@@ -56,6 +56,13 @@ def execute(state, directory, script, inputs):
                             subprocess.run([docker, 'rm', '-f', identifier], capture_output=True, timeout=15)
                 finally:
                     process.kill(); process.wait(timeout=15)
+    if sum(p.stat().st_size for p in outgoing.rglob('*') if p.is_file())>32*1024*1024:
+        raise ValueError('sandbox output exceeds size limit')
+    dependencies={}
+    with (directory/'execution.log').open(encoding='utf8',errors='replace') as log:
+        for line in log:
+            if line.startswith('SANDBOX_ENVIRONMENT '):
+                dependencies=json.loads(line.removeprefix('SANDBOX_ENVIRONMENT '));break
     files = []
     for path in outgoing.rglob('*'):
         if path.is_symlink() or not path.resolve().is_relative_to(outgoing.resolve()):
@@ -66,6 +73,7 @@ def execute(state, directory, script, inputs):
                'exit_code': process.returncode, 'seconds': time.monotonic()-started,
                'image': image, 'script_sha256': digest(incoming/'script.py'),
                'isolation_entry_sha256':digest(incoming/'sandbox_entry.py'),
+               'dependencies':dependencies,
                'inputs': references, 'outputs': files, 'acceptance': 'UNVERIFIED'}
     write(directory/'sandbox-receipt.json', receipt)
     return receipt

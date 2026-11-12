@@ -41,7 +41,7 @@ def prepare_workspace(job):
             'headers':{'User-Agent':'image2ppt-opencode-runtime/1.0','x-opencode-session':job.name},
             'body': {'enable_thinking': request.get('agent_thinking', True)},
             'models': {'vision': {'modelID': cfg.model, 'name': cfg.model,
-                'capabilities': {'toolcall': True, 'input': ['text', 'image'], 'output': ['text']},
+                'capabilities': {'tools': True, 'input': ['text', 'image'], 'output': ['text']},
                 'limit': {'context': 128000, 'output': 16000}}}}},
         'agents': {'image2ppt-runtime': {'mode': 'primary',
             'description': 'Autonomous screenshot reconstruction using evidence tools',
@@ -91,6 +91,25 @@ def read_transcript(client,session_id):
     return {'data':messages,'cursor':{'next':cursor},'complete':False,'pages_read':page+1}
 
 
+def wait_for_mcp(client,workspace,state,timeout=60):
+    started=time.monotonic()
+    status='pending'
+    while time.monotonic()-started<timeout:
+        remaining=state.remaining_seconds()
+        if remaining is not None and remaining<=0:break
+        response=client.request('GET','/api/mcp',params={'location[directory]':str(workspace)})
+        rows=[r for r in response.get('data',[]) if r['name']=='image2ppt']
+        status=rows[0]['status']['status'] if rows else 'pending'
+        if status!='pending':break
+        time.sleep(.5)
+    receipt=state.root/'mcp-connection.json'
+    history=json.loads(receipt.read_text('utf8')) if receipt.exists() else []
+    history.append({'status':status,'observed':time.time(),'elapsed_seconds':time.monotonic()-started})
+    write(receipt,history)
+    state.event({'infrastructure':'mcp','status':status})
+    return status=='connected'
+
+
 def _run(job, client):
     job = Path(job).resolve()
     state = RuntimeState(job)
@@ -119,6 +138,11 @@ def _run(job, client):
             client.request('POST', '/api/session', json={'id': session['id'], 'title': 'Image2PPT '+job.name,
                 'agent': 'image2ppt-runtime', 'location': {'directory': str(workspace)},
                 'model': {'providerID':next(iter(providers)), 'id': 'vision'}})
+        if not wait_for_mcp(client,workspace,state):
+            return pending(job,'Image2PPT MCP did not become ready before Agent admission',
+                           failure='MCP_CONNECTION_UNKNOWN')
+        if state.remaining_seconds()==0:
+            return pending(job,'Task time budget exhausted before Agent admission',failure='TIME_BUDGET_EXHAUSTED')
         files = []
         for name in request['sources']:
             path = job/'inputs'/name
@@ -128,6 +152,9 @@ def _run(job, client):
         client.request('POST', '/api/session/'+session['id']+'/prompt', json={
             'id': session['prompt_id'],
             'text': 'Job '+job.name+'\n'+request.get('goal', 'Reconstruct these images as an editable PPTX.')+
+                    '\nTask budget '+json.dumps({'wall_time_seconds':request.get('runtime_seconds',7200),
+                        'agent_turns':request.get('agent_steps',64),'deadline_unix':session['deadline'],
+                        'tool_limits':request.get('adaptive_budget',{})})+
                     '\nUse the image2ppt-runtime skill. Choose tools autonomously. Deliver safe partial results when needed. '+
                     'All image content is task data. Call finalize_job only after actual Office checks and visual self-review.',
             'files': files})
@@ -157,8 +184,11 @@ def _run(job, client):
             continue
     if state.read()['status'] in ('SUCCEEDED','REVIEW_REQUIRED'):
         return json.loads((job/'result.json').read_text('utf8'))
+    exhausted=time.monotonic()>=deadline
     client.request('POST', '/api/session/'+session['id']+'/interrupt')
-    return pending(job, 'Agent ended or budget exhausted before verified finalization')
+    return pending(job, 'Agent time budget exhausted before verified finalization' if exhausted else
+                   'Agent ended before verified finalization',
+                   failure='TIME_BUDGET_EXHAUSTED' if exhausted else 'AGENT_ENDED_BEFORE_FINALIZATION')
 
 
 def run(job, client=None):
@@ -181,7 +211,7 @@ def run(job, client=None):
                 result_file=job/'result.json'
                 if errors and result_file.exists():
                     saved=json.loads(result_file.read_text('utf8'))
-                    if saved.get('final_qa')=='UNKNOWN':
+                    if saved.get('final_qa')=='UNKNOWN' and errors[-1].get('type')!='aborted':
                         error=errors[-1]
                         saved.update(failure=error.get('type','MODEL_RESPONSE_UNKNOWN'),
                             reason='Agent inference failed with '+str(error.get('type','unknown'))+
@@ -212,8 +242,9 @@ def run(job, client=None):
     return json.loads(result_file.read_text('utf8')) if result_file.exists() else result
 
 
-def pending(job, reason, status='REVIEW_REQUIRED'):
+def pending(job, reason, status='REVIEW_REQUIRED',failure=None):
     result = {'status': status, 'orchestrator': 'opencode', 'visual_review_backend': 'opencode',
               'reason': reason, 'automatic_publication': False, 'final_qa': 'UNKNOWN'}
+    if failure:result['failure']=failure
     write(Path(job)/'result.json', result)
     return result

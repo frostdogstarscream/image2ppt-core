@@ -1,0 +1,580 @@
+{
+  "date": "2026-11-12",
+  "branch": "codex/opencode-mcp-runtime",
+  "foundation_commit": "cb496b2a9643a04f3995e8ca0c0d552a5005ab64",
+  "status": "REVIEW_REQUIRED",
+  "agent_provider": "opencode_go",
+  "agent_model": "qwen3.8-flash",
+  "visual_review_backend": "opencode",
+  "independent_go_review_required": false,
+  "versions": {
+    "opencode": "2.1.4",
+    "mcp": "1.3.0",
+    "pydantic": "2.10.x"
+  },
+  "checks": {
+    "product_tests": {
+      "passed": 325,
+      "seconds": 40.93
+    },
+    "fixed_core_tests": {
+      "passed": 39
+    },
+    "skill_sync": "PASS",
+    "mcp_image_transport": {
+      "status": "PASS",
+      "synthetic": true,
+      "evidence": "outputs/opencode-go-minimum/mcp-image-probe.json"
+    }
+  },
+  "regional_success": {
+    "job_id": "e8061dc1540646c7bb91c33b6244d4ec",
+    "candidate": "c-c6afd4d63b5b70e54a3ae31e",
+    "editable_text_objects": 1,
+    "office_edit_checks": "PASS",
+    "final_session_qa": "UNKNOWN"
+  },
+  "held_out_page6": {
+    "job_id": "1c292960fd9d4f2a91cfd6b6b901f742",
+    "candidate": "c-937700fdcc368546a0b8b063",
+    "office_edit_checks": "PASS",
+    "regional_commit": false,
+    "final_session_qa": "UNKNOWN",
+    "stop_reason": "OpenCode maximum 32 Agent steps reached before commit and finalization",
+    "developer_visual_observation": "Recovered footer heading is black and heavier than the blue source heading. This candidate requires visual correction before acceptance.",
+    "test_scope": "One complete editable phrase or sentence, Agent selects object and tool sequence."
+  },
+  "artifacts": [
+    {
+      "path": "outputs\\opencode-go-acceptance\\original-page2\\region-office-validated.pptx",
+      "sha256": "ea5387dbe1d739201d873446649c3b2be91dc898e45180497a4b4161301f600a",
+      "scope": "regional Office acceptance, final session QA incomplete"
+    },
+    {
+      "path": "outputs\\opencode-go-acceptance\\original-page2\\region-office-before.png",
+      "sha256": "ed12b12baf7695d4adc0b092701ebd9624691a9c46ffd3c3656afe0e763e4d97",
+      "scope": "regional Office acceptance, final session QA incomplete"
+    },
+    {
+      "path": "outputs\\opencode-go-final-closure\\new-page6\\region-office-validated.pptx",
+      "sha256": "4319bcf520d362e26b1493ddc7e7616b915d04e653711fa589b08bf39730e17d",
+      "scope": "validated candidate, uncommitted, final session QA incomplete"
+    },
+    {
+      "path": "outputs\\opencode-go-final-closure\\new-page6\\office-before.png",
+      "sha256": "0cabe8b59e7274ff97cd8daaee75b45982ff5bb04cba17c110164fc3b76e2ef1",
+      "scope": "validated candidate, uncommitted, final session QA incomplete"
+    },
+    {
+      "path": "outputs\\opencode-go-final-closure\\new-page6\\summary.json",
+      "sha256": "c5171b0e5fb1f7bc4f9062656a4523eb437b99c3bb05c12894f336924a8b95c0",
+      "scope": "validated candidate, uncommitted, final session QA incomplete"
+    }
+  ],
+  "runs": [
+    {
+      "job_id": "e8061dc1540646c7bb91c33b6244d4ec",
+      "sources": [
+        {
+          "name": "01.png",
+          "sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371"
+        }
+      ],
+      "model": "qwen3.8-flash",
+      "budget": {
+        "runtime_seconds": 1200,
+        "agent_steps": 48,
+        "adaptive_budget": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "model_calls": 12,
+          "office_validations": 60,
+          "max_seconds": 1200
+        }
+      },
+      "result": {
+        "status": "REVIEW_REQUIRED",
+        "orchestrator": "opencode",
+        "visual_review_backend": "opencode",
+        "reason": "Agent inference failed with aborted (HTTP unknown)",
+        "automatic_publication": false,
+        "final_qa": "UNKNOWN",
+        "failure": "aborted",
+        "infrastructure_status": "UNKNOWN"
+      },
+      "pages": [
+        {
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "selected": [
+            "tx_r01_desc"
+          ],
+          "native_texts": 1,
+          "independent_images": 0
+        }
+      ],
+      "candidate_count": 3,
+      "candidate_outcomes": [
+        {
+          "id": "c-e3e3393387440030d3b5b8e1",
+          "object": "tx_r01_desc",
+          "status": "REVIEW_REQUIRED",
+          "failure": null,
+          "validation_status": "REVIEW_REQUIRED",
+          "office_status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "863c3b233cde3b94e59b16b578a90ac2df4c78c42ca0ba4cc546f74adb96203e"
+        },
+        {
+          "id": "c-c6afd4d63b5b70e54a3ae31e",
+          "object": "tx_r01_desc",
+          "status": "COMMITTED",
+          "failure": null,
+          "validation_status": "PASS",
+          "office_status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "ea5387dbe1d739201d873446649c3b2be91dc898e45180497a4b4161301f600a"
+        },
+        {
+          "id": "c-a5e3b337d3cdfe9905d615e1",
+          "object": "tx_r02_desc",
+          "status": "REVIEW_REQUIRED",
+          "failure": null,
+          "validation_status": "REVIEW_REQUIRED",
+          "office_status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "fc509034398e232104c0c550189dddd5ba8a2d1883d74cf1710168dacdcbf70a"
+        }
+      ],
+      "tool_invocations": {
+        "run_ocr": 1,
+        "analyze_text_regions": 1,
+        "create_scene": 1,
+        "fit_background": 4,
+        "complete_text_mask": 3,
+        "validate_mask": 1,
+        "fit_text_layout": 3,
+        "list_fonts": 1,
+        "update_scene": 2,
+        "create_candidate": 4,
+        "validate_candidate": 3,
+        "commit_region": 1
+      },
+      "office_requests": 3,
+      "reported_model_messages": 30,
+      "tokens": {
+        "input": 79352,
+        "output": 6351,
+        "reasoning": 0
+      },
+      "provider_reported_cost": 0,
+      "monetary_price_verified": false,
+      "independent_go_review_calls": 0,
+      "event_elapsed_seconds": 1069.9677097797394,
+      "transcript_sha256": "6215ed5206962e473128db04eda3a95b17a1d0ab19bcb50f18f9f5ce383267d7",
+      "artifact_hashes": {},
+      "mcp_connections": null
+    },
+    {
+      "job_id": "b0bbdd49d0914eafb0a75547afc85f5e",
+      "sources": [
+        {
+          "name": "01.png",
+          "sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1"
+        }
+      ],
+      "model": "qwen3.8-flash",
+      "budget": {
+        "runtime_seconds": 1200,
+        "agent_steps": 48,
+        "adaptive_budget": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "model_calls": 12,
+          "office_validations": 60,
+          "max_seconds": 1200
+        }
+      },
+      "result": {
+        "status": "REVIEW_REQUIRED",
+        "orchestrator": "opencode",
+        "visual_review_backend": "opencode",
+        "reason": "Agent inference failed with aborted (HTTP unknown)",
+        "automatic_publication": false,
+        "final_qa": "UNKNOWN",
+        "failure": "aborted",
+        "infrastructure_status": "UNKNOWN"
+      },
+      "pages": [
+        {
+          "source_sha256": "d67fdd09560b0fd66745b0aad9c755d3d0cad562b5de610b16cc85c24734a0b1",
+          "selected": [],
+          "native_texts": 0,
+          "independent_images": 0
+        }
+      ],
+      "candidate_count": 2,
+      "candidate_outcomes": [
+        {
+          "id": "c-1e6674e72a74da261f292809",
+          "object": "num_02",
+          "status": "REVIEW_REQUIRED",
+          "failure": null,
+          "validation_status": "REVIEW_REQUIRED",
+          "office_status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "128dc528cb85e5d6497e7184b8379a514f75b44f2d7b3dce90ad09cb0eab15fe"
+        },
+        {
+          "id": "c-9c7d2c3ba2340af09c21694c",
+          "object": "num_02",
+          "status": "STAGED_LOCAL",
+          "failure": null,
+          "validation_status": null,
+          "office_status": null,
+          "pptx_sha256": null
+        }
+      ],
+      "tool_invocations": {
+        "run_ocr": 1,
+        "list_fonts": 1,
+        "inspect_image": 1,
+        "crop_image": 2,
+        "analyze_text_regions": 1,
+        "decompose_layers": 1,
+        "create_scene": 1,
+        "complete_text_mask": 1,
+        "validate_mask": 1,
+        "extract_background": 1,
+        "fit_text_layout": 1,
+        "create_candidate": 2,
+        "validate_candidate": 1
+      },
+      "office_requests": 1,
+      "reported_model_messages": 23,
+      "tokens": {
+        "input": 53052,
+        "output": 3275,
+        "reasoning": 0
+      },
+      "provider_reported_cost": 0,
+      "monetary_price_verified": false,
+      "independent_go_review_calls": 0,
+      "event_elapsed_seconds": 1083.3762707710266,
+      "transcript_sha256": "fa0287fcab55b8f7393b6ea77a1cd402831bff46951fb125aaba457005ef58be",
+      "artifact_hashes": {},
+      "mcp_connections": null
+    },
+    {
+      "job_id": "dbf04afd98344611b901105b6df73476",
+      "sources": [
+        {
+          "name": "01.png",
+          "sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371"
+        }
+      ],
+      "model": "qwen3.8-flash",
+      "budget": {
+        "runtime_seconds": 1800,
+        "agent_steps": 48,
+        "adaptive_budget": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "model_calls": 12,
+          "office_validations": 60,
+          "max_seconds": 1800
+        }
+      },
+      "result": {
+        "status": "REVIEW_REQUIRED",
+        "orchestrator": "opencode",
+        "visual_review_backend": "opencode",
+        "reason": "Agent time budget exhausted before verified finalization",
+        "automatic_publication": false,
+        "final_qa": "UNKNOWN",
+        "failure": "TIME_BUDGET_EXHAUSTED"
+      },
+      "pages": [
+        {
+          "source_sha256": "3f1daa8db89fd43e9a595361fcc320283cf456eea867c9c2b9bcf54adc91d371",
+          "selected": [],
+          "native_texts": 0,
+          "independent_images": 0
+        }
+      ],
+      "candidate_count": 2,
+      "candidate_outcomes": [
+        {
+          "id": "c-ff24fadecd502203cc7231af",
+          "object": "row01_line",
+          "status": "REVIEW_REQUIRED",
+          "failure": "MASK_INCOMPLETE",
+          "validation_status": null,
+          "office_status": null,
+          "pptx_sha256": null
+        },
+        {
+          "id": "c-24a39d2d64736892210234be",
+          "object": "row01_line",
+          "status": "REVIEW_REQUIRED",
+          "failure": "MASK_INCOMPLETE",
+          "validation_status": null,
+          "office_status": null,
+          "pptx_sha256": null
+        }
+      ],
+      "tool_invocations": {
+        "run_ocr": 1,
+        "crop_image": 6,
+        "list_fonts": 1,
+        "analyze_text_regions": 1,
+        "analyze_image": 1,
+        "run_image_script": 1,
+        "create_scene": 1,
+        "update_scene": 1,
+        "complete_text_mask": 2,
+        "validate_mask": 1,
+        "extract_background": 1,
+        "fit_background": 1,
+        "create_candidate": 2,
+        "compose_delivery": 1
+      },
+      "office_requests": 0,
+      "reported_model_messages": 31,
+      "tokens": {
+        "input": 66446,
+        "output": 6118,
+        "reasoning": 0
+      },
+      "provider_reported_cost": 0,
+      "monetary_price_verified": false,
+      "independent_go_review_calls": 0,
+      "event_elapsed_seconds": 1595.092856645584,
+      "transcript_sha256": "dcf9e7c988a58d8075d77d4d0d8149455e0999b4f8b0210f430b7c9324b27ad1",
+      "artifact_hashes": {},
+      "mcp_connections": null
+    },
+    {
+      "job_id": "e26d9bdbd50e4098a04fa3c1c7deef29",
+      "sources": [
+        {
+          "name": "01.png",
+          "sha256": "c6ec4020dd0ca20b9f81c931c4fe6ee7684fe1ca5e60279b87a54db2a577d515"
+        }
+      ],
+      "model": "qwen3.8-flash",
+      "budget": {
+        "runtime_seconds": 1800,
+        "agent_steps": 48,
+        "adaptive_budget": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "model_calls": 12,
+          "office_validations": 60,
+          "max_seconds": 1800
+        }
+      },
+      "result": {
+        "status": "REVIEW_REQUIRED",
+        "orchestrator": "opencode",
+        "visual_review_backend": "opencode",
+        "reason": "Agent time budget exhausted before verified finalization",
+        "automatic_publication": false,
+        "final_qa": "UNKNOWN",
+        "failure": "TIME_BUDGET_EXHAUSTED"
+      },
+      "pages": [
+        {
+          "source_sha256": "c6ec4020dd0ca20b9f81c931c4fe6ee7684fe1ca5e60279b87a54db2a577d515",
+          "selected": [],
+          "native_texts": 0,
+          "independent_images": 0
+        }
+      ],
+      "candidate_count": 3,
+      "candidate_outcomes": [
+        {
+          "id": "c-7a969804a0f8ff51e18c9852",
+          "object": "t_title",
+          "status": "REVIEW_REQUIRED",
+          "failure": null,
+          "validation_status": "REVIEW_REQUIRED",
+          "office_status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "934ac7e2cd9b9acfc9ff6e1eb029c16b389d1627ea7e7568791ccab3d43d93aa"
+        },
+        {
+          "id": "c-d4b10d93613b3c6c8592739a",
+          "object": "t_title",
+          "status": "REVIEW_REQUIRED",
+          "failure": null,
+          "validation_status": "REVIEW_REQUIRED",
+          "office_status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "939d301d183779698d5d289bb5bbd3b3c434510c56afec2b1a2cf16bb7de748e"
+        },
+        {
+          "id": "c-828d5c6ad55d6d8c6da7ace4",
+          "object": "t_title",
+          "status": "REVIEW_REQUIRED",
+          "failure": null,
+          "validation_status": "REVIEW_REQUIRED",
+          "office_status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "a13aeb1736eb458068e8131bb718b06ed6662ed0416afc0c9b20df1b6b0f5e0b"
+        }
+      ],
+      "tool_invocations": {
+        "run_ocr": 1,
+        "analyze_image": 6,
+        "run_image_script": 1,
+        "list_fonts": 1,
+        "crop_image": 3,
+        "complete_text_mask": 2,
+        "create_scene": 2,
+        "extract_background": 2,
+        "decompose_layers": 1,
+        "fit_text_layout": 1,
+        "create_candidate": 3,
+        "validate_candidate": 3,
+        "segment_object": 1,
+        "update_scene": 3,
+        "compose_delivery": 1,
+        "commit_region": 2
+      },
+      "office_requests": 3,
+      "reported_model_messages": 38,
+      "tokens": {
+        "input": 72110,
+        "output": 8352,
+        "reasoning": 0
+      },
+      "provider_reported_cost": 0,
+      "monetary_price_verified": false,
+      "independent_go_review_calls": 0,
+      "event_elapsed_seconds": 1640.402333498001,
+      "transcript_sha256": "f0a42af281c4020d9d8844c68db9417b7ea6f60248f9fc2ea3e843c76fd86d43",
+      "artifact_hashes": {},
+      "mcp_connections": null
+    },
+    {
+      "job_id": "1c292960fd9d4f2a91cfd6b6b901f742",
+      "sources": [
+        {
+          "name": "01.png",
+          "sha256": "f39a7c200e789625333425cfe12a1153042de639a6005c1c09855fa4dcf075b5"
+        }
+      ],
+      "model": "qwen3.8-flash",
+      "budget": {
+        "runtime_seconds": 1800,
+        "agent_steps": 32,
+        "adaptive_budget": {
+          "region_candidates": 2,
+          "complex_region_candidates": 4,
+          "model_calls": 12,
+          "office_validations": 60,
+          "max_seconds": 1800
+        }
+      },
+      "result": {
+        "status": "REVIEW_REQUIRED",
+        "orchestrator": "opencode",
+        "visual_review_backend": "opencode",
+        "reason": "Agent ended before verified finalization",
+        "automatic_publication": false,
+        "final_qa": "UNKNOWN",
+        "failure": "AGENT_ENDED_BEFORE_FINALIZATION"
+      },
+      "pages": [
+        {
+          "source_sha256": "f39a7c200e789625333425cfe12a1153042de639a6005c1c09855fa4dcf075b5",
+          "selected": [],
+          "native_texts": 0,
+          "independent_images": 0
+        }
+      ],
+      "candidate_count": 4,
+      "candidate_outcomes": [
+        {
+          "id": "c-61885560473f8b197fd31e0a",
+          "object": "t_intro_line",
+          "status": "REVIEW_REQUIRED",
+          "failure": "BACKGROUND_REFERENCE_UNRELIABLE",
+          "validation_status": null,
+          "office_status": null,
+          "pptx_sha256": null
+        },
+        {
+          "id": "c-e50563a663700af20df3c967",
+          "object": "t_head_line",
+          "status": "REVIEW_REQUIRED",
+          "failure": "MASK_INCOMPLETE",
+          "validation_status": null,
+          "office_status": null,
+          "pptx_sha256": null
+        },
+        {
+          "id": "c-46546efaa0be1f7e80f40cb3",
+          "object": "t_head_line",
+          "status": "REVIEW_REQUIRED",
+          "failure": null,
+          "validation_status": "REVIEW_REQUIRED",
+          "office_status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "dd5300443dac33aa0cffc6d8cb894e0b309a6791919cd6b684bab384fa105bd8"
+        },
+        {
+          "id": "c-937700fdcc368546a0b8b063",
+          "object": "t_head_line",
+          "status": "VALIDATED",
+          "failure": null,
+          "validation_status": "PASS",
+          "office_status": "PASS_APP_AUTOMATED",
+          "pptx_sha256": "4319bcf520d362e26b1493ddc7e7616b915d04e653711fa589b08bf39730e17d"
+        }
+      ],
+      "tool_invocations": {
+        "run_ocr": 1,
+        "list_fonts": 1,
+        "analyze_image": 1,
+        "create_scene": 4,
+        "complete_text_mask": 3,
+        "fit_text_layout": 1,
+        "extract_background": 1,
+        "fit_background": 3,
+        "create_candidate": 4,
+        "rollback_region": 1,
+        "run_image_script": 1,
+        "analyze_text_regions": 1,
+        "validate_candidate": 2
+      },
+      "office_requests": 2,
+      "reported_model_messages": 32,
+      "tokens": {
+        "input": 114603,
+        "output": 7188,
+        "reasoning": 0
+      },
+      "provider_reported_cost": 0,
+      "monetary_price_verified": false,
+      "independent_go_review_calls": 0,
+      "event_elapsed_seconds": 1289.175614118576,
+      "transcript_sha256": "446a34021c88711c3ad0581028764149e164a0f60ad8addbcd2938a613541358",
+      "artifact_hashes": {},
+      "mcp_connections": [
+        {
+          "status": "connected",
+          "observed": 1794483334.6701705,
+          "elapsed_seconds": 1.077999999979511
+        }
+      ]
+    }
+  ],
+  "comparison_limits": [
+    "Runs use different code bindings, images and budgets. They do not establish a speedup.",
+    "Tool model calls and OpenCode model messages are accounted separately.",
+    "Provider-reported zero cost has no independently verified monetary interpretation.",
+    "Early aborted receipts preceded the explicit time-budget classification fix."
+  ],
+  "open_acceptance": [
+    "Autonomous final Office plus same-session visual review and finalization.",
+    "Full page-2, page-5 and held-out-page delivery acceptance.",
+    "Real Docker sandbox isolation and adversarial resource tests.",
+    "Complete live fault injection, dual-task isolation and multi-page combination acceptance.",
+    "Host model credential reinjection is required after a host restart."
+  ],
+  "audit_sha256": "74e9fc0b5dfbd92304bfc8a2c6982e7c112dd8c365e00e3556c6779cf77163a2",
+  "audit_path": "outputs\\opencode-go-final-closure\\runtime-audit.json"
+}

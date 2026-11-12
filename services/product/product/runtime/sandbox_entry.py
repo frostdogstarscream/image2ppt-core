@@ -2,6 +2,7 @@
 import ctypes
 import ctypes.util
 import errno
+import json
 import runpy
 import sys
 
@@ -38,7 +39,11 @@ if __name__=='__main__':
         import PIL
         import numpy
         import cv2
+        import resource
         cv2.setNumThreads(1)
+        resource.setrlimit(resource.RLIMIT_FSIZE,(32*1024*1024,32*1024*1024))
+        print('SANDBOX_ENVIRONMENT '+json.dumps({'python':sys.version.split()[0],
+            'Pillow':PIL.__version__,'numpy':numpy.__version__,'opencv':cv2.__version__}),flush=True)
         restrict_processes()
     except Exception as exc:
         print('SANDBOX_ISOLATION_UNAVAILABLE '+type(exc).__name__,file=sys.stderr)

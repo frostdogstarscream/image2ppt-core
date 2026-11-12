@@ -269,6 +269,7 @@ def test_runner_preserves_completed_result_when_session_becomes_idle(job,monkeyp
         def verify(self):return {'version':runner.PINNED_VERSION}
         def request(self,method,route,**options):
             if method=='GET' and route.endswith('/message'):return {'data':[],'cursor':{}}
+            if method=='GET' and route=='/api/mcp':return {'data':[{'name':'image2ppt','status':{'status':'connected'}}]}
             if method=='GET':
                 response=httpx.Response(404,request=httpx.Request(method,'http://test'+route))
                 raise httpx.HTTPStatusError('missing',request=response.request,response=response)
@@ -416,7 +417,80 @@ def test_go_agent_configuration_and_tool_planner_use_the_selected_provider(job,m
     provider=configuration['providers']['image2ppt-go']
     assert provider['settings']['baseURL']==GO_BASE_URL
     assert provider['models']['vision']['modelID']=='qwen3.8-flash'
+    assert provider['models']['vision']['capabilities']['tools'] is True
     assert 'synthetic-agent-secret' not in encoded
     actor=planning_actor(directory)
     assert actor.model=='qwen3.8-flash' and actor.base_url==GO_BASE_URL
     assert actor.session==directory.name
+
+
+def test_agent_scene_reuses_installed_windows_font_aliases(job,monkeypatch):
+    from product import fonts
+    service,identifier,_=job
+    monkeypatch.setattr(fonts,'font_manifest',lambda texts:{'fonts':[
+        {'family':'微软雅黑','bold':False,'weight':400,'cjk':True}]})
+    result=call(service,identifier,'create_scene',page=1,evidence={'text':{
+        'styles':[{'id':'s','role':'body','ea':'Microsoft YaHei','latin':'Microsoft YaHei',
+                   'size_px':12.,'bold':False,'color':'000000'}],
+        'texts':[{'id':'t','text':'中文','bbox':[10.,10.,20.,15.],'style':'s','z':1,'align':'left'}]}})
+    style=result['scene']['text']['styles'][0]
+    assert style['ea']==style['latin']=='微软雅黑'
+
+
+def test_remaining_budget_updates_on_idempotent_readback(job,monkeypatch):
+    import product.runtime.state as state_module
+    service,identifier,_=job
+    state=service.state(identifier)
+    write(state.root/'session.json',{'deadline':200})
+    monkeypatch.setattr(state_module.time,'time',lambda:100)
+    context=service.call('get_job_context',identifier)
+    assert context['budget']['remaining_seconds']==100
+    arguments={'evidence_id':context['sources'][0]['id'],'idempotency_key':'inspect-budget-01'}
+    first=service.call('inspect_image',identifier,**arguments)
+    monkeypatch.setattr(state_module.time,'time',lambda:110)
+    second=service.call('inspect_image',identifier,**arguments)
+    assert first['remaining_seconds']==100 and second['remaining_seconds']==90
+    assert first['version']==second['version']==1
+
+
+def test_cancelled_job_does_not_dispatch_queued_office_work(tmp_path,monkeypatch):
+    monkeypatch.setenv('IMAGE2PPT_RESOURCE_ROOT',str(tmp_path/'leases'))
+    root=tmp_path/'jobs'
+    for identifier in ('a'*32,'b'*32):
+        write(root/identifier/'runtime/o/check/worker-state.json',{'status':'QUEUED'})
+    write(root/('a'*32)/'cancel.requested',{'requested':True})
+    ticket=OfficeQueue(root).claim()
+    assert ticket['ticket'].startswith('b'*32+'/')
+    first=json.loads((root/('a'*32)/'runtime/o/check/worker-state.json').read_text('utf8'))
+    assert first['status']=='CANCELLED'
+
+
+def test_mcp_readiness_is_checked_before_agent_execution(job,monkeypatch):
+    from product.runtime.runner import wait_for_mcp
+    import product.runtime.runner as runner
+    service,identifier,directory=job
+    monkeypatch.setattr(runner.time,'sleep',lambda seconds:None)
+    class Client:
+        calls=0
+        def request(self,method,route,**options):
+            self.calls+=1
+            return {'data':[] if self.calls==1 else [{'name':'image2ppt','status':{'status':'connected'}}]}
+    client=Client()
+    assert wait_for_mcp(client,directory,service.state(identifier))
+    assert client.calls==2
+
+
+def test_office_overflow_measurements_remain_unverified_repair_proposals():
+    from types import SimpleNamespace
+    from product.runtime.office import frame_feedback
+    layout={'overflow':True,'unexpected_wrap':False,'frame':[139.5,29.25,212.25,48.],
+            'text_bounds':[139.5,29.25,227.625,42.3]}
+    result={'status':'REVIEW_REQUIRED','replacements':{'records':[
+        {'id':'title','content_matches':True,'siblings_unchanged':True,'frame_unchanged':True,
+         'outside_pixels':23,'layout':layout}]}}
+    graph=SimpleNamespace(text=SimpleNamespace(texts=[SimpleNamespace(id='title',bbox=[186,39,283,64])]))
+    feedback=frame_feedback(result,graph,'title')
+    assert feedback['status']=='UNVERIFIED_LAYOUT_PROPOSAL'
+    assert feedback['measured_frame_minimum_px']==[305,58]
+    assert feedback['previous_edit_outside_pixels']==[23]
+    assert result['status']=='REVIEW_REQUIRED'

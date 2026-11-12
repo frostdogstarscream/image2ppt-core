@@ -13,7 +13,7 @@ def frame_feedback(result,graph,identifier):
     if not rows or not any(r['layout']['overflow'] for r in rows):
         return None
     if any(not r['content_matches'] or not r['siblings_unchanged'] or not r['frame_unchanged']
-           or r['outside_pixels'] or r['layout']['unexpected_wrap'] for r in rows):
+           or r['layout']['unexpected_wrap'] for r in rows):
         return None
     text=next(t for t in graph.text.texts if t.id==identifier)
     sizes=[]
@@ -24,7 +24,8 @@ def frame_feedback(result,graph,identifier):
             return None
         sizes.append([math.ceil((bl+bw-left)*text.bbox[2]/width)+1,
                       math.ceil((bt+bh-top)*text.bbox[3]/height)+1])
-    return {'failure':'FONT_LAYOUT_FAILED',
+    return {'failure':'FONT_LAYOUT_FAILED','status':'UNVERIFIED_LAYOUT_PROPOSAL',
+            'previous_edit_outside_pixels':[r['outside_pixels'] for r in rows],
             'measured_frame_minimum_px':[max(s[0] for s in sizes),max(s[1] for s in sizes)],
             'meaning':'Measured transparent native-frame extent for create_candidate.frame_minimum. Source text bbox and authorized erase pixels remain independent.'}
 
