@@ -218,7 +218,7 @@ class PrimitiveTools:
                           if r['cjk'] or r['family'] in ('Arial','Segoe UI','Times New Roman')],
                 'all_fonts_evidence':self.artifact(state,directory/'fonts.json','installed_fonts')}
 
-    def create_scene(self, state, current, directory, *, page, evidence):
+    def create_scene(self, state, current, directory, *, page, evidence, _update=False, _remove=()):
         from ..parallel_branches import snapshot
         from ..parallel_contracts import TextEvidence, AssetEvidence, SurfaceEvidence
         from ..parallel_fusion import fuse
@@ -227,9 +227,28 @@ class PrimitiveTools:
         existing = current['pages'][page-1] if len(current['pages']) >= page else None
         if set(evidence)-{'text', 'asset', 'surface'}:
             raise ValueError('scene accepts branch evidence, ownership is derived by the host')
+        if existing and not _update:
+            return {'status':'SCENE_EXISTS','page':page,'scene_version':current['version'],
+                    'reason':'Use update_scene to revise existing objects; creation never replaces a page.'}
         accepted=self.graph(existing) if existing and self.graph(existing).selected else None
         if existing:
-            evidence=merge_scene_evidence(self.graph(existing),evidence)
+            previous=self.graph(existing).model_copy(deep=True)
+            known={t.id for t in previous.text.texts}|{a.id for a in previous.asset.objects}|{a.id for a in previous.surface.shapes}
+            if set(_remove)-known:raise ValueError('remove_object_ids contains unknown objects; inspect_scene first')
+            if set(_remove)&set(previous.selected):raise ValueError('accepted objects require dependency-local rollback')
+            previous.text.texts=[t for t in previous.text.texts if t.id not in _remove]
+            previous.text.members={k:v for k,v in previous.text.members.items() if k not in _remove}
+            previous.asset.objects=[a for a in previous.asset.objects if a.id not in _remove]
+            previous.surface.shapes=[a for a in previous.surface.shapes if a.id not in _remove]
+            duplicates=[]
+            for proposed in evidence.get('text',{}).get('texts',[]):
+                for original in previous.text.texts:
+                    if proposed['id']!=original.id and proposed.get('text')==original.text and proposed.get('bbox')==original.bbox:
+                        duplicates.append({'proposed_id':proposed['id'],'existing_id':original.id,'text':original.text,'bbox':original.bbox})
+            if duplicates:
+                return {'status':'IDENTITY_CONFLICT','duplicates':duplicates,'scene_unchanged':True,
+                        'reason':'Reuse the existing ID to revise it, or explicitly remove the old draft. This does not change pixel ownership.'}
+            evidence=merge_scene_evidence(previous,evidence)
         base = {k: snap[k] for k in ('source_sha256', 'image_size', 'transform')}
         base['method_version'] = 'opencode-evidence/1'
         branches = {}
@@ -282,11 +301,11 @@ class PrimitiveTools:
                                    for t in graph.text.texts if graph.ownership[t.id]!='RESOLVED'],
                 'evidence': self.artifact(state, directory/'submitted-evidence.json', 'agent_scene_proposal')}
 
-    def update_scene(self, state, current, directory, *, page, evidence):
+    def update_scene(self, state, current, directory, *, page, evidence, remove_object_ids=()):
         if set(evidence)-{'text', 'asset', 'surface'}:
             raise ValueError('scene accepts branch evidence, ownership is derived by the host')
         self.page(current, page)
-        return self.create_scene(state, current, directory, page=page, evidence=evidence)
+        return self.create_scene(state, current, directory, page=page, evidence=evidence, _update=True, _remove=remove_object_ids)
 
     def fit_text_layout(self, state, current, directory, *, page, object_id,minimum_size=None):
         from ..recovery.candidate_stage import native_frame

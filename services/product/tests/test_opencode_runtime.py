@@ -201,7 +201,7 @@ def test_visual_self_review_requires_provided_images_and_current_hashes(job):
     current['composition'] = {'files': {str(fake): digest(fake)}, 'office': {'status': 'PASS'},
                               'required_evidence': [source, preview]}
     write(state.root/'state.json', current)
-    review = {'passed': True, 'findings': [], 'minor_deviations': [],
+    review = {'passed': True, 'findings': [], 'observations':[{'item':'synthetic descriptive observation'}], 'minor_deviations': [],
               'evidence_ids': [source['id'], preview['id']],
               'checked': ['content','completeness','layout','residual','background','editing'], 'reason': 'synthetic'}
     with pytest.raises(ValueError, match='provided'):
@@ -209,6 +209,9 @@ def test_visual_self_review_requires_provided_images_and_current_hashes(job):
     for reference in (source, preview):
         state.evidence(reference['id'], delivered=True)
     assert call(service, identifier, 'record_visual_review', review=review)['status'] == 'PASS'
+    assert call(service,identifier,'record_visual_review',review={**review,'passed':False,'findings':[{'item':'unresolved defect'}]})['status']=='REVIEW_REQUIRED'
+    with pytest.raises(ValueError,match='unresolved defects'):
+        call(service,identifier,'record_visual_review',review={**review,'findings':[{'item':'unresolved defect'}]})
     fake.write_bytes(b'changed package')
     with pytest.raises(RuntimeConflict, match='changed'):
         call(service, identifier, 'record_visual_review', review=review)
@@ -569,6 +572,20 @@ def test_incremental_scene_keeps_uncommitted_text_and_shared_styles(job,monkeypa
     assert {t['id'] for t in result['scene']['text']['texts']}=={'first','second'}
     assert [s['id'] for s in result['scene']['text']['styles']]==['body']
     assert result['scene']['selected']=={}
-    added=call(service,identifier,'create_scene',page=1,evidence={'text':{
+    added=call(service,identifier,'update_scene',page=1,evidence={'text':{
         'texts':[{'id':'third','text':'Third','bbox':[2,42,35,15],'style':'body','z':3}]}})
     assert {t['id'] for t in added['scene']['text']['texts']}=={'first','second','third'}
+
+    before=service.state(identifier).read()['pages'][0]['scene']
+    exists=call(service,identifier,'create_scene',page=1,evidence={})
+    assert exists['status']=='SCENE_EXISTS'
+    duplicate=call(service,identifier,'update_scene',page=1,evidence={'text':{'texts':[
+        {'id':'alias','text':'First','bbox':[2,2,30,15],'style':'body','z':1}]}})
+    assert duplicate['status']=='IDENTITY_CONFLICT'
+    assert duplicate['duplicates'][0]['existing_id']=='first'
+    assert service.state(identifier).read()['pages'][0]['scene']==before
+    removed=call(service,identifier,'update_scene',page=1,evidence={},remove_object_ids=['second'])
+    assert {t['id'] for t in removed['scene']['text']['texts']}=={'first','third'}
+    assert service.call('get_progress',identifier)['reconstruction']=='NO_EDITABLE_RECONSTRUCTION'
+    refs=service.call('list_evidence',identifier,role='agent_scene_proposal')['evidence']
+    assert refs and all(r['role']=='agent_scene_proposal' for r in refs)

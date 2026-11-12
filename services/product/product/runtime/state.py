@@ -66,7 +66,7 @@ class RuntimeState:
         with self.db() as db:
             row = db.execute('SELECT path,sha,role,delivered FROM evidence WHERE id=?', (identifier,)).fetchone()
             if not row:
-                raise ValueError('unknown evidence reference')
+                raise ValueError('unknown evidence reference in this job; list_evidence returns valid IDs, get_job_context returns sources')
             path = (self.job/row[0]).resolve()
             if not path.is_relative_to(self.job) or digest(path) != row[1]:
                 raise RuntimeConflict('evidence bytes changed')

@@ -24,13 +24,14 @@ TOOLS += ('inspect_image', 'crop_image', 'compare_images', 'run_ocr', 'analyze_t
           'unmix_foreground', 'validate_rgba', 'list_fonts', 'fit_text_layout',
           'create_scene', 'update_scene', 'create_candidate', 'commit_candidate',
           'rollback_region', 'compile_pptx', 'run_image_script', 'run_parallel_pipeline')
-TOOLS += ('record_observation',)
+TOOLS += ('record_observation', 'list_evidence', 'get_progress')
 
 
 class VisualReview(BaseModel):
     model_config = ConfigDict(extra='forbid')
     passed: bool
     findings: list[dict] = Field(max_length=100)
+    observations: list[dict] = Field(default_factory=list, max_length=100)
     minor_deviations: list[dict] = Field(max_length=100)
     evidence_ids: list[str] = Field(min_length=2)
     checked: list[str]
@@ -57,8 +58,31 @@ class RuntimeService(ExplorationTools):
         if tool not in TOOLS:
             raise ValueError('unknown runtime tool')
         state = self.state(job_id)
+        if tool == 'list_evidence':
+            limit=max(1,min(int(arguments.get('limit',30)),100))
+            with state.db() as db:
+                rows=db.execute('SELECT id,path,sha,role,delivered FROM evidence WHERE role LIKE ? ORDER BY rowid DESC LIMIT ?',('%'+arguments.get('role','')+'%',limit)).fetchall()
+            return {'evidence':[{'id':r[0],'name':Path(r[1]).name,'sha256':r[2],'role':r[3],'provided_to_agent':bool(r[4])} for r in rows],
+                    'note':'References are task-bound; use get_evidence to actually view contents.'}
+        if tool == 'get_progress':
+            current=state.read()
+            pages=[]
+            for index,page in enumerate(current['pages'],1):
+                if not page:continue
+                graph=self.graph(page)
+                ir=json.loads(Path(page['ir']).read_text('utf8'))
+                pages.append({'page':index,'draft_texts':len(graph.text.texts),'draft_assets':len(graph.asset.objects),
+                    'committed_objects':len(graph.selected),'native_texts':sum(n['type']=='text' for n in ir['nodes']),
+                    'independent_images':sum(n['type']=='image' and n['id']!='source-plate' for n in ir['nodes'])})
+            with state.db() as db:
+                recent=[json.loads(r[0]) for r in db.execute('SELECT payload FROM events ORDER BY id DESC LIMIT 12')]
+            return {'version':current['version'],'pages':pages,'candidates':[{k:c.get(k) for k in ('id','page','object_id','status','failure')} for c in current['candidates'].values()],
+                    'recent_events':recent,'remaining_seconds':state.remaining_seconds(),
+                    'reconstruction':'NATIVE_OBJECTS_COMMITTED' if any(p['committed_objects'] for p in pages) else 'NO_EDITABLE_RECONSTRUCTION'}
         if tool == 'get_job_context':
             result = state.read()
+            result['progress'] = self.call('get_progress',job_id)
+            result['recent_evidence'] = self.call('list_evidence',job_id,limit=12)['evidence']
             result['sources'] = [state.register(p, 'source') for p in sorted((state.job/'inputs').glob('*.png'))]
             request=json.loads((state.job/'request.json').read_text('utf8'))
             shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region'} if request.get('tool_profile')=='basic' else set()
@@ -493,7 +517,7 @@ class RuntimeService(ExplorationTools):
         review = VisualReview.model_validate(review)
         required_checks = {'content', 'completeness', 'layout', 'residual', 'background', 'editing'}
         if set(review.checked) != required_checks or (review.passed and review.findings):
-            raise ValueError('incomplete or contradictory visual review')
+            raise ValueError('checked must include all six categories. findings means unresolved defects and requires passed=false; positive notes belong in observations, accepted differences in minor_deviations.')
         composition = self.composition(current)
         if composition['office']['status'] != 'PASS':
             raise ValueError('actual editing and residual evidence required')
@@ -541,7 +565,7 @@ class RuntimeService(ExplorationTools):
         for index in range(1, len(current['pages'])+1):
             shutil.copyfile(office_dir/f'page-{index:02d}-before.png', delivery/f'page-{index:02d}.png')
         delivery_state='SUCCEEDED' if any(selected) else 'REVIEW_REQUIRED'
-        result = {'status': delivery_state, 'completion': status, 'visual_review_backend': 'opencode',
+        result = {'status': delivery_state, 'completion': status, 'reconstruction_succeeded':any(selected), 'visual_review_backend': 'opencode',
                   'office_pass': True, 'visual_review': visual, 'pages': len(selected),
                   'editable_objects': [sorted(page) for page in selected],
                   'unresolved_objects': [[identifier for identifier in self.graph(page).ownership

@@ -48,3 +48,11 @@ Compile the chosen scene and run validate_office. Inspect every required source,
 Record visual review with passed, findings, minor_deviations, evidence_ids, checked and reason. checked must contain content, completeness, layout, residual, background and editing. The same Agent performs this review. Go is not used on this path. A provided-image receipt records transport provision; give a genuine visual judgment.
 
 Finalize only with current hard checks and visual evidence. Safe partial editability is allowed. Report editable objects, retained raster regions, unresolved issues and why further work stopped. Unavailable Office or vision evidence remains UNKNOWN. Do not claim complete recall without an independent reference denominator.
+
+## Durable references and draft revisions
+
+create_scene initializes a page once; SCENE_EXISTS means use update_scene. Keep object IDs stable across observations and context compaction. update_scene revises existing IDs or adds drafts; remove_object_ids explicitly removes only uncommitted drafts. IDENTITY_CONFLICT contains exact duplicate evidence and the existing ID; decide whether to revise that ID or replace the draft explicitly. Neither identity operation authorizes pixel erasure.
+
+Use list_evidence to recover task-bound source/mask/background/layout references instead of guessing IDs. get_progress distinguishes drafts from actual native objects and shows failures and candidates. get_job_context includes this progress and recent references after context recovery. A compiled raster-only scene has NO_EDITABLE_RECONSTRUCTION, regardless of Office file validity. Do not describe it as editable success.
+
+Visual review observations are descriptive notes; findings are unresolved defects; minor_deviations are accepted differences with reasons. passed=true requires no unresolved findings, but may include observations and minor deviations. Include every required evidence ID, including hard_checks. Record passed=false for unresolved failures. Autonomous strategy remains yours; the tools report evidence and validate actual writes.

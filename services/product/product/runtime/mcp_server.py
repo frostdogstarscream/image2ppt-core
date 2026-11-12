@@ -13,7 +13,7 @@ from ..parallel_config import configure
 from .service import RuntimeService, TOOLS, VisualReview
 
 
-READ_ONLY = {'get_job_context', 'inspect_scene', 'get_evidence'}
+READ_ONLY = {'get_job_context', 'inspect_scene', 'get_evidence', 'list_evidence', 'get_progress'}
 DESCRIPTION = {
     'get_job_context': 'Read job status, version and immutable original-image evidence references.',
     'run_perception': 'Run OCR and text/asset/surface perception once and create a source-safe initial scene.',
@@ -33,7 +33,7 @@ DESCRIPTION.update({
     'list_fonts':'List actual installed CJK and common Latin font faces, including real weight availability. Full verified font metadata is returned as evidence.',
     'fit_background':'Fit a continuous background from an image evidence_id and xywh bbox, or from a scene text object. This produces a hypothesis and does not change the source.',
     'complete_text_mask':'Complete strokes using explicit background_id and scene text, or independent source/mask/backing evidence. Returns hypotheses with no erase authority.',
-    'create_scene':'Create a scene proposal from branch evidence. Preserve exact OCR wording and bind text.members to OCR line IDs; inspect unresolved owners in the response.',
+    'create_scene':'Initialize a page once. An existing page returns SCENE_EXISTS; use update_scene for revisions. Preserve exact OCR wording and bind text.members to OCR line IDs; inspect unresolved owners in the response.',
     'update_scene':'Revise scene evidence and add draft objects. Existing accepted objects and their styles are preserved; revising those requires dependency-local rollback.',
     'create_candidate':'Construct an unapproved text preview from explicit mask, background and optional layout evidence. Returns exploratory artifacts even when ownership or visual quality remains uncertain.',
     'segment_object':'Obtain SAM evidence for a complete scene asset object. SAM evidence does not authorize source erasure.',
@@ -57,6 +57,7 @@ def schemas():
     strings = {'type': 'array', 'items': string}
     region = {'page': page, 'object_id': string}
     fields = {
+        'list_evidence': {'role':string,'limit':{'type':'integer','minimum':1,'maximum':100}},
         'inspect_scene': {'page': {'type': 'integer', 'minimum': 1}},
         'rebuild_region': {'page': {'type': 'integer', 'minimum': 1}, 'object_id': string,
                            'strategy': {'type': 'string', 'enum': ['auto', 'next_background', 'verified-backing', 'source-halo', 'sam']}},
@@ -78,7 +79,7 @@ def schemas():
         'unmix_foreground': {**region, 'strategy': string},
         'validate_rgba': {'candidate_id': string}, 'fit_text_layout': dict(region),
         'create_scene': {'page': page, 'evidence': {'type': 'object'}},
-        'update_scene': {'page': page, 'evidence': {'type': 'object'}},
+        'update_scene': {'page': page, 'evidence': {'type': 'object'},'remove_object_ids':strings},
         'create_candidate': {**region, 'mask_id': string, 'background_id': string},
         'commit_candidate': {'candidate_id': string},
         'rollback_region': {'page': page, 'object_ids': strings, 'reason': string},
@@ -119,6 +120,8 @@ def schemas():
     for name in TOOLS:
         properties = {'job_id': string, **fields.get(name, {})}
         required = list(properties)
+        if name=='list_evidence':required=['job_id']
+        if name=='update_scene':required.remove('remove_object_ids')
         if name in ('rebuild_region', 'unmix_foreground'):
             required.remove('strategy')
         if name=='segment_object':
