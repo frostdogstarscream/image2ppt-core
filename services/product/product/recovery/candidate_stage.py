@@ -33,7 +33,7 @@ def font_line_height(record, size):
         return size*units/face['head'].unitsPerEm
 
 
-def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_size=None):
+def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_size=None, exploratory=False):
     """Fit installed font bearings/leading within this local replacement scope."""
     used = {text.style, *[span.style for span in text.spans]}
     records = {(font['family'], font['bold']): font for font in fonts['fonts']}
@@ -61,7 +61,7 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
     # A transparent textbox's font-leading allowance is not an erase mask.
     # Keep its origin fixed and validate canvas/peer bounds independently.
     left,top,width,height=payload['bbox']
-    if ((grown & protected).any() or min(left,top)<0 or left+width>source_size[0]
+    if not exploratory and ((grown & protected).any() or min(left,top)<0 or left+width>source_size[0]
             or top+height>source_size[1]):
         raise ValueError('native font frame allowance conflicts with canvas or protected peers')
     return payload

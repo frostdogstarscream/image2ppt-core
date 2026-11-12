@@ -306,9 +306,14 @@ class PrimitiveTools:
         if missing:
             return {'status':'MISSING_EVIDENCE','failure':'FONT_UNAVAILABLE','missing_fonts':missing}
         payload = native_frame(text, {s.id: s for s in graph.text.styles},
-            fonts, graph.image_size, protected, scope,minimum_size=minimum_size)
+            fonts, graph.image_size, protected, scope,minimum_size=minimum_size, exploratory=True)
+        from ..object_extract import rectangle
+        left, top, width, height = payload['bbox']
+        measurements = {'protected_overlap_pixels': int((rectangle(payload['bbox'], graph.image_size) & protected).sum()),
+                        'outside_canvas': min(left, top) < 0 or left+width > graph.image_size[0] or top+height > graph.image_size[1]}
         write(directory/'layout.json', payload)
-        return {'layout': payload, 'evidence': self.artifact(state, directory/'layout.json', 'layout')}
+        return {'layout': payload, 'measurements': measurements, 'ownership_authority': False,
+                'evidence': self.artifact(state, directory/'layout.json', 'layout')}
 
     def text_context(self, current, page, object_id):
         from ..parallel_text_candidates import peer_protection
@@ -347,9 +352,13 @@ class PrimitiveTools:
             if bbox is None:raise ValueError('independent fitting requires an xywh search scope')
             reference,fit=fit_gradient(source,bbox,protected,context=context_width)
         else:
-            row, graph, source, protected, box, reference, fit, mask, style = self.text_context(current, page, object_id)
+            row = self.page(current, page)
+            graph = self.graph(row)
+            source = np.array(Image.open(row['snapshot']['path']).convert('RGB'))
             from ..parallel_text_candidates import peer_protection
             text=next(t for t in graph.text.texts if t.id==object_id)
+            x, y, w, h = map(round, text.bbox)
+            box = [x-3, y-3, w+6, h+6]
             sampling=peer_protection(text,graph,source,np.zeros(source.shape[:2],bool),
                 purpose='context',baseline_directory=Path(row['ir']).parent)
             reference,fit=fit_gradient(source,box,sampling,context=context_width)
@@ -407,7 +416,7 @@ class PrimitiveTools:
             return {'status': 'MISSING_EVIDENCE', 'missing': ['LayerD layers']}
         source = np.array(Image.open(row['snapshot']['path']).convert('RGB'))
         mask = self.image(state, mask_id, 'L') > 0
-        records = lower_backgrounds(source, layers, mask)
+        records = lower_backgrounds(source, layers, mask, exploratory=True)
         result = []
         for i, record in enumerate(records):
             path = directory/f'lower-{i}.png'
@@ -415,25 +424,25 @@ class PrimitiveTools:
             result.append({'image': self.artifact(state, path, 'background_candidate'), 'provenance': record.provenance})
         return {'backgrounds': result}
 
-    def inpaint_background(self, state, current, directory, *, page, object_id, mask_id):
-        validation = self.validate_mask(state, current, directory, page=page, object_id=object_id, mask_id=mask_id)
-        if validation['status'] != 'PASS':
-            return validation
+    def inpaint_background(self, state, current, directory, *, mask_id, page=None, object_id=None, evidence_id=None):
         from ..parallel_config import ROOT
         from .background import inpaint_service
         from ..recovery.adaptive_policy import AdaptiveBudget
         config = json.loads((ROOT/'.runtime/parallel-services.json').read_text('utf8')).get('lama')
         if not config:
             return {'status': 'UNKNOWN', 'failure': 'TOOL_UNAVAILABLE'}
-        row = self.page(current, page)
-        source = np.array(Image.open(row['snapshot']['path']).convert('RGB'))
+        source = self.image(state, evidence_id) if evidence_id else np.array(
+            Image.open(self.page(current, page)['snapshot']['path']).convert('RGB'))
         mask = self.image(state, mask_id, 'L') > 0
+        if mask.shape != source.shape[:2] or not mask.any():
+            raise ValueError('nonempty source-sized mask required')
         request = json.loads((state.job/'request.json').read_text('utf8'))
         service = inpaint_service(config, state.job/'cache/lama', AdaptiveBudget(Store(state.job/'state'), request.get('adaptive_budget')))
         raw = service(source, mask)
         Image.fromarray(raw).save(directory/'raw-inpaint.png')
         write(directory/'service-receipt.json', service.receipt)
-        return {'background': self.artifact(state, directory/'raw-inpaint.png', 'background_candidate')}
+        return {'status': 'COMPUTED', 'background': self.artifact(state, directory/'raw-inpaint.png', 'background_candidate'),
+                'ownership_authority': False}
 
     def create_candidate(self, state, current, directory, *, page, object_id, mask_id, background_id,frame_minimum=None):
         from ..recovery.text_mask_completion import TextMaskCompletion
@@ -449,10 +458,10 @@ class PrimitiveTools:
                 return {**previous,'cache_hit':True}
         request=json.loads((state.job/'request.json').read_text('utf8'))
         limit=request.get('adaptive_budget',{}).get('complex_region_candidates',4)
-        if sum(c['page']==page and c['object_id']==object_id for c in current['candidates'].values())>=limit:
+        if sum(c['page']==page and c['object_id']==object_id and not c.get('exploratory') for c in current['candidates'].values())>=limit:
             return {'status':'BLOCKED','failure':'CANDIDATE_BUDGET_EXHAUSTED'}
         row, graph, source, protected, box, reference, fit, original, style = self.text_context(current, page, object_id)
-        check = self.validate_mask(state, current, directory, page=page, object_id=object_id, mask_id=mask_id)
+        check = PrimitiveTools.validate_mask(self, state, current, directory, page=page, object_id=object_id, mask_id=mask_id)
         if check['status'] != 'PASS':
             return check
         mask = self.image(state, mask_id, 'L') > 0

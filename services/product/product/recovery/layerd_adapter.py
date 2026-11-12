@@ -16,7 +16,7 @@ class LowerBackground:
     provenance: dict
 
 
-def lower_backgrounds(source, layer_directory, write_mask):
+def lower_backgrounds(source, layer_directory, write_mask, *, exploratory=False):
     """Enumerate actual lower stacks, without assuming the first layer is clean.
 
     Each prefix is a hypothesis. Source reconstruction and opaque coverage prove
@@ -29,7 +29,7 @@ def lower_backgrounds(source, layer_directory, write_mask):
     if write_mask.dtype != bool or write_mask.shape != source.shape[:2] or not write_mask.any():
         raise RecoveryBlocked('INVALID_MASK', 'lower background requires a source-sized glyph mask')
     error = float(np.abs(recompose(page).astype(float) - source).mean())
-    if not np.isfinite(error) or error > 3:
+    if not exploratory and (not np.isfinite(error) or error > 3):
         raise RecoveryBlocked('LAYER_RECOMPOSITION_MISMATCH', 'LayerD stack does not reconstruct the source')
     transparency = np.ones(source.shape[:2], dtype=np.float32)
     records = []
@@ -37,7 +37,7 @@ def lower_backgrounds(source, layer_directory, write_mask):
         with Image.open(layer.path) as image:
             alpha = np.asarray(image.convert('RGBA'))[..., 3].astype(np.float32) / 255
         transparency *= 1 - alpha
-        if not np.all(transparency[write_mask] == 0):
+        if not exploratory and not np.all(transparency[write_mask] == 0):
             continue
         rgb = recompose(replace(page, layers=page.layers[:index + 1]))
         rgb.setflags(write=False)
@@ -48,6 +48,6 @@ def lower_backgrounds(source, layer_directory, write_mask):
                        for item in page.layers if item.z <= layer.z],
             'below_z': layer.z + 1,
             'recomposition_mae': error,
-            'mask_opaque_coverage': 1.0,
+            'mask_opaque_coverage': float(np.mean(transparency[write_mask] == 0)),
         }))
     return records

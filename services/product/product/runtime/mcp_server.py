@@ -32,13 +32,22 @@ DESCRIPTION.update({
     'crop_image':'Crop an immutable image evidence reference, optionally enlarge its preview, and return measured RGB frequencies from the original crop.',
     'list_fonts':'List actual installed CJK and common Latin font faces, including real weight availability. Full verified font metadata is returned as evidence.',
     'fit_background':'Fit a continuous background from an image evidence_id and xywh bbox, or from a scene text object. This produces a hypothesis and does not change the source.',
-    'complete_text_mask':'Complete strokes and antialiasing from independent source/mask/backing evidence, or derive them for a RESOLVED scene TEXT ID. Independent outputs grant no erase authority.',
+    'complete_text_mask':'Complete strokes using explicit background_id and scene text, or independent source/mask/backing evidence. Returns hypotheses with no erase authority.',
     'create_scene':'Create a scene proposal from branch evidence. Preserve exact OCR wording and bind text.members to OCR line IDs; inspect unresolved owners in the response.',
     'update_scene':'Revise scene evidence and add draft objects. Existing accepted objects and their styles are preserved; revising those requires dependency-local rollback.',
-    'create_candidate':'Combine a binary mask and background image for a scene TEXT object. Recomputes legal source stroke ownership and all background gates before staging.',
+    'create_candidate':'Construct an unapproved text preview from explicit mask, background and optional layout evidence. Returns exploratory artifacts even when ownership or visual quality remains uncertain.',
     'segment_object':'Obtain SAM evidence for a complete scene asset object. SAM evidence does not authorize source erasure.',
     'fit_text_layout':'Compute a native text frame using installed font metrics. The result is a proposal; source ownership and candidate validation remain separate.',
     'run_perception':'Optional high-cost shortcut invoking three model branches and LayerD. Basic evidence tools can be used independently.'})
+DESCRIPTION.update({
+    'validate_mask':'Measure binary mask size and supplied protection/reference overlap. Returns measurements and uncertainty without approving source ownership.',
+    'unmix_foreground':'Compute RGBA from explicit source evidence_id, background_id and mask_id. Does not choose a recovery strategy.',
+    'validate_rgba':'Measure an RGBA evidence image, optional source recomposition and protection overlap. No staged IR is required.',
+    'compile_pptx':'Compile candidate_id as an unapproved native preview, or compile the current committed scene when candidate_id is omitted.',
+    'validate_candidate':'For exploratory candidates, prepare native preview artifacts. Legacy staged candidates retain formal submission validation.',
+    'validate_office':'With candidate_id, return actual preview edit diagnostics without approval. With no candidate_id, validate final composition.',
+    'record_observation':'Record Agent findings, uncertainty and next action on arbitrary task evidence, including failed experiments.',
+    'commit_candidate':'Submit a candidate through source-owner, content and actual-edit safety checks. Exploratory preview approval never bypasses these checks.'})
 
 
 def schemas():
@@ -80,10 +89,18 @@ def schemas():
     fields['complete_text_mask'].update(evidence_id=string,original_mask_id=string,background_id=string,protected_id=string,
         bbox={'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},glyph_height={'type':'number','exclusiveMinimum':0})
     fields['unmix_foreground'].update(object_evidence={'type':'object'},protected_id=string,alpha_id=string)
+    fields['unmix_foreground'].update(evidence_id=string,background_id=string,mask_id=string)
+    fields['validate_mask'].update(evidence_id=string,protected_id=string,reference_mask_id=string)
+    fields['validate_rgba'].update(evidence_id=string,source_id=string,background_id=string,protected_id=string)
+    fields['compile_pptx']={'candidate_id':string}
+    fields['validate_office']={'candidate_id':string}
+    fields['inpaint_background']['evidence_id']=string
+    fields['record_observation']={'evidence_ids':strings,'findings':{'type':'array','items':{'type':'object'}},'next_action':string}
     fields['segment_object']=dict(fields['segment_object'],object_evidence={'type':'object'})
     frame={'type':'array','items':{'type':'number','exclusiveMinimum':0},'minItems':2,'maxItems':2}
     fields['fit_text_layout']['minimum_size']=frame
     fields['create_candidate']['frame_minimum']=frame
+    fields['create_candidate']['layout_id']=string
     fields['create_candidate']['frame_minimum']['description']='Optional transparent native text frame [width,height] in source pixels. Keeps source origin and erase Mask fixed. Use measured Office bounds when testing a layout repair.'
     definitions = {}
     branches = {}
@@ -110,9 +127,16 @@ def schemas():
         if name in ('fit_background','complete_text_mask'):
             required=['job_id']
         if name=='unmix_foreground':
-            required=['job_id','page']
+            required=['job_id','evidence_id','background_id','mask_id']
+        if name=='validate_mask':required=['job_id','mask_id']
+        if name=='validate_rgba':required=['job_id','evidence_id']
+        if name in ('compile_pptx','validate_office'):required=['job_id']
+        if name=='inpaint_background':required=['job_id','mask_id']
+        if name=='record_observation':required.remove('next_action')
         if name=='fit_text_layout':required.remove('minimum_size')
-        if name=='create_candidate':required.remove('frame_minimum')
+        if name=='create_candidate':
+            required.remove('frame_minimum')
+            required.remove('layout_id')
         if name == 'crop_image':
             required.remove('scale')
         if name not in READ_ONLY:

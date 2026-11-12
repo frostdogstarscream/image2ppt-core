@@ -12,6 +12,7 @@ from ..parallel_store import Store, key
 from ..resource_lease import lease
 from .state import RuntimeState, RuntimeConflict
 from .primitives import PrimitiveTools
+from .exploration import ExplorationTools
 
 
 TOOLS = ('get_job_context', 'run_perception', 'inspect_scene', 'rebuild_region',
@@ -23,6 +24,7 @@ TOOLS += ('inspect_image', 'crop_image', 'compare_images', 'run_ocr', 'analyze_t
           'unmix_foreground', 'validate_rgba', 'list_fonts', 'fit_text_layout',
           'create_scene', 'update_scene', 'create_candidate', 'commit_candidate',
           'rollback_region', 'compile_pptx', 'run_image_script', 'run_parallel_pipeline')
+TOOLS += ('record_observation',)
 
 
 class VisualReview(BaseModel):
@@ -35,7 +37,7 @@ class VisualReview(BaseModel):
     reason: str = Field(min_length=1, max_length=4000)
 
 
-class RuntimeService(PrimitiveTools):
+class RuntimeService(ExplorationTools):
     def __init__(self, root):
         self.root = Path(root).resolve()
 
@@ -264,6 +266,10 @@ class RuntimeService(PrimitiveTools):
 
     def validate_candidate(self, state, current, directory, *, candidate_id):
         candidate = current['candidates'][candidate_id]
+        if candidate.get('exploratory'):
+            preview = self.compile_pptx(state, current, directory/'preview', candidate_id=candidate_id)
+            return {'status': 'OBSERVATION_READY', 'preview': preview,
+                    'ownership_authority': False, 'uncertainties': ['Formal source-owner and editing checks have not run.']}
         if candidate['status']=='VALIDATED':
             self.check_candidate(current,candidate)
             for path,sha in candidate['validation'].get('files',{}).items():
@@ -312,6 +318,17 @@ class RuntimeService(PrimitiveTools):
 
     def commit_region(self, state, current, directory, *, candidate_id):
         candidate = current['candidates'][candidate_id]
+        if candidate.get('exploratory'):
+            self.check_candidate(current, candidate)
+            approval = directory/'submission'
+            approval.mkdir(parents=True)
+            staged = PrimitiveTools.create_candidate(self, state, current, approval, **candidate['proposal'])
+            if staged.get('status') != 'STAGED_LOCAL':
+                return {'status': 'SUBMISSION_BLOCKED', 'checks': staged, 'preview_candidate_id': candidate_id}
+            checked = self.validate_candidate(state, current, directory/'submission-check', candidate_id=staged['id'])
+            if checked.get('status') != 'PASS':
+                return {'status': 'SUBMISSION_BLOCKED', 'checks': checked, 'preview_candidate_id': candidate_id}
+            return self.commit_region(state, current, directory/'commit', candidate_id=staged['id'])
         if candidate['status'] != 'VALIDATED' or candidate['validation']['status'] != 'PASS':
             raise ValueError('candidate requires successful hard and actual edit checks')
         self.check_candidate(current, candidate)
@@ -348,7 +365,24 @@ class RuntimeService(PrimitiveTools):
         current.pop('visual_review', None)
         return {'status': 'COMPOSED', 'pptx_sha256': digest(artifacts['pptx'])}
 
-    compile_pptx = compose_delivery
+    def compile_pptx(self, state, current, directory, *, candidate_id=None):
+        if candidate_id is None:
+            return self.compose_delivery(state, current, directory)
+        candidate = current['candidates'][candidate_id]
+        self.check_candidate(current, candidate)
+        if not candidate.get('ir'):
+            return {'status': 'MISSING_INPUT', 'required': ['candidate IR']}
+        from .compiler import compile_local
+        from ..parallel_pipeline import effective_texts
+        ir = Path(candidate['ir'])
+        graph = self.graph({'scene': str(ir.parent/'scene.json')})
+        with lease('compiler'):
+            artifacts = compile_local([ir], directory/'compiled', [effective_texts(graph, ir)])
+        references = [state.register(p, 'exploratory_preview') for p in (directory/'compiled').rglob('*')
+                      if p.is_file() and p.suffix.lower() in ('.png', '.pptx')]
+        candidate['preview'] = {'artifacts': artifacts, 'pptx_sha256': digest(artifacts['pptx'])}
+        return {'status': 'COMPILED', 'candidate_id': candidate_id, 'artifacts': artifacts,
+                'evidence': references, 'delivery_approval': False}
 
     @staticmethod
     def office_check(state, pptx, irs, directory):
@@ -413,7 +447,19 @@ class RuntimeService(PrimitiveTools):
         result = self.compose_delivery(state, current, directory/'composition')
         return {**result, 'visual_review': 'REQUIRES_AGENT_OBSERVATION', 'backend': 'opencode'}
 
-    def validate_office(self, state, current, directory):
+    def validate_office(self, state, current, directory, *, candidate_id=None):
+        if candidate_id:
+            candidate = current['candidates'][candidate_id]
+            self.check_candidate(current, candidate)
+            preview = candidate.get('preview')
+            if not preview:
+                return {'status': 'MISSING_INPUT', 'required': ['compiled candidate preview']}
+            pptx = preview['artifacts']['pptx']
+            if digest(pptx) != preview['pptx_sha256']:
+                raise RuntimeConflict('preview bytes changed')
+            result = self.office_check(state, pptx, [Path(candidate['ir'])], directory)
+            return {'status': 'MEASURED' if result['status'] != 'UNKNOWN' else 'UNKNOWN',
+                    'checks': result, 'delivery_approval': False}
         composition = self.composition(current)
         result = self.office_check(state, composition['artifacts']['pptx'], [Path(p['ir']) for p in current['pages']], directory)
         composition['office'] = result

@@ -22,6 +22,12 @@ Submit ordered multipart `files` to `POST /api/v1/jobs`. Query the resulting job
 
 ## Agent and evidence
 
+Basic computation now returns exploratory artifacts. `create_candidate` uses the existing scene adapter to create a private native preview, including candidates whose mask or background remains unapproved. `compile_pptx(candidate_id)` compiles that preview without changing the committed page or delivery composition. `validate_office(candidate_id)` returns edit diagnostics for observation. `commit_candidate` separately invokes the existing submission checks and actual Office verification.
+
+`validate_mask` and `validate_rgba` return measurements and uncertainty. RGBA measurement accepts image evidence directly. `unmix_foreground` computes from explicit source, background and mask evidence. Scene-mode `complete_text_mask` requires a chosen background. Inpainting accepts source/mask evidence without requiring text-mask approval. Layout proposals include conflict measurements. LayerD exploration returns prefix hypotheses with their actual opacity coverage and recomposition error. Stable production callers retain strict staging behavior.
+
+Agent local findings use `record_observation`, which has no Office prerequisite. Final delivery review remains hash-bound through `record_visual_review`. Existing formal submission thresholds are retained in the submission path. This revision removes their effect on exploratory generation and preview; it does not establish new real-slide visual acceptance.
+
 The runtime Skill is `skills/image2ppt-runtime/SKILL.md`. A job receives a private MCP context, source attachments and the delivery goal. Each tool records its input, implementation/candidate bindings and output artifacts. Candidates may combine separately generated masks and backgrounds. The source mask, private staging adapter and actual Office checks validate submissions.
 
 `tool_profile=basic` in a task request exposes the basic tool catalog for autonomous-composition acceptance. It omits `run_perception`, `run_parallel_pipeline`, `rebuild_region` and `repair_region`. It does not select an object or prescribe a tool sequence.

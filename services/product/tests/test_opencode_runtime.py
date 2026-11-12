@@ -162,14 +162,32 @@ def test_basic_mask_background_composition_with_source_reference(job,monkeypatch
     assert scene['scene']['ownership']['text']=='RESOLVED'
     assert scene['scene']['text']['members']['text']==['line-1']
     source=service.call('get_job_context',identifier)['sources'][0]['id']
-    masks=call(service,identifier,'complete_text_mask',page=1,object_id='text',evidence_id=source)
     backing=call(service,identifier,'fit_background',page=1,object_id='text',evidence_id=source)
+    masks=call(service,identifier,'complete_text_mask',page=1,object_id='text',background_id=backing['background']['id'])
     candidate=call(service,identifier,'create_candidate',page=1,object_id='text',
                    mask_id=masks['masks']['semantic_completion']['id'],background_id=backing['background']['id'])
-    assert candidate['status']=='STAGED_LOCAL'
-    assert candidate['checks']['protected_changed_pixels']==0
-    with pytest.raises(ValueError,match='successful hard'):
-        call(service,identifier,'commit_candidate',expected_version=candidate['version'],candidate_id=candidate['id'])
+    assert candidate['status']=='EXPLORATORY'
+    assert candidate['ownership_authority'] is False
+    assert service.state(identifier).read()['pages'][0]['ir'] != candidate['ir']
+    bad_mask=directory/'unproven-mask.png'
+    Image.new('L',image.size,255).save(bad_mask)
+    mask_ref=state.register(bad_mask,'mask_candidate')
+    draft=call(service,identifier,'create_candidate',page=1,object_id='text',
+               mask_id=mask_ref['id'],background_id=backing['background']['id'])
+    assert draft['status']=='EXPLORATORY'
+    submitted=call(service,identifier,'commit_candidate',expected_version=draft['version'],candidate_id=draft['id'])
+    assert submitted['status']=='SUBMISSION_BLOCKED'
+    assert not service.graph(service.state(identifier).read()['pages'][0]).selected
+    import product.runtime.compiler as compiler
+    def compile_preview(irs,output,texts):
+        assert irs == [Path(draft['ir'])]
+        output.mkdir(parents=True)
+        (output/'preview.pptx').write_bytes(b'synthetic compiler response')
+        return {'pptx':str(output/'preview.pptx')}
+    monkeypatch.setattr(compiler,'compile_local',compile_preview)
+    preview=call(service,identifier,'compile_pptx',candidate_id=draft['id'])
+    assert preview['status']=='COMPILED' and not preview['delivery_approval']
+    assert not service.state(identifier).read().get('composition')
 
 
 def test_visual_self_review_requires_provided_images_and_current_hashes(job):
@@ -494,3 +512,45 @@ def test_office_overflow_measurements_remain_unverified_repair_proposals():
     assert feedback['measured_frame_minimum_px']==[305,58]
     assert feedback['previous_edit_outside_pixels']==[23]
     assert result['status']=='REVIEW_REQUIRED'
+
+
+def test_mask_measurements_do_not_grant_or_require_ownership(job):
+    service, identifier, directory = job
+    state = service.state(identifier)
+    source = service.call('get_job_context', identifier)['sources'][0]['id']
+    for name, color in [('wanted',255),('protected',255),('reference',0)]:
+        Image.new('L',(80,60),color).save(directory/(name+'.png'))
+    refs={name:state.register(directory/(name+'.png'),'mask')['id'] for name in ('wanted','protected','reference')}
+    result=call(service,identifier,'validate_mask',evidence_id=source,mask_id=refs['wanted'],
+                protected_id=refs['protected'],reference_mask_id=refs['reference'])
+    assert result['status']=='MEASURED'
+    assert result['measurements']['protected_overlap_pixels']==4800
+    assert result['measurements']['outside_reference_pixels']==4800
+    assert not result['ownership_authority'] and not state.read()['pages']
+
+
+def test_unmix_and_rgba_measurements_work_without_staged_ir(job):
+    service, identifier, directory = job
+    state=service.state(identifier)
+    source=service.call('get_job_context',identifier)['sources'][0]['id']
+    Image.new('RGB',(80,60),'white').save(directory/'backing.png')
+    Image.new('L',(80,60),255).save(directory/'mask.png')
+    backing=state.register(directory/'backing.png','background')['id']
+    mask=state.register(directory/'mask.png','mask')['id']
+    result=call(service,identifier,'unmix_foreground',evidence_id=source,background_id=backing,mask_id=mask)
+    assert result['status']=='COMPUTED'
+    measured=call(service,identifier,'validate_rgba',evidence_id=result['image']['id'],
+                  source_id=source,background_id=backing,protected_id=mask)
+    assert measured['status']=='MEASURED'
+    assert measured['measurements']['protected_overlap_pixels']>0
+    assert 'recomposition_mae' in measured['measurements']
+    assert not state.read()['pages']
+
+
+def test_agent_can_record_failed_candidate_observation_before_office(job):
+    service,identifier,_=job
+    source=service.call('get_job_context',identifier)['sources'][0]['id']
+    result=call(service,identifier,'record_observation',evidence_ids=[source],
+                findings=[{'issue':'background uncertain'}],next_action='compare another background')
+    assert result['status']=='RECORDED'
+    assert not service.state(identifier).read().get('visual_review')

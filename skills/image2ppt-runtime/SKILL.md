@@ -17,7 +17,11 @@ After committing an object, update_scene can add or revise other draft objects. 
 
 Text evidence uses styles, texts and members. members maps each text ID to the independent OCR line IDs that support its exact wording. The host can bind a unique exact OCR line with matching geometry. AMBIGUOUS text cannot be erased. Match source words and geometry, then inspect the ownership diagnostics when unresolved.
 
-A layout result is a proposal. A mask or fitted background is evidence. A candidate exists only when create_candidate or a reconstruction tool returns a candidate ID. commit_candidate accepts that returned candidate ID after validate_candidate succeeds. Object IDs and candidate IDs have different roles.
+A layout result is a proposal. A mask or fitted background is evidence. create_candidate returns an EXPLORATORY candidate with no erase authority. Use compile_pptx(candidate_id) to inspect its native rendering and validate_office(candidate_id) for editing measurements. validate_candidate on an exploratory candidate prepares observation artifacts. Choose your next action from the images and measurements. commit_candidate separately runs submission checks against the current source and actual editing evidence. Object IDs and candidate IDs have different roles.
+
+Scene-mode complete_text_mask requires explicit background_id. Choose a fitted, extracted or inpainted background first, or provide independent source/mask/background evidence. validate_mask reports overlap with supplied protection and reference masks without declaring those masks authoritative. unmix_foreground takes explicit evidence_id, background_id and mask_id. validate_rgba accepts the resulting image evidence directly, with optional source/background/protection references for recomposition measurements.
+
+record_observation stores your findings and proposed next action at any point, including failed or incomplete experiments. Use it for local diagnosis. record_visual_review is the final hash-bound delivery review. Computed artifacts and measured diagnostics do not imply delivery acceptance. Decide whether a minor visual difference is acceptable, record the evidence and reason, and request submission when ready.
 
 Tool inputs are evidence IDs and scene/object references. Generate a unique idempotency_key for each new operation. Reuse the same key and arguments to reconcile an uncertain response. Only committing requires expected_version. Read current version before submitting a candidate. Do not invent results, model calls, file paths, object counts or acceptance.
 
