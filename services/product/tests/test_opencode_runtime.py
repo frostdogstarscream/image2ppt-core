@@ -163,6 +163,8 @@ def test_basic_mask_background_composition_with_source_reference(job,monkeypatch
     assert scene['scene']['text']['members']['text']==['line-1']
     source=service.call('get_job_context',identifier)['sources'][0]['id']
     backing=call(service,identifier,'fit_background',page=1,object_id='text',evidence_id=source)
+    with pytest.raises(ValueError,match='binary grayscale Mask'):
+        call(service,identifier,'complete_text_mask',page=1,object_id='text',background_id=backing['background']['id'],original_mask_id=backing['background']['id'])
     masks=call(service,identifier,'complete_text_mask',page=1,object_id='text',background_id=backing['background']['id'])
     candidate=call(service,identifier,'create_candidate',page=1,object_id='text',
                    mask_id=masks['masks']['semantic_completion']['id'],background_id=backing['background']['id'])

@@ -89,6 +89,7 @@ def schemas():
         'description':'Unprotected source-strip sampling width in pixels. A changed width supplies different background evidence. All original ownership and fit validation thresholds still apply.'}
     fields['complete_text_mask'].update(evidence_id=string,original_mask_id=string,background_id=string,protected_id=string,
         bbox={'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},glyph_height={'type':'number','exclusiveMinimum':0})
+    fields['complete_text_mask']['original_mask_id']={'type':'string','description':'Optional existing binary grayscale Mask evidence. Never use a source/background image ID here. Omit in scene mode to derive original strokes automatically.'}
     fields['unmix_foreground'].update(object_evidence={'type':'object'},protected_id=string,alpha_id=string)
     fields['unmix_foreground'].update(evidence_id=string,background_id=string,mask_id=string)
     fields['validate_mask'].update(evidence_id=string,protected_id=string,reference_mask_id=string)

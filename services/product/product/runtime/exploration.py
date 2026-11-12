@@ -39,6 +39,11 @@ class ExplorationTools(PrimitiveTools):
         protected = peer_protection(text, graph, source, np.zeros(source.shape[:2],bool),
                                    baseline_directory=Path(row['ir']).parent)
         if original_mask_id:
+            mask_path, mask_reference = state.evidence(original_mask_id)
+            with Image.open(mask_path) as mask_image:
+                pixels=np.array(mask_image)
+                if mask_image.mode not in ('1','L') or not np.isin(pixels,[0,1,255]).all():
+                    raise ValueError('original_mask_id must reference a binary grayscale Mask, not a background or source image. In scene mode omit original_mask_id to derive strokes from source and background_id.')
             original = self.image(state, original_mask_id, 'L') > 0
         else:
             bx, by, bw, bh = box
