@@ -109,6 +109,8 @@ class RuntimeService(ExplorationTools):
             return [state.evidence(identifier) for identifier in arguments['evidence_ids']]
         if tool in ('commit_candidate', 'commit_region') and expected_version is None:
             raise ValueError('committing requires an explicit scene version')
+        if tool=='fit_background' and not (all(arguments.get(k) is not None for k in ('page','object_id')) or all(arguments.get(k) is not None for k in ('evidence_id','bbox'))):
+            raise ValueError('fit_background requires page+object_id OR evidence_id+bbox; no operation was reserved')
         method = getattr(self, tool)
         return state.mutate(tool, arguments, expected_version, idempotency_key,
                             lambda current, directory: method(state, current, directory, **arguments))

@@ -146,6 +146,9 @@ def schemas():
             required.remove('layout_id')
         if name == 'crop_image':
             required.remove('scale')
+        alternatives={}
+        if name=='fit_background':alternatives={'anyOf':[{'required':['page','object_id']},{'required':['evidence_id','bbox']}]}
+        if name=='complete_text_mask':alternatives={'anyOf':[{'required':['page','object_id','background_id']},{'required':['evidence_id','original_mask_id','background_id','bbox','glyph_height']}]}
         if name not in READ_ONLY:
             properties.update(expected_version={'type': 'integer', 'minimum': 0},
                               idempotency_key={'type':'string','minLength':8,'maxLength':100,'pattern':'^[A-Za-z0-9_-]+$'})
@@ -153,7 +156,7 @@ def schemas():
             if name in ('commit_candidate', 'commit_region'):
                 required.append('expected_version')
         result.append(Tool(name=name, description=DESCRIPTION.get(name, name.replace('_', ' ')+'. Independent evidence tool; outputs do not authorize pixel erasure.'), inputSchema={
-            'type': 'object', 'properties': properties, 'required': required, 'additionalProperties': False,
+            'type': 'object', 'properties': properties, 'required': required, 'additionalProperties': False, **alternatives,
             **({'$defs': definitions} if name in ('create_scene', 'update_scene', 'segment_object') else {})}))
     return result
 

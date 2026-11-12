@@ -631,3 +631,16 @@ def test_removed_draft_cannot_remove_independent_ocr_protection(tmp_path):
     graph.source_sha256='changed'
     with pytest.raises(ValueError,match='source hash mismatch'):
         peer_protection(SimpleNamespace(id='target'),graph,np.zeros((30,30,3),np.uint8),np.zeros((30,30),bool),baseline_directory=tmp_path)
+
+
+def test_missing_background_inputs_do_not_reserve_idempotency_key(job):
+    from jsonschema import validate,ValidationError
+    service,identifier,_=job
+    args={'job_id':identifier,'idempotency_key':'background-missing-001'}
+    schema=next(t.inputSchema for t in schemas() if t.name=='fit_background')
+    with pytest.raises(ValidationError):validate(args,schema)
+    with pytest.raises(ValueError,match='no operation was reserved'):
+        service.call('fit_background',**args)
+    with service.state(identifier).db() as db:
+        assert db.execute('SELECT count(*) FROM operations WHERE id=?',(args['idempotency_key'],)).fetchone()[0]==0
+    validate({**args,'page':1,'object_id':'draft'},schema)
