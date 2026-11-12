@@ -186,6 +186,8 @@ def test_basic_mask_background_composition_with_source_reference(job,monkeypatch
     assert draft['status']=='EXPLORATORY'
     submitted=call(service,identifier,'commit_candidate',expected_version=draft['version'],candidate_id=draft['id'])
     assert submitted['status']=='SUBMISSION_BLOCKED'
+    assert {'validation_reference_mask','unauthorized_mask','protected_mask'} <= submitted['checks']['evidence'].keys()
+    for ref in submitted['checks']['evidence'].values():assert state.evidence(ref['id'])[0].is_file()
     assert not service.graph(service.state(identifier).read()['pages'][0]).selected
     import product.runtime.compiler as compiler
     def compile_preview(irs,output,texts):
