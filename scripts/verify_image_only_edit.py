@@ -28,8 +28,10 @@ def verify(run_directory, output):
     output.mkdir(parents=True, exist_ok=False)
     edited = output / 'edit-check.pptx'
     no_text = output / 'no-native-text.pptx'
+    no_images = output / 'no-independent-images.pptx'
     shutil.copy2(source, edited)
     shutil.copy2(source, no_text)
+    shutil.copy2(source, no_images)
     app = win32com.client.DispatchEx('PowerPoint.Application')
     existing = app.Presentations.Count
     presentation = None
@@ -70,6 +72,8 @@ def verify(run_directory, output):
         unchanged = set(initial) - {deleted, movable}
         for name in unchanged:
             assert all(abs(a-b) < .1 for a, b in zip(geometry(after[name]), before[name])), name
+        presentation.Slides.Item(1).Export(str((output / 'edited-preview.png').resolve()),
+                                          'PNG', *ir['canvas']['source_px'])
         presentation.Close()
         presentation = app.Presentations.Open(str(no_text.resolve()), ReadOnly=False,
                                               Untitled=False, WithWindow=False)
@@ -86,13 +90,50 @@ def verify(run_directory, output):
         original = np.asarray(Image.open(run_directory / 'source/page.png').convert('RGB'))
         actual = np.asarray(Image.open(preview).convert('RGB'))
         residuals = []
+        text_footprint = np.zeros(original.shape[:2], bool)
         for node in ir['nodes']:
             if node['type'] != 'text':
                 continue
             line, _ = text_mask_evidence(original, node)
             masks = precise_text_masks(original, line, np.zeros(original.shape[:2], bool))
+            text_footprint |= masks['repair']
             residuals.append({'id': node['id'], **inspect_residue(
                 original, actual, masks['core'], masks['inspection'])})
+        presentation = app.Presentations.Open(str(no_images.resolve()), ReadOnly=False,
+                                              Untitled=False, WithWindow=False)
+        slide = presentation.Slides.Item(1)
+        for name in image_ids:
+            shapes(slide)[name].Delete()
+        presentation.Save()
+        image_preview = output / 'no-independent-images.png'
+        slide.Export(str(image_preview.resolve()), 'PNG', *ir['canvas']['source_px'])
+        presentation.Close()
+        presentation = None
+        import cv2
+        rendered = np.asarray(Image.open(image_preview).convert('RGB'))
+        source_gray = cv2.cvtColor(original, cv2.COLOR_RGB2GRAY).astype('float32')
+        target_gray = cv2.cvtColor(rendered, cv2.COLOR_RGB2GRAY).astype('float32')
+        original_edges = np.abs(source_gray - cv2.GaussianBlur(source_gray, (0, 0), 2)) > 15
+        remaining_edges = np.abs(target_gray - cv2.GaussianBlur(target_gray, (0, 0), 2)) > 6
+        image_residuals = []
+        for node in ir['nodes']:
+            if node['type'] != 'image':
+                continue
+            asset = state['assets'][node['asset_id']]
+            x, y, width, height = map(int, asset['bbox'])
+            local = np.asarray(Image.open(run_directory / asset['path']).convert('RGBA'))
+            reference = original[y:y+height, x:x+width]
+            target = rendered[y:y+height, x:x+width]
+            evidence = ((local[:, :, 3] > 128) & original_edges[y:y+height, x:x+width]
+                        & ~text_footprint[y:y+height, x:x+width]
+                        & (np.abs(local[:, :, :3].astype('int16') - reference.astype('int16')).max(axis=2) <= 6))
+            count = int(evidence.sum())
+            matches = (remaining_edges[y:y+height, x:x+width]
+                       & (np.abs(target.astype('int16') - reference.astype('int16')).max(axis=2) <= 12))
+            fraction = float(matches[evidence].mean()) if count else None
+            image_residuals.append({'id': node['id'], 'checked_source_stroke_pixels': count,
+                'source_stroke_matches_after_deletion_fraction': fraction,
+                'status': 'UNKNOWN' if count < 60 else 'PASS' if fraction <= .01 else 'REVIEW_REQUIRED'})
         assert digest(source) == source_hash, 'original output changed'
         result.update(status='PASS', edited_text=edited_text, moved_and_scaled=movable,
                       deleted=deleted, sibling_geometries_checked=len(unchanged),
@@ -100,7 +141,9 @@ def verify(run_directory, output):
                       saved_and_reopened=True, text_residual_checks=residuals,
                       text_residual_status='PASS' if all(r['status'] == 'PASS' for r in residuals)
                       else 'REVIEW_REQUIRED', edited_copy=str(edited), no_text_copy=str(no_text),
-                      no_text_preview=str(preview))
+                      no_text_preview=str(preview), image_residual_checks=image_residuals,
+                      image_residual_status='PASS' if all(r['status'] == 'PASS' for r in image_residuals)
+                      else 'REVIEW_REQUIRED', no_images_copy=str(no_images), no_images_preview=str(image_preview))
     except Exception as exc:
         result.update(status='FAILED', error_type=type(exc).__name__, error=str(exc))
     finally:

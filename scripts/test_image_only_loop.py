@@ -128,6 +128,9 @@ class ImageOnlyTest(unittest.TestCase):
             conflicts = loop.duplicated_asset_strokes(ir, state, source, root)
             self.assertEqual(conflicts[0]['objects'], ['parent-node', 'icon-node'])
             Image.new('RGBA', (100, 100), (255, 255, 255, 255)).save(root / 'assets/parent.png')
+            # Original white pixels near icon edges are not duplicate artwork
+            # when the repaired parent itself has no edge at those pixels.
+            self.assertEqual(loop.duplicated_asset_strokes(ir, state, source, root), [])
             # Transparent foreground omits the surrounding uniform background.
             import numpy as np
             icon = np.asarray(Image.open(root / 'assets/icon.png')).copy()
@@ -245,6 +248,8 @@ class ImageOnlyTest(unittest.TestCase):
             with patch.object(loop.requests, 'post', side_effect=responses), \
                     patch.object(loop, 'local_ocr', return_value=evidence), \
                     patch.object(loop, 'build_clean_plate', side_effect=plate), \
+                    patch.object(loop, 'render_probe', side_effect=lambda pptx, ir, folder, root, node, **kwargs:
+                        {'render': {'pages': [{'path': str(folder / 'preview.png')}]}}), \
                     patch.object(loop, 'compiler', side_effect=compiler):
                 state = loop.run(args, 'temporary-test-key')
             self.assertEqual(state['status'], 'REVIEW_REQUIRED')
@@ -254,6 +259,14 @@ class ImageOnlyTest(unittest.TestCase):
             self.assertEqual(state['next_turn'], 6)
             self.assertTrue((args.output / 'messages.json').exists())
             self.assertNotIn('temporary-test-key', (args.output / 'messages.json').read_text())
+            args.resume = True
+            args.max_turns = 1
+            old_build = state['best_build']
+            with patch.object(loop.requests, 'post', return_value=responses[-1]):
+                resumed = loop.run(args, 'temporary-test-key')
+            self.assertEqual(resumed['status'], 'TURN_LIMIT_REACHED')
+            self.assertIn('fresh plate', resumed['history'][-1]['result']['error'])
+            self.assertEqual(resumed['best_build'], old_build)
 
 
 if __name__ == '__main__':

@@ -19,10 +19,13 @@ from model_slideir_loop import compiler, digest, image_data, rgb_page, seal, FOR
 from moma_page_analysis import retry_after_seconds
 from model_slideir_loop import patch
 from image_only_typography import fit_model_text
+from image_only_assets import restore_dependencies, dependency_conflicts, overlapping_ink, remove_text_plan
+from image_only_probe import render_probe
+from model_slideir_loop import node_cmd
 
 ROOT = Path(__file__).resolve().parents[1]
 EXECUTOR_FILES = {name: digest(ROOT / 'scripts' / name) for name in
-                  ('image_only_loop.py', 'image_only_typography.py')}
+                  ('image_only_loop.py', 'image_only_typography.py', 'image_only_assets.py', 'image_only_probe.py')}
 EXECUTOR_SHA256 = hashlib.sha256(json.dumps(EXECUTOR_FILES, sort_keys=True).encode()).hexdigest()
 
 
@@ -66,6 +69,10 @@ cleaned plate. It preserves your text and emphasis, returning geometry diagnosti
 view {bbox:[x,y,w,h],target?:'source'|'plate'|'preview'} returns an actual crop.
 remove_text {ids:[node IDs],reason:string} returns uncertain or false-positive OCR
 nodes to raster ownership in the backing. Keep real text native whenever possible.
+For intrinsic UI screenshot lettering, remove_text can instead use
+{within_inventory:logical_object_id,reason:string}. This returns native text fully
+inside YOUR inventory region to raster ownership and deselects stale cleaned crops.
+Regenerate plate then re-extract those modules. Standalone body text stays native.
 extract_many {objects:[{id,bbox,mode,background_color?,from?},...]} extracts a
 model-defined batch with independent per-object receipts. Prefer it for repeated
 icons and photos. Extract identifiable logos, icons, photos and backing panels
@@ -119,7 +126,14 @@ their children in objects.ids. This preserves artwork without duplicating childr
 finish requires your honest remaining issues. Do not execute code. """ + FORMAT_RULES + (
     " These SlideIR field rules apply only inside ir values. Always return an action JSON. "
     "Prefer draft instead of spelling out full SlideIR. For source text missed by OCR, "
-    "draft texts may contain a new id, text, bbox, color and style.")
+    "draft texts may contain a new id, text, bbox, color and style. "
+    "Compile returns the actual final preview followed by an actual-PPTX no-native-text preview. "
+    "Failed-region comparison crops follow, each with ORIGINAL, FINAL and NO-NATIVE-TEXT columns. "
+    "Inspect both and the no-text residual diagnostics. A fresh successful compile is required "
+    "after every resume before finish. Ghosts hidden by native text still fail cleanup. Operational overlap errors "
+    "are repairable. Preserve recognizable icons. A parent extracted after clearing children "
+    "requires those children selected ABOVE it. To retain a child in backing, re-extract its "
+    "parent from a fresh plate with that child deselected. Never drop children and leave holes.")
 
 
 def local_ocr(source, models):
@@ -279,7 +293,7 @@ def build_clean_plate(ir, source, target, state, output):
     import cv2
     import numpy as np
     sys.path.insert(0, str(ROOT / 'ppt-rebuild/src'))
-    from background_models import precise_text_masks, inspect_residue
+    from background_models import precise_text_masks, inspect_residue, fit_surface, gradient_pixels
     pixels = np.asarray(Image.open(source).convert('RGB'))
     protected = np.zeros(pixels.shape[:2], bool)
     masks = []
@@ -332,14 +346,41 @@ def build_clean_plate(ir, source, target, state, output):
             masks.append(mask)
     if not masks:
         raise ValueError('select native text or extracted objects before plate')
+    text_union = np.logical_or.reduce(masks[:len(details)]) if details else protected.copy()
+    sample_exclusion = cv2.dilate(text_union.astype('uint8'), np.ones((5, 5), 'uint8')).astype(bool)
+    image_union = np.logical_or.reduce(masks[len(details):]) if len(masks) > len(details) else protected.copy()
+    planes = []
+    for index, (identifier, detail) in enumerate(details):
+        yy, xx = np.nonzero(detail['inspection'])
+        box = [int(xx.min()), int(yy.min()), int(xx.max()-xx.min()+1), int(yy.max()-yy.min()+1)]
+        try:
+            model, quality = fit_surface(pixels, box, ~sample_exclusion)
+        except ValueError:
+            continue
+        if quality['mae'] > 2 or quality['p95'] > 5:
+            continue
+        x, y, width, height = box
+        background = gradient_pixels(model, box)
+        foreground = np.abs(pixels[y:y+height, x:x+width].astype('int16') - background.astype('int16')).max(axis=2) > 3
+        grown = cv2.dilate(detail['repair'].astype('uint8'), np.ones((3, 3), 'uint8')).astype(bool)
+        detail['repair'][y:y+height, x:x+width] |= grown[y:y+height, x:x+width] & foreground
+        masks[index] = detail['repair']
+        planes.append((identifier, box, background, detail['repair'], quality))
     union = np.logical_or.reduce(masks)
     repaired = cv2.inpaint(pixels, union.astype('uint8') * 255, 4, cv2.INPAINT_TELEA)
     clean = pixels.copy()
     clean[union] = repaired[union]
+    for _, box, background, repair_mask, _ in planes:
+        x, y, width, height = box
+        authorized = repair_mask[y:y+height, x:x+width] & ~image_union[y:y+height, x:x+width]
+        clean[y:y+height, x:x+width][authorized] = background[authorized]
     Image.fromarray(clean).save(target)
     Image.fromarray(union.astype('uint8') * 255).save(target.with_suffix('.mask.png'))
     return {'outside_mask_changed_pixels': int(np.any(clean[~union] != pixels[~union], axis=1).sum()),
-            'mask_pixels': int(union.sum()), 'source_ink_colors': palettes, 'text_residuals': [
+            'mask_pixels': int(union.sum()), 'source_ink_colors': palettes,
+            'source_fitted_text_backgrounds': [{'id': identifier, 'bbox': box, 'quality': quality}
+                                              for identifier, box, _, _, quality in planes],
+            'text_residuals': [
                 {'id': identifier, **inspect_residue(pixels, clean, detail['core'], detail['inspection'])}
                 for identifier, detail in details]}
 
@@ -357,10 +398,12 @@ def extract_object(arguments, state, source, output, folder):
     crop_source = source
     cleaned_ids = []
     cleaned_boxes = {}
+    cleared_ids = []
     if arguments.get('from') == 'plate':
         if state.get('plate_plan') != state.get('current_ir'):
             raise ValueError('generate plate for current text plan before extracting from plate')
         aid = state['current_ir']['background']['asset_id']
+        cleared_ids = state['assets'][aid].get('cleared_asset_ids', [])
         crop_source = output / state['assets'][aid]['path']
         import numpy as np
         erased = np.zeros((box[3]-box[1], box[2]-box[0]), bool)
@@ -400,6 +443,8 @@ def extract_object(arguments, state, source, output, folder):
     result = {'id': identifier, 'path': 'assets/' + asset.name, 'sha256': digest(asset),
               'bbox': arguments['bbox'], 'cleaned_text_ids': cleaned_ids,
               'cleaned_text_boxes': cleaned_boxes, 'cropped_from_sha256': digest(crop_source)}
+    result['requires_asset_ids'] = [other for other in cleared_ids
+        if overlapping_ink(result, state['assets'][other], output) >= 12]
     state['assets'][identifier] = result
     write_json(folder / (identifier + '.json'), result)
     return result, asset
@@ -419,10 +464,12 @@ def duplicated_asset_strokes(ir, state, source, output):
         asset = state['assets'][node['asset_id']]
         with Image.open(output / asset['path']) as image:
             rgba = np.asarray(image.convert('RGBA'))
-        records.append((node['id'], safe_box(asset['bbox'], state['size']), rgba))
+        local_gray = cv2.cvtColor(rgba[:, :, :3], cv2.COLOR_RGB2GRAY).astype('float32')
+        local_detail = np.abs(local_gray - cv2.GaussianBlur(local_gray, (0, 0), 2)) > 15
+        records.append((node['id'], safe_box(asset['bbox'], state['size']), rgba, local_detail))
     conflicts = []
-    for index, (left_id, left, left_pixels) in enumerate(records):
-        for right_id, right, right_pixels in records[index+1:]:
+    for index, (left_id, left, left_pixels, left_detail) in enumerate(records):
+        for right_id, right, right_pixels, right_detail in records[index+1:]:
             x0, y0 = max(left[0], right[0]), max(left[1], right[1])
             x1, y1 = min(left[2], right[2]), min(left[3], right[3])
             if x1 <= x0 or y1 <= y0:
@@ -431,6 +478,8 @@ def duplicated_asset_strokes(ir, state, source, output):
             b = right_pixels[y0-right[1]:y1-right[1], x0-right[0]:x1-right[0]]
             reference = original[y0:y1, x0:x1].astype('int16')
             shared = ((a[:, :, 3] > 128) & (b[:, :, 3] > 128) & detail[y0:y1, x0:x1]
+                      & left_detail[y0-left[1]:y1-left[1], x0-left[0]:x1-left[0]]
+                      & right_detail[y0-right[1]:y1-right[1], x0-right[0]:x1-right[0]]
                       & (np.abs(a[:, :, :3].astype('int16') - reference).max(axis=2) <= 8)
                       & (np.abs(b[:, :, :3].astype('int16') - reference).max(axis=2) <= 8))
             count = int(shared.sum())
@@ -525,6 +574,7 @@ def run_locked(args, key):
         state['status'] = 'RUNNING'
         state.pop('model_review', None)
         state.pop('model_review_binding', None)
+        restore_dependencies(state, output)
         messages[0] = {'role': 'system', 'content': SYSTEM}
         if state.get('current_ir'):
             state['pending_asset_conflicts'] = duplicated_asset_strokes(
@@ -534,7 +584,17 @@ def run_locked(args, key):
                          'and inspect a fresh compiled preview before finish. Prior valid builds are retained. '
                          'Current independent-asset duplicate stroke diagnostics: ' +
                          json.dumps(state.get('pending_asset_conflicts', []), ensure_ascii=False)})
+        probe = state.get('best_probe', {})
+        if probe.get('text_residual_status') == 'REVIEW_REQUIRED':
+            messages.append({'role': 'user', 'content': 'The actual-PPTX no-native-text probe still '
+                'has source glyph residuals. Inspect the failed-region comparisons from a fresh compile. '
+                'Readable fragments or duplicated intrinsic UI captions need local correction. '
+                'When tiny intrinsic UI lettering cannot be cleared safely, use remove_text with '
+                'YOUR within_inventory module region and re-extract that module from a regenerated '
+                'plate with its old image deselected. Keep standalone body text native. '
+                'Changing to raster ownership must restore the original pixels and preserve content.'})
     state.setdefault('executor_versions', []).append({'first_turn': start_turn, 'sha256': EXECUTOR_SHA256})
+    state['compiled_this_execution'] = False
     for turn in range(start_turn, start_turn + args.max_turns):
         folder = output / f"turn-{turn:03}"
         replay = folder.exists() and (folder / 'raw-response.json').exists()
@@ -697,16 +757,9 @@ def run_locked(args, key):
                           'removed_objects': [identifier for identifier in previous_ids if identifier not in selected_ids],
                           'next_actions': ['plate', 'compile']}
             elif name == 'remove_text':
-                ir = copy.deepcopy(state['current_ir'])
-                selected = set(arguments['ids'])
-                available = {n['id'] for n in ir['nodes'] if n['type'] == 'text'}
-                if not selected <= available or not arguments.get('reason'):
-                    raise ValueError('remove_text requires existing text IDs and a reason')
-                ir['nodes'] = [n for n in ir['nodes'] if n['id'] not in selected]
-                ir['review_notes'].append(arguments['reason'])
+                ir, result = remove_text_plan(arguments, state)
                 state['current_ir'] = ir
                 state.pop('plate_plan', None)
-                result = {'raster_text_node_ids': sorted(selected), 'next_actions': ['plate', 'compile']}
             elif name in ('extract', 'extract_many'):
                 objects = arguments['objects'] if name == 'extract_many' else [arguments]
                 extracted, failures = [], []
@@ -743,7 +796,8 @@ def run_locked(args, key):
                 ir = seal(ir, source, state['assets'])
                 report = build_clean_plate(ir, source, target, state, output)
                 result = {"id": identifier, "path": 'assets/'+target.name,
-                          "sha256": digest(target), 'inspection': report}
+                          "sha256": digest(target), 'inspection': report,
+                          'cleared_asset_ids': [n['asset_id'] for n in ir['nodes'] if n['type'] == 'image']}
                 state['assets'][identifier] = dict(result)
                 ir['assets'] = [a for a in ir['assets'] if a['purpose'] != 'cleaned_background']
                 owned = {eid for n in ir['nodes'] for eid in n['evidence_ids']}
@@ -766,6 +820,11 @@ def run_locked(args, key):
                     ir = state['current_ir']
                 if ir != state.get('plate_plan'):
                     raise ValueError('create a cleaned plate for this exact IR before compile')
+                missing = dependency_conflicts(ir, state)
+                if missing:
+                    raise ValueError('Parent artwork has erased children: ' + json.dumps(missing) +
+                        '. Select required children ABOVE parents, or deselect parents and those children, '
+                        'regenerate plate and re-extract parents preserving source child artwork.')
                 conflicts = duplicated_asset_strokes(ir, state, source, output)
                 write_json(folder / 'asset-overlap.json', conflicts)
                 if conflicts:
@@ -781,17 +840,31 @@ def run_locked(args, key):
                 shutil.copytree(output / 'assets', folder / 'assets', dirs_exist_ok=True)
                 result = compiler(ir_path, 'validate')
                 build = compiler(ir_path, 'compile')
+                images.append(Path(build["preview"]))
+                result = {"validation": result, "build": build}
+                probe = render_probe(Path(build['pptx']), ir, folder, ROOT, node_cmd(), source=source,
+                                     preview=Path(build['preview']))
+                write_json(folder / 'no-text-probe.json', probe)
                 state["best_build"] = build
                 state["best_ir"] = str(ir_path)
                 state["current_ir"] = ir
+                state['best_probe'] = probe
+                state['compiled_this_execution'] = True
                 state['pending_asset_conflicts'] = []
-                write_json(folder / 'generation.json', {'ir_sha256': digest(ir_path), 'build': build})
-                images.append(Path(build["preview"]))
-                result = {"validation": result, "build": build}
+                write_json(folder / 'generation.json', {'ir_sha256': digest(ir_path), 'build': build,
+                    'no_native_text_probe': probe, 'executor_sha256': EXECUTOR_SHA256})
+                images.append(Path(probe['render']['pages'][0]['path']))
+                images.extend(Path(row['path']) for row in probe.get('comparison_crops', []))
+                result['no_native_text_probe'] = probe
+                result['image_order'] = ['final PPTX preview', 'same PPTX with native text removed',
+                    *[f"{row['id']}: original | final | no native text" for row in probe.get('comparison_crops', [])]]
                 result['pending_visual_objects'] = pending_visual_objects(ir, state.get('visual_inventory', {}))
             elif name == "finish":
                 if state["best_build"] is None:
                     raise ValueError("compile and inspect actual preview before finishing")
+                if not state.get('compiled_this_execution'):
+                    raise ValueError('Resume requires a fresh plate and successful compile with the current tools. '
+                                     'Inspect both actual-PPTX previews before finish.')
                 if (arguments.get('visual_status') not in ('pass', 'needs_review')
                         or not isinstance(arguments.get('issues'), list)
                         or not all(isinstance(issue, str) for issue in arguments['issues'])):
@@ -811,7 +884,8 @@ def run_locked(args, key):
                     for item in state['visual_inventory'].values()) else 'MODEL_INVENTORY_COVERED')
                 state['model_review_binding'] = {'source_sha256': state['source_sha256'],
                     'pptx_sha256': digest(Path(state['best_build']['pptx'])),
-                    'preview_sha256': digest(Path(state['best_build']['preview']))}
+                    'preview_sha256': digest(Path(state['best_build']['preview'])),
+                    'no_native_text_preview_sha256': digest(Path(state['best_probe']['render']['pages'][0]['path']))}
                 result = arguments
             else:
                 raise ValueError('unknown action. Choose ocr, inventory, draft, view, extract, extract_many, '
@@ -862,7 +936,7 @@ if __name__ == '__main__':
         'IMAGE2PPT_OCR_MODELS', str(ROOT / 'ppt-rebuild/models'))))
     parser.add_argument('--base-url', default='https://moma.cmecloud.cn/v1')
     parser.add_argument('--model', default='qwen/qwen3.8-max')
-    parser.add_argument('--max-turns', type=int, default=40)
+    parser.add_argument('--max-turns', type=int, default=120)
     parser.add_argument('--timeout', type=float, default=240)
     parser.add_argument('--resume', action='store_true')
     args = parser.parse_args()

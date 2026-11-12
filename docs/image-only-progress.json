@@ -1,0 +1,117 @@
+{
+  "schema": "image-only-task-progress/2",
+  "objective": "Original screenshot input to model-driven editable PPTX through existing semi-automatic tools",
+  "workspace_branch": "codex/semi-auto-image-only-loop",
+  "stage": "Generation and actual-file verification complete, REVIEW_REQUIRED delivery",
+  "selected_source_pages": [
+    "03",
+    "05",
+    "14"
+  ],
+  "frozen_source_page": "02",
+  "delivery": "runs/image-only-delivery-20261112-r2",
+  "status": "REVIEW_REQUIRED",
+  "tests": {
+    "image_only": 18,
+    "model_loop": 10,
+    "resume_rate_limit": 5,
+    "fixed_protocol": 40
+  },
+  "frozen_02": {
+    "preview_exact_match": true,
+    "preview_mae": 0,
+    "baseline_unchanged": true
+  },
+  "pages": [
+    {
+      "page": "03",
+      "run": "runs\\image-only-release-03",
+      "native_text_objects": 105,
+      "image_nodes": 54,
+      "powerpoint_edit": {
+        "status": "PASS",
+        "saved_and_reopened": true,
+        "edited_text": "text-ocr-0",
+        "moved_and_scaled": "object-logo-univ",
+        "deleted": "object-logo-cm-v3",
+        "sibling_geometries_checked": 158,
+        "text_residual_status": "REVIEW_REQUIRED",
+        "image_residual_status": "REVIEW_REQUIRED"
+      },
+      "model_visual_status": "needs_review",
+      "editable_completion": "PARTIAL"
+    },
+    {
+      "page": "05",
+      "run": "runs\\image-only-release-05",
+      "native_text_objects": 60,
+      "image_nodes": 14,
+      "powerpoint_edit": {
+        "status": "PASS",
+        "saved_and_reopened": true,
+        "edited_text": "text-ocr-0-num",
+        "moved_and_scaled": "object-icon-doc-blue",
+        "deleted": "object-screenshot-right-v2",
+        "sibling_geometries_checked": 73,
+        "text_residual_status": "PASS",
+        "image_residual_status": "REVIEW_REQUIRED"
+      },
+      "model_visual_status": "pass",
+      "editable_completion": "PARTIAL"
+    },
+    {
+      "page": "14",
+      "run": "runs\\image-only-release-14",
+      "native_text_objects": 39,
+      "image_nodes": 12,
+      "powerpoint_edit": {
+        "status": "PASS",
+        "saved_and_reopened": true,
+        "edited_text": "text-ocr-0",
+        "moved_and_scaled": "object-logo_cm",
+        "deleted": "object-icon_val_4_final",
+        "sibling_geometries_checked": 50,
+        "text_residual_status": "REVIEW_REQUIRED",
+        "image_residual_status": "REVIEW_REQUIRED"
+      },
+      "model_visual_status": "pass",
+      "editable_completion": "PARTIAL"
+    }
+  ],
+  "development_usage": {
+    "reservations": 692,
+    "usage": {
+      "prompt_tokens": 37758741,
+      "completion_tokens": 312987,
+      "total_tokens": 38071728
+    },
+    "receipt_statuses": {
+      "RESPONSE_RECORDED": 612,
+      "RESPONSE_UNKNOWN": 1,
+      "HTTP_RECORDED": 79
+    },
+    "reservations_without_raw_response": [
+      "runs\\image-only-first-03\\turn-000\\reservation.json"
+    ]
+  },
+  "remaining_issues": [
+    "03 and 14 retain native-text residual regions and background repair texture requiring review.",
+    "05 intrinsic lettering inside the two UI screenshots remains raster within independent image modules.",
+    "14 list icons are preserved inside independent card images and have no separate editable objects.",
+    "Font family, weight, size and local alignment differ in some regions.",
+    "Image deletion cleanup remains REVIEW_REQUIRED on all three pages. Page 03 has icon fringes, page 05 has local icon/logo residuals, and page 14 has large background repair color blocks.",
+    "No independent source object denominator is available, so full editable recall is unknown.",
+    "One early development reservation has an unknown response and has been retained without replay."
+  ],
+  "human_acceptance": false,
+  "wps_checked": false,
+  "next": [
+    "Improve image deletion cleanup and incomplete logical-object extraction",
+    "Human visual acceptance and WPS checks remain separate"
+  ],
+  "updated_at_unix": 1794474499.4627366,
+  "synthetic_demo": {
+    "passed": true,
+    "report": "runs/synthetic-2026-11-12T09-20-03-510Z-b1e9af6b/checks.json"
+  }
+}
