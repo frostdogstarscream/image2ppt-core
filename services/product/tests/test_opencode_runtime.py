@@ -554,3 +554,18 @@ def test_agent_can_record_failed_candidate_observation_before_office(job):
                 findings=[{'issue':'background uncertain'}],next_action='compare another background')
     assert result['status']=='RECORDED'
     assert not service.state(identifier).read().get('visual_review')
+
+
+def test_incremental_scene_keeps_uncommitted_text_and_shared_styles(job,monkeypatch):
+    service,identifier,_=job
+    from product import fonts
+    monkeypatch.setattr(fonts,'font_manifest',lambda texts:{'fonts':[
+        {'family':'Arial','bold':False,'weight':400,'cjk':False}]})
+    call(service,identifier,'create_scene',page=1,evidence={'text':{
+        'styles':[{'id':'body','role':'body','ea':'Arial','latin':'Arial','size_px':12,'bold':False,'color':'000000'}],
+        'texts':[{'id':'first','text':'First','bbox':[2,2,30,15],'style':'body','z':1}]}})
+    result=call(service,identifier,'update_scene',page=1,evidence={'text':{
+        'texts':[{'id':'second','text':'Second','bbox':[2,22,45,15],'style':'body','z':2}]}})
+    assert {t['id'] for t in result['scene']['text']['texts']}=={'first','second'}
+    assert [s['id'] for s in result['scene']['text']['styles']]==['body']
+    assert result['scene']['selected']=={}

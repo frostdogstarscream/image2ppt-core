@@ -283,6 +283,10 @@ class PrimitiveTools:
                 'evidence': self.artifact(state, directory/'submitted-evidence.json', 'agent_scene_proposal')}
 
     def update_scene(self, state, current, directory, *, page, evidence):
+        if set(evidence)-{'text', 'asset', 'surface'}:
+            raise ValueError('scene accepts branch evidence, ownership is derived by the host')
+        existing = self.graph(self.page(current, page))
+        evidence = merge_scene_evidence(existing, evidence)
         return self.create_scene(state, current, directory, page=page, evidence=evidence)
 
     def fit_text_layout(self, state, current, directory, *, page, object_id,minimum_size=None):
