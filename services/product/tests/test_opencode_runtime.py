@@ -591,3 +591,16 @@ def test_incremental_scene_keeps_uncommitted_text_and_shared_styles(job,monkeypa
     assert service.call('get_progress',identifier)['reconstruction']=='NO_EDITABLE_RECONSTRUCTION'
     refs=service.call('list_evidence',identifier,role='agent_scene_proposal')['evidence']
     assert refs and all(r['role']=='agent_scene_proposal' for r in refs)
+
+
+def test_catalog_exposes_real_asset_contract_and_unavailable_sandbox(job,monkeypatch):
+    from jsonschema import Draft202012Validator
+    monkeypatch.delenv('IMAGE2PPT_SANDBOX_IMAGE',raising=False)
+    service,identifier,_=job
+    assert service.call('get_job_context',identifier)['tool_availability']['run_image_script']['status']=='UNAVAILABLE'
+    catalog={tool.name:tool.inputSchema for tool in schemas()}
+    for schema in catalog.values():Draft202012Validator.check_schema(schema)
+    obj=catalog['segment_object']['properties']['object_evidence']
+    assert {'id','description','prompt_en','parts'} <= set(obj['required'])
+    assert 'text' not in obj['properties']['kind']['enum']
+    assert 'original_mask_id' not in catalog['complete_text_mask']['required']

@@ -81,6 +81,9 @@ class RuntimeService(ExplorationTools):
                     'reconstruction':'NATIVE_OBJECTS_COMMITTED' if any(p['committed_objects'] for p in pages) else 'NO_EDITABLE_RECONSTRUCTION'}
         if tool == 'get_job_context':
             result = state.read()
+            import re
+            sandbox_configured=bool(shutil.which('docker') and re.fullmatch(r'[\w./:-]+@sha256:[a-f0-9]{64}',os.environ.get('IMAGE2PPT_SANDBOX_IMAGE','')))
+            result['tool_availability']={'run_image_script':{'status':'CONFIGURED_NOT_PROBED' if sandbox_configured else 'UNAVAILABLE','reason':'requires Docker and a locally provisioned digest-pinned image'}}
             result['progress'] = self.call('get_progress',job_id)
             result['recent_evidence'] = self.call('list_evidence',job_id,limit=12)['evidence']
             result['sources'] = [state.register(p, 'source') for p in sorted((state.job/'inputs').glob('*.png'))]

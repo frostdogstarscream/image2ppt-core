@@ -32,11 +32,11 @@ DESCRIPTION.update({
     'crop_image':'Crop an immutable image evidence reference, optionally enlarge its preview, and return measured RGB frequencies from the original crop.',
     'list_fonts':'List actual installed CJK and common Latin font faces, including real weight availability. Full verified font metadata is returned as evidence.',
     'fit_background':'Fit a continuous background from an image evidence_id and xywh bbox, or from a scene text object. This produces a hypothesis and does not change the source.',
-    'complete_text_mask':'Complete strokes using explicit background_id and scene text, or independent source/mask/backing evidence. Returns hypotheses with no erase authority.',
+    'complete_text_mask':'SCENE MODE: supply page, object_id, background_id; OMIT original_mask_id unless you already have a genuine binary Mask. The tool derives initial strokes automatically. INDEPENDENT MODE: supply evidence_id, original_mask_id, background_id, bbox, glyph_height. Returns hypotheses, never erase authority.',
     'create_scene':'Initialize a page once. An existing page returns SCENE_EXISTS; use update_scene for revisions. Preserve exact OCR wording and bind text.members to OCR line IDs; inspect unresolved owners in the response.',
     'update_scene':'Revise scene evidence and add draft objects. Existing accepted objects and their styles are preserved; revising those requires dependency-local rollback.',
     'create_candidate':'Construct an unapproved text preview from explicit mask, background and optional layout evidence. Returns exploratory artifacts even when ownership or visual quality remains uncertain.',
-    'segment_object':'Obtain SAM evidence for a complete scene asset object. SAM evidence does not authorize source erasure.',
+    'segment_object':'Obtain SAM evidence for a complete icon/logo/illustration asset, not a text object. Supply either an existing scene asset ID or full object_evidence. Text strokes use complete_text_mask with page, object_id and background_id; original_mask_id is optional. SAM does not authorize erasure.',
     'fit_text_layout':'Compute a native text frame using installed font metrics. The result is a proposal; source ownership and candidate validation remain separate.',
     'run_perception':'Optional high-cost shortcut invoking three model branches and LayerD. Basic evidence tools can be used independently.'})
 DESCRIPTION.update({
@@ -104,7 +104,10 @@ def schemas():
     fields['create_candidate']['frame_minimum']=frame
     fields['create_candidate']['layout_id']=string
     fields['create_candidate']['frame_minimum']['description']='Optional transparent native text frame [width,height] in source pixels. Keeps source origin and erase Mask fixed. Use measured Office bounds when testing a layout repair.'
-    definitions = {}
+    from ..object_contracts import ClosedObject
+    object_schema=ClosedObject.model_json_schema()
+    definitions = object_schema.pop('$defs',{})
+    fields['segment_object']['object_evidence']=object_schema
     branches = {}
     for branch, contract in [('text', TextEvidence), ('asset', AssetEvidence), ('surface', SurfaceEvidence)]:
         schema = contract.model_json_schema()
@@ -151,7 +154,7 @@ def schemas():
                 required.append('expected_version')
         result.append(Tool(name=name, description=DESCRIPTION.get(name, name.replace('_', ' ')+'. Independent evidence tool; outputs do not authorize pixel erasure.'), inputSchema={
             'type': 'object', 'properties': properties, 'required': required, 'additionalProperties': False,
-            **({'$defs': definitions} if name in ('create_scene', 'update_scene') else {})}))
+            **({'$defs': definitions} if name in ('create_scene', 'update_scene', 'segment_object') else {})}))
     return result
 
 
