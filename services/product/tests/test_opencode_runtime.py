@@ -569,3 +569,6 @@ def test_incremental_scene_keeps_uncommitted_text_and_shared_styles(job,monkeypa
     assert {t['id'] for t in result['scene']['text']['texts']}=={'first','second'}
     assert [s['id'] for s in result['scene']['text']['styles']]==['body']
     assert result['scene']['selected']=={}
+    added=call(service,identifier,'create_scene',page=1,evidence={'text':{
+        'texts':[{'id':'third','text':'Third','bbox':[2,42,35,15],'style':'body','z':3}]}})
+    assert {t['id'] for t in added['scene']['text']['texts']}=={'first','second','third'}

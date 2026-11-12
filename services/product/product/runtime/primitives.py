@@ -228,8 +228,8 @@ class PrimitiveTools:
         if set(evidence)-{'text', 'asset', 'surface'}:
             raise ValueError('scene accepts branch evidence, ownership is derived by the host')
         accepted=self.graph(existing) if existing and self.graph(existing).selected else None
-        if accepted:
-            evidence=merge_scene_evidence(accepted,evidence)
+        if existing:
+            evidence=merge_scene_evidence(self.graph(existing),evidence)
         base = {k: snap[k] for k in ('source_sha256', 'image_size', 'transform')}
         base['method_version'] = 'opencode-evidence/1'
         branches = {}
@@ -285,8 +285,7 @@ class PrimitiveTools:
     def update_scene(self, state, current, directory, *, page, evidence):
         if set(evidence)-{'text', 'asset', 'surface'}:
             raise ValueError('scene accepts branch evidence, ownership is derived by the host')
-        existing = self.graph(self.page(current, page))
-        evidence = merge_scene_evidence(existing, evidence)
+        self.page(current, page)
         return self.create_scene(state, current, directory, page=page, evidence=evidence)
 
     def fit_text_layout(self, state, current, directory, *, page, object_id,minimum_size=None):
