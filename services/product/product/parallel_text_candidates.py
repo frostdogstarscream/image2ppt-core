@@ -14,6 +14,19 @@ class TextUncertainty(ValueError):
 
 def peer_protection(text, graph, source, blocked, *, baseline_directory=None, diagnostics=None, purpose='erase'):
     from .peer_evidence import protection
+    if baseline_directory is not None:
+        import json
+        from pathlib import Path
+        retained=Path(baseline_directory)/'runtime-ocr-protection.json'
+        if retained.exists():
+            evidence=json.loads(retained.read_text('utf8'))
+            if evidence['source_sha256']!=graph.source_sha256:
+                raise ValueError('retained OCR protection source hash mismatch')
+            own=set(graph.text.members.get(text.id,[])) if graph.ownership.get(text.id)=='RESOLVED' else set()
+            blocked=blocked.copy()
+            for line in evidence['lines']:
+                if line['id'] not in own:
+                    blocked |= rectangle(line['bbox'],source.shape[1::-1],pad=1)
     return protection(text,graph,source,blocked,baseline_directory,purpose=purpose,diagnostics=diagnostics)
 
 

@@ -166,6 +166,13 @@ def test_basic_mask_background_composition_with_source_reference(job,monkeypatch
     with pytest.raises(ValueError,match='binary grayscale Mask'):
         call(service,identifier,'complete_text_mask',page=1,object_id='text',background_id=backing['background']['id'],original_mask_id=backing['background']['id'])
     masks=call(service,identifier,'complete_text_mask',page=1,object_id='text',background_id=backing['background']['id'])
+    protection_file=Path(state.read()['pages'][0]['ir']).parent/'runtime-ocr-protection.json'
+    retained=json.loads(protection_file.read_text('utf8'))
+    write(protection_file,{**retained,'lines':retained['lines']+[{'id':'neighbor','bbox':bbox}]})
+    protected_masks=call(service,identifier,'complete_text_mask',page=1,object_id='text',background_id=backing['background']['id'])
+    assert protected_masks['report']['derived_seed_protected_pixels_excluded']>0
+    assert protected_masks['status']=='NO_UNPROTECTED_SEED' and protected_masks['masks']=={}
+    write(protection_file,retained)
     candidate=call(service,identifier,'create_candidate',page=1,object_id='text',
                    mask_id=masks['masks']['semantic_completion']['id'],background_id=backing['background']['id'])
     assert candidate['status']=='EXPLORATORY'
@@ -604,3 +611,21 @@ def test_catalog_exposes_real_asset_contract_and_unavailable_sandbox(job,monkeyp
     assert {'id','description','prompt_en','parts'} <= set(obj['required'])
     assert 'text' not in obj['properties']['kind']['enum']
     assert 'original_mask_id' not in catalog['complete_text_mask']['required']
+
+
+def test_removed_draft_cannot_remove_independent_ocr_protection(tmp_path):
+    from types import SimpleNamespace
+    from product.parallel_text_candidates import peer_protection
+    import product.peer_evidence as peers
+    import numpy as np
+    from unittest.mock import patch
+    graph=SimpleNamespace(source_sha256='source',text=SimpleNamespace(members={'target':['own']}),ownership={'target':'RESOLVED'})
+    write(tmp_path/'runtime-ocr-protection.json',{'source_sha256':'source','lines':[
+        {'id':'own','bbox':[2,2,8,8]},{'id':'removed-peer','bbox':[2,12,8,8]}]})
+    def observed(text,graph,source,blocked,baseline_directory,**kw):return blocked
+    with patch.object(peers,'protection',observed):
+        mask=peer_protection(SimpleNamespace(id='target'),graph,np.zeros((30,30,3),np.uint8),np.zeros((30,30),bool),baseline_directory=tmp_path)
+    assert mask[15,5] and not mask[5,5]
+    graph.source_sha256='changed'
+    with pytest.raises(ValueError,match='source hash mismatch'):
+        peer_protection(SimpleNamespace(id='target'),graph,np.zeros((30,30,3),np.uint8),np.zeros((30,30),bool),baseline_directory=tmp_path)

@@ -287,6 +287,7 @@ class PrimitiveTools:
             report={'retained_verified_objects':sorted(accepted.selected),'draft_update':True}
         else:
             ir, report = build(graph, snap, fonts, directory/'backing', strategy='off', text_candidates=False,surface_candidates=False)
+        write(ir.parent/'runtime-ocr-protection.json',{'source_sha256':snap['source_sha256'],'lines':ocr.get('lines',[])})
         while len(current['pages']) < page:
             current['pages'].append(None)
         current['pages'][page-1] = {'snapshot': snap, 'ir': str(ir), 'scene': str(ir.parent/'scene.json'),
@@ -361,6 +362,7 @@ class PrimitiveTools:
         ink, _ = glyph_evidence(source, box, style.color, backing)
         mask = np.zeros(source.shape[:2], bool)
         mask[y-3:y+h+3, x-3:x+w+3] = ink
+        mask &= ~protected  # source-derived seed excludes independently protected neighbors
         reference, fit = fit_gradient(source, box, context)
         return row, graph, source, protected, box, reference, fit, mask, style
 

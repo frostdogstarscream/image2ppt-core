@@ -50,6 +50,13 @@ class ExplorationTools(PrimitiveTools):
             ink, _ = glyph_evidence(source, box, style.color, background[by:by+bh,bx:bx+bw])
             original = np.zeros(source.shape[:2],bool)
             original[by:by+bh,bx:bx+bw] = ink
+        excluded_seed_pixels=int((original & protected).sum())
+        if not original_mask_id:
+            original &= ~protected  # derived hypotheses must never seed known neighbor pixels
+        if not original.any():
+            report={'derived_seed_protected_pixels_excluded':excluded_seed_pixels,'remaining_seed_pixels':0}
+            write(directory/'report.json',report)
+            return {'status':'NO_UNPROTECTED_SEED','masks':{},'report':report,'ownership_authority':False}
         completion = TextMaskCompletion.analyze(source, original, protected, box, background,
                                                 glyph_height=style.size_px)
         refs = {}
@@ -57,6 +64,7 @@ class ExplorationTools(PrimitiveTools):
             file = directory/(name+'.png')
             Image.fromarray(pixels.astype('uint8')*255).save(file)
             refs[name] = self.artifact(state,file,'mask_candidate')
+        completion.report['derived_seed_protected_pixels_excluded']=excluded_seed_pixels if not original_mask_id else 0
         write(directory/'report.json',completion.report)
         return {'status':'COMPUTED','masks':refs,'report':completion.report,'ownership_authority':False}
 
