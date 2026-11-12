@@ -534,10 +534,11 @@ class RuntimeService(ExplorationTools):
         required = {r['id'] for r in composition['required_evidence']}
         if not required <= set(review.evidence_ids):
             raise ValueError('review omitted required source, preview or edit evidence')
-        for identifier in review.evidence_ids:
-            _, reference = state.evidence(identifier)
-            if not reference['provided_to_agent']:
-                raise ValueError('evidence has not been provided to Agent')
+        unseen = [identifier for identifier in review.evidence_ids
+                  if not state.evidence(identifier)[1]['provided_to_agent']]
+        if unseen:
+            raise ValueError('evidence has not been provided to Agent: '+', '.join(unseen)+
+                             '; use get_evidence to receive the actual content before review')
         current['visual_review'] = {**review.model_dump(), 'backend': 'opencode',
                                     'composition_sha256': key(composition),
                                     'status': 'PASS' if review.passed else 'REVIEW_REQUIRED'}
