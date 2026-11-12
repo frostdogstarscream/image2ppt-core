@@ -183,12 +183,12 @@ def calibrate(ir: dict, source: Path, assets_base: Path) -> tuple[dict, dict]:
                     model_pixels[0] > part["bbox"][2] + 3 or
                     model_pixels[1] > part["bbox"][3] + 3)
                 part["font"]["size_pt"] = best.size_pt
-                # Only the selected family's measurable weight is used; no
-                # family substitution or other model-authored fields change.
-                part["bold"] = best.bold
+                # Font geometry and emphasis are independent decisions. Preserve
+                # the model/reviewer's explicit bold and any runs/paragraphs.
                 entry.update(status="FITTED", fitted_size_pt=best.size_pt,
                              size_change_pt=round(best.size_pt - old_size, 2),
-                             fitted_bold=best.bold,
+                             candidate_bold=best.bold,
+                             preserved_bold=part.get("bold"),
                              projected_target_ink_px=[round(v * tw / sw, 2)
                                                       for v in best.rendered])
             report["rows"].append(entry)

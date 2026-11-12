@@ -39,7 +39,7 @@ export function validateIR(ir) {
   for(const node of ir.nodes) {
     expect(IR_NODE_TYPES.includes(node?.type), `${node?.id} 不支持的节点类型 ${node?.type}。`);
     const common='id type bbox z evidence_ids';
-    const byType={text:'text font bold color align wrap line_spacing_pt runs paragraphs text_override_reason source_text_bbox insets vertical_anchor',
+    const byType={text:'text font bold italic color align wrap line_spacing_pt runs paragraphs text_override_reason source_text_bbox insets vertical_anchor',
       shape:'geometry fill line corner_radius_px fill_gradient',image:'asset_id',
       table:'rows font column_tracks header_row banded_rows row_heights merges cell_styles',
       chart:'chart_type title font categories series has_legend legend_position'};
@@ -47,6 +47,7 @@ export function validateIR(ir) {
     if(node.type==='text') {
       fields(node.font,'latin ea size_pt','font');
       if(node.bold!==undefined) expect(typeof node.bold==='boolean',`${node.id} bold 必须为 boolean。`);
+      if(node.italic!==undefined) expect(typeof node.italic==='boolean',`${node.id} italic 必须为 boolean。`);
       if(node.text_override_reason!==undefined) expect(typeof node.text_override_reason==='string' && node.text_override_reason.trim(),`${node.id} text_override_reason 无效。`);
       if(node.runs!==undefined) {
         expect(array(node.runs) && node.runs.length>0,`${node.id} runs 必须为非空数组。`);

@@ -3,11 +3,14 @@ import argparse
 import json
 import tempfile
 import unittest
+import shutil
+import xml.etree.ElementTree as ET
 from pathlib import Path
+from zipfile import ZipFile
 
 from PIL import Image, ImageDraw, ImageFont
 
-from model_slideir_loop import ROOT, digest, patch, run, seal
+from model_slideir_loop import ROOT, compiler, digest, patch, run, seal, write_json
 from model_text_layout import calibrate
 
 SCRATCH = ROOT / ".tmp-test"
@@ -36,6 +39,9 @@ class ModelLoopTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid local font patch"):
             patch(original, {"patches": [{"id": "t", "changes":
                          {"font": {"text": "invented"}}}]})
+        with self.assertRaisesRegex(ValueError, "runs must preserve exact node text"):
+            patch(original, {"patches": [{"id": "t", "changes":
+                         {"runs": [{"text": "changed", "bold": True}]}}]})
 
     def test_source_bound_split_keeps_exact_text_and_unique_evidence(self):
         font_file = Path("C:/Windows/Fonts/msyhbd.ttc")
@@ -63,15 +69,55 @@ class ModelLoopTest(unittest.TestCase):
                   "nodes": [{"id": "merged", "type": "text", "text": "02标题",
                              "bbox": [30, 20, 250, 50], "z": 1,
                              "evidence_ids": ["e"],
+                             "bold": True,
                              "font": {"latin": "Arial", "ea": "Microsoft YaHei",
                                       "size_pt": 40}}], "review_notes": []}
             calibrated, report = calibrate(ir, source, root)
             self.assertEqual(len(report["splits"]), 1)
             self.assertEqual([n["text"] for n in calibrated["nodes"]], ["02", "标题"])
+            self.assertTrue(all(n["bold"] for n in calibrated["nodes"]))
             self.assertEqual([e["text"] for e in calibrated["evidence"]], ["02", "标题"])
             self.assertEqual({e for n in calibrated["nodes"] for e in n["evidence_ids"]},
                              {e["id"] for e in calibrated["evidence"]})
             self.assertEqual(ir["nodes"][0]["text"], "02标题")
+
+    def test_local_red_bold_survives_calibration_compile_and_ooxml(self):
+        fixture = ROOT / "examples/synthetic"
+        original = json.loads((fixture / "slideir.json").read_text(encoding="utf-8"))
+        node = next(n for n in original["nodes"] if n["id"] == "subtitle")
+        index = node["text"].index("18%")
+        runs = [{"text": node["text"][:index]},
+                {"text": "18%", "bold": True, "color": "C00000"},
+                {"text": node["text"][index + 3:]}]
+        styled = patch(original, {"patches": [{"id": "subtitle", "changes":
+                       {"bold": False, "runs": runs}},
+                       {"id": "title", "changes": {"italic": True}}]})
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as tmp:
+            folder = Path(tmp)
+            shutil.copytree(fixture / "source", folder / "source")
+            shutil.copytree(fixture / "assets", folder / "assets")
+            styled, _ = calibrate(styled, folder / "source/page.png", folder)
+            ir_file = folder / "slideir.json"
+            write_json(ir_file, styled)
+            write_json(folder / "authoring.json", {"format_version": "1", "tool": "synthetic-style-test",
+                                                   "ir_sha256": digest(ir_file)})
+            compiler(ir_file, "validate")
+            built = compiler(ir_file, "compile")
+            self.assertTrue(Path(built["preview"]).is_file())
+            with ZipFile(built["pptx"]) as package:
+                root = ET.fromstring(package.read("ppt/slides/slide1.xml"))
+            ns = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+            matches = [run for run in root.findall(".//a:r", ns)
+                       if "".join(t.text or "" for t in run.findall("a:t", ns)) == "18%"]
+            self.assertEqual(len(matches), 1)
+            props = matches[0].find("a:rPr", ns)
+            self.assertEqual(props.get("b"), "1")
+            self.assertEqual(props.find("a:solidFill/a:srgbClr", ns).get("val"), "C00000")
+            pns = {**ns, "p": "http://schemas.openxmlformats.org/presentationml/2006/main"}
+            title_shape = next(shape for shape in root.findall(".//p:sp", pns)
+                               if shape.find("p:nvSpPr/p:cNvPr", pns).get("name") == "title")
+            self.assertTrue(all(element.get("i") == "1" for element in
+                                title_shape.findall(".//a:rPr", ns)))
 
     def test_seal_rejects_model_provenance_change(self):
         with tempfile.TemporaryDirectory(dir=SCRATCH) as tmp:

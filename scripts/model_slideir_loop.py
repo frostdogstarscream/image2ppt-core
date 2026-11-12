@@ -33,8 +33,9 @@ SYSTEM = ("You reconstruct one screenshot as editable SlideIR 0.1 JSON. Preserve
           "Do not invent source content or asset paths.")
 REPAIR = ("Inspect the source and the actual PPTX preview plus diagnostics. Return JSON "
           "{\"patches\":[{\"id\":\"existing-node-id\",\"changes\":{\"bbox\":[x,y,w,h],"
-          "\"font\":{...},\"color\":\"RRGGBB\",\"fill\":\"RRGGBB\"}}],"
+          "\"font\":{...},\"color\":\"RRGGBB\",\"bold\":true,\"runs\":[...]}}],"
           "\"review_notes\":[\"...\"]}. Change only nodes needing local correction. "
+          "Runs or paragraphs must concatenate to the exact unchanged node text. "
           "Never change text, evidence ownership, assets, IDs, z order, or page metadata.")
 FORMAT_RULES = (
     "Return the SlideIR object itself, with no slide/elements wrapper. Required top-level fields: "
@@ -50,7 +51,8 @@ FORMAT_RULES = (
     "Every evidence ID has exactly one owner. Keep unresolved_evidence_ids=[] only if all "
     "visible content is represented; otherwise retain uncertain pixels in the supplied raster."
 )
-PATCH_FIELDS = {"bbox", "font", "color", "fill", "line", "align", "wrap", "insets", "vertical_anchor"}
+PATCH_FIELDS = {"bbox", "font", "color", "fill", "line", "align", "wrap", "insets",
+                "vertical_anchor", "bold", "italic", "runs", "paragraphs"}
 
 
 def digest(path: Path) -> str:
@@ -211,6 +213,52 @@ def patch(ir: dict, answer: dict) -> dict:
                    for k in ("latin", "ea") if k in font):
                 raise ValueError("invalid local font family")
             nodes[nid]["font"] = {**nodes[nid]["font"], **font}
+        if any(field in changes for field in ("bold", "italic", "runs", "paragraphs")):
+            node = nodes[nid]
+            if node.get("type") != "text":
+                raise ValueError("style patch requires a text node")
+            if "bold" in changes and not isinstance(changes["bold"], bool):
+                raise ValueError("invalid local bold patch")
+            if "italic" in changes and not isinstance(changes["italic"], bool):
+                raise ValueError("invalid local italic patch")
+            if "runs" in changes:
+                runs = changes["runs"]
+                if (node.get("paragraphs") or "paragraphs" in changes
+                        or not isinstance(runs, list) or not runs
+                        or not all(isinstance(run, dict) and
+                                   set(run) <= {"text", "bold", "color"} and
+                                   isinstance(run.get("text"), str) and run["text"] and
+                                   ("bold" not in run or isinstance(run["bold"], bool)) and
+                                   ("color" not in run or isinstance(run["color"], str) and
+                                    re.fullmatch(r"[0-9a-fA-F]{6}", run["color"]))
+                                   for run in runs)
+                        or "".join(run["text"] for run in runs) != node["text"]):
+                    raise ValueError("runs must preserve exact node text")
+            if "paragraphs" in changes:
+                paragraphs = changes["paragraphs"]
+                if (node.get("runs") or "runs" in changes
+                        or not isinstance(paragraphs, list) or not paragraphs
+                        or not all(isinstance(p, dict) and
+                                   set(p) <= {"text", "font", "bold", "color", "align",
+                                              "line_spacing_pt", "space_before_pt",
+                                              "space_after_pt", "left_indent_px", "runs"} and
+                                   isinstance(p.get("text"), str) and p["text"] and
+                                   "\n" not in p["text"] and
+                                   isinstance(p.get("bold"), bool) and
+                                   isinstance(p.get("color"), str) and
+                                   re.fullmatch(r"[0-9a-fA-F]{6}", p["color"]) and
+                                   isinstance(p.get("font"), dict) and
+                                   set(p["font"]) == {"latin", "ea", "size_pt"} and
+                                   isinstance(p["font"]["latin"], str) and
+                                   isinstance(p["font"]["ea"], str) and
+                                   isinstance(p["font"]["size_pt"], (int, float)) and
+                                   0 < p["font"]["size_pt"] <= 400 and
+                                   ("runs" not in p or isinstance(p["runs"], list) and
+                                    "".join(r.get("text", "") for r in p["runs"]
+                                            if isinstance(r, dict)) == p["text"])
+                                   for p in paragraphs)
+                        or "\n".join(p["text"] for p in paragraphs) != node["text"]):
+                    raise ValueError("paragraphs must preserve exact node text")
         nodes[nid].update({key: value for key, value in changes.items() if key != "font"})
     notes = answer.get("review_notes", [])
     if not isinstance(notes, list) or not all(isinstance(n, str) for n in notes):

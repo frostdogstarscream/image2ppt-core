@@ -42,6 +42,10 @@ test('requires boolean node and run bold',()=>{
   }
   const x=fixture();x.nodes[0].bold=false;x.nodes[0].runs=[{text:x.nodes[0].text,bold:true}];assert.doesNotThrow(()=>validateIR(x));
 });
+test('allows boolean node italic and rejects invalid values',()=>{
+  const x=fixture();x.nodes[0].italic=true;assert.doesNotThrow(()=>validateIR(x));
+  for(const value of ['true',1,null]) {const y=fixture();y.nodes[0].italic=value;assert.throws(()=>validateIR(y),/italic 必须为 boolean/);}
+});
 test('rejects unknown semantic fields at each boundary',()=>{
   for(const change of [x=>x.rotation=45,x=>x.canvas.dpi=96,x=>x.background.opacity=0.5,x=>x.nodes[0].rotation=45,x=>x.nodes[0].font.weight=700,
     x=>x.nodes[0].runs=[{text:x.nodes[0].text,italic:true}],x=>x.evidence[0].confidence=0.5]) {

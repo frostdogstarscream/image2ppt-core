@@ -27,6 +27,8 @@ def q(name):
 def _text_properties(tag, style):
     props = ET.Element(q(tag), {"sz": str(round(style["font"]["size_pt"] * 100)),
                                "b": "1" if style.get("bold") else "0", "dirty": "0"})
+    if "italic" in style:
+        props.set("i", "1" if style["italic"] else "0")
     fill = ET.SubElement(props, q("a:solidFill"))
     ET.SubElement(fill, q("a:srgbClr"), {"val": style["color"]})
     for role, family in (("latin", "latin"), ("ea", "ea"), ("cs", "ea")):
@@ -59,6 +61,37 @@ def _replace_paragraphs(item, node, ir):
             text = ET.SubElement(element, q("a:t"), {"{http://www.w3.org/XML/1998/namespace}space": "preserve"})
             text.text = run["text"]
         paragraph.append(_text_properties("a:endParaRPr", spec))
+
+
+def _replace_runs(item, node):
+    """Materialize node-level runs after Artifact Tool's global text style pass.
+
+    The engine can reset run bold/color when shape.text.style is assigned after
+    shape.text. Rebuild the exact recorded runs in OOXML so local emphasis is
+    reflected in the final package and its reimported preview.
+    """
+    body = item.find("p:txBody", NS)
+    if body is None:
+        raise ValueError("原生文本框缺少 txBody: " + node["id"])
+    for existing in list(body.findall("a:p", NS)):
+        body.remove(existing)
+    paragraph = ET.SubElement(body, q("a:p"))
+    props = ET.SubElement(paragraph, q("a:pPr"),
+                          {"algn": {"left": "l", "center": "ctr", "right": "r"}[
+                              node.get("align", "left")]})
+    if "line_spacing_pt" in node:
+        spacing = ET.SubElement(props, q("a:lnSpc"))
+        ET.SubElement(spacing, q("a:spcPts"),
+                      {"val": str(round(node["line_spacing_pt"] * 100))})
+    props.append(_text_properties("a:defRPr", node))
+    for run in node["runs"]:
+        style = {**node, **run}
+        element = ET.SubElement(paragraph, q("a:r"))
+        element.append(_text_properties("a:rPr", style))
+        text = ET.SubElement(element, q("a:t"),
+                             {"{http://www.w3.org/XML/1998/namespace}space": "preserve"})
+        text.text = run["text"]
+    paragraph.append(_text_properties("a:endParaRPr", node))
 
 
 def adapt_slide(xml, ir):
@@ -94,6 +127,9 @@ def adapt_slide(xml, ir):
             if node.get("paragraphs"):
                 _replace_paragraphs(item, node, ir)
                 continue
+            if node.get("runs"):
+                _replace_runs(item, node)
+                continue
             if "line_spacing_pt" in node:
                 for paragraph in item.findall("p:txBody/a:p", NS):
                     props = paragraph.find("a:pPr", NS)
@@ -108,6 +144,8 @@ def adapt_slide(xml, ir):
                         spacing.remove(child)
                     ET.SubElement(spacing, q("a:spcPts"), {"val": str(round(node["line_spacing_pt"] * 100))})
             for rpr in item.findall(".//a:rPr", NS) + item.findall(".//a:defRPr", NS) + item.findall(".//a:endParaRPr", NS):
+                if "italic" in node:
+                    rpr.set("i", "1" if node["italic"] else "0")
                 for key, field in [("a:latin", "latin"), ("a:ea", "ea")]:
                     font = rpr.find(key, NS)
                     if font is None:
