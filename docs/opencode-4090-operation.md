@@ -8,7 +8,7 @@
 |---|---|
 | 仓库 / 分支 | frostdogstarscream/image2ppt-core / codex/opencode-mcp-runtime |
 | 上次部署功能代码 | dfc89fc520c21bd3e78193b309951ef8d04ad935 |
-| SSH | cmcc@192.168.1.103 |
+| SSH | cmcc@192.168.10.27 |
 | 4090 应用 / Python | F:/i2oc/app / F:/i2oc/venv/Scripts/python.exe |
 | 任务存储 | F:/i2oc/jobs |
 | 业务 API | 4090 本机 http://127.0.0.1:8772 |
@@ -18,7 +18,7 @@
 | Office | 当前用户 Windows 电脑上的 PowerPoint Worker，认证后主动领取任务 |
 | LayerD / LaMa | 4090 本机 18847 / 18841；LaMa 路径 /inpaint |
 
-2026-11-13 文档编写时，192.168.1.103:22 返回 Connection refused；未能重新在线核验部署。以上部署参数来自上一轮实际部署收据，并非今日在线健康证明。不要恢复使用历史 IP 或把 18848 当作 LaMa /inpaint。
+2026-11-13 用户确认 4090 主机地址迁移为 192.168.10.27，原 192.168.1.103 不再用于连接。本次新地址 SSH 探测返回 Connection closed by 192.168.10.27 port 22，尚未完成认证和在线部署核验。以上部署参数来自上一轮实际部署收据，并非今日在线健康证明。不要恢复使用历史 IP 或把 18848 当作 LaMa /inpaint。
 
 正常业务通过 8772 提交，不直接调用 OpenCode 14100。业务令牌、Office Worker 令牌、模型密钥是不同凭据。密钥由宿主注入，不写入仓库、命令历史或任务日志。
 
@@ -49,7 +49,7 @@ $job = '<提交返回的32位任务ID>'
 服务绑定远端 loopback，通过现有 SSH 配置建立本地转发。先确认没有已经运行的同端口隧道：
 
 ```powershell
-ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -i C:/Users/83895/.ssh/aitoy_tts_4090_ed25519 -L 18772:127.0.0.1:8772 cmcc@192.168.1.103
+ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -i C:/Users/83895/.ssh/aitoy_tts_4090_ed25519 -L 18772:127.0.0.1:8772 cmcc@192.168.10.27
 ```
 
 隧道终端保持运行，另开 PowerShell。当前产品工作树下已有 `.runtime/opencode-client.dpapi`，可用同一 Windows 用户的 Python 环境执行：
