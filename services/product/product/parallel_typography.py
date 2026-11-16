@@ -9,6 +9,11 @@ from .parallel_branches import canonical_fonts
 from .parallel_store import key
 
 
+def snap_ooxml_size_px(value: float) -> float:
+    """Snap pixel font size to 0.2px steps so size_px * 0.75 * 100 is an exact integer."""
+    return float(round(round(max(4.0, min(400.0, float(value))) * 5.0) * 0.2, 1))
+
+
 def measure_text_appearance(source, bbox, blocked=None):
     """Measure foreground glyph RGB, stroke ink mask and local backing class from source pixels."""
     from reconstruction import background_model
@@ -152,7 +157,7 @@ def calibrate(graph,source,fonts,store,ocr=None,stable=(),*,adaptive=False):
         s=styles[sid];before=s.model_dump();color=np.median(np.stack([r[0] for r in rows]),axis=0).round().astype(int)
         s.color=''.join(f'{v:02X}' for v in color)
         # One role-level size adjustment, never independent old/new box styles.
-        ratio=float(np.median([r[1] for r in rows]));s.size_px=round(s.size_px*ratio,2)
+        ratio=float(np.median([r[1] for r in rows]));s.size_px=snap_ooxml_size_px(s.size_px*ratio)
         from .parallel_font_match import match
         representatives=sorted(visual[sid],key=lambda r:-len(r['text']))[:2]
         choices={'fonts':[f for f in fonts['fonts'] if f['family'] in (s.ea,s.latin)]} if adaptive else fonts
@@ -160,7 +165,7 @@ def calibrate(graph,source,fonts,store,ocr=None,stable=(),*,adaptive=False):
         if selection is not None:
             if selection['cjk']:s.ea=selection['family']
             else:s.latin=selection['family']
-            s.bold=selection['bold'];s.size_px=selection['size_px']
+            s.bold=selection['bold'];s.size_px=snap_ooxml_size_px(selection['size_px'])
             if (s.latin,s.bold) not in installed:s.latin=selection['family']
             if (s.ea,s.bold) not in installed:s.ea=selection['family']
         changes.append({'style':sid,'before':before,'after':s.model_dump(),'source_members':[r[2] for r in rows],'font_selection':selection})
@@ -175,7 +180,7 @@ def calibrate(graph,source,fonts,store,ocr=None,stable=(),*,adaptive=False):
         def flush_tier(items):
             if len(items)<2:return
             weights=sum(w for _,w,_ in items)
-            snapped=round(sum(st.size_px*w for st,w,_ in items)/max(1,weights),1)
+            snapped=snap_ooxml_size_px(sum(st.size_px*w for st,w,_ in items)/max(1,weights))
             for st,_,rec in items:
                 st.size_px=snapped;rec['after']=st.model_dump()
         for item in group:

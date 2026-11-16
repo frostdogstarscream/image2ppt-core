@@ -238,7 +238,7 @@ def create_app(root=None, token=None, run_worker=True):
     def submit(request:Request,files:list[UploadFile]=File(...),object_extraction:str='default',pipeline_mode:str='parallel_review',
                orchestrator:str='pipeline',goal:str='Restore these images as an editable PPTX.',fresh_perception:bool=True,
                agent_steps:int=64,runtime_seconds:int=7200,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=False,agent_model:str|None=None):
-        if agent_model is not None and not re.fullmatch(r'[A-Za-z0-9._:-]{1,80}',agent_model):raise HTTPException(422,'模型标识格式无效')
+        if agent_model is not None and ('..' in agent_model or not re.fullmatch(r'[A-Za-z0-9._:-]{1,40}(?:/[A-Za-z0-9._:-]{1,60})?',agent_model)):raise HTTPException(422,'模型标识格式无效')
         if request.url.path=='/api/v1/jobs' and orchestrator=='pipeline':orchestrator='opencode'
         if os.environ.get('IMAGE2PPT_DEFAULT_ORCHESTRATOR')=='opencode' and orchestrator=='pipeline':orchestrator='opencode'
         if orchestrator not in ('pipeline','opencode'):raise HTTPException(422,'未知执行器')

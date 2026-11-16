@@ -21,8 +21,8 @@ def configure_model(job=None):
         os.environ.update(PLANNER_API_KEY=key,PLANNER_BASE_URL=GO_BASE_URL,PLANNER_MODEL=model)
     elif provider!='moma':
         raise ValueError('unsupported Agent inference provider')
-    elif request.get('agent_model'):
-        os.environ['PLANNER_MODEL']=request['agent_model']
+    elif request.get('agent_model') or os.environ.get('IMAGE2PPT_AGENT_MODEL'):
+        os.environ['PLANNER_MODEL']=request.get('agent_model') or os.environ['IMAGE2PPT_AGENT_MODEL']
     from ..pipeline import settings
     return provider,settings()
 

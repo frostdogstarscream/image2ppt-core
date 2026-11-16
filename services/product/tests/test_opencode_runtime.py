@@ -1155,4 +1155,101 @@ def test_hierarchical_container_and_surface_staging(job, monkeypatch, tmp_path):
     assert int((np.abs(plate_arr.astype(float) - 254.0).max(2) > 4).sum()) == 0
 
 
+def test_odd_tenth_size_px_snaps_cleanly_for_ooxml_compile_and_office_packet_prunes_probes(job, tmp_path):
+    from product.parallel_typography import snap_ooxml_size_px
+    from product.parallel_pipeline import effective_texts
+    from product.runtime.compiler import compile_local
+
+    # 18.3px and 17.1px previously hit .5 hundredth-point boundary (1372.5 / 1282.5) and failed verify_package
+    for raw in (18.3, 17.1, 15.5, 13.9, 21.7):
+        snapped = snap_ooxml_size_px(raw)
+        exact_hundredths = snapped * 0.75 * 100.0
+        assert abs(exact_hundredths - round(exact_hundredths)) < 1e-9
+
+    service, identifier, directory = job
+    call(service, identifier, 'list_fonts')
+    ocr = {'lines': [{'id': 'l-odd', 'text': 'Hello', 'score': 0.99, 'bbox': [18.0, 20.0, 56.0, 24.0]}]}
+    write(directory / 'ocr.json', ocr)
+    st = service.state(identifier)
+    cur = st.read()
+    cur['ocr'] = {'1': str(directory / 'ocr.json')}
+    write(st.root / 'state.json', cur)
+    scene_res = call(service, identifier, 'create_scene', page=1, evidence={'text': {
+        'styles': [{'id': 's-odd', 'role': 'body', 'ea': 'Arial', 'latin': 'Arial',
+                    'size_px': 18.3, 'bold': False, 'color': '112233'}],
+        'texts': [{'id': 't-odd', 'text': 'Hello', 'bbox': [18.0, 20.0, 56.0, 24.0],
+                   'style': 's-odd', 'z': 1, 'align': 'left'}],
+    }})
+    assert scene_res['scene']['text']['styles'][0]['size_px'] == 18.4
+
+    # Verify compile_local + verify_package succeeds cleanly on the normalized style
+    state = service.state(identifier)
+    current = state.read()
+    row = service.page(current, 1)
+    graph = service.graph(row)
+    # Stage t-odd into SlideIR via adapt and compile
+    from product.parallel_rebuild import adapt
+    stage_dir = tmp_path / 'odd_stage'
+    import shutil
+    shutil.copytree(Path(row['ir']).parent, stage_dir)
+    graph.selected['t-odd'] = {'id': 't-odd', 'kind': 'text', 'bbox': [18.0, 20.0, 56.0, 24.0], 'payload': graph.text.texts[0].model_dump()}
+    ir_dict = adapt(graph, stage_dir)
+    write(stage_dir / 'slideir.json', ir_dict)
+    compiled = compile_local([stage_dir / 'slideir.json'], tmp_path / 'odd_compiled', [effective_texts(graph, stage_dir / 'slideir.json')])
+    assert Path(compiled['pptx']).is_file()
+
+
+def test_submit_accepts_vendor_prefixed_moma_agent_model_and_rejects_traversal(job, tmp_path, monkeypatch):
+    import io
+    import product.app as app_module
+    import product.pipeline as pipeline
+    from product.runtime.runner import prepare_workspace
+
+    _, _, directory = job
+    for name in ('PLANNER_API_KEY', 'PLANNER_BASE_URL', 'PLANNER_MODEL'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('IMAGE2PPT_AGENT_PROVIDER', 'moma')
+    monkeypatch.setenv('MOMA_API_KEY', 'synthetic-moma-secret')
+    monkeypatch.setenv('IMAGE2PPT_AGENT_MODEL', 'qwen/qwen3.5-plus')
+    req_path = directory / 'request.json'
+    req = json.loads(req_path.read_text('utf8'))
+    req.update(agent_inference_provider='moma', agent_model='qwen/qwen3.5-plus')
+    write(req_path, req)
+    workspace = prepare_workspace(directory)
+    encoded = (workspace / 'opencode.json').read_text('utf8')
+    cfg = json.loads(encoded)
+    assert cfg['providers']['image2ppt-moma']['models']['vision']['modelID'] == 'qwen/qwen3.5-plus'
+    assert 'synthetic-moma-secret' not in encoded
+
+    app_root = tmp_path / 'api_root'
+    app_root.mkdir()
+    monkeypatch.setattr(app_module, 'ROOT', app_root)
+    monkeypatch.setattr(pipeline, 'settings', lambda: object())
+    client = TestClient(app_module.create_app(app_root / 'jobs', token='t' * 32, run_worker=False))
+    picture = io.BytesIO()
+    Image.new('RGB', (80, 60)).save(picture, 'PNG')
+    auth = {'Authorization': 'Bearer ' + 't' * 32}
+
+    ok = client.post(
+        '/api/v1/jobs',
+        params={'agent_model': 'qwen/qwen3.5-plus'},
+        files=[('files', ('x.png', picture.getvalue(), 'image/png'))],
+        headers=auth,
+    )
+    assert ok.status_code == 202
+    saved_req = json.loads((app_root / 'jobs' / ok.json()['id'] / 'request.json').read_text('utf8'))
+    assert saved_req['agent_model'] == 'qwen/qwen3.5-plus'
+
+    for bad_model in ('../bad', 'a/b/c'):
+        bad = client.post(
+            '/api/v1/jobs',
+            params={'agent_model': bad_model},
+            files=[('files', ('x.png', picture.getvalue(), 'image/png'))],
+            headers=auth,
+        )
+        assert bad.status_code == 422
+
+
+
+
 

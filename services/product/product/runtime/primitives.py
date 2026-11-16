@@ -271,7 +271,12 @@ class PrimitiveTools:
             self.list_fonts(state, current, directory/'font-input')
         fonts = json.loads(Path(current['fonts']).read_text('utf8'))
         from ..parallel_branches import canonical_fonts
+        from ..parallel_typography import snap_ooxml_size_px
         branches['text']=canonical_fonts(branches['text'],fonts,Store(state.job/'state'))
+        locked_styles={t.style for t in accepted.text.texts if t.id in accepted.selected}|({sp.style for t in accepted.text.texts if t.id in accepted.selected for sp in t.spans}) if accepted else set()
+        for st in branches['text'].styles:
+            if st.id not in locked_styles:
+                st.size_px=snap_ooxml_size_px(st.size_px)
         graph = fuse(snap, branches, ocr)
         geometry_conflicts=text_geometry_conflicts(graph.text,ocr)
         for identifier in geometry_conflicts-(set(accepted.selected) if accepted else set()):

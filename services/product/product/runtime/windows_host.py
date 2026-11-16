@@ -47,6 +47,9 @@ def receive(pipe_name, root):
             IMAGE2PPT_AGENT_MODEL=configuration.get('agent_model','qwen3.8-max'))
     else:
         os.environ['MOMA_API_KEY']=configuration['moma']
+        if configuration.get('agent_model'):
+            os.environ['IMAGE2PPT_AGENT_MODEL']=configuration['agent_model']
+            os.environ['PLANNER_MODEL']=configuration['agent_model']
     sys.path.insert(0,str(app/'services/product'))
     log=(root/'business.log').open('a',encoding='utf8',buffering=1)
     sys.stdout=log;sys.stderr=log

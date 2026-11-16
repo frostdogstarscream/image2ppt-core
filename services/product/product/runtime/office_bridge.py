@@ -29,7 +29,7 @@ def unpack(data, target):
     target = Path(target).resolve()
     target.mkdir(parents=True, exist_ok=False)
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        if sum(p.file_size for p in archive.infolist()) > 512*1024*1024:
+        if sum(p.file_size for p in archive.infolist()) > 1024*1024*1024:
             raise ValueError('Office packet exceeds limit')
         names = archive.namelist()
         if len(set(names)) != len(names):
@@ -116,6 +116,16 @@ def execute_ticket(client,ticket,run,binding):
     if any(not p.is_relative_to(run/'input') for p in irs):
         raise ValueError('Office IR escaped packet')
     result=check_local(run/'input/input.pptx',irs,run/'output/check')
+    for probe_file in list((run/'output/check').rglob('*')):
+        if not probe_file.is_file():
+            continue
+        suf = probe_file.suffix.lower()
+        if suf == '.pptx':
+            probe_file.unlink()
+        elif suf == '.png' and not (probe_file.name.endswith('-before.png') or probe_file.name.endswith('-delete.png')):
+            probe_file.unlink()
+    result['files'] = {str(p): digest(p) for p in (run/'output/check').rglob('*') if p.is_file()}
+    write(run/'output/check/checks.json', result)
     result['worker_binding']=binding
     result['input_sha256']=sha256(data.content).hexdigest()
     write(run/'output/result.json',result)

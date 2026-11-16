@@ -25,7 +25,7 @@ from ..object_extract import rectangle
 from ..parallel_contracts import Relation, SceneGraph
 from ..parallel_fusion import is_decorative_subspan
 from ..parallel_store import Store, key
-from ..parallel_typography import calibrate, measure_text_appearance
+from ..parallel_typography import calibrate, snap_ooxml_size_px, measure_text_appearance
 from ..resource_lease import lease
 
 
@@ -345,9 +345,9 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         if appearance is not None and appearance['ink'].any():
             yy = np.nonzero(appearance['ink'])[0]
             ink_span = float(yy.max() - yy.min() + 1)
-            est_px = max(9.0, min(96.0, round(max(ink_span * 0.96, raw_h * 0.72), 1)))
+            est_px = snap_ooxml_size_px(max(9.0, min(96.0, max(ink_span * 0.96, raw_h * 0.72))))
         else:
-            est_px = max(9.0, min(96.0, round(raw_h * 0.76, 1)))
+            est_px = snap_ooxml_size_px(max(9.0, min(96.0, raw_h * 0.76)))
         role = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
         bold = bool(est_px >= 20.0)
         measured_items.append({
@@ -386,7 +386,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     styles = []
     style_lookup = {}
     for grp in style_groups:
-        avg_size = float(round(grp['size_sum'] / grp['count'], 1))
+        avg_size = snap_ooxml_size_px(grp['size_sum'] / grp['count'])
         avg_rgb = np.clip(np.rint(grp['rgb_sum'] / grp['count']), 0, 255).astype(int)
         hex_c = ''.join(f'{int(v):02X}' for v in avg_rgb)
         st = {'id': grp['id'], 'role': grp['role'], 'ea': cjk_family, 'latin': latin_family,
@@ -847,4 +847,5 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         'staged_count': len(staged_ids), 'staged_object_ids': staged_ids,
         'committed_count': 0, 'office_status': office_res.get('status'),
         'failed_count': len(failed_regions), 'failed_regions': failed_regions,
+        'next_step': f'Batch candidate {batch_cid} is staged but not yet committed; call commit_candidate(candidate_id="{batch_cid}") to validate and commit.',
     }

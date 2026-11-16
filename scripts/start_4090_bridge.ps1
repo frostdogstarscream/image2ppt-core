@@ -3,8 +3,8 @@
     [string]$BindAddress = '10.36.154.44',
     [string]$RemoteUser = 'cmcc',
     [string]$IdentityFile = (Join-Path $env:USERPROFILE '.ssh\aitoy_tts_4090_ed25519'),
-    [string]$AgentProvider = 'opencode_go',
-    [string]$AgentModel = 'qwen3.8-max',
+    [string]$AgentProvider = 'moma',
+    [string]$AgentModel = 'qwen/qwen3.7-flash',
     [int]$LocalTunnelPort = 18772,
     [switch]$BootRemoteIfStopped
 )
@@ -18,8 +18,22 @@ if (-not (Test-Path $ProfilePath)) {
 
 Write-Host "[1/4] Checking wired Ethernet SSH to $RemoteUser@$RemoteHost (from $BindAddress)..."
 $remoteCheck = @'
-import urllib.request
-for name, url in [('api', 'http://127.0.0.1:8772/'), ('opencode', 'http://127.0.0.1:14100/global/health'), ('layerd', 'http://127.0.0.1:18847/health')]:
+import time, urllib.request
+try:
+    import win32com.client
+    sch = win32com.client.Dispatch('Schedule.Service'); sch.Connect()
+    fld = sch.GetFolder('\\')
+    for tname in ('Image2PPT-Parallel-R10-LayerD-R2-20261110', 'Image2PPT-Parallel-R10-SAM-R2-20261110'):
+        try:
+            tsk = fld.GetTask(tname)
+            if tsk.State != 4:
+                tsk.Run(None)
+                time.sleep(2)
+        except Exception:
+            pass
+except Exception:
+    pass
+for name, url in [('api', 'http://127.0.0.1:8772/'), ('opencode', 'http://127.0.0.1:14100/global/health'), ('layerd', 'http://127.0.0.1:18847/health'), ('sam', 'http://127.0.0.1:18848/v1/capabilities')]:
     try:
         code = urllib.request.urlopen(url, timeout=2).status
     except Exception:
@@ -51,6 +65,7 @@ if '$AgentProvider' == 'opencode_go':
     payload['agent_model'] = '$AgentModel'
 else:
     payload['moma'] = os.environ['_I2P_TMP_AGENT_KEY']
+    payload['agent_model'] = '$AgentModel'
 res = subprocess.run(
     ['ssh', '-o', 'BatchMode=yes', '-b', '$BindAddress', '-i', '$IdentityFile', '$RemoteUser@$RemoteHost',
      r'F:\i2oc\venv\Scripts\python.exe', r'F:\i2oc\app\services\product\product\runtime\windows_host.py', '--root', r'F:\i2oc'],
