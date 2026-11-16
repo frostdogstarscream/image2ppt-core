@@ -163,7 +163,13 @@ def candidate_from_evidence(obj,source,protected,*,original_alpha=None,surface=N
     if (mask&excluded[y:y+h,x:x+w]).any():raise ValueError('unmix protected content')
     rgba=extract_rgba(crop,backing,mask)
     if original_alpha is not None:
-        prior=original_alpha[y:y+h,x:x+w];keep=(rgba[...,3]==0)&(prior[...,3]>0)
+        prior=original_alpha[y:y+h,x:x+w]
+        prior_alpha=prior[...,3:4].astype(float)/255
+        prior_recomp=prior[...,:3].astype(float)*prior_alpha+backing*(1-prior_alpha)
+        prior_match=((np.abs(prior_recomp-crop.astype(float)).max(2)<=max(4.0,error*1.5))
+                     &(np.abs(prior[...,:3].astype(float)-backing).max(2)<=max(18.0,error*4.0))
+                     &(prior[...,3]>=32))
+        keep=(rgba[...,3]==0)&(prior[...,3]>0)&prior_match
         rgba[keep]=prior[keep]
     full=np.zeros((*source.shape[:2],4),np.uint8);full[y:y+h,x:x+w]=rgba
     if ((full[...,3]>0)&excluded).any():raise ValueError('unmix retained Alpha intersects protected content')

@@ -8,17 +8,17 @@
 |---|---|
 | 仓库 / 分支 | frostdogstarscream/image2ppt-core / codex/opencode-mcp-runtime |
 | 上次部署功能代码 | dfc89fc520c21bd3e78193b309951ef8d04ad935 |
-| SSH | cmcc@192.168.10.27 |
+| SSH | cmcc@10.36.154.54（直连千兆/万兆以太网，本机 10.36.154.44/26） |
 | 4090 应用 / Python | F:/i2oc/app / F:/i2oc/venv/Scripts/python.exe |
 | 任务存储 | F:/i2oc/jobs |
 | 业务 API | 4090 本机 http://127.0.0.1:8772 |
 | OpenCode Server | 4090 本机 http://127.0.0.1:14100，固定版本 2.1.4 |
-| Agent 模型 | OpenCode Go / qwen3.8-flash（最后实测配置） |
+| Agent 模型 | OpenCode Go / qwen3.8-max（默认推荐配置，支持按任务 `--agent-model` 指定） |
 | MCP | OpenCode 为每个任务启动 Python stdio 服务，绑定 job_id |
 | Office | 当前用户 Windows 电脑上的 PowerPoint Worker，认证后主动领取任务 |
 | LayerD / LaMa | 4090 本机 18847 / 18841；LaMa 路径 /inpaint |
 
-2026-11-13 用户确认 4090 主机地址迁移为 192.168.10.27，原 192.168.1.103 不再用于连接。本次新地址 SSH 探测返回 Connection closed by 192.168.10.27 port 22，尚未完成认证和在线部署核验。以上部署参数来自上一轮实际部署收据，并非今日在线健康证明。不要恢复使用历史 IP 或把 18848 当作 LaMa /inpaint。
+2026-11-13 用户已将 4090 主机通过网线直连当前电脑，有线地址确认为 `10.36.154.54/26`（本机以太网地址 `10.36.154.44/26`，同属 `10.36.154.0/26` 子网；原历史无线地址不再作为主连接）。已完成有线 SSH 免密登录核验与端口探测：`18847`（LayerD）、`18841`（LaMa `/inpaint`，RTX 4090 CUDA）随系统启动在线；`8772`（业务 API）与 `14100`（OpenCode 2.1.4）在 4090 重启后需通过内存凭据引导启动。不要恢复使用历史 IP 或把 18848 当作 LaMa `/inpaint`。
 
 正常业务通过 8772 提交，不直接调用 OpenCode 14100。业务令牌、Office Worker 令牌、模型密钥是不同凭据。密钥由宿主注入，不写入仓库、命令历史或任务日志。
 
@@ -49,13 +49,15 @@ $job = '<提交返回的32位任务ID>'
 服务绑定远端 loopback，通过现有 SSH 配置建立本地转发。先确认没有已经运行的同端口隧道：
 
 ```powershell
-ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -i C:/Users/83895/.ssh/aitoy_tts_4090_ed25519 -L 18772:127.0.0.1:8772 cmcc@192.168.10.27
+ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -b 10.36.154.44 -i C:/Users/83895/.ssh/aitoy_tts_4090_ed25519 -L 18772:127.0.0.1:8772 cmcc@10.36.154.54
 ```
+
+也可直接运行仓库内置一键联调脚本 `.\scripts\start_4090_bridge.ps1`（自动检测远端 `8772` 状态、按需安全隐藏输入模型密钥拉起 `qwen3.8-max` 远端宿主、建立 `18772` 有线隧道并启动本机 `office_bridge`）。
 
 隧道终端保持运行，另开 PowerShell。当前产品工作树下已有 `.runtime/opencode-client.dpapi`，可用同一 Windows 用户的 Python 环境执行：
 
 ```powershell
-python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi submit D:/input/01.png --goal '恢复可编辑 PPTX，保留源内容，执行实际 Office 检查和视觉自检。' --seconds 3600 --no-agent-thinking
+python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi submit D:/input/01.png --goal '恢复可编辑 PPTX，保留源内容，执行实际 Office 检查和视觉自检。' --agent-model qwen3.8-max --agent-steps 32 --seconds 1800
 python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi status <任务ID>
 python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi artifacts <任务ID> --output outputs/download-new-job
 ```
@@ -102,7 +104,7 @@ python -m product.runtime.office_bridge --url http://127.0.0.1:18772 --root C:/U
 Set-Location F:/i2oc/app
 $env:PYTHONPATH = 'F:/i2oc/app/services/product'
 $env:IMAGE2PPT_AGENT_PROVIDER = 'opencode_go'
-$env:IMAGE2PPT_AGENT_MODEL = 'qwen3.8-flash'
+$env:IMAGE2PPT_AGENT_MODEL = 'qwen3.8-max'
 $env:IMAGE2PPT_OFFICE_MODE = 'remote'
 $env:IMAGE2PPT_OPENCODE_BIN = 'F:/i2oc/app/opencode.exe'
 $env:IMAGE2PPT_NODE = 'F:/code/image2ppt/.runtime/bundle/node.exe'

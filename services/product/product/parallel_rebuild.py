@@ -402,16 +402,27 @@ def adapt(graph,directory):
         ev='ev-'+id;ir['evidence'].append({'id':ev,'kind':'image','bbox':bbox,'description':description})
         ir['assets'].append({'id':id,'path':file.name,'purpose':'module','sha256':digest(file),'contains_evidence_ids':[ev],'description':description})
         ir['nodes'].append({'id':id,'type':'image','bbox':bbox,'z':z,'asset_id':id,'evidence_ids':[]})
-    surfaces=[c for c in chosen if c['kind']=='surface']
+    shape_by_id={s.id:s for s in graph.surface.shapes}
+    surfaces=sorted([c for c in chosen if c['kind']=='surface'],
+                    key=lambda c:(shape_by_id[c['id']].z,-(shape_by_id[c['id']].bbox[2]*shape_by_id[c['id']].bbox[3])))
     image('source-plate',[0,0,*graph.image_size],backing,'Safe source backing with only committed replacement ink cleared',0)
     for z,c in enumerate(surfaces,1):
-        s=next(s for s in graph.surface.shapes if s.id==c['id']);ev='ev-'+s.id
+        s=shape_by_id[c['id']];ev='ev-'+s.id
         ir['evidence'].append({'id':ev,'kind':'shape','bbox':s.bbox,'description':'source-confirmed flat backing'})
-        ir['nodes'].append({'id':s.id,'type':'shape','geometry':s.geometry,'bbox':s.bbox,'z':z,'fill':s.fill,
-                            'line':{'color':s.line_color,'width_pt':s.line_width_pt},'evidence_ids':[ev]})
+        snode={'id':s.id,'type':'shape','geometry':s.geometry,'bbox':s.bbox,'z':z,'fill':s.fill,
+               'line':{'color':s.line_color,'width_pt':s.line_width_pt},'evidence_ids':[ev]}
+        if s.corner_radius_px is not None:
+            snode['corner_radius_px']=min(float(s.corner_radius_px),min(s.bbox[2],s.bbox[3])/2.0)
+        if s.fill_gradient is not None:
+            snode['fill_gradient']=s.fill_gradient.model_dump()
+        ir['nodes'].append(snode)
     styles={s.id:s for s in graph.text.styles}
     def attrs(s):return {'font':{'ea':s.ea,'latin':s.latin,'size_pt':s.size_px*.75},'bold':s.bold,'color':s.color}
-    for z,c in enumerate([c for c in chosen if c['kind']!='surface'],len(surfaces)+1):
+    container_assets=sorted([c for c in chosen if c['kind']=='asset' and c.get('container_layer')],
+                            key=lambda c:-(c['bbox'][2]*c['bbox'][3]))
+    foreground_assets=[c for c in chosen if c['kind']=='asset' and not c.get('container_layer')]
+    ordered=container_assets+foreground_assets+[c for c in chosen if c['kind'] not in ('surface','asset')]
+    for z,c in enumerate(ordered,len(surfaces)+1):
         if c['kind']=='asset':
             file=reference(c['asset_reference']);meta=c['payload']
             image(c['id'],c['bbox'],file,'Complete transparent graphic candidate; '+meta['method'],z)

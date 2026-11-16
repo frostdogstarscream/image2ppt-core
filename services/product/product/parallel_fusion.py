@@ -6,6 +6,30 @@ from .contracts import intersection
 from .object_extract import rectangle
 
 
+def is_decorative_subspan(item, line):
+    """True when item covers the complete alphanumeric core of an OCR line whose
+    only omitted prefix/suffix characters are non-alphanumeric decorative marks."""
+    item_text = (item.text if hasattr(item, 'text') else item['text']).replace(' ', '').replace('\n', '')
+    line_text = line.get('text', '').replace(' ', '').replace('\n', '')
+    if len(item_text) < 2 or item_text == line_text or line_text.count(item_text) != 1:
+        return False
+    idx = line_text.find(item_text)
+    prefix, suffix = line_text[:idx], line_text[idx + len(item_text):]
+    if not (prefix or suffix) or any(ch.isalnum() for ch in (prefix + suffix)):
+        return False
+    x, y, w, h = item.bbox if hasattr(item, 'bbox') else item['bbox']
+    lx, ly, lw, lh = line['bbox']
+    if lw <= 0 or lh <= 0 or w <= 0 or h <= 0:
+        return False
+    slack = max(3.0, min(8.0, lh * 0.15))
+    bounded = (x >= lx - slack and y >= ly - slack and x + w <= lx + lw + slack and y + h <= ly + lh + slack)
+    vertical = (y <= ly + 4.0 and y + h >= ly + lh - 4.0)
+    min_width = lw * max(0.35, (len(item_text) / len(line_text)) * 0.6)
+    anchor_left = True if prefix else (x <= lx + 4.0)
+    anchor_right = True if suffix else (x + w >= lx + lw - 4.0)
+    return bool(bounded and vertical and w >= min_width and anchor_left and anchor_right)
+
+
 def fuse(snap,branches,ocr):
     text,asset,surface=(branches[k] for k in ('text','asset','surface'))
     ownership={n.id:'RESOLVED' for n in [*text.texts,*asset.objects,*surface.shapes]};relations=[]
@@ -29,7 +53,9 @@ def fuse(snap,branches,ocr):
             # One OCR line may contain a separate sequence number and heading.
             # Joint exact coverage is required; overlapping repeated text fails.
             if norm(''.join(x.text for x in users[ids[0]]))!=norm(lines[ids[0]]['text']):ownership[t.id]='AMBIGUOUS'
-        elif norm(''.join(lines[i]['text'] for i in ids))!=norm(t.text):ownership[t.id]='AMBIGUOUS'
+        elif norm(''.join(lines[i]['text'] for i in ids))!=norm(t.text):
+            if not (len(ids)==1 and len(users[ids[0]])==1 and is_decorative_subspan(t,lines[ids[0]])):
+                ownership[t.id]='AMBIGUOUS'
         if t.style not in styles or any(s.style not in styles for s in t.spans):ownership[t.id]='UNOWNED'
         if t.spans and ''.join(s.text for s in t.spans)!=t.text:ownership[t.id]='UNOWNED'
         for a in asset.objects:

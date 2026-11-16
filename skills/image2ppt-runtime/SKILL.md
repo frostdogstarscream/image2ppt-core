@@ -1,62 +1,48 @@
 ---
 name: image2ppt-runtime
-description: Autonomously reconstruct uploaded screenshot pages into editable PowerPoint using composable Image2PPT evidence and reconstruction tools.
+description: Autonomously reconstruct uploaded screenshot pages into editable PowerPoint using composable Image2PPT evidence, batch backbone, and regional repair tools.
 ---
 
 # Image2PPT autonomous reconstruction
 
 Complete the user's image-to-PPTX goal within the job budget. Observe the original images and actual intermediate results, choose useful tools, revise your approach when evidence reveals a defect, and stop when quality is acceptable. The user should not need to direct each object.
 
+## Recommended 4-stage workflow (`tool_profile=all`)
+
+When `prepare_page_evidence` and `batch_reconstruct_page` appear in `get_job_context.tool_catalog`, use the hybrid 4-stage pipeline so 100+ object slides finish cleanly within 8–18 turns instead of exhausting turns on repetitive atomic calls:
+
+1. **Stage 1 — Page Evidence & Calibrated Scene (`prepare_page_evidence`)**:
+   - Call `get_job_context` and `get_evidence` on the source image(s).
+   - Call `prepare_page_evidence(page=...)` once per page. It runs local OCR, LayerD decomposition, pixel-measured foreground color extraction, decorative affix splitting (e.g., separating `>>` or bullets from text), page-level font-size tier clustering, **automatic LayerD graphic/badge/illustration discovery** (`assets`), and initializes the `RESOLVED` draft scene.
+2. **Stage 2 — Layout Review & Optional Scene Refinement (`update_scene`)**:
+   - Compare the source image against the returned `items`, `assets`, and `styles` directly (avoid spending multiple `crop_image` calls before running `batch_reconstruct_page`).
+   - Use `update_scene` only when helpful: merge multi-line paragraphs in the same card (`\n`-joined wording with ordered `members`), or remove draft labels that are intrinsic parts of logos/charts so they stay intact with the graphic.
+   - Keep the auto-discovered `assets` from `prepare_page_evidence` intact (including `deferred_after_text` composite badges, which `batch_reconstruct_page` automatically stages right after erasing adjacent captions). Only add extra `asset.objects` if an important standalone icon was missed by `prepare_page_evidence.assets`.
+3. **Stage 3 — Parallel Batch Reconstruction (`batch_reconstruct_page`)**:
+   - Call `batch_reconstruct_page(page=..., include_assets=true)` to evaluate gradient/LayerD/LaMa text candidates in parallel, stage verified textboxes, extract whole movable PNG assets (icons, circle+icon badges, and unified illustrations, with automatic SAM3 fallback when `sam_available=true`), hierarchically extract draggable text background boxes/cards (`s-*` native `roundRect`/`rect` shapes and `a-c*` stylized banner/divider layers), run a single batch PowerPoint check (with automatic `frame_minimum` overflow repair), and commit all verified objects at once.
+   - Inspect `committed_count`, `committed_object_ids`, and the compact `failed_regions` digest.
+4. **Stage 4 — Targeted Surgery, Final Office Gate & Self-Review**:
+   - Spend at most 2–3 focused turns repairing high-value `failed_regions` **before** running final composition (e.g., adjusting a tight text `bbox` by 2px away from a card divider line via `update_scene`, or `fit_background` -> `complete_text_mask` -> `create_candidate` -> `commit_candidate`). Retain complex textures, photos, or ambiguous regions safely in `source-plate`.
+   - Once ready to deliver (or whenever `remaining_seconds < 450`), run the final delivery sequence without starting new region experiments: call `compile_pptx()` (no `candidate_id`), `validate_office()`, `get_evidence` on **every** ID in `required_evidence` (source, `office_preview`, `edit_panel`s, and `hard_checks`), then immediately call `record_visual_review` (recording regions intentionally retained in `source-plate` under `observations` or `minor_deviations`, never `findings` when `passed=true`) and `finalize_job`.
+
+When `tool_profile=basic` omits batch shortcuts, compose atomic tools directly (`run_ocr`, `list_fonts`, `decompose_layers`, `create_scene`, `fit_background`, `complete_text_mask`, `create_candidate`, `commit_candidate`).
+
 ## Tools and planning
 
-Use get_job_context to obtain immutable sources and task identity. Use get_evidence to receive actual images. Tool names have the image2ppt_ prefix. Available tools include OCR, semantic analysis, LayerD, SAM, text masks, gradient/background extraction, inpainting, foreground unmixing, fonts, scene proposals, candidates, image operations and optional scripts. Tools can be combined in the order justified by the image. The full pipeline and regional rebuild tools are optional shortcuts.
+Use `get_job_context` to obtain immutable sources and task identity. Use `get_evidence` to receive actual images. Tool names have the `image2ppt_` prefix. Available tools include `prepare_page_evidence`, `batch_reconstruct_page`, OCR, semantic analysis, LayerD, SAM, text masks, gradient/background extraction, inpainting, foreground unmixing, fonts, scene proposals, candidates, image operations and optional scripts.
 
-Create scene proposals with source wording, complete logical objects and evidence references. create_scene accepts text/asset/surface branch evidence. Ownership is derived by the host. Inspect returned ownership and conflicts. You may start with only the evidence relevant to your chosen object. A source-backed page with unprocessed objects is permitted.
+Create scene proposals with source wording, complete logical objects and evidence references. `create_scene` accepts `text`/`asset`/`surface` branch evidence; ownership is derived by the host. `SCENE_EXISTS` means use `update_scene`. Keep object IDs stable across turns. `update_scene` preserves accepted objects and shared styles; revising an accepted object requires `rollback_region`. `remove_object_ids` removes only uncommitted drafts and never removes source OCR neighbor protection.
 
-After committing an object, update_scene can add or revise other draft objects. It preserves accepted definitions and shared styles. Revising an accepted object requires dependency-local rollback. Preserve a source text search scope corroborated by OCR. Transparent native frame expansion is a separate layout proposal.
+Text evidence uses `styles`, `texts` and `members`. `members` maps each text ID to the OCR line IDs supporting its wording. Unique exact wording (or a complete alphanumeric core with purely decorative non-alphanumeric affixes such as `>>` or `•` and matching sub-bbox) can be bound by the host. `AMBIGUOUS` text cannot be erased.
 
-Text evidence uses styles, texts and members. members maps each text ID to the independent OCR line IDs that support its exact wording. The host can bind a unique exact OCR line with matching geometry. AMBIGUOUS text cannot be erased. Match source words and geometry, then inspect the ownership diagnostics when unresolved.
+`create_candidate` returns an `EXPLORATORY` candidate with no erase authority. Use `compile_pptx(candidate_id)` to inspect native rendering and `validate_office(candidate_id)` for preview edit diagnostics. `commit_candidate` runs formal source-owner, backing, and actual PowerPoint editing checks (`expected_version` required). Object IDs and candidate IDs (`c-...`) have different roles.
 
-A layout result is a proposal. A mask or fitted background is evidence. create_candidate returns an EXPLORATORY candidate with no erase authority. Use compile_pptx(candidate_id) to inspect its native rendering and validate_office(candidate_id) for editing measurements. validate_candidate on an exploratory candidate prepares observation artifacts. Choose your next action from the images and measurements. commit_candidate separately runs submission checks against the current source and actual editing evidence. Object IDs and candidate IDs have different roles.
+Scene-mode `complete_text_mask` requires `page`, `object_id`, and `background_id` (omit `original_mask_id` unless supplying a binary grayscale mask). `unmix_foreground` takes `evidence_id`, `background_id`, and `mask_id`. Generate a unique `idempotency_key` for each new mutating call; reuse the exact key and arguments only to reconcile an uncertain response.
 
-Scene-mode complete_text_mask requires explicit background_id. Choose a fitted, extracted or inpainted background first, or provide independent source/mask/background evidence. validate_mask reports overlap with supplied protection and reference masks without declaring those masks authoritative. unmix_foreground takes explicit evidence_id, background_id and mask_id. validate_rgba accepts the resulting image evidence directly, with optional source/background/protection references for recomposition measurements.
+## Quality, safety and final review
 
-record_observation stores your findings and proposed next action at any point, including failed or incomplete experiments. Use it for local diagnosis. record_visual_review is the final hash-bound delivery review. Computed artifacts and measured diagnostics do not imply delivery acceptance. Decide whether a minor visual difference is acceptable, record the evidence and reason, and request submission when ready.
+Preserve exact wording, numbers, punctuation, hierarchy, measured colors, and original proportions. Never authorize erasure by bbox or SAM mask alone. Unknown pixels remain protected in `source-plate`. Verified LayerD lower composites and Big-LaMa inpainting are validated by context-ring, seam continuity, and stroke-ablation gates in addition to planar gradient fits; `FONT_LAYOUT_FAILED` repairs use transparent `frame_minimum` without altering the erase mask.
 
-Tool inputs are evidence IDs and scene/object references. Generate a unique idempotency_key for each new operation. Reuse the same key and arguments to reconcile an uncertain response. Only committing requires expected_version. Read current version before submitting a candidate. Do not invent results, model calls, file paths, object counts or acceptance.
+Record visual review via `record_visual_review` with `passed`, `findings`, `observations`, `minor_deviations`, `evidence_ids`, `checked`, and `reason`. `checked` must contain all six categories: `content`, `completeness`, `layout`, `residual`, `background`, and `editing`. `findings` are unresolved defects (requires `passed=false`); accepted subtle differences belong in `minor_deviations`, descriptive notes in `observations`. Include every required evidence ID from `validate_office` after viewing them with `get_evidence`.
 
-## Quality and exploration
-
-Preserve exact wording, numbers, punctuation, hierarchy and the original proportions. Never authorize erasure by bbox or SAM mask alone. Unknown pixels remain protected. Candidate preparation and exploratory scripts do not grant ownership. The host independently validates masks, source_owner, neighboring objects, background and actual edit behavior.
-
-Prefer existing reliable evidence and low-cost tools. A failed attempt should lead to new evidence or a changed strategy. Do not repeat the same failure with unchanged inputs. Mild font, italic, spacing, antialiasing and subtle background differences may be accepted. Obvious residuals, missing foreground, wrong text, damaged neighbors and unusable editing must be corrected or safely reverted.
-
-Read the specific failed checks. BACKGROUND_REFERENCE_UNRELIABLE concerns independent source sampling. A different raw repair does not change that reference proof. Obtain genuinely different source evidence or continue an independent object. FONT_LAYOUT_FAILED may include Office-measured transparent frame extents. Frame repair does not require changing the source text search bbox or erase Mask.
-
-Make progress toward the user's requested coverage. A useful verified object can establish the method before spending budget fitting many uncommitted objects. When the requested deliverable is satisfied, finish its checks and stop. Preserve other content as raster when further recovery is unjustified.
-
-Read the task budget and remaining_seconds in tool responses. Account for compilation, final Office checks, viewing evidence, self-review and finalization before adding more objects. Once the requested minimum coverage is verified, prioritize completing acceptance. Further coverage must fit the remaining budget together with its required checks.
-
-Observe candidates before accepting them. Tools return evidence IDs for images and receipts. Use get_evidence for close inspection. You may use run_image_script only when its OS sandbox is available; outputs remain unverified candidates. Do not modify product code or manually construct final SlideIR/PPTX. The host's scene adapter and fixed compiler produce deliveries.
-
-Evidence references include names and roles. Choose the source_crop and written_crop images for local comparisons when they answer the question. Use full-page images for page context and final review. This keeps repeated image observations focused.
-
-## Final result
-
-Compile the chosen scene and run validate_office. Inspect every required source, Office preview, edit panel and hard-check receipt using get_evidence. Visually examine text, completeness, layout, old residuals, background and actual edits. If defects remain, inspect, repair or rollback the affected region, then recompile and recheck the changed result.
-
-Record visual review with passed, findings, minor_deviations, evidence_ids, checked and reason. checked must contain content, completeness, layout, residual, background and editing. The same Agent performs this review. Go is not used on this path. A provided-image receipt records transport provision; give a genuine visual judgment.
-
-Finalize only with current hard checks and visual evidence. Safe partial editability is allowed. Report editable objects, retained raster regions, unresolved issues and why further work stopped. Unavailable Office or vision evidence remains UNKNOWN. Do not claim complete recall without an independent reference denominator.
-
-## Durable references and draft revisions
-
-create_scene initializes a page once; SCENE_EXISTS means use update_scene. Keep object IDs stable across observations and context compaction. update_scene revises existing IDs or adds drafts; remove_object_ids explicitly removes only uncommitted drafts. IDENTITY_CONFLICT contains exact duplicate evidence and the existing ID; decide whether to revise that ID or replace the draft explicitly. Neither identity operation authorizes pixel erasure.
-
-Use list_evidence to recover task-bound source/mask/background/layout references instead of guessing IDs. get_progress distinguishes drafts from actual native objects and shows failures and candidates. get_job_context includes this progress and recent references after context recovery. A compiled raster-only scene has NO_EDITABLE_RECONSTRUCTION, regardless of Office file validity. Do not describe it as editable success.
-
-Visual review observations are descriptive notes; findings are unresolved defects; minor_deviations are accepted differences with reasons. passed=true requires no unresolved findings, but may include observations and minor deviations. Include every required evidence ID, including hard_checks. Record passed=false for unresolved failures. Autonomous strategy remains yours; the tools report evidence and validate actual writes.
-
-A useful optional first probe is a short, isolated meaningful label on simple backing. Long text bands and tightly packed groups often need more context analysis; choose according to actual evidence. This is a cost heuristic, not a prescribed object or tool sequence.
-
-Removing a draft never removes source OCR neighbor protection. If a candidate is rejected, inspect the returned unauthorized_mask and protected_mask rather than assuming an antialiasing cause. validation_reference_mask is a current independent-source hypothesis; it is not permission to skip background, residual or Office checks. Regenerate or revise candidates only from evidence you actually inspect.
+Finalize with `finalize_job` only when current Office checks and visual review pass. A raster-only scene has `NO_EDITABLE_RECONSTRUCTION`—never describe it as editable success. Safe partial editability is encouraged when complex illustrations or uncertain regions are best preserved in raster backing; state editable objects and retained raster regions honestly.

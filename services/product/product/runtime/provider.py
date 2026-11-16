@@ -5,16 +5,24 @@ import os
 GO_BASE_URL='https://opencode.ai/inference/go/openai/v1'
 
 
-def configure_model():
-    provider=os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma')
+def configure_model(job=None):
+    import json
+    from pathlib import Path
+    request={}
+    if job is not None:
+        req_file=Path(job)/'request.json'
+        if req_file.is_file():request=json.loads(req_file.read_text('utf8'))
+    provider=request.get('agent_inference_provider') or os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma')
     if provider=='opencode_go':
         key=os.environ.get('IMAGE2PPT_AGENT_API_KEY') or os.environ.get('OPENCODE_GO_API_KEY')
         if not key:
             raise RuntimeError('OpenCode Go Agent credential absent')
-        model=os.environ.get('IMAGE2PPT_AGENT_MODEL','qwen3.8-flash')
+        model=request.get('agent_model') or os.environ.get('IMAGE2PPT_AGENT_MODEL','qwen3.8-max')
         os.environ.update(PLANNER_API_KEY=key,PLANNER_BASE_URL=GO_BASE_URL,PLANNER_MODEL=model)
     elif provider!='moma':
         raise ValueError('unsupported Agent inference provider')
+    elif request.get('agent_model'):
+        os.environ['PLANNER_MODEL']=request['agent_model']
     from ..pipeline import settings
     return provider,settings()
 
@@ -27,7 +35,7 @@ def planning_actor(job):
     from ..parallel_provider import Planner,Reviewer
     from ..go_provider import GoProvider
     from pathlib import Path
-    selected,cfg=configure_model()
+    selected,cfg=configure_model(job)
     if selected!='opencode_go':
         return Planner(cfg)
     class GoAgentPlanner:

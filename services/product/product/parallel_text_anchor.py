@@ -17,7 +17,11 @@ def anchor(graph,ocr,source,fonts,store,*,fitted=False):
         if not ids or any(i not in lines for i in ids):continue
         boxes=[lines[i]['bbox'] for i in ids];x=min(b[0] for b in boxes);y=min(b[1] for b in boxes)
         right=max(b[0]+b[2] for b in boxes);bottom=max(b[1]+b[3] for b in boxes)
-        if len(ids)==1 and len(users[ids[0]])>1:
+        from .parallel_fusion import is_decorative_subspan
+        if len(ids)==1 and len(users[ids[0]])==1 and is_decorative_subspan(t,lines[ids[0]]):
+            x,y=round(t.bbox[0]),round(t.bbox[1])
+            right,bottom=round(t.bbox[0]+t.bbox[2]),round(t.bbox[1]+t.bbox[3])
+        elif len(ids)==1 and len(users[ids[0]])>1:
             ordered=users[ids[0]];index=ordered.index(t)
             try:weights=[font(styles[a.style],a.text).getlength(a.text) for a in ordered]
             except (KeyError,OSError):continue

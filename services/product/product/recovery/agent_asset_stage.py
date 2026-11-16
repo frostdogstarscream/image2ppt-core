@@ -63,6 +63,20 @@ def stage_asset_candidate(candidate_directory, graph, baseline_directory, output
         composed=SceneGraph.model_validate_json((staged/'scene.json').read_text('utf8'))
         if composed.selected[identifier]['asset_reference']['sha256']!=digest(image):
             raise ValueError('staged asset bytes changed')
+        if (root/'under-text-backing.npz').is_file():
+            from PIL import Image
+            from ..parallel_rebuild import adapt
+            with np.load(root/'under-text-backing.npz',allow_pickle=False) as udata:
+                ov_mask=udata['mask'].astype(bool)
+                card_rgb=udata['card_rgb']
+                rx,ry,rw,rh=udata['bbox'].astype(int).tolist()
+            plate=np.array(Image.open(staged/'source-plate.png').convert('RGBA'))
+            ov_local=ov_mask[ry:ry+rh,rx:rx+rw]
+            plate[ry:ry+rh,rx:rx+rw,:3][ov_local]=card_rgb[ov_local]
+            Image.fromarray(plate).save(staged/'source-plate.png')
+            composed.raster_backing['sha256']=digest(staged/'source-plate.png')
+            write(staged/'scene.json',composed.model_dump())
+            write(staged/'slideir.json',adapt(composed,staged))
         retained_scene=identifier+'-candidate-scene.json'
         shutil.copyfile(root/'candidate-scene.json',staged/retained_scene)
         retained_checks=identifier+'-independent-checks.json'

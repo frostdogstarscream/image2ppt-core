@@ -1,4 +1,5 @@
 """Continuous local colour plane fitted only to held-out, unprotected context."""
+import cv2
 import numpy as np
 
 from ..object_extract import rectangle
@@ -21,8 +22,54 @@ def fit_gradient(source, bbox, protected, context=14):
     rgb = source[y0:y1, x0:x1].astype(float)
     clean = (~scope & window & ~protected)[y0:y1, x0:x1]
     bx, _, bw, _ = map(round, bbox)
-    if min(int((clean & (x < bx)).sum()), int((clean & (x >= bx+bw)).sum())) < max(30, bh*2):
+    min_side = max(30, bh*2)
+    if min(int((clean & (x < bx)).sum()), int((clean & (x >= bx+bw)).sum())) < min_side:
         raise RecoveryBlocked('INSUFFICIENT_CONTEXT', 'both lateral sides need independent unprotected samples')
+    # Exclude discrete high-contrast foreign foreground intrusions (such as an
+    # adjacent unmodeled icon or badge) only when both lateral sides still
+    # retain substantial independent support on the shared continuous backing.
+    excluded_foreground_pixels = 0
+    left_mask = clean & (x < bx)
+    right_mask = clean & (x >= bx+bw)
+    med_l = np.median(rgb[left_mask], axis=0)
+    med_r = np.median(rgb[right_mask], axis=0)
+    nxl = float(np.median(nx[left_mask]))
+    nxr = float(np.median(nx[right_mask]))
+    slope_x = (med_r - med_l) / max(1e-3, nxr - nxl)
+    seed_pred = med_l + (nx - nxl)[..., None] * slope_x
+    seed_res = rgb - seed_pred
+    near_h = clean & (np.abs(seed_res).max(2) <= 24.0)
+    if int(near_h.sum()) >= 60:
+        ny_c = ny - float(np.median(ny[near_h]))
+        denom = float((ny_c[near_h] ** 2).sum())
+        if denom > 1e-3:
+            slope_y = (ny_c[near_h, None] * seed_res[near_h]).sum(0) / denom
+            seed_pred = seed_pred + ny_c[..., None] * slope_y
+    coarse_design = np.stack([np.ones_like(nx), nx, ny], axis=2)
+    coarse_keep = clean & (np.abs(rgb - seed_pred).max(2) <= 18.0)
+    for _ in range(5):
+        if coarse_keep.sum() < 100:
+            break
+        coarse_coeff = np.linalg.lstsq(coarse_design[coarse_keep], rgb[coarse_keep], rcond=None)[0]
+        coarse_err = np.abs(coarse_design @ coarse_coeff - rgb).max(2)
+        med = float(np.median(coarse_err[coarse_keep]))
+        mad = float(np.median(np.abs(coarse_err[coarse_keep] - med)))
+        updated = clean & (coarse_err <= max(4.0, med + 3.5 * mad))
+        if updated.sum() < 100 or np.array_equal(updated, coarse_keep):
+            break
+        coarse_keep = updated
+    if coarse_keep.sum() >= 100:
+        coarse_coeff = np.linalg.lstsq(coarse_design[coarse_keep], rgb[coarse_keep], rcond=None)[0]
+        coarse_err = np.abs(coarse_design @ coarse_coeff - rgb).max(2)
+        foreign = clean & (coarse_err > 20.0)
+        if foreign.any():
+            foreign_dilated = (cv2.dilate(foreign.astype('uint8'), np.ones((3, 3), np.uint8)) > 0) & clean
+            candidate_clean = clean & ~foreign_dilated
+            if (int((candidate_clean & (x < bx)).sum()) >= min_side
+                    and int((candidate_clean & (x >= bx+bw)).sum()) >= min_side
+                    and int(candidate_clean.sum()) >= max(130, round(0.55 * int(clean.sum())))):
+                excluded_foreground_pixels = int(clean.sum() - candidate_clean.sum())
+                clean = candidate_clean
     validation = clean & ((x + 3*y) % 5 == 0)
     training = clean & ~validation
     if training.sum() < 100 or validation.sum() < 30:
@@ -56,6 +103,7 @@ def fit_gradient(source, bbox, protected, context=14):
               'bbox': list(bbox), 'context': context, 'degree': degree,
               'training_pixels': int(training.sum()), 'inlier_pixels': int(keep.sum()),
               'validation_pixels': int(validation.sum()),
+              'excluded_foreground_context_pixels': excluded_foreground_pixels,
               'validation_p95_rgb': p95,
               'validation_mae_rgb': float(errors[validation].mean()),
               'coefficients': coefficients.tolist(),

@@ -31,7 +31,7 @@ def frame_feedback(result,graph,identifier):
 
 
 def check_local(pptx, irs, directory):
-    from ..parallel_office import inspect
+    from ..parallel_office import inspect, OfficeValidationError
     from ..parallel_edit_probe import inspect_text
     from ..parallel_residual_gate import inspect_residuals
     directory = Path(directory)
@@ -39,18 +39,29 @@ def check_local(pptx, irs, directory):
     result = {'status': 'UNKNOWN', 'pptx_sha256': digest(pptx), 'office_directory': str(directory/'office')}
     try:
         with lease('office'):
-            actual = inspect(pptx, irs, directory/'office')
+            try:
+                actual = inspect(pptx, irs, directory/'office')
+            except OfficeValidationError as exc:
+                report_file = directory/'office/report.json'
+                actual = json.loads(report_file.read_text('utf8')) if report_file.is_file() else {
+                    'status': 'FAIL_APP_AUTOMATED', 'failed_object_id': exc.object_id,
+                    'reason': str(exc), 'error_type': 'OfficeValidationError',
+                }
             has_text = any(n['type'] == 'text' for ir in irs
                            for n in json.loads(Path(ir).read_text('utf8'))['nodes'])
             replacement = inspect_text(pptx, irs, directory/'replacement', include_long=False) if has_text else {
                 'status': 'NOT_APPLICABLE', 'reason': 'no native text objects'}
         residuals = [inspect_residuals(ir, directory/'office', index, directory/f'residual-{index:02d}.json')
                      for index, ir in enumerate(irs, 1)]
-        passed = (actual['status'] == 'PASS_APP_AUTOMATED'
-                  and replacement['status'] in ('PASS', 'NOT_APPLICABLE')
-                  and all(r['residual_check_status'] == 'PASS' for page in residuals for r in page))
-        result.update(status='PASS' if passed else 'REVIEW_REQUIRED', office=actual,
-                      replacements=replacement, residuals=residuals)
+        if replacement.get('status') == 'UNKNOWN':
+            result.update(error_type='RuntimeError', failure='QA_INFRASTRUCTURE_UNAVAILABLE',
+                          office=actual, replacements=replacement, residuals=residuals)
+        else:
+            passed = (actual['status'] == 'PASS_APP_AUTOMATED'
+                      and replacement['status'] in ('PASS', 'NOT_APPLICABLE')
+                      and all(r['residual_check_status'] == 'PASS' for page in residuals for r in page))
+            result.update(status='PASS' if passed else 'REVIEW_REQUIRED', office=actual,
+                          replacements=replacement, residuals=residuals)
     except Exception as exc:
         result.update(error_type=type(exc).__name__, failure='QA_INFRASTRUCTURE_UNAVAILABLE')
     write(directory/'checks.json', result)

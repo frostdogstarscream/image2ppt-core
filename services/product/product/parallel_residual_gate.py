@@ -12,6 +12,9 @@ from .materialize import digest,write
 
 def inspect_residuals(irfile,office_dir,page,output):
     irfile=Path(irfile);scene=json.loads((irfile.parent/'scene.json').read_text(encoding='utf-8'))
+    ir=json.loads(irfile.read_text(encoding='utf-8')) if irfile.is_file() else {'nodes':[]}
+    node_z={n['id']:int(n.get('z',0)) for n in ir.get('nodes',[]) if isinstance(n,dict) and 'id' in n}
+    node_bbox={n['id']:n.get('bbox') for n in ir.get('nodes',[]) if isinstance(n,dict) and 'id' in n}
     records=list(scene['selected'].values());source=np.array(Image.open(irfile.parent/'source.png').convert('RGB'));proofs={};results=[]
     for record in records:
         ref=record.get('owner_evidence')
@@ -27,6 +30,22 @@ def inspect_residuals(irfile,office_dir,page,output):
         data=proofs[identifier];mask=data['mask'].astype(bool).copy();x,y,w,h=map(int,data['restore_bbox'])
         for other,proof in proofs.items():
             if other!=identifier:mask&=~proof['mask'].astype(bool)
+        if record.get('kind') in ('asset','surface'):
+            z_self=node_z.get(identifier,0)
+            for other_rec in records:
+                oid=other_rec['id']
+                if oid==identifier:continue
+                okind=other_rec.get('kind')
+                z_other=node_z.get(oid,10**9 if okind=='text' else 0)
+                if z_other<=z_self:continue
+                obox=node_bbox.get(oid) or other_rec.get('bbox') or (other_rec.get('payload') or {}).get('bbox')
+                if not obox or len(obox)!=4:continue
+                tx,ty,tw,th=[round(v) for v in obox]
+                tx0,ty0=max(0,tx-2),max(0,ty-2)
+                tx1,ty1=min(source.shape[1],tx+tw+2),min(source.shape[0],ty+th+2)
+                if tx1>tx0 and ty1>ty0 and mask[ty0:ty1,tx0:tx1].any():
+                    # Higher-z sibling objects remain rendered above this object in PowerPoint when it is deleted.
+                    mask[ty0:ty1,tx0:tx1]=False
         local=mask[y:y+h,x:x+w];after=np.array(Image.open(deleted).convert('RGB'))
         if after.shape!=source.shape or not local.any():results.append({**base,'reason':'unverifiable size or occluded owner'});continue
         bg=data['backing_patch'].astype(float);src=source[y:y+h,x:x+w].astype(float);got=after[y:y+h,x:x+w].astype(float)

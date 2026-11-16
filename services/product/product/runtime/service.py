@@ -24,7 +24,8 @@ TOOLS += ('inspect_image', 'crop_image', 'compare_images', 'run_ocr', 'analyze_t
           'unmix_foreground', 'validate_rgba', 'list_fonts', 'fit_text_layout',
           'create_scene', 'update_scene', 'create_candidate', 'commit_candidate',
           'rollback_region', 'compile_pptx', 'run_image_script', 'run_parallel_pipeline')
-TOOLS += ('record_observation', 'list_evidence', 'get_progress')
+TOOLS += ('record_observation', 'list_evidence', 'get_progress',
+          'prepare_page_evidence', 'batch_reconstruct_page')
 
 
 class VisualReview(BaseModel):
@@ -73,6 +74,7 @@ class RuntimeService(ExplorationTools):
                 ir=json.loads(Path(page['ir']).read_text('utf8'))
                 pages.append({'page':index,'draft_texts':len(graph.text.texts),'draft_assets':len(graph.asset.objects),
                     'committed_objects':len(graph.selected),'native_texts':sum(n['type']=='text' for n in ir['nodes']),
+                    'native_shapes':sum(n['type']=='shape' for n in ir['nodes']),
                     'independent_images':sum(n['type']=='image' and n['id']!='source-plate' for n in ir['nodes'])})
             with state.db() as db:
                 recent=[json.loads(r[0]) for r in db.execute('SELECT payload FROM events ORDER BY id DESC LIMIT 12')]
@@ -88,7 +90,8 @@ class RuntimeService(ExplorationTools):
             result['recent_evidence'] = self.call('list_evidence',job_id,limit=12)['evidence']
             result['sources'] = [state.register(p, 'source') for p in sorted((state.job/'inputs').glob('*.png'))]
             request=json.loads((state.job/'request.json').read_text('utf8'))
-            shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region'} if request.get('tool_profile')=='basic' else set()
+            shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region',
+                       'prepare_page_evidence','batch_reconstruct_page'} if request.get('tool_profile')=='basic' else set()
             result['tool_catalog'] = [name for name in TOOLS if name not in shortcuts]
             result['goal'] = json.loads((state.job/'request.json').read_text('utf8')).get('goal', 'Faithful editable PPTX')
             result['budget']={'remaining_seconds':state.remaining_seconds(),
@@ -126,6 +129,18 @@ class RuntimeService(ExplorationTools):
     @staticmethod
     def graph(page):
         return SceneGraph.model_validate_json(Path(page['scene']).read_text('utf8'))
+
+    def prepare_page_evidence(self, state, current, directory, *, page, auto_create_scene=True, run_layers=True):
+        from .batch_backbone import prepare_page_evidence
+        return prepare_page_evidence(self, state, current, directory, page=page,
+                                     auto_create_scene=auto_create_scene, run_layers=run_layers)
+
+    def batch_reconstruct_page(self, state, current, directory, *, page, object_ids=None,
+                               include_assets=True, include_containers=True, use_inpaint=True, verify_office=True):
+        from .batch_backbone import batch_reconstruct_page
+        return batch_reconstruct_page(self, state, current, directory, page=page, object_ids=object_ids,
+                                      include_assets=include_assets, include_containers=include_containers,
+                                      use_inpaint=use_inpaint, verify_office=verify_office)
 
     def run_perception(self, state, current, directory):
         if current['pages']:
@@ -363,6 +378,9 @@ class RuntimeService(ExplorationTools):
             if checked.get('status') != 'PASS':
                 return {'status': 'SUBMISSION_BLOCKED', 'checks': checked, 'preview_candidate_id': candidate_id}
             return self.commit_region(state, current, directory/'commit', candidate_id=staged['id'])
+        if candidate.get('status') == 'COMMITTED':
+            return {'status': 'COMMITTED', 'already_committed': True,
+                    'object_id': candidate.get('object_id'), 'object_ids': candidate.get('object_ids', [candidate.get('object_id')])}
         if candidate['status'] != 'VALIDATED' or candidate['validation']['status'] != 'PASS':
             raise ValueError('candidate requires successful hard and actual edit checks')
         self.check_candidate(current, candidate)
@@ -391,9 +409,20 @@ class RuntimeService(ExplorationTools):
         from .compiler import compile_local as compile_pages
         from ..parallel_pipeline import effective_texts
         irs = [Path(p['ir']) for p in current['pages']]
-        with lease('compiler'):
-            artifacts = compile_pages(irs, directory/'compiled',
-                                      [effective_texts(self.graph(p), ir) for p, ir in zip(current['pages'], irs)])
+        ir_digests = [digest(ir) for ir in irs]
+        verified_bundle = current.get('last_verified_bundle')
+        if (verified_bundle and verified_bundle.get('irs') == ir_digests
+                and Path(verified_bundle.get('pptx', '')).is_file()
+                and digest(verified_bundle['pptx']) == verified_bundle.get('pptx_sha256')):
+            out_dir = directory/'compiled'
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_pptx = out_dir/'result.pptx'
+            shutil.copyfile(verified_bundle['pptx'], out_pptx)
+            artifacts = {'pptx': str(out_pptx)}
+        else:
+            with lease('compiler'):
+                artifacts = compile_pages(irs, directory/'compiled',
+                                          [effective_texts(self.graph(p), ir) for p, ir in zip(current['pages'], irs)])
         binding = {str(p): digest(p) for p in [Path(artifacts['pptx']), *irs]}
         current['composition'] = {'artifacts': artifacts, 'files': binding, 'office': {'status': 'NOT_RUN'}}
         current.pop('visual_review', None)
@@ -503,7 +532,9 @@ class RuntimeService(ExplorationTools):
         required = []
         for i, page in enumerate(current['pages'], 1):
             preview = Path(result['office_directory'])/f'page-{i:02d}-before.png'
-            required.append(state.register(page['snapshot']['path'], 'source'))
+            canonical_src = self.source(state, i)
+            src_path = canonical_src if digest(canonical_src) == page['snapshot']['source_sha256'] else page['snapshot']['path']
+            required.append(state.register(src_path, 'source'))
             required.append(state.register(preview, 'office_preview'))
             images, _ = panels(page['snapshot']['path'], preview, page['ir'],
                                result['office_directory'], i, directory/f'panels-{i:02d}')
@@ -531,14 +562,16 @@ class RuntimeService(ExplorationTools):
         composition = self.composition(current)
         if composition['office']['status'] != 'PASS':
             raise ValueError('actual editing and residual evidence required')
-        required = {r['id'] for r in composition['required_evidence']}
-        if not required <= set(review.evidence_ids):
-            raise ValueError('review omitted required source, preview or edit evidence')
-        unseen = [identifier for identifier in review.evidence_ids
-                  if not state.evidence(identifier)[1]['provided_to_agent']]
+        supplied_refs = {identifier: state.evidence(identifier)[1] for identifier in review.evidence_ids}
+        unseen = [identifier for identifier, ref in supplied_refs.items() if not ref['provided_to_agent']]
         if unseen:
             raise ValueError('evidence has not been provided to Agent: '+', '.join(unseen)+
                              '; use get_evidence to receive the actual content before review')
+        supplied_role_shas = {(ref['role'], ref['sha256']) for ref in supplied_refs.values()}
+        missing = [r['id'] for r in composition['required_evidence']
+                   if r['id'] not in supplied_refs and (r['role'], r['sha256']) not in supplied_role_shas]
+        if missing:
+            raise ValueError('review omitted required source, preview or edit evidence: '+', '.join(missing))
         current['visual_review'] = {**review.model_dump(), 'backend': 'opencode',
                                     'composition_sha256': key(composition),
                                     'status': 'PASS' if review.passed else 'REVIEW_REQUIRED'}

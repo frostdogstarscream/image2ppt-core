@@ -44,7 +44,7 @@ def receive(pipe_name, root):
     if configuration.get('agent_provider')=='opencode_go':
         os.environ.update(IMAGE2PPT_AGENT_PROVIDER='opencode_go',
             IMAGE2PPT_AGENT_API_KEY=configuration['agent_api_key'],
-            IMAGE2PPT_AGENT_MODEL=configuration.get('agent_model','qwen3.8-flash'))
+            IMAGE2PPT_AGENT_MODEL=configuration.get('agent_model','qwen3.8-max'))
     else:
         os.environ['MOMA_API_KEY']=configuration['moma']
     sys.path.insert(0,str(app/'services/product'))

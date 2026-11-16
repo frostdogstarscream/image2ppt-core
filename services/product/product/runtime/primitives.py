@@ -45,8 +45,9 @@ def merge_scene_evidence(graph,proposal):
 
 
 def bind_exact_ocr_members(text, ocr):
-    """Resolve only unique exact source wording with corroborating OCR geometry."""
+    """Resolve unique exact source wording or decorative-affix sub-span with corroborating OCR geometry."""
     from ..contracts import intersection
+    from ..parallel_fusion import is_decorative_subspan
     result=text.model_copy(deep=True)
     normalize=lambda value:value.replace(' ','').replace('\n','')
     for item in result.texts:
@@ -54,12 +55,17 @@ def bind_exact_ocr_members(text, ocr):
         matches=[row['id'] for row in ocr.get('lines',[]) if row['score']>=.85
                  and normalize(row['text'])==normalize(item.text)
                  and intersection(row['bbox'],item.bbox)>=.5*min(row['bbox'][2]*row['bbox'][3],item.bbox[2]*item.bbox[3])]
+        if not matches:
+            matches=[row['id'] for row in ocr.get('lines',[]) if row['score']>=.85
+                     and is_decorative_subspan(item,row)
+                     and intersection(row['bbox'],item.bbox)>=.5*(item.bbox[2]*item.bbox[3])]
         if len(matches)==1:result.members[item.id]=matches
     return result
 
 
 def text_geometry_conflicts(text,ocr):
     """Corroborate erase search scopes against complete independent text extents."""
+    from ..parallel_fusion import is_decorative_subspan
     lines={row['id']:row for row in ocr.get('lines',[])}
     conflicts=set()
     for item in text.texts:
@@ -70,6 +76,8 @@ def text_geometry_conflicts(text,ocr):
         right=max(b[0]+b[2] for b in rows);bottom=max(b[1]+b[3] for b in rows)
         peers=[t for t in text.texts if len(members)==1 and text.members.get(t.id)==members]
         group=peers if len(peers)>1 else [item]
+        if len(members)==1 and len(group)==1 and is_decorative_subspan(item,lines[members[0]]):
+            continue
         gx=min(t.bbox[0] for t in group);gy=min(t.bbox[1] for t in group)
         gr=max(t.bbox[0]+t.bbox[2] for t in group);gb=max(t.bbox[1]+t.bbox[3] for t in group)
         x,y,w,h=item.bbox
@@ -452,7 +460,12 @@ class PrimitiveTools:
         for i, record in enumerate(records):
             path = directory/f'lower-{i}.png'
             Image.fromarray(record.image).save(path)
-            result.append({'image': self.artifact(state, path, 'background_candidate'), 'provenance': record.provenance})
+            bg_ref = self.artifact(state, path, 'background_candidate')
+            current.setdefault('background_contexts', {})[bg_ref['id']] = {
+                'page': page, 'object_id': object_id, 'context_width': 14,
+                'origin': 'layerd', 'provenance': record.provenance,
+                'scene_sha256': digest(row['scene'])}
+            result.append({'image': bg_ref, 'provenance': record.provenance})
         return {'backgrounds': result}
 
     def inpaint_background(self, state, current, directory, *, mask_id, page=None, object_id=None, evidence_id=None):
@@ -472,7 +485,14 @@ class PrimitiveTools:
         raw = service(source, mask)
         Image.fromarray(raw).save(directory/'raw-inpaint.png')
         write(directory/'service-receipt.json', service.receipt)
-        return {'status': 'COMPUTED', 'background': self.artifact(state, directory/'raw-inpaint.png', 'background_candidate'),
+        bg_ref = self.artifact(state, directory/'raw-inpaint.png', 'background_candidate')
+        if page is not None and object_id is not None:
+            row = self.page(current, page)
+            current.setdefault('background_contexts', {})[bg_ref['id']] = {
+                'page': page, 'object_id': object_id, 'context_width': 14,
+                'origin': 'big-lama', 'provenance': service.receipt,
+                'scene_sha256': digest(row['scene'])}
+        return {'status': 'COMPUTED', 'background': bg_ref,
                 'ownership_authority': False}
 
     def create_candidate(self, state, current, directory, *, page, object_id, mask_id, background_id,frame_minimum=None):
@@ -518,7 +538,8 @@ class PrimitiveTools:
              'object_id': object_id, 'source_sha256': graph.source_sha256,
              'scene_graph_sha256': key(graph.model_dump()), 'scene_sha256': key(graph.model_dump()),
              'provenance': {'mask_evidence': mask_id, 'background_evidence': background_id,
-                            'background_context_width':context_width}})
+                            'background_context_width': context_width,
+                            **({'background_origin': sampling['origin']} if sampling.get('origin') else {})}})
         candidate = {'id': 'c-'+key(str(directory.relative_to(state.job)))[:24], 'page': page, 'object_id': object_id,
                      'kind': 'text', 'status': 'REVIEW_REQUIRED', 'trial': str(directory/'trial'),
                      'parent_ir_sha256': digest(row['ir']), 'strategy': 'agent_composed',

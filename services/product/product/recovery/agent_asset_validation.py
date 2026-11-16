@@ -24,7 +24,7 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
     Existing product preflight and source-owner thresholds are reused. Office
     and independent visual approval are subsequent operations.
     """
-    from .asset_retry import protected_for_asset, complete_source_halo
+    from .asset_retry import effective_asset_inputs, complete_source_halo
     if baseline_directory is None:raise ValueError('asset tool needs a host-bound baseline')
     baseline=Path(baseline_directory).resolve()
     candidate=ReconstructionCandidate.model_validate(_load(directory/'candidate.json'))
@@ -53,9 +53,9 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
         raise ValueError('asset baseline source binding mismatch')
     if payload.get('baseline_scene_sha256')!=digest(baseline/'scene.json'):
         raise ValueError('asset baseline scene binding mismatch')
-    source=np.array(Image.open(source_file).convert('RGB'))
+    raw_source=np.array(Image.open(source_file).convert('RGB'))
     saved=np.array(Image.open(directory/'source.png').convert('RGB'))
-    if not np.array_equal(saved,source):raise ValueError('asset candidate source pixels changed')
+    if not np.array_equal(saved,raw_source):raise ValueError('asset candidate source pixels changed')
     with np.load(directory/'pixels.npz',allow_pickle=False) as data:
         if (data['bbox'].shape!=(4,) or data['rgba_bbox'].shape!=(4,)
                 or not np.issubdtype(data['bbox'].dtype,np.integer)
@@ -64,12 +64,12 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
         mask=data['mask'];patch=data['patch'];box=data['bbox'].astype(int).tolist()
         rgba=data['rgba'];rgba_box=data['rgba_bbox'].astype(int).tolist()
         seed=data['seed_rgba'];saved_protected=data['protected']
-    if (mask.dtype!=bool or mask.shape!=source.shape[:2] or not mask.any()
+    if (mask.dtype!=bool or mask.shape!=raw_source.shape[:2] or not mask.any()
             or rgba.dtype!=np.uint8 or patch.dtype!=np.uint8
-            or seed.dtype!=np.uint8 or seed.shape!=(*source.shape[:2],4)):
+            or seed.dtype!=np.uint8 or seed.shape!=(*raw_source.shape[:2],4)):
         raise ValueError('invalid asset pixel evidence')
     strategy=payload.get('protection_strategy','source-halo')
-    protected=protected_for_asset(scene,baseline,object_id,background_context=strategy!='source-halo')
+    work_source,protected,staged_text_mask=effective_asset_inputs(scene,baseline,object_id,background_context=strategy!='source-halo')
     if not np.array_equal(protected,saved_protected) or (mask&protected).any():
         raise ValueError('asset candidate altered protected peers')
     surface=scene.surface.model_copy(deep=True)
@@ -77,7 +77,7 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
     if layer_directory is None or payload.get('layer_manifest_sha256')!=digest(Path(layer_directory)/'manifest.json'):
         raise ValueError('asset LayerD input is not bound to the host configuration')
     layers=load_page(layer_directory)
-    if not np.array_equal(np.array(Image.open(layers.source_path).convert('RGB')),source):
+    if not np.array_equal(np.array(Image.open(layers.source_path).convert('RGB')),raw_source):
         raise ValueError('asset LayerD evidence belongs to different source pixels')
     sam=None
     if strategy=='sam':
@@ -91,21 +91,21 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
             raise ValueError('SAM model provenance differs from pinned model')
         sam,error=load_sam(evidence['directory'],obj,scene.source_sha256,digest(evidence['plan']),tuple(scene.image_size),'sam3',individual=True)
         if error:raise ValueError(error)
-    seeds=asset_candidates(obj,source,layers,protected,(),'auto',sam=sam,surface=surface)
+    seeds=asset_candidates(obj,work_source,layers,protected,(),'auto',sam=sam,surface=surface)
     if strategy=='sam':
         from .asset_retry import sam_source_candidates
         source_seeds=list(seeds)
         seeds=[(rgba,meta) for rgba,meta in seeds if meta['method']=='sam3']
-        try:seeds.extend(sam_source_candidates(obj,source,protected,surface,sam,source_seeds))
+        try:seeds.extend(sam_source_candidates(obj,work_source,protected,surface,sam,source_seeds))
         except ValueError:pass
     seed_metadata=next((metadata for proposal,metadata in seeds if np.array_equal(seed,proposal)),None)
     if seed_metadata is None:
         raise ValueError('asset segmentation seed lacks original LayerD/source evidence')
     from .asset_retry import localized_owner_object
     owner_obj=localized_owner_object(obj,seed_metadata)
-    completed,halo=complete_source_halo(owner_obj,seed,source,protected,surface)
+    completed,halo=complete_source_halo(owner_obj,seed,work_source,protected,surface)
     x,y,w,h=rgba_box
-    if (min(x,y)<0 or min(w,h)<=0 or x+w>source.shape[1] or y+h>source.shape[0]
+    if (min(x,y)<0 or min(w,h)<=0 or x+w>work_source.shape[1] or y+h>work_source.shape[0]
             or rgba.shape!=(h,w,4)):
         raise ValueError('asset RGBA scope is invalid')
     full=np.zeros_like(completed);full[y:y+h,x:x+w]=rgba
@@ -118,26 +118,32 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
         raise ValueError('asset PNG hash mismatch')
     if not np.array_equal(np.array(Image.open(directory/filename).convert('RGBA')),rgba):
         raise ValueError('asset PNG pixels were resampled or changed')
-    owner_box,backing,owner,owner_proof=source_owner(owner_obj,full,source,protected,surface)
-    if owner_box!=box or not np.array_equal(owner,mask):
+    owner_box,backing,full_owner,owner_proof=source_owner(owner_obj,full,work_source,protected,surface)
+    expected_mask=full_owner&~staged_text_mask
+    if owner_box!=box or not np.array_equal(expected_mask,mask):
         raise ValueError('asset owner closure differs from independent source components')
     rx,ry,rw,rh=box;local=mask[ry:ry+rh,rx:rx+rw]
+    unrepresented=local&~(full[ry:ry+rh,rx:rx+rw,3]>0)
+    if int(unrepresented.sum())>max(48,int(0.12*mask.sum())):
+        unrep_delta=np.abs(work_source[ry:ry+rh,rx:rx+rw][unrepresented].astype(float)-backing[unrepresented].astype(float)).max(1)
+        if float(np.percentile(unrep_delta,90))>12.0:
+            raise ValueError('candidate omits visible badge or fill owned by source closure')
     if 'background_selection' in payload:
         from .asset_retry import asset_background
-        expected,background_selection,chosen_background=asset_background(source,box,mask,protected,layer_directory,backing)
+        expected,background_selection,chosen_background=asset_background(work_source,box,mask,protected,layer_directory,backing,raw_source=raw_source)
         if background_selection!=payload['background_selection']:
             raise ValueError('asset background route differs from independent evidence')
     else:
-        expected=source[ry:ry+rh,rx:rx+rw].copy();expected[local]=backing[local]
+        expected=work_source[ry:ry+rh,rx:rx+rw].copy();expected[local]=backing[local]
     if not np.array_equal(expected,patch):raise ValueError('asset patch changed pixels beyond the proven owner')
-    backing_rgba,error,_=backing_from_evidence(source,rgba_box,protected,surface)
+    backing_rgba,error,_=backing_from_evidence(work_source,rgba_box,protected,surface)
     if payload.get('background_selection',{}).get('method')=='layerd_lower':
         backing_rgba=chosen_background[y-ry:y-ry+h,x-rx:x-rx+w]
     alpha=rgba[...,3:4]/255
     reconstructed=rgba[...,:3]*alpha+backing_rgba*(1-alpha)
     visible=rgba[...,3]>0
     if not visible.any():raise ValueError('asset is fully transparent')
-    p95=float(np.percentile(np.abs(reconstructed-source[y:y+h,x:x+w]).max(2)[visible],95))
+    p95=float(np.percentile(np.abs(reconstructed-work_source[y:y+h,x:x+w]).max(2)[visible],95))
     if not np.isfinite(error) or error>6 or p95>24:
         raise ValueError('asset failed existing independent background/recomposition gates')
     baseline_scene=_load(baseline/'scene.json')
@@ -147,8 +153,15 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
             raise ValueError('baseline owner proof changed')
         with np.load(file,allow_pickle=False) as data:
             if (mask&data['mask'].astype(bool)).any():raise ValueError('asset overlaps a verified old owner')
-    source_crop=source[y:y+h,x:x+w];written=source.copy()
+    source_crop=work_source[y:y+h,x:x+w];written=work_source.copy()
     written[ry:ry+rh,rx:rx+rw][local]=patch[local]
+    overlap_under_text=full_owner&(full[...,3]>0)&staged_text_mask
+    if overlap_under_text.any():
+        card_fill=chosen_background if payload.get('background_selection',{}).get('method')=='layerd_lower' else backing
+        np.savez_compressed(output/'under-text-backing.npz',
+                            mask=overlap_under_text,card_rgb=card_fill,bbox=np.array(box,dtype=int))
+        ov_local=overlap_under_text[ry:ry+rh,rx:rx+rw]
+        written[ry:ry+rh,rx:rx+rw][ov_local]=card_fill[ov_local]
     Image.fromarray(source_crop).save(output/'source-region.png')
     Image.fromarray(written[y:y+h,x:x+w]).save(output/'deleted-region.png')
     checker=np.indices((h,w)).sum(0)//8%2

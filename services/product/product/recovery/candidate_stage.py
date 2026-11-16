@@ -132,7 +132,8 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
         reference,fit_report=fit_gradient(source,box,context_protected,context=context_width)
     if saved['method'] == 'gradient' and not np.array_equal(raw, reference):
         raise ValueError('gradient raw backing binding mismatch')
-    report, written, _ = assess_trial(source, wanted, raw, protected, box, reference, fit_report, {})
+    report, written, _ = assess_trial(source, wanted, raw, protected, box, reference, fit_report,
+                                      {'method': saved['method'], 'provenance': saved.get('provenance')})
     if report['status'] != 'PRECHECK_PASS':
         raise ValueError('background recheck failed')
     if not np.array_equal(written, np.array(Image.open(trial_directory/'written_back.png').convert('RGB'))):

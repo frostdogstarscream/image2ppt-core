@@ -47,7 +47,9 @@ DESCRIPTION.update({
     'validate_candidate':'For exploratory candidates, prepare native preview artifacts. Legacy staged candidates retain formal submission validation.',
     'validate_office':'With candidate_id, return actual preview edit diagnostics without approval. With no candidate_id, validate final composition.',
     'record_observation':'Record Agent findings, uncertainty and next action on arbitrary task evidence, including failed experiments.',
-    'commit_candidate':'Submit a candidate through source-owner, content and actual-edit safety checks. Exploratory preview approval never bypasses these checks.'})
+    'commit_candidate':'Submit a candidate through source-owner, content and actual-edit safety checks. Exploratory preview approval never bypasses these checks.',
+    'prepare_page_evidence':'Run deterministic local OCR, optional LayerD decomposition, pixel-measured foreground color/size extraction, decorative affix splitting, and page-level style clustering in one step. Initializes the RESOLVED draft scene by default.',
+    'batch_reconstruct_page':'Reconstruct all (or selected) uncommitted RESOLVED scene objects in parallel, stage source-safe candidates, run a single batch PowerPoint verification with automatic transparent-frame overflow repair, commit verified objects, and return a compact failed_regions digest for targeted repair.'})
 
 
 def schemas():
@@ -83,7 +85,11 @@ def schemas():
         'create_candidate': {**region, 'mask_id': string, 'background_id': string},
         'commit_candidate': {'candidate_id': string},
         'rollback_region': {'page': page, 'object_ids': strings, 'reason': string},
-        'run_image_script': {'script': string, 'inputs': strings}})
+        'run_image_script': {'script': string, 'inputs': strings},
+        'prepare_page_evidence': {'page': page, 'auto_create_scene': {'type': 'boolean'}, 'run_layers': {'type': 'boolean'}},
+        'batch_reconstruct_page': {'page': page, 'object_ids': strings, 'include_assets': {'type': 'boolean'},
+                                   'include_containers': {'type': 'boolean'},
+                                   'use_inpaint': {'type': 'boolean'}, 'verify_office': {'type': 'boolean'}}})
     fields['fit_background'].update(evidence_id=string,bbox={'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},protected_id=string)
     fields['fit_background']['context_width']={'type':'integer','minimum':8,'maximum':128,
         'description':'Unprotected source-strip sampling width in pixels. A changed width supplies different background evidence. All original ownership and fit validation thresholds still apply.'}
@@ -147,6 +153,8 @@ def schemas():
             required.remove('layout_id')
         if name == 'crop_image':
             required.remove('scale')
+        if name in ('prepare_page_evidence', 'batch_reconstruct_page'):
+            required = ['job_id', 'page']
         alternatives={}
         if name=='fit_background':alternatives={'anyOf':[{'required':['page','object_id']},{'required':['evidence_id','bbox']}]}
         if name=='complete_text_mask':alternatives={'anyOf':[{'required':['page','object_id','background_id']},{'required':['evidence_id','original_mask_id','background_id','bbox','glyph_height']}]}
@@ -170,7 +178,8 @@ def create_server(root, bound_job=None):
         if bound_job:
             request=json.loads((service.state(bound_job).job/'request.json').read_text('utf8'))
             profile=request.get('tool_profile','all')
-        shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region'} if profile=='basic' else set()
+        shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region',
+                   'prepare_page_evidence','batch_reconstruct_page'} if profile=='basic' else set()
         return [tool for tool in schemas() if tool.name not in shortcuts]
 
     @server.list_tools()

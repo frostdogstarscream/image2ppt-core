@@ -46,17 +46,30 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
     np.savez_compressed(directory/'mask-evidence.npz',**completion.evidence,**completion.masks)
     for name,mask in completion.evidence.items():
         Image.fromarray(mask[by:by+bh,bx:bx+bw].astype('uint8')*255).save(directory/(name+'.png'))
-    if completion.report['unassigned_contrast_pixels']:
+    delta_ref = np.abs(source.astype(float)-reference.astype(float)).max(2)
+    unassigned_mask = completion.evidence['unknown'] & (delta_ref > 6)
+    unassigned_px = int(unassigned_mask.sum())
+    unassigned_peak = float(delta_ref[unassigned_mask].max()) if unassigned_px else 0.0
+    mild_interior_nonplanar = (
+        unassigned_px > 0
+        and bool(layer_directory or inpaint)
+        and (unassigned_peak <= 22.0 or (unassigned_px <= 4 and unassigned_peak <= 16.0))
+    )
+    if fit['validation_p95_rgb'] <= 3 and unassigned_px and not mild_interior_nonplanar:
         raise RecoveryBlocked('MASK_INCOMPLETE','visible unassigned signal blocks repair')
     # Prefer the smallest complete legal mask. Do not spend a renderer trial on
     # the original mask when known AA/stroke pixels would necessarily remain.
-    signal = (np.abs(source.astype(float)-reference.astype(float)).max(2)>6)
+    signal = (delta_ref > 6)
     scope = np.zeros(source.shape[:2],bool);scope[by:by+bh,bx:bx+bw]=True
-    mask_name = next(name for name,mask in completion.masks.items()
-                     if not (signal & scope & ~protected & ~mask).any())
+    use_planar = (fit['validation_p95_rgb'] <= 3 and not mild_interior_nonplanar)
+    if use_planar:
+        mask_name = next(name for name,mask in completion.masks.items()
+                         if not (signal & scope & ~protected & ~mask).any())
+    else:
+        if not layer_directory and not inpaint:
+            raise RecoveryBlocked('INSUFFICIENT_CONTEXT','no trusted continuous background reference; expensive tools cannot repair that evidence')
+        mask_name = 'semantic_completion'
     mask = completion.masks[mask_name]
-    if fit['validation_p95_rgb']>3:
-        raise RecoveryBlocked('INSUFFICIENT_CONTEXT','no trusted continuous background reference; expensive tools cannot repair that evidence')
     records=[];routes=[];failures=[]
     limit = int(budget.limits['region_candidates']) if budget else 2
     if completion.report['counts']['possible_text']:
@@ -81,18 +94,22 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
             try:
                 from .diagnostics import assess_trial
                 for index,bg in enumerate(lower_backgrounds(source,layer_directory,mask)):
-                    assessment,_,_=assess_trial(source,mask,bg.image,protected,box,reference,fit,{})
-                    routes.append({'tool':'layerd-'+str(index),'checks':assessment['checks'],
+                    method_name='layerd-'+str(index)
+                    assessment,_,_=assess_trial(source,mask,bg.image,protected,box,reference,fit,{'method':method_name,'provenance':bg.provenance})
+                    routes.append({'tool':method_name,'checks':assessment['checks'],
                                    'decision':'USE' if assessment['status']=='PRECHECK_PASS' else 'REJECT_LOWER_EVIDENCE'})
                     if assessment['status']=='PRECHECK_PASS':
-                        yield save('layerd-'+str(index),bg.image,bg.provenance)
+                        yield save(method_name,bg.image,bg.provenance)
                         if len(records)>=limit:return
                         break
             except (ValueError,OSError) as exc:
                 failures.append({'stage':'layerd','code':getattr(exc,'code','BACKGROUND_REPAIR_FAILED')})
-        routes.append({'tool':'gradient','reason':'source-context continuous fit','validation_p95_rgb':fit['validation_p95_rgb']})
-        yield save('gradient',reference,{'fit':fit})
-        if len(records)>=limit:return
+        if use_planar:
+            routes.append({'tool':'gradient','reason':'source-context continuous fit','validation_p95_rgb':fit['validation_p95_rgb']})
+            yield save('gradient',reference,{'fit':fit})
+            if len(records)>=limit:return
+        else:
+            routes.append({'tool':'gradient','decision':'SKIP_NONPLANAR_CONTEXT','validation_p95_rgb':fit['validation_p95_rgb']})
         if inpaint:
             routes.append({'tool':'big-lama','reason':'earlier candidate rejected by consumer or local gates'})
             try:

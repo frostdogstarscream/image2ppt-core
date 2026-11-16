@@ -16,8 +16,8 @@ from ..parallel_regions import regions
 from ..parallel_store import key
 
 
-def protected_for_asset(graph, baseline_directory, object_id=None, *, background_context=False, evidence=None):
-    """Reconstruct conservative peer protection from hash-bound host evidence."""
+def effective_asset_inputs(graph, baseline_directory, object_id=None, *, background_context=False, evidence=None):
+    """Return (work_source, protected, staged_text_mask) from hash-bound baseline evidence."""
     baseline=Path(baseline_directory).resolve()
     if digest(baseline/'source.png')!=graph.source_sha256:
         raise ValueError('baseline source binding mismatch')
@@ -25,33 +25,59 @@ def protected_for_asset(graph, baseline_directory, object_id=None, *, background
     if digest(baseline/'ownership.npz')!=ownership['map_sha256']:
         raise ValueError('baseline ownership map changed')
     with np.load(baseline/'ownership.npz',allow_pickle=False) as data:
-        protected=(data['ownership']==1)|data['uncertain_text']
-    if protected.shape!=tuple(reversed(graph.image_size)):
+        raw_text_protected=(data['ownership']==1)|data['uncertain_text']
+    if raw_text_protected.shape!=tuple(reversed(graph.image_size)):
         raise ValueError('invalid baseline ownership dimensions')
     baseline_scene=json.loads((baseline/'scene.json').read_text('utf8'))
     if baseline_scene['source_sha256']!=graph.source_sha256:
         raise ValueError('baseline scene source changed')
-    for record in baseline_scene['selected'].values():
+    source=np.array(Image.open(baseline/'source.png').convert('RGB'))
+    size=tuple(graph.image_size)
+    staged_text_mask=np.zeros(raw_text_protected.shape,bool)
+    cleared_text_scope=np.zeros(raw_text_protected.shape,bool)
+    other_owners=np.zeros(raw_text_protected.shape,bool)
+    text_by_id={t.id:t for t in graph.text.texts}
+    for identifier,record in baseline_scene['selected'].items():
         proof=record['owner_evidence']
         file=(baseline/proof['file']).resolve()
         if not file.is_relative_to(baseline) or digest(file)!=proof['sha256']:
             raise ValueError('stable owner proof changed')
         with np.load(file,allow_pickle=False) as data:
             mask=data['mask']
-        if mask.dtype!=bool or mask.shape!=protected.shape:
+        if mask.dtype!=bool or mask.shape!=raw_text_protected.shape:
             raise ValueError('invalid stable owner mask')
-        protected|=mask
+        if record.get('kind')=='text' and graph.ownership.get(identifier)=='RESOLVED' and identifier in text_by_id:
+            staged_text_mask|=mask
+            cleared_text_scope|=mask|rectangle(text_by_id[identifier].bbox,size,pad=4)
+            src_def_box=(record.get('source_text_definition') or {}).get('bbox')
+            if src_def_box:
+                cleared_text_scope|=rectangle(src_def_box,size,pad=4)
+        else:
+            other_owners|=mask
+    protected=(raw_text_protected&~cleared_text_scope)|other_owners
     for text in graph.text.texts:
-        protected|=rectangle(text.bbox,tuple(graph.image_size))
-    classified={};source=None;surfaces={}
+        if text.id in baseline_scene['selected'] and baseline_scene['selected'][text.id].get('kind')=='text':
+            continue
+        protected|=rectangle(text.bbox,size)
+    work_source=source.copy()
+    if staged_text_mask.any():
+        rb=baseline_scene.get('raster_backing') or {}
+        plate_file=(baseline/rb.get('path','source-plate.png')).resolve()
+        if not plate_file.is_relative_to(baseline) or not plate_file.is_file() or digest(plate_file)!=rb.get('sha256'):
+            raise ValueError('baseline raster backing changed')
+        plate_rgb=np.array(Image.open(plate_file).convert('RGB'))
+        if plate_rgb.shape!=source.shape:
+            raise ValueError('baseline raster backing dimensions mismatch')
+        work_source[staged_text_mask]=plate_rgb[staged_text_mask]
+    classified={};surfaces={}
     if background_context:
         from ..peer_evidence import roles
-        classified=roles(graph);source=np.array(Image.open(baseline/'source.png').convert('RGB'))
+        classified=roles(graph)
         surfaces={s.id:s for s in graph.surface.shapes}
     target=next((a for a in graph.asset.objects if a.id==object_id),None)
     if object_id is not None:
         for peer in graph.asset.objects:
-            if peer.id==object_id:continue
+            if peer.id==object_id or peer.id in baseline_scene['selected']:continue
             verified=False
             if background_context and classified[peer.id]['role']=='BACKGROUND_PANEL_CANDIDATE':
                 from ..peer_evidence import panel_evidence
@@ -59,13 +85,19 @@ def protected_for_asset(graph, baseline_directory, object_id=None, *, background
                 for surface_id in classified[peer.id]['surface_ids']:
                     surface=surfaces[surface_id]
                     if not intersection(surface.bbox,target.bbox):continue
-                    backing,proof=panel_evidence(peer,surface,graph,source)
+                    backing,proof=panel_evidence(peer,surface,graph,work_source)
                     if backing is not None:
                         verified=True
                         if evidence is not None:evidence.append({'object_id':peer.id,'surface_id':surface_id,**proof,
                             'authority':'read-only backing context; PNG and source owner independently rechecked'})
                         break
-            if not verified:protected|=rectangle(peer.bbox,tuple(graph.image_size))
+            if not verified:protected|=rectangle(peer.bbox,size)
+    return work_source,protected,staged_text_mask
+
+
+def protected_for_asset(graph, baseline_directory, object_id=None, *, background_context=False, evidence=None):
+    """Reconstruct conservative peer protection from hash-bound host evidence."""
+    _,protected,_=effective_asset_inputs(graph,baseline_directory,object_id,background_context=background_context,evidence=evidence)
     return protected
 
 
@@ -87,8 +119,8 @@ def complete_source_halo(obj, seed_rgba, source, protected, surface):
             or seed_rgba.shape!=(*source.shape[:2],4)
             or protected.dtype!=bool or protected.shape!=source.shape[:2]):
         raise ValueError('invalid source-halo evidence arrays')
-    if obj.kind!='icon' or obj.text_policy!='exclude_independent_text':
-        raise ValueError('bounded source-halo evidence requires an independent icon')
+    if obj.kind not in ('icon','logo','illustration','decoration'):
+        raise ValueError('bounded source-halo evidence requires an independent graphic object')
     size=source.shape[1::-1]
     semantic=rectangle(obj.bbox,size)
     for part in obj.parts:
@@ -98,7 +130,7 @@ def complete_source_halo(obj, seed_rgba, source, protected, surface):
         raise ValueError('seed Alpha is empty or conflicts with a peer')
     window=rectangle(bounds(semantic|support),size,pad=8)
     x,y,width,height=bounds(window)
-    if width*height>256*256:
+    if width*height>960*960:
         raise ValueError('source-halo evidence scope is too large')
     backing,error,background=backing_from_evidence(source,[x,y,width,height],protected,surface)
     if not np.isfinite(error) or error>6:
@@ -117,6 +149,10 @@ def complete_source_halo(obj, seed_rgba, source, protected, surface):
     count,components,stats,_=cv2.connectedComponentsWithStats(missing.astype('uint8'),8)
     additions=np.zeros_like(missing)
     rows=[]
+    is_clean_illustration=(obj.kind=='illustration' and error<=4.0)
+    max_comp_pixels=256 if is_clean_illustration else 48
+    max_comp_peak=28.0 if is_clean_illustration else 14.0
+    max_comp_extent=28.0 if is_clean_illustration else 4.0
     for component in range(1,count):
         mask=components==component
         if not (mask&local_semantic).any():continue
@@ -125,14 +161,16 @@ def complete_source_halo(obj, seed_rgba, source, protected, surface):
         extent=float(distance[mask].max())
         # Each entire source component gets a decision. No clipped component or
         # bounding rectangle may authorize source deletion.
-        accepted=(pixels<=32 and peak<=12 and extent<=4
+        accepted=(pixels<=max_comp_pixels and peak<=max_comp_peak and extent<=max_comp_extent
                   and not (mask&local_protected).any() and not (mask&~local_semantic).any())
         rows.append({'pixels':pixels,'max_source_contrast':peak,'max_alpha_distance':extent,
                      'bbox':[int(stats[component,0]+x),int(stats[component,1]+y),
                              int(stats[component,2]),int(stats[component,3])],
                      'accepted':bool(accepted)})
         if accepted:additions|=mask
-    if additions.sum()>64:
+    max_additions=(min(2400,max(128,(width*height)//80)) if is_clean_illustration
+                   else min(640,max(64,(width*height)//350)))
+    if additions.sum()>max_additions:
         raise ValueError('source-halo additions exceed the bounded evidence budget')
     from reconstruction import extract_rgba
     supplemental=extract_rgba(crop,backing,additions)
@@ -254,13 +292,18 @@ def localized_owner_object(obj, metadata):
     return obj.model_copy(update={'bbox':box,'parts':[obj.parts[0].model_copy(update={'bbox':box})]})
 
 
-def asset_background(source, box, mask, protected, layers, fitted):
+def asset_background(source, box, mask, protected, layers, fitted, *, raw_source=None):
     """Reuse the existing lower-background adapter after source ownership is proved."""
     from .layerd_adapter import lower_backgrounds
     from .background_adapter import generate_background_candidates
     x,y,width,height=box
+    local=mask[y:y+height,x:x+width]
     reports=[]
-    for lower in lower_backgrounds(source,layers,mask):
+    for lower in lower_backgrounds(raw_source if raw_source is not None else source,layers,mask):
+        lower_crop=lower.image[y:y+height,x:x+width]
+        if local.any() and float(np.percentile(np.abs(lower_crop[local].astype(float)-fitted[local].astype(float)).max(1),95))>4.0:
+            reports.append({'provenance':lower.provenance,'issues':['LOWER_RETAINS_BADGE_OR_SHADOW_FILL']})
+            continue
         candidates,issues=generate_background_candidates(source,mask,protected,
             lower_rgb=lower.image,lower_provenance_verified=True)
         reports.append({'provenance':lower.provenance,'issues':issues})
@@ -268,7 +311,6 @@ def asset_background(source, box, mask, protected, layers, fitted):
             return candidates[0].image[y:y+height,x:x+width].copy(),{
                 'method':'layerd_lower','metrics':candidates[0].diagnostics,'lower_hypotheses':reports},lower.image[y:y+height,x:x+width]
     patch=source[y:y+height,x:x+width].copy()
-    local=mask[y:y+height,x:x+width]
     patch[local]=fitted[local]
     return patch,{'method':'source_verified_continuous_fit','lower_hypotheses':reports,
                   'big_lama_calls':0},fitted
@@ -297,9 +339,9 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
         result['reason']='source ownership or dependency closure is unresolved'
         write(output/'result.json',result)
         return result
-    source=np.array(Image.open(source_file).convert('RGB'))
+    raw_source=np.array(Image.open(source_file).convert('RGB'))
     protection=[]
-    protected=protected_for_asset(graph,baseline,object_id,background_context=strategy!='source-halo',evidence=protection)
+    work_source,protected,staged_text_mask=effective_asset_inputs(graph,baseline,object_id,background_context=strategy!='source-halo',evidence=protection)
     write(output/'protection.json',{'strategy':strategy,'relations':protection,'protected_pixels':int(protected.sum()),'mask_sha256':array_sha(protected)})
     np.savez_compressed(output/'protection.npz',mask=protected)
     surface=resolved_surface(graph)
@@ -312,36 +354,43 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
         if error:raise ValueError(error)
         sam_binding={'directory':str(Path(sam_directory).resolve()),'plan':str(Path(sam_plan).resolve()),
             'files':{str(p.resolve()):digest(p) for p in [Path(sam_plan),*[p for p in Path(sam_directory).iterdir() if p.is_file()]]}}
-    seeds=asset_candidates(obj,source,layers,protected,(),'auto',sam=sam,surface=surface)
+    seeds=asset_candidates(obj,work_source,layers,protected,(),'auto',sam=sam,surface=surface)
     if strategy=='sam':
         source_seeds=list(seeds)
         seeds=[(seed,meta) for seed,meta in seeds if meta['method']=='sam3']
-        try:seeds.extend(sam_source_candidates(obj,source,protected,surface,sam,source_seeds))
+        try:seeds.extend(sam_source_candidates(obj,work_source,protected,surface,sam,source_seeds))
         except ValueError as exc:result['sam_source_failure']=str(exc)
     for index,(seed,metadata) in enumerate(seeds):
         folder=output/('candidate-'+str(index));folder.mkdir()
         attempt={'seed_method':metadata['method'],'seed_rgba_sha256':array_sha(seed)}
         try:
             owner_obj=localized_owner_object(obj,metadata)
-            rgba,segmentation=complete_source_halo(owner_obj,seed,source,protected,surface)
+            rgba,segmentation=complete_source_halo(owner_obj,seed,work_source,protected,surface)
             write(folder/'segmentation.json',segmentation)
-            restore_box,backing,mask,proof=source_owner(owner_obj,rgba,source,protected,surface)
+            restore_box,backing,full_owner_mask,proof=source_owner(owner_obj,rgba,work_source,protected,surface)
+            mask=full_owner_mask&~staged_text_mask
+            if not mask.any():raise ValueError('asset owner is completely covered by staged text')
             proof['owner_localization_bbox']=owner_obj.bbox
             bx,by,bw,bh=bounds(rgba[...,3]>0)
             x,y,width,height=restore_box
-            patch,background_selection,chosen_background=asset_background(source,restore_box,mask,protected,layer_directory,backing)
+            unrepresented=mask[y:y+height,x:x+width]&~(rgba[y:y+height,x:x+width,3]>0)
+            if int(unrepresented.sum())>max(48,int(0.12*mask.sum())):
+                unrep_delta=np.abs(work_source[y:y+height,x:x+width][unrepresented].astype(float)-backing[unrepresented].astype(float)).max(1)
+                if float(np.percentile(unrep_delta,90))>12.0:
+                    raise ValueError('candidate omits visible badge or fill owned by source closure')
+            patch,background_selection,chosen_background=asset_background(work_source,restore_box,mask,protected,layer_directory,backing,raw_source=raw_source)
             crop=rgba[by:by+bh,bx:bx+bw]
-            checked_backing,error,_=backing_from_evidence(source,[bx,by,bw,bh],protected,surface)
+            checked_backing,error,_=backing_from_evidence(work_source,[bx,by,bw,bh],protected,surface)
             if background_selection['method']=='layerd_lower':
                 checked_backing=chosen_background[by-y:by-y+bh,bx-x:bx-x+bw]
             alpha=crop[...,3:4]/255;visible=crop[...,3]>0
             recomposed=crop[...,:3]*alpha+checked_backing*(1-alpha)
-            p95=float(np.percentile(np.abs(recomposed-source[by:by+bh,bx:bx+bw]).max(2)[visible],95))
+            p95=float(np.percentile(np.abs(recomposed-work_source[by:by+bh,bx:bx+bw]).max(2)[visible],95))
             attempt.update(background_error=float(error),source_recomposition_p95=p95)
             if not np.isfinite(error) or error>6 or p95>24:raise ValueError('existing background/recomposition gates failed')
             Image.fromarray(crop).save(folder/'asset.png')
-            Image.fromarray(source).save(folder/'source.png')
-            Image.fromarray(source[y:y+height,x:x+width]).save(folder/'source_crop.png')
+            Image.fromarray(raw_source).save(folder/'source.png')
+            Image.fromarray(work_source[y:y+height,x:x+width]).save(folder/'source_crop.png')
             Image.fromarray(patch).save(folder/'written_crop.png')
             Image.fromarray(chosen_background).save(folder/'background.png')
             Image.fromarray((mask[y:y+height,x:x+width]*255).astype('uint8')).save(folder/'mask.png')
@@ -390,7 +439,7 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
         assembled,ambiguous,missing=assemble(obj,arrays,[layer.file for layer in layers.layers],tuple(graph.image_size))
         result['seed_diagnostics']={'alpha_ambiguities':ambiguous,'missing_parts':missing,
             'alpha_visible_pixels':int((assembled[...,3]>0).sum()),'sam':'NOT_SUPPLIED'}
-        try:candidate_from_evidence(obj,source,protected,surface=surface)
+        try:candidate_from_evidence(obj,work_source,protected,surface=surface)
         except ValueError as exc:result['seed_diagnostics']['source_unmix_failure']=str(exc)
     if key(graph.model_dump())!=original_scene or digest(source_file)!=graph.source_sha256:
         raise ValueError('asset retry modified its input')

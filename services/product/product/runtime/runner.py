@@ -26,7 +26,7 @@ def prepare_workspace(job):
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(skill, target)
     from .provider import configure_model,provider_id
-    selected_provider,cfg=configure_model()
+    selected_provider,cfg=configure_model(job)
     identity=provider_id(selected_provider)
     request=json.loads((job/'request.json').read_text('utf8'))
     permissions = [{'action': '*', 'resource': '*', 'effect': 'deny'},
@@ -39,7 +39,7 @@ def prepare_workspace(job):
             'package': '@opencode/ai/providers/openai-compatible',
             'settings': {'baseURL': cfg.base_url},
             'headers':{'User-Agent':'image2ppt-opencode-runtime/1.0','x-opencode-session':job.name},
-            'body': {'enable_thinking': request.get('agent_thinking', True)},
+            'body': {'enable_thinking': request.get('agent_thinking', False)},
             'models': {'vision': {'modelID': cfg.model, 'name': cfg.model,
                 'capabilities': {'tools': True, 'input': ['text', 'image'], 'output': ['text']},
                 'limit': {'context': 128000, 'output': 16000}}}}},

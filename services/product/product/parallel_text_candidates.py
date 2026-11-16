@@ -14,6 +14,7 @@ class TextUncertainty(ValueError):
 
 def peer_protection(text, graph, source, blocked, *, baseline_directory=None, diagnostics=None, purpose='erase'):
     from .peer_evidence import protection
+    from .parallel_fusion import is_decorative_subspan
     if baseline_directory is not None:
         import json
         from pathlib import Path
@@ -27,6 +28,21 @@ def peer_protection(text, graph, source, blocked, *, baseline_directory=None, di
             for line in evidence['lines']:
                 if line['id'] not in own:
                     blocked |= rectangle(line['bbox'],source.shape[1::-1],pad=1)
+                elif 'text' in line and hasattr(text, 'text') and hasattr(text, 'bbox') and is_decorative_subspan(text, line):
+                    rem_scope = (rectangle(line['bbox'], source.shape[1::-1], pad=1)
+                                 & ~rectangle(text.bbox, source.shape[1::-1], pad=1))
+                    lx, ly, lw, lh = [round(v) for v in line['bbox']]
+                    lx0, ly0 = max(0, lx), max(0, ly)
+                    lx1, ly1 = min(source.shape[1], lx + lw), min(source.shape[0], ly + lh)
+                    if lx1 > lx0 and ly1 > ly0:
+                        lcrop = source[ly0:ly1, lx0:lx1].astype(float)
+                        bg = np.median(np.concatenate([lcrop[0], lcrop[-1]], axis=0), axis=0)
+                        affix_ink = np.zeros(source.shape[:2], bool)
+                        affix_ink[ly0:ly1, lx0:lx1] = np.abs(lcrop - bg).max(2) > 12.0
+                        affix_guard = (cv2.dilate(affix_ink.astype('uint8'), np.ones((3, 3), np.uint8)) > 0) & rem_scope
+                        blocked |= affix_guard if affix_guard.any() else rem_scope
+                    else:
+                        blocked |= rem_scope
     return protection(text,graph,source,blocked,baseline_directory,purpose=purpose,diagnostics=diagnostics)
 
 

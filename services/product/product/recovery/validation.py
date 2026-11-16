@@ -60,7 +60,17 @@ def stage_and_verify(trial, graph, baseline, fonts, output, *, office=False, typ
         error = np.abs(actual.astype(float)-reference.astype(float)).max(2)
         original = np.abs(source.astype(float)-reference.astype(float)).max(2)
         residual = scope & (original > 6) & (error > 6)
-        target_report = {'status': 'PASS' if not residual.any() and np.percentile(error[scope], 95) <= 5 else 'REVIEW_REQUIRED',
+        planar_ok = fit['validation_p95_rgb'] <= 3 and not residual.any() and np.percentile(error[scope], 95) <= 5
+        if not planar_ok and row.get('method', '') != 'gradient':
+            from .diagnostics import _nonplanar_backing_proof
+            import cv2
+            mask_arr = np.array(Image.open(Path(trial)/'mask.png').convert('L')) > 0
+            kernel = np.ones((3, 3), np.uint8)
+            seam = ((cv2.dilate(mask_arr.astype('uint8'), kernel) > 0)
+                    & ~(cv2.erode(mask_arr.astype('uint8'), kernel) > 0) & scope)
+            proof = _nonplanar_backing_proof(source, actual, actual, mask_arr, protected, scope, seam, row)
+            planar_ok = bool(proof and proof['passed'])
+        target_report = {'status': 'PASS' if planar_ok else 'REVIEW_REQUIRED',
                          'original_signal_residual_pixels': int(residual.sum()),
                          'whole_scope_p95_rgb': float(np.percentile(error[scope], 95)),
                          'whole_scope_mae_rgb': float(error[scope].mean()),

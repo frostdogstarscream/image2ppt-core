@@ -237,7 +237,8 @@ def create_app(root=None, token=None, run_worker=True):
     @app.post('/api/v1/jobs',status_code=202,dependencies=[Depends(auth)])
     def submit(request:Request,files:list[UploadFile]=File(...),object_extraction:str='default',pipeline_mode:str='parallel_review',
                orchestrator:str='pipeline',goal:str='Restore these images as an editable PPTX.',fresh_perception:bool=True,
-               agent_steps:int=64,runtime_seconds:int=7200,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=True):
+               agent_steps:int=64,runtime_seconds:int=7200,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=False,agent_model:str|None=None):
+        if agent_model is not None and not re.fullmatch(r'[A-Za-z0-9._:-]{1,80}',agent_model):raise HTTPException(422,'模型标识格式无效')
         if request.url.path=='/api/v1/jobs' and orchestrator=='pipeline':orchestrator='opencode'
         if os.environ.get('IMAGE2PPT_DEFAULT_ORCHESTRATOR')=='opencode' and orchestrator=='pipeline':orchestrator='opencode'
         if orchestrator not in ('pipeline','opencode'):raise HTTPException(422,'未知执行器')
@@ -283,7 +284,7 @@ def create_app(root=None, token=None, run_worker=True):
                                       'canonical_file':name,'canonical_sha256':digest(job/'inputs'/name)})
             write(job/'request.json',{'sources':names,'max_calls':None,'italic_difference_ignored':True,
                                      'agent_inference_provider':os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma'),
-                                     'agent_model':os.environ.get('IMAGE2PPT_AGENT_MODEL'),
+                                     'agent_model':agent_model or os.environ.get('IMAGE2PPT_AGENT_MODEL'),
                                      'object_extraction':object_route,'pipeline_mode':selected_mode,'original_inputs':original_refs,
                                      'orchestrator':orchestrator,'visual_review_backend':'opencode' if orchestrator=='opencode' else 'go',
                                      'goal':goal,'fresh_perception':fresh_perception,'candidate_engine':'r12-regional' if orchestrator=='opencode' else 'off',
