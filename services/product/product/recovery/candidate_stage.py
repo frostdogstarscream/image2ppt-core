@@ -33,25 +33,74 @@ def font_line_height(record, size):
         return size*units/face['head'].unitsPerEm
 
 
+def _find_non_colliding_frame(text, payload_bbox, spacing, max_font_px, max_glyph_bottom, max_line_len, source_size, protected, minimum_size):
+    left, top, width, height = payload_bbox
+    lines_n = len(text.text.split('\n'))
+    if min(left, top) < 0 or left + text.bbox[2] > source_size[0] or top + text.bbox[3] > source_size[1]:
+        return None
+    min_gate_w = max(int(math.ceil(text.bbox[2])), max_line_len - 2)
+    min_gate_h = max(
+        int(math.ceil(text.bbox[3])),
+        int(math.ceil((lines_n - 1) * spacing + max_font_px - 3)),
+        (max_glyph_bottom + 1 if lines_n == 1 else int(math.ceil(text.bbox[3]))),
+    )
+    if minimum_size is not None:
+        min_gate_w = max(min_gate_w, int(math.ceil(minimum_size[0])))
+        min_gate_h = max(min_gate_h, int(math.ceil(minimum_size[1])))
+    max_w = min(int(math.ceil(width)), int(math.floor(source_size[0] - left)))
+    max_h = min(int(math.ceil(height)), int(math.floor(source_size[1] - top)))
+    ix0 = max(0, int(round(left)))
+    iy0 = max(0, int(round(top)))
+    max_w = min(max_w, source_size[0] - ix0)
+    max_h = min(max_h, source_size[1] - iy0)
+    if max_w < min_gate_w or max_h < min_gate_h:
+        return None
+    from ..object_extract import rectangle
+    sub = protected[iy0:iy0 + max_h, ix0:ix0 + max_w].astype(np.int32)
+    csum = np.pad(sub, ((1, 0), (1, 0)), mode='constant').cumsum(axis=0).cumsum(axis=1)
+    best = None
+    best_cost = None
+    for cand_w in range(max_w, min_gate_w - 1, -1):
+        for cand_h in range(max_h, min_gate_h - 1, -1):
+            if csum[cand_h, cand_w] == 0:
+                cost = (max_w - cand_w) * 2 + (max_h - cand_h)
+                if best_cost is None or cost < best_cost:
+                    cand_box = [left, top, float(cand_w), float(cand_h)]
+                    if (cand_box[0] + cand_box[2] <= source_size[0]
+                            and cand_box[1] + cand_box[3] <= source_size[1]
+                            and not (rectangle(cand_box, source_size) & protected).any()):
+                        best = cand_box
+                        best_cost = cost
+                break
+    return best
+
+
 def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_size=None, exploratory=False):
     """Fit installed font bearings/leading within this local replacement scope."""
     used = {text.style, *[span.style for span in text.spans]}
     records = {(font['family'], font['bold']): font for font in fonts['fonts']}
     bearing = 0
     line_height = 0
+    max_glyph_bottom = 0
+    max_line_len = 0
+    max_font_px = styles[text.style].size_px
     advance_width = text.bbox[2]
+    lines = text.text.split('\n')
     for identifier in used:
         style = styles[identifier]
+        max_font_px = max(max_font_px, style.size_px)
         family = style.ea if any(ord(c) > 255 for c in text.text) else style.latin
         record = records[family, style.bold]
         face = ImageFont.truetype(record['file'], max(1, round(style.size_px)), index=record['index'])
-        bearing = max(bearing, max(0, face.getbbox(text.text.split('\n')[0])[1]))
-        advance_width=max(advance_width,*[math.ceil(face.getlength(line))+1 for line in text.text.split('\n')])
+        bearing = max(bearing, max(0, face.getbbox(lines[0])[1]))
+        max_glyph_bottom = max(max_glyph_bottom, *[face.getbbox(line)[3] for line in lines])
+        max_line_len = max(max_line_len, *[math.ceil(face.getlength(line)) for line in lines])
+        advance_width = max(advance_width, *[math.ceil(face.getlength(line)) + 1 for line in lines])
         for name in (style.ea, style.latin):
             line_height = max(line_height, font_line_height(records[name, style.bold], style.size_px))
     payload = text.model_dump()
-    spacing = text.line_spacing_px or styles[text.style].size_px*1.2
-    metric_height = (len(text.text.split('\n'))-1)*spacing+math.ceil(line_height)+1
+    spacing = text.line_spacing_px or max_font_px*1.2
+    metric_height = (len(lines)-1)*spacing+math.ceil(line_height)+1
     payload['bbox'] = [*text.bbox[:2],advance_width,max(text.bbox[3]+bearing, metric_height)]
     if minimum_size is not None:
         payload['bbox'][2]=max(payload['bbox'][2],minimum_size[0])
@@ -63,7 +112,12 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
     left,top,width,height=payload['bbox']
     if not exploratory and ((grown & protected).any() or min(left,top)<0 or left+width>source_size[0]
             or top+height>source_size[1]):
-        raise ValueError('native font frame allowance conflicts with canvas or protected peers')
+        clamped = _find_non_colliding_frame(
+            text, payload['bbox'], spacing, max_font_px, max_glyph_bottom, max_line_len,
+            source_size, protected, minimum_size)
+        if clamped is None:
+            raise ValueError('native font frame allowance conflicts with canvas or protected peers')
+        payload['bbox'] = clamped
     return payload
 
 
@@ -110,7 +164,10 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
     ink, _ = glyph_evidence(source, box, styles[text.style].color, backing)
     original = np.zeros(source.shape[:2], bool)
     original[by:by+bh, bx:bx+bw] = ink
-    reference, fit_report = fit_gradient(source, box, context_protected)
+    reference_ctx = (saved.get('provenance') or {}).get('background_context_width', 14)
+    if type(reference_ctx) is not int or not 8 <= reference_ctx <= 128:
+        raise ValueError('invalid source context width')
+    reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx)
     completion = TextMaskCompletion.analyze(source, original, protected, box, reference,
                                              glyph_height=styles[text.style].size_px)
     selected = np.array(Image.open(trial_directory/'mask.png').convert('L'))
@@ -125,11 +182,6 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
     if not np.isin(selected, [0, 255]).all() or not np.array_equal(selected > 0, wanted):
         raise ValueError('trial mask is not source-authorized')
     raw = np.array(Image.open(trial_directory/'raw_inpaint.png').convert('RGB'))
-    context_width=(saved.get('provenance') or {}).get('background_context_width',14)
-    if type(context_width) is not int or not 8<=context_width<=128:
-        raise ValueError('invalid source context width')
-    if context_width!=14:
-        reference,fit_report=fit_gradient(source,box,context_protected,context=context_width)
     if saved['method'] == 'gradient' and not np.array_equal(raw, reference):
         raise ValueError('gradient raw backing binding mismatch')
     report, written, _ = assess_trial(source, wanted, raw, protected, box, reference, fit_report,

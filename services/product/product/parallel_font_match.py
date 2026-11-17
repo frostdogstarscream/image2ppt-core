@@ -23,7 +23,13 @@ def match(rows,fonts,current):
         try:
             base=face(record['file'],record['index'],32)
             for r in rows:
-                box=base.getbbox(r['text']);estimates.append(32*r['ink_width']/max(1,box[2]-box[0]))
+                box=base.getbbox(r['text'])
+                est_w=32*r['ink_width']/max(1,box[2]-box[0])
+                if 'ink_height' in r:
+                    est_h=32*r['ink_height']/max(1,box[3]-box[1])
+                    estimates.append(min(est_w,est_h*1.08))
+                else:
+                    estimates.append(est_w)
             centre=int(round(float(np.median(estimates))))
             for size in range(max(4,centre-1),min(200,centre+1)+1):
                 font=face(record['file'],record['index'],size);scores=[]

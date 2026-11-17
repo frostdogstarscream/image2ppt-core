@@ -14,6 +14,27 @@ from .diagnostics import save_trial
 from .background_adapter import RecoveryBlocked
 
 
+def _with_context_provenance(provenance, ctx_w):
+    if ctx_w == 14:
+        return provenance
+    prov = dict(provenance) if isinstance(provenance, dict) else ({'receipt': provenance} if provenance is not None else {})
+    prov.setdefault('background_context_width', ctx_w)
+    return prov
+
+
+def _fit_gradient_adaptive(source, box, context_protected):
+    last_exc = None
+    for ctx_w in (14, 28, 44):
+        try:
+            ref, fit = fit_gradient(source, box, context_protected, context=ctx_w)
+            return ref, fit, ctx_w
+        except RecoveryBlocked as exc:
+            if exc.code != 'INSUFFICIENT_CONTEXT':
+                raise
+            last_exc = exc
+    raise last_exc
+
+
 def adaptive_candidates(graph, identifier, source_file, layer_directory, directory, *, inpaint=None, budget=None, baseline_directory=None):
     """Lazy tool routing. The consumer advances only after a concrete defect.
 
@@ -40,7 +61,7 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
     ink,_ = glyph_evidence(source,box,style.color,backing)
     original = np.zeros(source.shape[:2],bool)
     original[by:by+bh,bx:bx+bw] = ink
-    reference,fit = fit_gradient(source,box,context_protected)
+    reference,fit,ctx_w = _fit_gradient_adaptive(source,box,context_protected)
     completion = TextMaskCompletion.analyze(source,original,protected,box,reference,glyph_height=style.size_px)
     write(directory/'mask-completion.json',completion.report)
     np.savez_compressed(directory/'mask-evidence.npz',**completion.evidence,**completion.masks)
@@ -86,7 +107,7 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
         row=save_trial(directory/name,source,mask,raw,protected,box,reference,fit,
             {'candidate':name,'mask_variant':mask_name,'method':method,'object_id':identifier,
              'source_sha256':graph.source_sha256,'scene_graph_sha256':key(graph.model_dump()),
-             'scene_sha256':key(graph.model_dump()),'provenance':provenance})
+             'scene_sha256':key(graph.model_dump()),'provenance':_with_context_provenance(provenance,ctx_w)})
         records.append(row);receipt()
         return row
     try:
@@ -139,7 +160,7 @@ def generate(graph,identifier,source_file,layer_directory,directory,*,inpaint=No
     style=next(s for s in graph.text.styles if s.id==text.style)
     ink,_=glyph_evidence(source,box,style.color,backing)
     original=np.zeros(source.shape[:2],bool);original[by:by+bh,bx:bx+bw]=ink
-    reference,fit=fit_gradient(source,box,context_protected)
+    reference,fit,ctx_w=_fit_gradient_adaptive(source,box,context_protected)
     completion=TextMaskCompletion.analyze(source,original,protected,box,reference,glyph_height=style.size_px)
     write(directory/'mask-completion.json',completion.report)
     np.savez_compressed(directory/'mask-evidence.npz',**completion.evidence,**completion.masks)
@@ -155,7 +176,7 @@ def generate(graph,identifier,source_file,layer_directory,directory,*,inpaint=No
         row=save_trial(directory/name,source,completion.masks[mask_name],raw,protected,box,reference,fit,
             {'candidate':name,'mask_variant':mask_name,'method':method,'object_id':identifier,
              'source_sha256':graph.source_sha256,'scene_graph_sha256':key(graph.model_dump()),
-             'scene_sha256':key(graph.model_dump()),'provenance':provenance})
+             'scene_sha256':key(graph.model_dump()),'provenance':_with_context_provenance(provenance,ctx_w)})
         records.append(row)
     for mask_name in completion.masks:
         save(mask_name,'gradient',reference,{'fit':fit})

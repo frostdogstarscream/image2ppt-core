@@ -111,13 +111,17 @@ def calibrate(graph,source,fonts,store,ocr=None,stable=(),*,adaptive=False):
         if f is None:continue
         try:
             font=ImageFont.truetype(f['file'],max(1,round(s.size_px)),index=f['index'])
-            xx=np.nonzero(ink)[1];target=int(xx.max()-xx.min()+1)
-            fbox=font.getbbox(content);rendered=max(1,fbox[2]-fbox[0]);ratio=target/rendered
+            yy,xx=np.nonzero(ink)
+            target=int(xx.max()-xx.min()+1)
+            target_h=int(yy.max()-yy.min()+1)
+            fbox=font.getbbox(content)
+            rendered=max(1,fbox[2]-fbox[0])
+            rendered_h=max(1,fbox[3]-fbox[1])
+            ratio=min(target/rendered,(target_h/rendered_h)*1.08)
             if .5<=ratio<=1.8:
-                yy,xx=np.nonzero(ink)
                 raw_samples[s.id].append((color,ratio,t,{'id':t.id,'text':content,'source':crop.astype(float),
                     'background':backing.astype(float),'foreground':color,
-                    'ink_left':int(xx.min()),'ink_top':int(yy.min()),'ink_width':target}))
+                    'ink_left':int(xx.min()),'ink_top':int(yy.min()),'ink_width':target,'ink_height':target_h}))
         except (ValueError,OSError):continue
     # If texts sharing one style have genuinely distinct measured ink colors
     # (e.g. blue header vs black body grouped together), split into color-clean styles.

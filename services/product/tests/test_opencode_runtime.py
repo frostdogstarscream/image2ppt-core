@@ -1250,6 +1250,153 @@ def test_submit_accepts_vendor_prefixed_moma_agent_model_and_rejects_traversal(j
         assert bad.status_code == 422
 
 
+def test_prepare_merges_paragraphs_flags_logo_lockup_and_prescribes_failed_regions(job, monkeypatch):
+    from PIL import ImageDraw, ImageFont
+    from product import fonts
+    service, identifier, directory = job
+    manifest = fonts.font_manifest([])
+    cjk_rec = next((r for r in manifest['fonts'] if r['family'] == '微软雅黑' and not r['bold']),
+                   next(r for r in manifest['fonts'] if r.get('cjk') and not r['bold']))
+    latin_rec = next((r for r in manifest['fonts'] if r['family'] == 'Arial' and not r['bold']), cjk_rec)
+    monkeypatch.setattr(fonts, 'font_manifest', lambda texts: {'fonts': [cjk_rec, latin_rec]})
+
+    w_img, h_img = 1000, 560
+    image = Image.new('RGB', (w_img, h_img), (242, 247, 255))
+    draw = ImageDraw.Draw(image)
+    body_font = ImageFont.truetype(latin_rec['file'], 16, index=latin_rec['index'])
+    logo_font = ImageFont.truetype(latin_rec['file'], 20, index=latin_rec['index'])
+
+    draw.text((80, 180), 'Line one card copy,', font=body_font, fill=(55, 65, 85))
+    draw.text((80, 204), 'second wrapped line.', font=body_font, fill=(55, 65, 85))
+    b1 = draw.textbbox((80, 180), 'Line one card copy,', font=body_font)
+    b2 = draw.textbbox((80, 204), 'second wrapped line.', font=body_font)
+
+    # Top-right brand lockup overlapping a peer within 2px vertically (glyphs touch/overlap box+pad)
+    draw.text((850, 22), 'AcmeBrand', font=logo_font, fill=(0, 110, 210))
+    l1 = draw.textbbox((850, 22), 'AcmeBrand', font=logo_font)
+    y_sub = int(l1[3]) - 2
+    draw.text((850, y_sub), 'SubTag', font=body_font, fill=(0, 110, 210))
+    l2 = draw.textbbox((850, y_sub), 'SubTag', font=body_font)
+
+    ocr_data = {'lines': [
+        {'id': 'o-l1', 'text': 'Line one card copy,', 'score': 0.99, 'bbox': [b1[0], b1[1], b1[2] - b1[0], b1[3] - b1[1]]},
+        {'id': 'o-l2', 'text': 'second wrapped line.', 'score': 0.99, 'bbox': [b2[0], b2[1], b2[2] - b2[0], b2[3] - b2[1]]},
+        {'id': 'o-logo1', 'text': 'AcmeBrand', 'score': 0.99, 'bbox': [l1[0], l1[1], l1[2] - l1[0], l1[3] - l1[1]]},
+        {'id': 'o-logo2', 'text': 'SubTag', 'score': 0.99, 'bbox': [l2[0], l2[1], l2[2] - l2[0], l2[3] - l2[1]]},
+    ]}
+    image.save(directory / 'inputs/01.png')
+    monkeypatch.setattr(service, 'run_ocr', lambda state, current, d, *, page: (
+        write(d / 'ocr.json', ocr_data),
+        current.setdefault('ocr', {}).update({str(page): str(d / 'ocr.json')}),
+        {'result': ocr_data})[2])
+    prep = call(service, identifier, 'prepare_page_evidence', page=1, run_layers=False)
+    rels = prep['scene_relations']
+    assert len(rels['merged_paragraphs']) == 1
+    assert any(it['text'] == 'Line one card copy,\nsecond wrapped line.' and it['ownership'] == 'RESOLVED'
+               for it in prep['items'])
+    assert all(s['ea'] not in ('微软雅黑 UI', 'Microsoft JhengHei UI', 'FangSong', 'NSimSun') for s in prep['styles'])
+    assert {c['text'] for c in rels['logo_lockup_candidates']} == {'AcmeBrand', 'SubTag'}
+
+    # Verify lines straddling the 20.0px synthetic bold threshold still merge when size/color/alignment match
+    import numpy as np
+    from product.runtime.batch_backbone import _merge_structural_ocr_items
+    merged_straddle, straddle_rels = _merge_structural_ocr_items(
+        np.full((200, 400, 3), 245, dtype=np.uint8),
+        [
+            {'id': 't-1', 'ocr_line_id': 'l-1', 'text': 'Line one straddling 20px', 'bbox': [40.0, 40.0, 200.0, 22.0],
+             'color_hex': '4C566E', 'est_size_px': 20.4, 'bold': True, 'stripped_affix': ''},
+            {'id': 't-2', 'ocr_line_id': 'l-2', 'text': 'line two just below 20px', 'bbox': [40.0, 65.0, 195.0, 20.0],
+             'color_hex': '4C566E', 'est_size_px': 18.8, 'bold': False, 'stripped_affix': ''},
+        ],
+        [],
+    )
+    assert len(merged_straddle) == 1 and len(straddle_rels['merged_paragraphs']) == 1
+    assert merged_straddle[0]['ocr_line_ids'] == ['l-1', 'l-2']
+
+    # Stage locally: merged paragraph succeeds, overlapping brand lockup emits prescriptive diagnostics
+    batch = call(service, identifier, 'batch_reconstruct_page', page=1,
+                 include_assets=False, include_containers=False, use_inpaint=False, verify_office=False)
+    assert batch['staged_count'] >= 1
+    assert any(fr['diagnostic_category'] == 'LOGO_OR_INTRINSIC_TEXT' and fr['recommended_action'] == 'retain_in_source_plate'
+               and fr['max_repair_attempts'] == 0 and fr['conflicting_peer_ids']
+               for fr in batch['failed_regions'])
+
+
+def test_native_frame_clamps_descender_allowance_away_from_protected_peer(monkeypatch):
+    from types import SimpleNamespace
+    import numpy as np
+    from product.contracts import Text, Style
+    from product.recovery.candidate_stage import native_frame
+
+    text = Text(id='t', text='测试标题', bbox=[40., 30., 80., 22.], z=1, style='body')
+    style = Style(id='body', role='body', ea='EA', latin='Latin', size_px=18, bold=False, color='111111')
+    monkeypatch.setattr('product.recovery.candidate_stage.ImageFont.truetype',
+                        lambda *args, **kwargs: SimpleNamespace(getbbox=lambda _: [0, 1, 74, 20], getlength=lambda _: 74.0))
+    monkeypatch.setattr('product.recovery.candidate_stage.font_line_height', lambda *args: 30.)
+    fonts = {'fonts': [{'family': family, 'bold': False, 'file': 'synthetic.ttf', 'index': 0}
+                       for family in ('EA', 'Latin')]}
+    protected = np.zeros((90, 160), bool)
+    protected[54:74, 40:130] = True  # Peer sits 2px below text.bbox bottom (30 + 22 = 52)
+    payload = native_frame(text, {'body': style}, fonts, (160, 90), protected, [35, 25, 90, 32])
+    assert payload['bbox'][3] <= 24.0 and payload['bbox'][3] >= 22.0
+    assert text.bbox == [40., 30., 80., 22.]
+
+
+def test_adaptive_gradient_context_widens_past_adjacent_bar_and_stages(tmp_path):
+    from types import SimpleNamespace
+    import numpy as np
+    from PIL import ImageDraw, ImageFont
+    from product import fonts
+    from product.parallel_contracts import SceneGraph
+    from product.recovery.region_candidates import _fit_gradient_adaptive, adaptive_candidates
+    from product.recovery.candidate_stage import stage_background
+    from product.parallel_rebuild import build
+
+    manifest = fonts.font_manifest([])
+    rec = next(r for r in manifest['fonts'] if r['family'] == 'Arial' and not r['bold'])
+    font_data = {'schema': 'FontManifest/1', 'fonts': [rec]}
+
+    w, h = 280, 100
+    img = Image.new('RGB', (w, h), (240, 245, 252))
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.truetype(rec['file'], 20, index=rec['index'])
+    draw.text((90, 36), 'Title', font=font, fill=(10, 40, 110))
+    tb = draw.textbbox((90, 36), 'Title', font=font)
+    tbbox = [float(tb[0]), float(tb[1]), float(tb[2] - tb[0]), float(tb[3] - tb[1])]
+
+    src_path = tmp_path / 'src.png'
+    img.save(src_path)
+    src_sha = digest(src_path)
+
+    # Put a narrow vertical divider bar within 10px to the left of Title so context=14 lacks clean left samples, while context=28/44 passes.
+    bar_bbox = [int(round(tbbox[0])) - 14, int(round(tbbox[1])) - 4, 10, int(round(tbbox[3])) + 8]
+    graph = SceneGraph.model_validate({
+        'schema': 'SceneGraph/1', 'source_sha256': src_sha, 'image_size': [w, h], 'transform': [1, 0, 0, 1, 0, 0],
+        'method_version': 'test',
+        'text': {'schema': 'TextEvidence/1', 'source_sha256': src_sha, 'image_size': [w, h], 'method_version': 'test',
+                 'styles': [{'id': 'st', 'role': 'body', 'ea': 'Arial', 'latin': 'Arial', 'size_px': 20.0, 'bold': False, 'color': '0A286E'}],
+                 'texts': [{'id': 't1', 'text': 'Title', 'bbox': tbbox, 'style': 'st', 'z': 1}],
+                 'members': {'t1': ['l1']}},
+        'asset': {'schema': 'AssetEvidence/1', 'source_sha256': src_sha, 'image_size': [w, h], 'method_version': 'test',
+                  'objects': [{'id': 'bar', 'kind': 'icon', 'bbox': bar_bbox, 'layers': ['l.png'], 'replaces': [],
+                               'components': ['bar'],
+                               'parts': [{'name': 'bar', 'bbox': bar_bbox, 'layers': ['l.png']}],
+                               'required_owners': [],
+                               'text_policy': 'exclude_independent_text', 'intrinsic_text': '',
+                               'description': 'bar', 'prompt_en': 'bar'}]},
+        'surface': {'schema': 'SurfaceEvidence/1', 'source_sha256': src_sha, 'image_size': [w, h], 'method_version': 'test', 'background': 'F0F5FC', 'shapes': []},
+        'ownership': {'t1': 'RESOLVED', 'bar': 'RESOLVED'}, 'relations': [],
+    })
+    ir, _ = build(graph, {'path': str(src_path), 'source_sha256': src_sha, 'image_size': [w, h], 'transform': [1, 0, 0, 1, 0, 0]},
+                  font_data, tmp_path / 'base', strategy='off', text_candidates=False, surface_candidates=False)
+    trials = list(adaptive_candidates(graph, 't1', src_path, None, tmp_path / 'trials', baseline_directory=ir.parent))
+    assert any(t['status'] == 'PRECHECK_PASS' for t in trials)
+    passed = next(t for t in trials if t['status'] == 'PRECHECK_PASS')
+    staged_ir = stage_background(tmp_path / 'trials' / passed['candidate'], graph, ir.parent, font_data, tmp_path / 'staged')
+    assert staged_ir.is_file()
+
+
+
 
 
 

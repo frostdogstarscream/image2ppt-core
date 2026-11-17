@@ -29,6 +29,376 @@ from ..parallel_typography import calibrate, snap_ooxml_size_px, measure_text_ap
 from ..resource_lease import lease
 
 
+def _merge_structural_ocr_items(
+    source: np.ndarray,
+    raw_items: list[dict],
+    asset_records: list[dict],
+) -> tuple[list[dict], dict]:
+    """Perform pre-scene structural grouping and relation analysis (Astra Step 2).
+
+    Identifies top-right brand logo lockups, merges split same-row titles, merges
+    consecutive same-card vertical lines into multi-line paragraphs, and flags
+    dual-color colon lines before `create_scene` locks individual single-line bboxes.
+    """
+    h_img, w_img = source.shape[:2]
+    items = []
+    for it in raw_items:
+        rgb = [int(it['color_hex'][i:i + 2], 16) for i in (0, 2, 4)]
+        items.append({
+            **it,
+            'ocr_line_ids': [it['ocr_line_id']],
+            'rgb': rgb,
+            'align': 'left',
+            'line_spacing_px': None,
+            'lines': [{'id': it['ocr_line_id'], 'text': it['text'], 'bbox': list(it['bbox']), 'rgb': rgb, 'est_size_px': it['est_size_px'], 'bold': it['bold'], 'stripped_affix': it.get('stripped_affix', '')}],
+            'is_header_merged': False,
+        })
+
+    # 1. Detect top-right brand logo lockup lettering & asset-overlapping logo texts.
+    logo_ids: set[str] = set()
+    logo_assets = [
+        a for a in asset_records
+        if a.get('kind') == 'logo'
+        or (a['bbox'][0] >= 0.78 * w_img and a['bbox'][1] <= 0.14 * h_img)
+    ]
+    for it in items:
+        x, y, w, h = it['bbox']
+        in_top_right = x >= 0.80 * w_img and y <= 0.14 * h_img and w <= 0.18 * w_img
+        hits_logo = any(intersection(it['bbox'], la['bbox']) > 0 for la in logo_assets)
+        if in_top_right or hits_logo:
+            logo_ids.add(it['id'])
+    # Propagate logo lockup flag to immediate vertical partner lines in top-right quadrant.
+    changed = True
+    while changed:
+        changed = False
+        for it in items:
+            if it['id'] in logo_ids:
+                continue
+            x, y, w, h = it['bbox']
+            if x < 0.78 * w_img or y > 0.18 * h_img or w > 0.20 * w_img:
+                continue
+            for lid in list(logo_ids):
+                other = next(o for o in items if o['id'] == lid)
+                if intersection([x - 4, y - 6, w + 8, h + 12], other['bbox']) > 0:
+                    logo_ids.add(it['id'])
+                    changed = True
+                    break
+
+    # 2. Detect dual-color colon lines (e.g. navy label prefix + gray suffix) before merging.
+    dual_color_ids: set[str] = set()
+    dual_color_colon_lines: list[dict] = []
+    for it in items:
+        if it['id'] in logo_ids:
+            continue
+        txt = it['text']
+        colon_pos = max(txt.find('：'), txt.find(':'))
+        if 0 < colon_pos < len(txt) - 1:
+            x, y, w, h = [round(v) for v in it['bbox']]
+            if w >= 40 and h >= 10:
+                split_x = max(6, min(w - 6, round(w * min(0.45, (colon_pos + 1.0) / max(1, len(txt))))))
+                left_app = measure_text_appearance(source, [x, y, split_x, h])
+                right_app = measure_text_appearance(source, [x + split_x, y, w - split_x, h])
+                if left_app and right_app:
+                    c_diff = int(np.abs(left_app['color_rgb'] - right_app['color_rgb']).max())
+                    if c_diff > 35:
+                        dual_color_ids.add(it['id'])
+                        dual_color_colon_lines.append({
+                            'id': it['id'],
+                            'text': txt,
+                            'prefix_color': left_app['color_hex'],
+                            'suffix_color': right_app['color_hex'],
+                            'suggestion': 'keep_in_source_plate_or_split_spans',
+                        })
+
+    def _union_bbox(b1: list[float], b2: list[float]) -> list[float]:
+        nx0 = min(b1[0], b2[0])
+        ny0 = min(b1[1], b2[1])
+        nx1 = max(b1[0] + b1[2], b2[0] + b2[2])
+        ny1 = max(b1[1] + b1[3], b2[1] + b2[3])
+        return [round(nx0, 2), round(ny0, 2), round(nx1 - nx0, 2), round(ny1 - ny0, 2)]
+
+    # 3. Horizontal split-header merge (only adjacent headers without huge visual whitespace gap).
+    merged_headers: list[dict] = []
+    items.sort(key=lambda it: (it['bbox'][1], it['bbox'][0]))
+    after_header: list[dict] = []
+    i = 0
+    while i < len(items):
+        cur = items[i]
+        while i + 1 < len(items):
+            nxt = items[i + 1]
+            if (cur['id'] in logo_ids or nxt['id'] in logo_ids
+                    or cur.get('stripped_affix') or nxt.get('stripped_affix')):
+                break
+            if min(cur['est_size_px'], nxt['est_size_px']) < 24.0:
+                break
+            cy1 = cur['bbox'][1] + cur['bbox'][3] / 2.0
+            cy2 = nxt['bbox'][1] + nxt['bbox'][3] / 2.0
+            gap_x = nxt['bbox'][0] - (cur['bbox'][0] + cur['bbox'][2])
+            rgb_diff = max(abs(a - b) for a, b in zip(cur['rgb'], nxt['rgb']))
+            # Measure actual ink gap if OCR boxes slightly overlap so numbered titles with a wide bar gap don't shift left.
+            ink_gap_ok = True
+            if gap_x < -4.0 or gap_x > 6.0:
+                x_band0 = max(0, round(min(cur['bbox'][0] + cur['bbox'][2], nxt['bbox'][0]) - 24))
+                x_band1 = min(w_img, round(max(cur['bbox'][0] + cur['bbox'][2], nxt['bbox'][0]) + 24))
+                # Quick check: skip merging tiny <=3 char section number + long title when visual gap exceeds 30px
+                if len(cur['text'].strip()) <= 3 and cur['text'].strip().isdigit():
+                    ax0, ay0, aw, ah = [max(0, round(v)) for v in cur['bbox']]
+                    bx0, by0, bw, bh = [max(0, round(v)) for v in nxt['bbox']]
+                    c_crop = source[ay0:min(h_img, ay0 + ah), ax0:min(w_img, ax0 + aw)].astype(float)
+                    b_crop = source[by0:min(h_img, by0 + bh), bx0:min(w_img, bx0 + bw)].astype(float)
+                    if c_crop.size and b_crop.size:
+                        c_bg = np.median(c_crop[0], axis=0)
+                        b_bg = np.median(b_crop[0], axis=0)
+                        c_cols = np.nonzero((np.abs(c_crop - c_bg).max(2) > 25.0).any(0))[0]
+                        b_cols = np.nonzero((np.abs(b_crop - b_bg).max(2) > 25.0).any(0))[0]
+                        if len(c_cols) and len(b_cols):
+                            real_gap = (bx0 + int(b_cols[0])) - (ax0 + int(c_cols[-1]) + 1)
+                            if real_gap > 32:
+                                ink_gap_ok = False
+            gap_band = [
+                min(cur['bbox'][0] + cur['bbox'][2], nxt['bbox'][0]) - 2,
+                min(cur['bbox'][1], nxt['bbox'][1]),
+                max(4.0, abs(gap_x) + 4),
+                max(cur['bbox'][3], nxt['bbox'][3]),
+            ]
+            asset_between = any(intersection(gap_band, ar['bbox']) > 0 for ar in asset_records)
+            if (abs(cy1 - cy2) <= 8.0 and -24.0 <= gap_x <= 36.0 and rgb_diff <= 30
+                    and ink_gap_ok and not asset_between):
+                join_sep = ''
+                tail_head = (cur['text'][-1:] + nxt['text'][:1])
+                if gap_x > 6.0 and '|' not in tail_head and '丨' not in tail_head:
+                    join_sep = ' '
+                cur = {
+                    **cur,
+                    'text': cur['text'] + join_sep + nxt['text'],
+                    'bbox': _union_bbox(cur['bbox'], nxt['bbox']),
+                    'ocr_line_ids': cur['ocr_line_ids'] + nxt['ocr_line_ids'],
+                    'lines': cur['lines'] + nxt['lines'],
+                    'est_size_px': snap_ooxml_size_px(max(cur['est_size_px'], nxt['est_size_px'])),
+                    'is_header_merged': True,
+                }
+                i += 1
+                continue
+            break
+        if cur['is_header_merged']:
+            merged_headers.append({
+                'source_ocr_ids': list(cur['ocr_line_ids']),
+                'merged_text': cur['text'],
+                'bbox': cur['bbox'],
+            })
+        after_header.append(cur)
+        i += 1
+
+    # 4. Same-card vertical paragraph merge.
+    merged_paragraphs: list[dict] = []
+    consumed = [False] * len(after_header)
+    final_items: list[dict] = []
+
+    def _can_merge_vertical(cur_item: dict, cand: dict) -> tuple[bool, str]:
+        if (cur_item['id'] in logo_ids or cand['id'] in logo_ids
+                or cur_item['id'] in dual_color_ids or cand['id'] in dual_color_ids
+                or cur_item.get('stripped_affix') or cand.get('stripped_affix')
+                or cur_item.get('is_header_merged') or cand.get('is_header_merged')):
+            return False, 'left'
+        if cur_item['est_size_px'] > 23.0 or cand['est_size_px'] > 23.0:
+            return False, 'left'
+        last_line = cur_item['lines'][-1]
+        if abs(last_line['est_size_px'] - cand['est_size_px']) > 2.4:
+            return False, 'left'
+        h_a, h_b = max(1.0, last_line['bbox'][3]), max(1.0, cand['bbox'][3])
+        if max(h_a, h_b) / min(h_a, h_b) > 1.25:
+            return False, 'left'
+        if max(abs(a - b) for a, b in zip(last_line['rgb'], cand['rgb'])) > 26:
+            return False, 'left'
+        ax, ay, aw, ah = last_line['bbox']
+        bx, by, bw, bh = cand['bbox']
+        gap_y = by - (ay + ah)
+        avg_h = 0.5 * (ah + bh)
+        if not (-4.0 <= gap_y <= max(9.0, 0.55 * avg_h)):
+            return False, 'left'
+        x_ov = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+        min_w = max(1.0, min(aw, bw))
+        if x_ov < 0.35 * min_w:
+            return False, 'left'
+        avg_size = 0.5 * (last_line['est_size_px'] + cand['est_size_px'])
+        left_aligned = abs(ax - bx) <= max(12.0, 0.75 * avg_size)
+        cx_a, cx_b = ax + aw / 2.0, bx + bw / 2.0
+        center_aligned = abs(cx_a - cx_b) <= 14.0 and max(aw, bw) <= 0.32 * w_img
+        if not (left_aligned or center_aligned):
+            return False, 'left'
+        # Do not merge across an asset or horizontal divider line.
+        x_min = max(0, int(round(min(ax, bx))))
+        x_max = min(w_img, int(round(max(ax + aw, bx + bw))))
+        strip_box = [float(x_min), ay + ah - 1.0, float(max(1, x_max - x_min)), max(2.0, gap_y + 2.0)]
+        if any(intersection(strip_box, ar['bbox']) > 0 for ar in asset_records):
+            return False, 'left'
+        if gap_y >= 2.0 and x_max > x_min + 4:
+            sy0 = max(0, int(round(ay + ah)))
+            sy1 = min(h_img, int(round(by)))
+            if sy1 > sy0:
+                strip = source[sy0:sy1, x_min:x_max].astype(float)
+                med_col = np.median(strip.reshape(-1, 3), axis=0)
+                dev = np.abs(strip.reshape(-1, 3) - med_col).max(axis=1)
+                if float(np.percentile(dev, 90)) > 16.0:
+                    return False, 'left'
+        return True, ('center' if (center_aligned and not left_aligned) else 'left')
+
+    for idx_a, base in enumerate(after_header):
+        if consumed[idx_a]:
+            continue
+        consumed[idx_a] = True
+        cur = dict(base)
+        pitches: list[float] = []
+        aligns: list[str] = []
+        while True:
+            best_j = None
+            best_align = 'left'
+            cur_last = cur['lines'][-1]['bbox']
+            cur_center_y = cur_last[1] + cur_last[3]
+            for idx_b in range(idx_a + 1, len(after_header)):
+                if consumed[idx_b]:
+                    continue
+                cand = after_header[idx_b]
+                if cand['bbox'][1] - cur_center_y > max(24.0, cur_last[3] * 1.2):
+                    break
+                ok, aln = _can_merge_vertical(cur, cand)
+                if ok:
+                    best_j = idx_b
+                    best_align = aln
+                    break
+            if best_j is None:
+                break
+            nxt = after_header[best_j]
+            consumed[best_j] = True
+            pitches.append(max(cur['est_size_px'] * 1.05, nxt['bbox'][1] - cur['lines'][-1]['bbox'][1]))
+            aligns.append(best_align)
+            cur['text'] = cur['text'] + '\n' + nxt['text']
+            cur['bbox'] = _union_bbox(cur['bbox'], nxt['bbox'])
+            cur['ocr_line_ids'] = cur['ocr_line_ids'] + nxt['ocr_line_ids']
+            cur['lines'] = cur['lines'] + nxt['lines']
+        if len(cur['lines']) > 1:
+            cur['est_size_px'] = snap_ooxml_size_px(float(np.mean([ln['est_size_px'] for ln in cur['lines']])))
+            cur['bold'] = bool(cur['est_size_px'] >= 20.0)
+            avg_pitch = float(np.median(pitches)) if pitches else cur['est_size_px'] * 1.2
+            cur['line_spacing_px'] = round(max(cur['est_size_px'] * 1.05, avg_pitch), 2)
+            cur['align'] = 'center' if all(a == 'center' for a in aligns) else 'left'
+            merged_paragraphs.append({
+                'source_ocr_ids': list(cur['ocr_line_ids']),
+                'line_count': len(cur['lines']),
+                'line_spacing_px': cur['line_spacing_px'],
+                'align': cur['align'],
+                'text_preview': cur['text'].replace('\n', ' / '),
+                'bbox': cur['bbox'],
+            })
+        final_items.append(cur)
+
+    # Assign contiguous deterministic t-001..t-NNN IDs after merging and update relation refs.
+    old_to_new: dict[str, str] = {}
+    cleaned: list[dict] = []
+    for new_idx, it in enumerate(final_items, 1):
+        new_id = f't-{new_idx:03d}'
+        old_to_new[it['id']] = new_id
+        for hdr in merged_headers:
+            if hdr['source_ocr_ids'] == it['ocr_line_ids']:
+                hdr['id'] = new_id
+        for para in merged_paragraphs:
+            if para['source_ocr_ids'] == it['ocr_line_ids']:
+                para['id'] = new_id
+        cleaned.append({
+            **{k: v for k, v in it.items() if k not in ('lines', 'is_header_merged')},
+            'id': new_id,
+        })
+
+    logo_lockup_candidates = [
+        {
+            'id': old_to_new[it['id']],
+            'text': it['text'],
+            'bbox': it['bbox'],
+            'suggestion': 'remove_from_text_draft_if_brand_logo',
+        }
+        for it in items
+        if it['id'] in logo_ids and it['id'] in old_to_new
+    ]
+    for dcol in dual_color_colon_lines:
+        dcol['id'] = old_to_new.get(dcol['id'], dcol['id'])
+
+    scene_relations = {
+        'raw_ocr_lines': len(raw_items),
+        'merged_text_objects': len(cleaned),
+        'merged_paragraphs': merged_paragraphs,
+        'merged_headers': merged_headers,
+        'logo_lockup_candidates': logo_lockup_candidates,
+        'dual_color_colon_lines': dual_color_colon_lines,
+    }
+    return cleaned, scene_relations
+
+
+def _classify_failed_region(entry: dict, graph: SceneGraph, logo_candidate_ids: set[str] | None = None) -> dict:
+    """Attach prescriptive failure taxonomy and repair cap (Astra Step 3)."""
+    oid = entry.get('object_id', '')
+    kind = entry.get('kind', '')
+    failure = entry.get('failure', '')
+    bbox = entry.get('bbox') or []
+    w_img, h_img = graph.image_size if graph.image_size else (1920, 1080)
+    logo_ids = logo_candidate_ids or set()
+
+    peers: list[str] = []
+    same_style_text_peer = False
+    asset_peer = False
+    text_by_id = {t.id: t for t in graph.text.texts}
+    self_text = text_by_id.get(oid)
+
+    if len(bbox) == 4:
+        pbox = [bbox[0] - 4.0, bbox[1] - 4.0, bbox[2] + 8.0, bbox[3] + 8.0]
+        for t in graph.text.texts:
+            if t.id == oid:
+                continue
+            if intersection(pbox, t.bbox) > 0:
+                peers.append(t.id)
+                if self_text and t.style == self_text.style:
+                    same_style_text_peer = True
+        for a in graph.asset.objects:
+            if a.id == oid:
+                continue
+            if intersection(pbox, a.bbox) > 0:
+                peers.append(a.id)
+                asset_peer = True
+
+    in_top_right_logo = (
+        oid in logo_ids
+        or (kind == 'text' and len(bbox) == 4 and bbox[0] >= 0.80 * w_img and bbox[1] <= 0.16 * h_img and bbox[2] <= 0.18 * w_img)
+        or (kind == 'text' and any(a.kind == 'logo' and a.id in peers for a in graph.asset.objects))
+    )
+
+    if kind == 'asset' or kind == 'surface':
+        category, action, cap = 'UNVERIFIED_ASSET_CLOSURE', 'retain_in_source_plate', 0
+    elif in_top_right_logo:
+        category, action, cap = 'LOGO_OR_INTRINSIC_TEXT', 'retain_in_source_plate', 0
+    elif failure == 'FONT_LAYOUT_FAILED':
+        category, action, cap = 'FONT_FRAME_NEIGHBOR_COLLISION', 'fit_text_layout_or_reduce_size_1px', 1
+    elif failure == 'INSUFFICIENT_CONTEXT':
+        category, action, cap = 'INSUFFICIENT_LATERAL_CONTEXT', 'fit_background_context_36', 1
+    elif failure == 'PROTECTED_NEIGHBOR':
+        if asset_peer and not same_style_text_peer:
+            category, action, cap = 'ADJACENT_ASSET_OVERLAP', 'shrink_text_bbox_away_from_asset', 1
+        elif same_style_text_peer or peers:
+            category, action, cap = 'PARAGRAPH_OR_PEER_OVERLAP', 'merge_with_peer_or_shrink_bbox_2px', 1
+        else:
+            category, action, cap = 'PROTECTED_NEIGHBOR_CONFLICT', 'shrink_text_bbox_2px', 1
+    elif failure in ('MASK_INCOMPLETE', 'BACKGROUND_REPAIR_FAILED', 'OWNER_CONFLICT'):
+        category, action, cap = 'COMPLEX_OR_DUAL_COLOR_BACKING', 'retain_in_source_plate', 0
+    else:
+        category, action, cap = 'OTHER_REPAIR_FAILURE', 'retain_in_source_plate', 0
+
+    return {
+        **entry,
+        'diagnostic_category': category,
+        'conflicting_peer_ids': peers,
+        'recommended_action': action,
+        'max_repair_attempts': cap,
+    }
+
+
 def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list[float], str]:
     """Strip purely non-alphanumeric leading/trailing affixes when a clean pixel gap exists."""
     raw_text = line.get('text', '').strip()
@@ -323,7 +693,9 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
 
     source = np.array(Image.open(source_path).convert('RGB'))
     h_img, w_img = source.shape[:2]
-    cjk_family = next((f['family'] for f in fonts['fonts'] if f.get('cjk') and '雅黑' in f['family']), None)
+    cjk_family = next((f['family'] for f in fonts['fonts'] if f.get('cjk') and f['family'] == '微软雅黑'), None)
+    if not cjk_family:
+        cjk_family = next((f['family'] for f in fonts['fonts'] if f.get('cjk') and '雅黑' in f['family']), None)
     if not cjk_family:
         cjk_family = next((f['family'] for f in fonts['fonts'] if f.get('cjk')), 'Arial')
     latin_family = next((f['family'] for f in fonts['fonts'] if f['family'] in ('Arial', 'Segoe UI', 'Calibri')), cjk_family)
@@ -331,7 +703,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     valid_lines = [row for row in ocr.get('lines', []) if row.get('score', 0) >= 0.85 and row.get('text', '').strip()]
     line_rects = [rectangle(row['bbox'], (w_img, h_img), pad=1) for row in valid_lines]
 
-    measured_items = []
+    raw_items = []
     for index, row in enumerate(valid_lines, 1):
         peers_mask = np.zeros((h_img, w_img), bool)
         for j, rect_mask in enumerate(line_rects):
@@ -350,7 +722,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
             est_px = snap_ooxml_size_px(max(9.0, min(96.0, raw_h * 0.76)))
         role = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
         bold = bool(est_px >= 20.0)
-        measured_items.append({
+        raw_items.append({
             'id': f't-{index:03d}',
             'ocr_line_id': row['id'],
             'text': text_val,
@@ -362,6 +734,32 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
             'backing_class': backing_class,
             'stripped_affix': stripped_affix,
         })
+
+    immediate_assets: list[dict] = []
+    deferred_assets: list[dict] = []
+    layers_path_str = current.get('layers', {}).get(str(page))
+    if layers_path_str and Path(layers_path_str).is_dir():
+        try:
+            immediate_assets, deferred_assets = discover_layerd_assets(
+                source, Path(layers_path_str), [it['bbox'] for it in raw_items])
+        except Exception:
+            immediate_assets, deferred_assets = [], []
+
+    measured_items, scene_relations = _merge_structural_ocr_items(
+        source, raw_items, [*immediate_assets, *deferred_assets])
+    for item in measured_items:
+        est_px = item['est_size_px']
+        item['role'] = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
+    merged_text_boxes = [it['bbox'] for it in measured_items]
+    all_assets = [*immediate_assets, *deferred_assets]
+    immediate_assets, deferred_assets = [], []
+    for a_obj in all_assets:
+        bx, by, bw, bh = a_obj['bbox']
+        padded_box = [bx - 10.0, by - 10.0, bw + 20.0, bh + 20.0]
+        if any(intersection(padded_box, tb) > 0 for tb in merged_text_boxes):
+            deferred_assets.append(a_obj)
+        else:
+            immediate_assets.append(a_obj)
 
     # Cluster styles by (role, bold, quantized RGB, 1.5px size bucket)
     style_groups: list[dict] = []
@@ -400,19 +798,14 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         st = style_lookup[item['style']]
         item['color_hex'] = st['color']
         item['size_px'] = st['size_px']
-        texts.append({'id': item['id'], 'bbox': item['bbox'], 'z': int(z_idx),
-                      'style': item['style'], 'text': item['text'], 'align': 'left'})
-        members[item['id']] = [item['ocr_line_id']]
+        text_entry = {'id': item['id'], 'bbox': item['bbox'], 'z': int(z_idx),
+                      'style': item['style'], 'text': item['text'], 'align': item.get('align', 'left')}
+        if item.get('line_spacing_px') is not None:
+            text_entry['line_spacing_px'] = item['line_spacing_px']
+        texts.append(text_entry)
+        members[item['id']] = list(item['ocr_line_ids'])
 
-    immediate_assets: list[dict] = []
-    deferred_assets: list[dict] = []
-    layers_path_str = current.get('layers', {}).get(str(page))
-    if layers_path_str and Path(layers_path_str).is_dir():
-        try:
-            immediate_assets, deferred_assets = discover_layerd_assets(
-                source, Path(layers_path_str), [it['bbox'] for it in measured_items])
-        except Exception:
-            immediate_assets, deferred_assets = [], []
+    current.setdefault('scene_relations', {})[str(page)] = scene_relations
 
     existing = current['pages'][page - 1] if len(current['pages']) >= page else None
     scene_initialized = False
@@ -430,8 +823,11 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         row = service.page(current, page)
         graph = service.graph(row)
         store = Store(state.job / 'state')
+        ui_excluded = {'微软雅黑 UI', 'Microsoft JhengHei UI', 'FangSong_GB2312'}
+        shared_font_list = [f for f in fonts['fonts'] if f['family'] not in ui_excluded]
+        shared_fonts = {'schema': fonts.get('schema', 'FontManifest/1'), 'fonts': shared_font_list} if shared_font_list else fonts
         with lease('cpu'):
-            calibrated = calibrate(graph, source, fonts, store, ocr=ocr, adaptive=True)
+            calibrated = calibrate(graph, source, shared_fonts, store, ocr=ocr, adaptive=True)
         if calibrated.model_dump() != graph.model_dump():
             from ..parallel_rebuild import build
             cal_dir = directory / 'calibrated-backing'
@@ -482,6 +878,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         'immediate_asset_count': len(immediate_assets),
         'deferred_asset_count': len(deferred_assets),
         'assets': asset_summaries,
+        'scene_relations': scene_relations,
         'backing_summary': {'FLAT': counts.get('FLAT', 0), 'GRADIENT': counts.get('GRADIENT', 0),
                             'COMPLEX': counts.get('COMPLEX', 0)},
         'styles': final_styles,
@@ -736,13 +1133,22 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                                      'failure': classify_exc(exc, 'generation'), 'reason': str(exc)})
         return cur_base, staged_ids, stage_errors
 
+    logo_ids = {
+        x['id'] for x in current.get('scene_relations', {}).get(str(page), {}).get('logo_lockup_candidates', [])
+        if x.get('id')
+    }
+
+    def _enriched_failures() -> list[dict]:
+        return [_classify_failed_region(err, initial_graph, logo_ids) for err in failed_regions]
+
     final_base, staged_ids, stage_errors = _chain_stage(passed_trials, 'stage-pass1', {}, set())
     failed_regions.extend(stage_errors)
     pass1_failed_ids = {err['object_id'] for err in stage_errors}
 
     if not staged_ids:
+        enriched = _enriched_failures()
         return {'status': 'NO_CANDIDATES_STAGED', 'page': page, 'committed_count': 0,
-                'committed_object_ids': [], 'failed_count': len(failed_regions), 'failed_regions': failed_regions}
+                'committed_object_ids': [], 'failed_count': len(enriched), 'failed_regions': enriched}
 
     final_ir = final_base / 'slideir.json'
     batch_cid = 'c-' + key(str(directory.relative_to(state.job)) + ':batch')[:24]
@@ -757,9 +1163,10 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'files': {str(p): digest(p) for p in final_base.rglob('*') if p.is_file()},
         }
         current['candidates'][batch_cid] = cand
+        enriched = _enriched_failures()
         return {'status': 'STAGED_LOCAL', 'candidate_id': batch_cid, 'page': page,
                 'staged_count': len(staged_ids), 'staged_object_ids': staged_ids,
-                'committed_count': 0, 'failed_count': len(failed_regions), 'failed_regions': failed_regions}
+                'committed_count': 0, 'failed_count': len(enriched), 'failed_regions': enriched}
 
     # Phase 4: Single batch compilation + Office verification (+ 1-pass auto frame/culprit repair).
     def _compile_and_check(ir_path: Path, tag: str):
@@ -821,13 +1228,14 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         }
         current.pop('composition', None)
         current.pop('visual_review', None)
+        enriched = _enriched_failures()
         return {
             'status': 'COMMITTED', 'office_status': 'PASS', 'already_committed': True,
             'candidate_id': batch_cid, 'page': page,
             'committed_count': len(staged_ids), 'committed_object_ids': staged_ids,
             'auto_repaired_frame_ids': auto_repaired_frames,
-            'failed_count': len(failed_regions), 'failed_regions': failed_regions,
-            'next_step': 'Objects in committed_object_ids are ALREADY committed to the page scene (do not call commit_candidate). Proceed to compose_delivery -> validate_office -> get_evidence -> record_visual_review -> finalize_job, or repair specific high-value failed_regions first.',
+            'failed_count': len(enriched), 'failed_regions': enriched,
+            'next_step': 'Objects in committed_object_ids are ALREADY committed to the page scene (do not call commit_candidate). Proceed to compose_delivery -> validate_office -> get_evidence -> record_visual_review -> finalize_job, or follow recommended_action (at most max_repair_attempts) on high-value failed_regions first.',
         }
 
     cand_status = 'STAGED_LOCAL' if office_res.get('status') == 'UNKNOWN' else 'REVIEW_REQUIRED'
@@ -841,11 +1249,12 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         'files': {str(p): digest(p) for p in final_base.rglob('*') if p.is_file()},
     }
     current['candidates'][batch_cid] = cand
+    enriched = _enriched_failures()
     return {
         'status': 'OFFICE_UNAVAILABLE' if office_res.get('status') == 'UNKNOWN' else 'REVIEW_REQUIRED',
         'candidate_id': batch_cid, 'page': page,
         'staged_count': len(staged_ids), 'staged_object_ids': staged_ids,
         'committed_count': 0, 'office_status': office_res.get('status'),
-        'failed_count': len(failed_regions), 'failed_regions': failed_regions,
+        'failed_count': len(enriched), 'failed_regions': enriched,
         'next_step': f'Batch candidate {batch_cid} is staged but not yet committed; call commit_candidate(candidate_id="{batch_cid}") to validate and commit.',
     }
