@@ -57,9 +57,10 @@ def detect(snap: dict, cache: str | Path) -> dict:
     if cfg['cache_home']:
         env['PADDLE_PDX_CACHE_HOME'] = cfg['cache_home']
     temporary = file.with_suffix('.tmp.json')
+    run_kwargs = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt' else {}
     subprocess.run([cfg['python'], str(WORKER), snap['path'], str(temporary), '--model', cfg['model'],
                     '--device', cfg['device']], check=True, timeout=cfg['timeout'], env=env,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **run_kwargs)
     result = json.loads(temporary.read_text(encoding='utf-8'))
     if result.get('source_sha256') != snap['source_sha256']:
         raise ValueError('layout result source mismatch')
