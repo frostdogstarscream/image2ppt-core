@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--pipeline-mode',choices=['parallel_review','parallel_shadow'],default='parallel_review')
     parser.add_argument('--object-extraction',choices=['default','auto','off','alpha','sam3','sam3.1'],default='default')
     parser.add_argument('--candidate-engine',choices=['off','r11-shadow','r12-shadow','r12-regional'],default='off')
+    parser.add_argument('--region-fallback',choices=['plate','crop'],default='plate',help='crop: small-first opaque region crops for content left in the page raster')
     args=parser.parse_args()
     if args.opencode_profile:
         from product.go_provider import load_profile
@@ -53,7 +54,7 @@ def main():
                                'candidate_engine':args.candidate_engine,'regional_strategy':args.regional_strategy,
                                'reuse_perception_from':args.reuse_perception_from,'reuse_verified_from':args.reuse_verified_from,
                                'adaptive_budget':args.adaptive_budget,'fresh_perception_requested':args.fresh_perception,
-                               'text_region_goal':args.text_region_goal,'retry_assets':args.retry_assets,'regional_agent':args.regional_agent,'agent_skill':args.agent_skill})
+                               'text_region_goal':args.text_region_goal,'region_fallback':args.region_fallback,'retry_assets':args.retry_assets,'regional_agent':args.regional_agent,'agent_skill':args.agent_skill})
     def progress(**kw):
         write(output/'progress.json',kw)
         print(json.dumps(kw),flush=True)
