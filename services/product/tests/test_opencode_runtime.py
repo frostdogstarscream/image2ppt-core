@@ -837,10 +837,18 @@ def test_prepare_page_evidence_and_batch_reconstruct_page_with_auto_frame_repair
     monkeypatch.setattr(compiler, 'compile_local', fake_compile)
     monkeypatch.setattr(service, 'office_check', fake_office)
     batch = call(service, identifier, 'batch_reconstruct_page', page=1, use_inpaint=False)
-    assert batch['status'] == 'COMMITTED'
-    assert batch['committed_count'] == 2
+    assert batch['status'] == 'VALIDATED'
+    assert batch['already_committed'] is False
+    assert batch['committed_count'] == 0
+    assert batch['staged_count'] == 2
     assert batch['auto_repaired_frame_ids'] == ['t-002']
     assert len(office_calls) == 2
+    before_commit = service.call('get_progress', identifier)
+    assert before_commit['pages'][0]['committed_objects'] == 0
+    committed = call(service, identifier, 'commit_candidate',
+                     candidate_id=batch['candidate_id'], expected_version=batch['version'])
+    assert committed['status'] == 'COMMITTED'
+    assert committed['committed_count'] == 2
     progress = service.call('get_progress', identifier)
     assert progress['reconstruction'] == 'NATIVE_OBJECTS_COMMITTED'
     assert progress['pages'][0]['committed_objects'] == 2
@@ -1394,6 +1402,269 @@ def test_adaptive_gradient_context_widens_past_adjacent_bar_and_stages(tmp_path)
     passed = next(t for t in trials if t['status'] == 'PRECHECK_PASS')
     staged_ir = stage_background(tmp_path / 'trials' / passed['candidate'], graph, ir.parent, font_data, tmp_path / 'staged')
     assert staged_ir.is_file()
+
+
+def test_container_stage_preserves_unmodeled_small_icon_in_card_interior_and_margin(tmp_path):
+    import numpy as np
+    from PIL import ImageDraw, ImageFont
+    from product import fonts
+    from product.parallel_branches import snapshot
+    from product.parallel_contracts import SceneGraph
+    from product.parallel_rebuild import build
+    from product.recovery.candidate_stage import stage_background
+    from product.recovery.container_stage import stage_containers_and_surfaces
+    from product.recovery.region_candidates import adaptive_candidates
+
+    manifest = fonts.font_manifest([])
+    rec = next(r for r in manifest['fonts'] if r['family'] == 'Arial' and not r['bold'])
+    font_data = {'schema': 'FontManifest/1', 'fonts': [rec]}
+    font = ImageFont.truetype(rec['file'], 18, index=rec['index'])
+
+    w, h = 540, 360
+    canvas = (254, 254, 254)
+    img = Image.new('RGB', (w, h), canvas)
+    draw = ImageDraw.Draw(img)
+
+    # Card A: bordered white card with an unmodeled 10x10 icon inside card interior.
+    draw.rounded_rectangle((25, 25, 255, 145), radius=8, fill=canvas, outline=(200, 215, 235), width=1)
+    draw.rectangle((50, 92, 60, 102), fill=(240, 125, 30))
+    draw.rectangle((53, 95, 57, 99), fill=(35, 110, 220))
+
+    # Card B: borderless tinted card with an unmodeled 7x7 icon inside outer 4px margin band (formerly skipped ix/iy).
+    draw.rounded_rectangle((285, 25, 515, 145), radius=8, fill=(240, 245, 252))
+    draw.rectangle((289, 29, 296, 36), fill=(30, 170, 95))
+
+    # Card C: chamfered banner with an unmodeled 10x10 icon inside enclosed interior (guards a-c* fallback).
+    draw.polygon([(25, 170), (240, 170), (255, 185), (255, 290), (40, 290), (25, 275)],
+                 fill=(248, 251, 254), outline=(25, 100, 200))
+    draw.rectangle((60, 235, 70, 245), fill=(150, 50, 200))
+
+    # Card D: clean control card with NO unmodeled icons -> must become native shape s-001.
+    draw.rounded_rectangle((285, 170, 515, 290), radius=8, fill=(238, 243, 249))
+
+    labels = [
+        ('t1', 'Card A', (48, 42)),
+        ('t2', 'Card B', (320, 65)),
+        ('t3', 'Card C', (60, 188)),
+        ('t4', 'Clean Control', (310, 195)),
+    ]
+    text_entries = []
+    members = {}
+    ocr_lines = []
+    for idx, (tid, txt, pos) in enumerate(labels, 1):
+        draw.text(pos, txt, font=font, fill=(30, 40, 60))
+        tb = draw.textbbox(pos, txt, font=font)
+        tbox = [float(tb[0]), float(tb[1]), float(tb[2] - tb[0]), float(tb[3] - tb[1])]
+        text_entries.append({'id': tid, 'text': txt, 'bbox': tbox, 'style': 'st', 'z': idx})
+        members[tid] = [f'l-{tid}']
+        ocr_lines.append({'id': f'l-{tid}', 'text': txt, 'score': 0.99, 'bbox': tbox})
+
+    src_path = tmp_path / 'src.png'
+    img.save(src_path)
+    src_arr = np.array(img)
+    snap = snapshot(src_path, tmp_path / 'snap')
+    graph = SceneGraph.model_validate({
+        'schema': 'SceneGraph/1', 'source_sha256': snap['source_sha256'], 'image_size': [w, h], 'transform': [1, 0, 0, 1, 0, 0],
+        'method_version': 'test',
+        'text': {'schema': 'TextEvidence/1', 'source_sha256': snap['source_sha256'], 'image_size': [w, h], 'method_version': 'test',
+                 'styles': [{'id': 'st', 'role': 'body', 'ea': 'Arial', 'latin': 'Arial', 'size_px': 18.0, 'bold': False, 'color': '1E283C'}],
+                 'texts': text_entries, 'members': members},
+        'asset': {'schema': 'AssetEvidence/1', 'source_sha256': snap['source_sha256'], 'image_size': [w, h], 'method_version': 'test', 'objects': []},
+        'surface': {'schema': 'SurfaceEvidence/1', 'source_sha256': snap['source_sha256'], 'image_size': [w, h], 'method_version': 'test', 'background': 'FEFEFE', 'shapes': []},
+        'ownership': {tid: 'RESOLVED' for tid, _, _ in labels}, 'relations': [],
+    })
+    ir, _ = build(graph, snap, font_data, tmp_path / 'base', strategy='off', text_candidates=False, surface_candidates=False)
+    cur_base = ir.parent
+    write(cur_base / 'runtime-ocr-protection.json', {'source_sha256': snap['source_sha256'], 'lines': ocr_lines})
+    for tid, _, _ in labels:
+        trials = list(adaptive_candidates(graph, tid, src_path, None, tmp_path / f'tr-{tid}', baseline_directory=ir.parent))
+        passed = next(t for t in trials if t['status'] == 'PRECHECK_PASS')
+        cur_ir = stage_background(tmp_path / f'tr-{tid}' / passed['candidate'], graph, cur_base, font_data, tmp_path / f'st-{tid}')
+        cur_base = cur_ir.parent
+
+    cont_ir, cont_ids = stage_containers_and_surfaces(cur_base, tmp_path / 'cont')
+    assert len(cont_ids) == 1
+    out_graph = SceneGraph.model_validate_json((cont_ir.parent / 'scene.json').read_text('utf8'))
+    assert len(out_graph.surface.shapes) == 1 and len(out_graph.asset.objects) == 0
+    assert out_graph.ownership[cont_ids[0]] == 'RESOLVED'
+    plate = np.array(Image.open(cont_ir.parent / 'source-plate.png').convert('RGB'))
+    assert np.array_equal(plate[92:103, 50:61], src_arr[92:103, 50:61])
+    assert np.array_equal(plate[29:37, 289:297], src_arr[29:37, 289:297])
+    assert np.array_equal(plate[235:246, 60:71], src_arr[235:246, 60:71])
+
+
+def test_container_stage_protects_low_score_ocr_text_inside_card(job, monkeypatch):
+    import numpy as np
+    from PIL import ImageDraw, ImageFont
+    from product import fonts
+    from product.parallel_contracts import SceneGraph
+
+    service, identifier, directory = job
+    manifest = fonts.font_manifest([])
+    rec = next(r for r in manifest['fonts'] if r['family'] == 'Arial' and not r['bold'])
+    monkeypatch.setattr(fonts, 'font_manifest', lambda texts: {'fonts': [rec]})
+
+    w, h = 480, 220
+    img = Image.new('RGB', (w, h), (254, 254, 254))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle((30, 30, 450, 180), radius=8, fill=(238, 243, 249))
+    font = ImageFont.truetype(rec['file'], 20, index=rec['index'])
+    sub_font = ImageFont.truetype(rec['file'], 14, index=rec['index'])
+    draw.text((55, 50), 'Main Heading', font=font, fill=(25, 35, 55))
+    draw.text((55, 118), '* low-conf tag v1.2', font=sub_font, fill=(95, 105, 125))
+    b_hi = draw.textbbox((55, 50), 'Main Heading', font=font)
+    b_lo = draw.textbbox((55, 118), '* low-conf tag v1.2', font=sub_font)
+    box_lo = [int(b_lo[0]), int(b_lo[1]), int(b_lo[2] - b_lo[0]), int(b_lo[3] - b_lo[1])]
+    img.save(directory / 'inputs/01.png')
+    src_arr = np.array(img)
+
+    ocr_data = {'lines': [
+        {'id': 'o-hi', 'text': 'Main Heading', 'score': 0.99,
+         'bbox': [float(b_hi[0]), float(b_hi[1]), float(b_hi[2] - b_hi[0]), float(b_hi[3] - b_hi[1])]},
+        {'id': 'o-lo', 'text': '* low-conf tag v1.2', 'score': 0.52,
+         'bbox': [float(v) for v in box_lo]},
+    ]}
+    monkeypatch.setattr(service, 'run_ocr', lambda state, current, d, *, page: (
+        write(d / 'ocr.json', ocr_data),
+        current.setdefault('ocr', {}).update({str(page): str(d / 'ocr.json')}),
+        {'result': ocr_data})[2])
+
+    prep = call(service, identifier, 'prepare_page_evidence', page=1, run_layers=False)
+    assert prep['text_count'] == 1
+    batch = call(service, identifier, 'batch_reconstruct_page', page=1,
+                 include_assets=True, include_containers=True, use_inpaint=False, verify_office=False)
+    assert batch['status'] == 'STAGED_LOCAL'
+    cand_ir = Path(service.state(identifier).read()['candidates'][batch['candidate_id']]['ir'])
+    cand_graph = SceneGraph.model_validate_json((cand_ir.parent / 'scene.json').read_text('utf8'))
+    assert cand_graph.surface.shapes == [] and cand_graph.asset.objects == []
+    plate = np.array(Image.open(cand_ir.parent / 'source-plate.png').convert('RGB'))
+    x0, y0, bw, bh = box_lo
+    assert np.array_equal(plate[y0:y0 + bh, x0:x0 + bw], src_arr[y0:y0 + bh, x0:x0 + bw])
+
+
+def test_deferred_assets_derive_host_ownership_and_batch_enforces_unified_commit_and_isolation(job, monkeypatch, tmp_path):
+    from PIL import ImageDraw, ImageFont
+    from product import fonts
+    from product.parallel_contracts import SceneGraph
+    import product.runtime.compiler as compiler
+
+    service, identifier, directory = job
+    manifest = fonts.font_manifest([])
+    rec = next(r for r in manifest['fonts'] if r['family'] == 'Arial' and not r['bold'])
+    monkeypatch.setattr(fonts, 'font_manifest', lambda texts: {'fonts': [rec]})
+
+    w, h = 420, 180
+    img = Image.new('RGB', (w, h), (246, 249, 255))
+    font = ImageFont.truetype(rec['file'], 20, index=rec['index'])
+    draw = ImageDraw.Draw(img)
+    draw.text((35, 30), 'Healthy Line', font=font, fill=(20, 90, 220))
+    draw.text((35, 95), 'Defective Line', font=font, fill=(40, 40, 40))
+    b1 = draw.textbbox((35, 30), 'Healthy Line', font=font)
+    b2 = draw.textbbox((35, 95), 'Defective Line', font=font)
+    img.save(directory / 'inputs/01.png')
+
+    layers_dir = tmp_path / 'mock_layers'
+    layers_dir.mkdir()
+    Image.new('RGBA', (w, h), (246, 249, 255, 255)).save(layers_dir / 'layer-00.png')
+    img.convert('RGBA').save(layers_dir / 'source.png')
+    write(layers_dir / 'manifest.json', {
+        'layer_order': 'back_to_front', 'image_size': [w, h], 'source_sha256': digest(layers_dir / 'source.png'),
+        'layers': [{'file': 'layer-00.png', 'z': 0, 'size': [w, h], 'sha256': digest(layers_dir / 'layer-00.png')}],
+    })
+    ocr_data = {'lines': [
+        {'id': 'o1', 'text': 'Healthy Line', 'score': 0.99, 'bbox': [float(b1[0]), float(b1[1]), float(b1[2] - b1[0]), float(b1[3] - b1[1])]},
+        {'id': 'o2', 'text': 'Defective Line', 'score': 0.99, 'bbox': [float(b2[0]), float(b2[1]), float(b2[2] - b2[0]), float(b2[3] - b2[1])]},
+    ]}
+    monkeypatch.setattr(service, 'run_ocr', lambda state, current, d, *, page: (
+        write(d / 'ocr.json', ocr_data),
+        current.setdefault('ocr', {}).update({str(page): str(d / 'ocr.json')}),
+        {'result': ocr_data})[2])
+    prep = call(service, identifier, 'prepare_page_evidence', page=1, run_layers=False)
+    assert prep['status'] == 'PREPARED'
+
+    # Inject malformed deferred assets plus layers dir into state so batch must derive UNOWNED via host fusion.
+    deferred_file = directory / 'bad_deferred.json'
+    write(deferred_file, [
+        {'id': 'a-bad-oob', 'kind': 'icon', 'bbox': [390, 20, 60, 40], 'layers': ['layer-00.png'],
+         'components': ['whole'], 'parts': [{'name': 'whole', 'bbox': [390, 20, 60, 40], 'layers': ['layer-00.png']}],
+         'exclusions': [], 'replaces': [], 'required_owners': [], 'text_policy': 'exclude_independent_text',
+         'intrinsic_text': '', 'description': 'oob', 'prompt_en': 'oob'},
+        {'id': 'a-bad-layer', 'kind': 'icon', 'bbox': [280, 20, 40, 40], 'layers': ['../escape.jpg'],
+         'components': ['whole'], 'parts': [{'name': 'whole', 'bbox': [280, 20, 40, 40], 'layers': ['layer-00.png']}],
+         'exclusions': [], 'replaces': [], 'required_owners': [], 'text_policy': 'exclude_independent_text',
+         'intrinsic_text': '', 'description': 'bad layer', 'prompt_en': 'bad layer'},
+    ])
+    st = service.state(identifier)
+    cur = st.read()
+    cur.setdefault('deferred_assets', {})['1'] = str(deferred_file)
+    cur['pages'][0]['layers'] = str(layers_dir)
+    write(st.root / 'state.json', cur)
+
+    def fake_compile(irs, out, texts):
+        out.mkdir(parents=True, exist_ok=True)
+        (out / 'deck.pptx').write_bytes(b'pptx:' + Path(irs[0]).read_bytes())
+        return {'pptx': str(out / 'deck.pptx')}
+
+    office_calls = []
+    def fake_office(state, pptx, irs, out):
+        office_calls.append(len(office_calls) + 1)
+        out = Path(out); out.mkdir(parents=True, exist_ok=True)
+        if len(office_calls) == 1:
+            res = {'status': 'REVIEW_REQUIRED', 'files': {}, 'residuals': [[
+                {'id': 't-001', 'residual_check_status': 'PASS'},
+                {'id': 't-002', 'residual_check_status': 'FAIL'},
+            ]], 'replacements': {'records': []}}
+        else:
+            res = {'status': 'PASS', 'files': {}, 'residuals': [[{'id': 't-001', 'residual_check_status': 'PASS'}]], 'replacements': {'records': []}}
+        write(out / 'checks.json', res)
+        return res
+
+    monkeypatch.setattr(compiler, 'compile_local', fake_compile)
+    monkeypatch.setattr(service, 'office_check', fake_office)
+
+    batch = call(service, identifier, 'batch_reconstruct_page', page=1,
+                 include_assets=True, include_containers=False, use_inpaint=False, verify_office=True)
+    assert batch['status'] == 'VALIDATED'
+    assert batch['committed_count'] == 0
+    assert batch['staged_object_ids'] == ['t-001']
+    assert batch['isolated_dropped_ids'] == ['t-002']
+    assert any(fr['object_id'] == 'a-bad-oob' and fr['failure'] == 'OWNERSHIP_UNRESOLVED' for fr in batch['failed_regions'])
+    assert any(fr['object_id'] == 'a-bad-layer' and fr['failure'] == 'OWNERSHIP_UNRESOLVED' for fr in batch['failed_regions'])
+    assert any(fr['object_id'] == 't-002' and fr['failure'] == 'OFFICE_RESIDUAL_OR_EDIT_FAILED' for fr in batch['failed_regions'])
+    assert len(office_calls) == 2
+    assert service.graph(st.read()['pages'][0]).selected == {}
+
+    # Unified commit checks: missing version, wrong version, and text tampering must all block commit.
+    with pytest.raises(ValueError, match='explicit scene version'):
+        call(service, identifier, 'commit_candidate', candidate_id=batch['candidate_id'])
+    with pytest.raises(RuntimeConflict, match='version conflict'):
+        call(service, identifier, 'commit_candidate', candidate_id=batch['candidate_id'], expected_version=0)
+
+    cand_ir = Path(st.read()['candidates'][batch['candidate_id']]['ir'])
+    cand_scene_path = cand_ir.parent / 'scene.json'
+    orig_scene_bytes = cand_scene_path.read_bytes()
+    tampered_scene = SceneGraph.model_validate_json(orig_scene_bytes.decode('utf8'))
+    tampered_scene.text.texts[0].text = 'TAMPERED'
+    write(cand_scene_path, tampered_scene.model_dump())
+    cur_after = st.read()
+    cur_after['candidates'][batch['candidate_id']]['files'][str(cand_scene_path)] = digest(cand_scene_path)
+    write(st.root / 'state.json', cur_after)
+    with pytest.raises(ValueError, match='confirmed text changed'):
+        call(service, identifier, 'commit_candidate',
+             candidate_id=batch['candidate_id'], expected_version=batch['version'])
+    assert st.read()['version'] == batch['version']
+
+    # Restore valid scene + hash and verify unified commit succeeds cleanly on surviving t-001.
+    cand_scene_path.write_bytes(orig_scene_bytes)
+    cur_restored = st.read()
+    cur_restored['candidates'][batch['candidate_id']]['files'][str(cand_scene_path)] = digest(cand_scene_path)
+    write(st.root / 'state.json', cur_restored)
+    committed = call(service, identifier, 'commit_candidate',
+                     candidate_id=batch['candidate_id'], expected_version=batch['version'])
+    assert committed['status'] == 'COMMITTED'
+    assert committed['committed_count'] == 1
+    assert committed['object_ids'] == ['t-001']
+    assert service.call('get_progress', identifier)['pages'][0]['committed_objects'] == 1
 
 
 

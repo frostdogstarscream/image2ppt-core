@@ -1,8 +1,12 @@
 """First barrier: explicit ownership and relationships, never rectangle erasure."""
+import copy
+import json
+from pathlib import Path
 import numpy as np
 from PIL import Image
-from .parallel_contracts import SceneGraph,Relation
-from .contracts import intersection
+from .parallel_contracts import AssetEvidence, Relation, SceneGraph, SurfaceEvidence, TextEvidence
+from .contracts import Shape, intersection
+from .object_contracts import ClosedObject
 from .object_extract import rectangle
 
 
@@ -127,3 +131,68 @@ def glyph_evidence(source,box,foreground,backing):
     certain=visible & (error<=32) & (alpha>.005) & (den>100)
     uncertain=visible & ~certain
     return certain,uncertain
+
+
+def fuse_incremental_scene(
+    baseline_dir: Path | str,
+    *,
+    base_graph: SceneGraph | None = None,
+    added_assets: list | tuple = (),
+    added_shapes: list | tuple = (),
+    background_hex: str | None = None,
+) -> SceneGraph:
+    """Derive scene ownership and relations exclusively through host fusion."""
+    baseline = Path(baseline_dir)
+    g = base_graph or SceneGraph.model_validate_json((baseline / 'scene.json').read_text('utf8'))
+    ocr_file = baseline / 'runtime-ocr-protection.json'
+    if ocr_file.is_file():
+        ocr = json.loads(ocr_file.read_text('utf8'))
+        if ocr.get('source_sha256') and ocr['source_sha256'] != g.source_sha256:
+            raise ValueError('runtime OCR protection source mismatch')
+    else:
+        ocr = {'lines': []}
+
+    snap = {
+        'source_sha256': g.source_sha256,
+        'image_size': g.image_size,
+        'transform': g.transform,
+    }
+    text_ev = g.text.model_copy(deep=True)
+    asset_ev = g.asset.model_copy(deep=True)
+    surf_ev = g.surface.model_copy(deep=True)
+    if background_hex is not None:
+        surf_ev.background = background_hex
+
+    existing_asset_ids = {a.id for a in asset_ev.objects}
+    for raw_a in added_assets:
+        a_obj = raw_a if isinstance(raw_a, ClosedObject) else ClosedObject.model_validate(raw_a)
+        if a_obj.id not in existing_asset_ids:
+            asset_ev.objects.append(a_obj)
+            existing_asset_ids.add(a_obj.id)
+
+    existing_shape_ids = {s.id for s in surf_ev.shapes}
+    for raw_s in added_shapes:
+        s_obj = raw_s if isinstance(raw_s, Shape) else Shape.model_validate(raw_s)
+        if s_obj.id not in existing_shape_ids:
+            surf_ev.shapes.append(s_obj)
+            existing_shape_ids.add(s_obj.id)
+
+    fused = fuse(snap, {'text': text_ev, 'asset': asset_ev, 'surface': surf_ev}, ocr)
+    if ocr.get('lines'):
+        from .runtime.primitives import text_geometry_conflicts
+        conflicts = text_geometry_conflicts(fused.text, ocr) - set(g.selected)
+        for tid in conflicts:
+            if fused.ownership.get(tid) == 'RESOLVED':
+                fused.ownership[tid] = 'AMBIGUOUS'
+
+    fused.selected = copy.deepcopy(g.selected)
+    fused.transactions = copy.deepcopy(g.transactions)
+    fused.raster_backing = copy.deepcopy(g.raster_backing)
+    for oid in g.selected:
+        if oid in g.ownership:
+            fused.ownership[oid] = g.ownership[oid]
+    if not ocr_file.is_file():
+        for t in g.text.texts:
+            if t.id in g.ownership:
+                fused.ownership[t.id] = g.ownership[t.id]
+    return fused

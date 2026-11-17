@@ -310,6 +310,34 @@ class RuntimeService(ExplorationTools):
         return self.rebuild_region(state, current, directory, page=previous['page'],
                                    object_id=previous['object_id'], strategy=strategy)
 
+    def _verify_staged_candidate_graph(self, current, candidate):
+        self.check_candidate(current, candidate)
+        ir = Path(candidate['ir'])
+        graph = SceneGraph.model_validate_json((ir.parent / 'scene.json').read_text('utf8'))
+        row = self.page(current, candidate['page'])
+        original = self.graph(row)
+        if {t.id: t.text for t in graph.text.texts} != {t.id: t.text for t in original.text.texts}:
+            raise ValueError('confirmed text changed')
+        if graph.source_sha256 != original.source_sha256:
+            raise ValueError('source changed')
+        if not set(original.selected) <= set(graph.selected):
+            raise ValueError('candidate dropped previously committed objects')
+        for oid in set(graph.selected) - set(original.selected):
+            if graph.ownership.get(oid) != 'RESOLVED':
+                raise ValueError(f'cannot commit unresolved object {oid}')
+            ref = graph.selected[oid].get('owner_evidence')
+            if not ref:
+                raise ValueError(f'missing owner evidence for {oid}')
+            pfile = (ir.parent / ref['file']).resolve()
+            if not pfile.is_relative_to(ir.parent.resolve()) or digest(pfile) != ref['sha256']:
+                raise RuntimeConflict('candidate owner proof changed')
+        rb = graph.raster_backing or {}
+        if rb.get('path') and rb.get('sha256'):
+            plate_file = (ir.parent / rb['path']).resolve()
+            if not plate_file.is_relative_to(ir.parent.resolve()) or digest(plate_file) != rb['sha256']:
+                raise RuntimeConflict('candidate raster backing changed')
+        return ir, graph, row, original
+
     def validate_candidate(self, state, current, directory, *, candidate_id):
         candidate = current['candidates'][candidate_id]
         if candidate.get('exploratory'):
@@ -327,27 +355,36 @@ class RuntimeService(ExplorationTools):
             return {'status':'REVIEW_REQUIRED','candidate_id':candidate_id,'office_status':'NOT_RUN',
                     'failure':candidate.get('failure','CANDIDATE_NOT_STAGED'),
                     'failed_checks':candidate.get('failed_checks',[]),'evidence':candidate.get('evidence',[])}
-        self.check_candidate(current, candidate)
-        ir = Path(candidate['ir'])
-        graph = SceneGraph.model_validate_json((ir.parent/'scene.json').read_text('utf8'))
-        row = self.page(current, candidate['page'])
-        original = self.graph(row)
-        if {t.id: t.text for t in graph.text.texts} != {t.id: t.text for t in original.text.texts}:
-            raise ValueError('confirmed text changed')
-        if graph.source_sha256 != original.source_sha256:
-            raise ValueError('source changed')
+        ir, graph, _, _ = self._verify_staged_candidate_graph(current, candidate)
         from .compiler import compile_local as compile_pages
         from ..parallel_pipeline import effective_texts
         with lease('compiler'):
             artifacts = compile_pages([ir], directory/'compiled', [effective_texts(graph, ir)])
         result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check')
+        if result.get('status') == 'REVIEW_REQUIRED' and candidate.get('kind') == 'batch' and not candidate.get('isolation_attempted'):
+            from .batch_backbone import restage_batch_candidate_subset
+            if restage_batch_candidate_subset(self, state, current, directory/'batch-isolate', candidate, result):
+                ir, graph, _, _ = self._verify_staged_candidate_graph(current, candidate)
+                with lease('compiler'):
+                    artifacts = compile_pages([ir], directory/'compiled-pass2', [effective_texts(graph, ir)])
+                result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check-pass2')
         if candidate.get('kind')=='text':
             from .office import frame_feedback
             feedback=frame_feedback(result,graph,candidate['object_id'])
             if feedback:
                 result['repair_feedback']=feedback
         candidate['validation'] = result
-        candidate['status'] = 'VALIDATED' if result['status'] == 'PASS' else 'REVIEW_REQUIRED'
+        if result.get('status') == 'PASS':
+            candidate['status'] = 'VALIDATED'
+            candidate['validated_bundle'] = {
+                'irs': [digest(ir)],
+                'pptx': str(artifacts['pptx']),
+                'pptx_sha256': digest(artifacts['pptx']),
+            }
+        elif result.get('status') == 'UNKNOWN':
+            candidate['status'] = 'STAGED_LOCAL'
+        else:
+            candidate['status'] = 'REVIEW_REQUIRED'
         return {'candidate_id': candidate_id, **result}
 
     def check_candidate(self, current, candidate):
@@ -379,20 +416,28 @@ class RuntimeService(ExplorationTools):
                 return {'status': 'SUBMISSION_BLOCKED', 'checks': checked, 'preview_candidate_id': candidate_id}
             return self.commit_region(state, current, directory/'commit', candidate_id=staged['id'])
         if candidate.get('status') == 'COMMITTED':
-            return {'status': 'COMMITTED', 'already_committed': True,
-                    'object_id': candidate.get('object_id'), 'object_ids': candidate.get('object_ids', [candidate.get('object_id')])}
-        if candidate['status'] != 'VALIDATED' or candidate['validation']['status'] != 'PASS':
+            obj_ids = candidate.get('object_ids') or [candidate.get('object_id')]
+            return {'status': 'COMMITTED', 'already_committed': True, 'candidate_id': candidate_id,
+                    'object_id': candidate.get('object_id'), 'object_ids': obj_ids, 'committed_count': len(obj_ids)}
+        if candidate.get('status') == 'STAGED_LOCAL':
+            self.validate_candidate(state, current, directory/'auto-validate', candidate_id=candidate_id)
+        if candidate.get('status') != 'VALIDATED' or candidate.get('validation', {}).get('status') != 'PASS':
             raise ValueError('candidate requires successful hard and actual edit checks')
-        self.check_candidate(current, candidate)
+        ir, _, row, _ = self._verify_staged_candidate_graph(current, candidate)
         for path, sha in candidate['validation'].get('files', {}).items():
             if digest(path) != sha:
                 raise RuntimeConflict('candidate Office evidence changed')
-        row = self.page(current, candidate['page'])
-        row.update(ir=candidate['ir'], scene=str(Path(candidate['ir']).parent/'scene.json'))
+        row.update(ir=str(ir), scene=str(ir.parent/'scene.json'))
         candidate['status'] = 'COMMITTED'
+        if candidate.get('validated_bundle'):
+            current['last_verified_bundle'] = candidate['validated_bundle']
+        else:
+            current.pop('last_verified_bundle', None)
         current.pop('composition', None)
         current.pop('visual_review', None)
-        return {'status': 'COMMITTED', 'object_id': candidate['object_id']}
+        obj_ids = candidate.get('object_ids') or [candidate['object_id']]
+        return {'status': 'COMMITTED', 'candidate_id': candidate_id, 'object_id': candidate['object_id'],
+                'object_ids': obj_ids, 'committed_count': len(obj_ids)}
 
     commit_candidate = commit_region
 

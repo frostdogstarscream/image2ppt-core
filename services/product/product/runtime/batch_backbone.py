@@ -23,7 +23,7 @@ from ..materialize import digest, write
 from ..object_contracts import ClosedObject
 from ..object_extract import rectangle
 from ..parallel_contracts import Relation, SceneGraph
-from ..parallel_fusion import is_decorative_subspan
+from ..parallel_fusion import fuse_incremental_scene, is_decorative_subspan
 from ..parallel_store import Store, key
 from ..parallel_typography import calibrate, snap_ooxml_size_px, measure_text_appearance
 from ..resource_lease import lease
@@ -934,22 +934,269 @@ def _collect_office_defects(office_result: dict, graph: SceneGraph, staged_ids: 
     return frame_repairs, bad_ids
 
 
-def batch_reconstruct_page(service, state, current, directory: Path, *, page: int,
-                           object_ids: list[str] | None = None, include_assets: bool = True,
-                           include_containers: bool = True, use_inpaint: bool = True,
-                           verify_office: bool = True) -> dict:
-    """Parallel local text trials + sequential text staging + whole-asset extraction/staging + single batch Office check."""
+def _chain_stage_from_spec(
+    *,
+    initial_graph: SceneGraph,
+    initial_baseline: Path,
+    fonts: dict,
+    source_path: str,
+    layers_dir: str | None,
+    deferred_path: str | None,
+    page_cache_dir: Path,
+    directory: Path,
+    tag: str,
+    trials_spec: list[dict],
+    frame_overrides: dict,
+    skip_ids: set[str],
+    include_assets: bool,
+    include_containers: bool,
+    wanted_filter: set[str] | None,
+    sam_enabled: bool,
+) -> tuple[Path, list[str], list[dict]]:
     from ..object_stage import infer_sam
-    from ..parallel_config import ROOT
-    from ..parallel_pipeline import effective_texts
-    from ..recovery.adaptive_policy import AdaptiveBudget
     from ..recovery.agent_asset_stage import stage_asset_candidate
     from ..recovery.asset_retry import retry_asset_extraction
     from ..recovery.candidate_stage import stage_background
     from ..recovery.product_pipeline import failure as classify_exc
+
+    cur_base = initial_baseline
+    staged_ids: list[str] = []
+    stage_errors: list[dict] = []
+
+    for idx, tr in enumerate(trials_spec):
+        oid = tr['object_id']
+        if oid in skip_ids:
+            continue
+        step_out = directory / tag / f'step-{idx:03d}-{oid}'
+        frame_opt = (
+            {'size': frame_overrides[oid], 'method': 'office_batch_auto_frame_repair/1'}
+            if oid in frame_overrides else None
+        )
+        try:
+            ir = stage_background(
+                Path(tr['trial_dir']),
+                initial_graph,
+                cur_base,
+                fonts,
+                step_out,
+                frame_minimum=frame_opt,
+            )
+            cur_base = ir.parent
+            staged_ids.append(oid)
+        except Exception as exc:
+            msg = str(exc)
+            code = 'FONT_LAYOUT_FAILED' if 'frame allowance' in msg else ('OWNER_CONFLICT' if 'stable owner' in msg else 'STAGE_REJECTED')
+            stage_errors.append({
+                'object_id': oid,
+                'kind': 'text',
+                'text': tr.get('text', ''),
+                'bbox': list(tr.get('bbox', [])),
+                'failure': code,
+                'reason': msg,
+            })
+
+    if include_assets and layers_dir:
+        cur_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
+        if deferred_path and Path(deferred_path).is_file():
+            deferred_list = json.loads(Path(deferred_path).read_text('utf8'))
+            existing_ids = {a.id for a in cur_graph.asset.objects}
+            to_add: list[ClosedObject] = []
+            for raw_obj in deferred_list:
+                oid = raw_obj.get('id')
+                if not oid or oid in existing_ids or oid in skip_ids:
+                    continue
+                if wanted_filter is not None and oid not in wanted_filter:
+                    continue
+                d_box = raw_obj['bbox']
+                d_area = max(1.0, d_box[2] * d_box[3])
+                if any(intersection(a.bbox, d_box) >= 0.30 * min(max(1.0, a.bbox[2] * a.bbox[3]), d_area)
+                       for a in cur_graph.asset.objects):
+                    continue
+                to_add.append(ClosedObject.model_validate(raw_obj))
+            if to_add:
+                prep_base = directory / tag / 'deferred-scene-prep'
+                shutil.copytree(cur_base, prep_base)
+                # Host fusion alone derives deferred asset ownership and semantic relations.
+                cur_graph = fuse_incremental_scene(cur_base, base_graph=cur_graph, added_assets=to_add)
+                write(prep_base / 'scene.json', cur_graph.model_dump())
+                cur_base = prep_base
+                for obj in to_add:
+                    if cur_graph.ownership.get(obj.id) != 'RESOLVED':
+                        stage_errors.append({
+                            'object_id': obj.id,
+                            'kind': 'asset',
+                            'bbox': list(obj.bbox),
+                            'failure': 'OWNERSHIP_UNRESOLVED',
+                            'reason': f"host fusion derived ownership={cur_graph.ownership.get(obj.id)}",
+                        })
+
+        cur_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
+        asset_targets = [
+            a for a in cur_graph.asset.objects
+            if a.id not in cur_graph.selected
+            and cur_graph.ownership.get(a.id) == 'RESOLVED'
+            and a.id not in skip_ids
+            and (wanted_filter is None or a.id in wanted_filter)
+        ]
+        for idx, asset in enumerate(asset_targets):
+            step_dir = directory / tag / f'asset-{idx:03d}-{key(asset.id)[:12]}'
+            step_dir.mkdir(parents=True, exist_ok=True)
+            active_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
+            try:
+                res = retry_asset_extraction(
+                    active_graph, asset.id, source_path, layers_dir,
+                    cur_base, step_dir / 'extract', strategy='verified-backing',
+                )
+                if res.get('status') != 'CANDIDATE_READY' and sam_enabled:
+                    sam_root = page_cache_dir / 'sam-cache' / key(asset.id)[:12]
+                    plan_file = sam_root / 'sam-plan.json'
+                    sam_out = sam_root / 'sam'
+                    if not (sam_out / 'manifest.json').is_file() and not any(sam_out.glob('*.png')) if sam_out.exists() else True:
+                        sam_root.mkdir(parents=True, exist_ok=True)
+                        write(plan_file, {
+                            'schema': 'LogicalObjects/2',
+                            'source_sha256': active_graph.source_sha256,
+                            'image_size': active_graph.image_size,
+                            'objects': [a.model_dump() for a in active_graph.asset.objects],
+                            'limitations': [],
+                        })
+                        try:
+                            infer_sam(source_path, plan_file, sam_out, 'sam3', [asset.id])
+                        except Exception:
+                            pass
+                    if plan_file.is_file() and sam_out.is_dir():
+                        res_sam = retry_asset_extraction(
+                            active_graph, asset.id, source_path, layers_dir,
+                            cur_base, step_dir / 'extract-sam', strategy='sam',
+                            sam_plan=plan_file, sam_directory=sam_out,
+                        )
+                        if res_sam.get('status') == 'CANDIDATE_READY':
+                            res = res_sam
+                if res.get('status') == 'CANDIDATE_READY':
+                    ir = stage_asset_candidate(
+                        res['candidate_directory'], active_graph, cur_base,
+                        step_dir / 'staged', layer_directory=layers_dir,
+                    )
+                    cur_base = ir.parent
+                    staged_ids.append(asset.id)
+                else:
+                    stage_errors.append({
+                        'object_id': asset.id, 'kind': 'asset', 'bbox': list(asset.bbox),
+                        'failure': 'ASSET_EXTRACTION_UNCERTAIN', 'reason': res.get('reason', 'unverified'),
+                    })
+            except Exception as exc:
+                stage_errors.append({
+                    'object_id': asset.id, 'kind': 'asset', 'bbox': list(asset.bbox),
+                    'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
+                })
+
+    if include_assets and include_containers and staged_ids and wanted_filter is None:
+        from ..recovery.container_stage import stage_containers_and_surfaces
+        cont_dir = directory / tag / 'containers-staged'
+        try:
+            cont_ir, cont_ids = stage_containers_and_surfaces(cur_base, cont_dir, skip_ids=skip_ids)
+            if cont_ids:
+                cur_base = cont_ir.parent
+                staged_ids.extend(cont_ids)
+        except Exception as exc:
+            stage_errors.append({
+                'object_id': 'containers', 'kind': 'surface', 'bbox': [],
+                'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
+            })
+
+    return cur_base, staged_ids, stage_errors
+
+
+def restage_batch_candidate_subset(
+    service,
+    state,
+    current,
+    directory: Path,
+    candidate: dict,
+    office_res: dict,
+) -> bool:
+    """Isolate failing batch objects and apply measured frame_minimum repairs without touching parent scene."""
+    spec = candidate.get('batch_spec')
+    if not spec:
+        return False
+    staged_graph = SceneGraph.model_validate_json((Path(candidate['ir']).parent / 'scene.json').read_text('utf8'))
+    staged_ids = candidate.get('object_ids') or [candidate['object_id']]
+    frame_repairs, bad_ids = _collect_office_defects(office_res, staged_graph, staged_ids)
+    if not (frame_repairs or (bad_ids and len(bad_ids) < len(staged_ids))):
+        return False
+
+    row = service.page(current, candidate['page'])
+    initial_baseline = Path(spec['initial_baseline'])
+    initial_graph = SceneGraph.model_validate_json((initial_baseline / 'scene.json').read_text('utf8'))
+    fonts = json.loads(Path(current['fonts']).read_text('utf8'))
+    overrides = {oid: fb['measured_frame_minimum_px'] for oid, fb in frame_repairs.items()}
+    skip = bad_ids | set(spec.get('pass1_failed_ids', []))
+    wanted_list = spec.get('wanted_filter')
+    wanted_filter = set(wanted_list) if wanted_list is not None else None
+
+    directory.mkdir(parents=True, exist_ok=True)
+    repaired_base, repaired_ids, retry_errors = _chain_stage_from_spec(
+        initial_graph=initial_graph,
+        initial_baseline=initial_baseline,
+        fonts=fonts,
+        source_path=row['snapshot']['path'],
+        layers_dir=row.get('layers'),
+        deferred_path=current.get('deferred_assets', {}).get(str(candidate['page'])),
+        page_cache_dir=Path(spec['cache_dir']),
+        directory=directory,
+        tag='stage-pass2',
+        trials_spec=spec['trials'],
+        frame_overrides=overrides,
+        skip_ids=skip,
+        include_assets=bool(spec.get('include_assets', True)),
+        include_containers=bool(spec.get('include_containers', True)),
+        wanted_filter=wanted_filter,
+        sam_enabled=bool(spec.get('sam_enabled', False)),
+    )
+
+    isolation_failures: list[dict] = []
+    for oid in sorted(bad_ids):
+        t_match = next((t for t in staged_graph.text.texts if t.id == oid), None)
+        a_match = next((a for a in staged_graph.asset.objects if a.id == oid), None)
+        s_match = next((s for s in staged_graph.surface.shapes if s.id == oid), None)
+        isolation_failures.append({
+            'object_id': oid,
+            'kind': 'text' if t_match else ('surface' if s_match else 'asset'),
+            'text': t_match.text if t_match else '',
+            'bbox': list(t_match.bbox) if t_match else (list(s_match.bbox) if s_match else (list(a_match.bbox) if a_match else [])),
+            'failure': 'OFFICE_RESIDUAL_OR_EDIT_FAILED',
+            'reason': 'isolated during batch Office verification; inspect locally',
+        })
+    for err in retry_errors:
+        if err['object_id'] in frame_repairs:
+            err['measured_frame_minimum_px'] = frame_repairs[err['object_id']]['measured_frame_minimum_px']
+        isolation_failures.append(err)
+
+    candidate['isolation_attempted'] = True
+    candidate['isolation_failures'] = isolation_failures
+    candidate['isolated_bad_ids'] = sorted(bad_ids)
+    if not repaired_ids:
+        return False
+
+    final_ir = repaired_base / 'slideir.json'
+    candidate['ir'] = str(final_ir)
+    candidate['object_id'] = repaired_ids[0]
+    candidate['object_ids'] = repaired_ids
+    candidate['auto_repaired_frame_ids'] = [oid for oid in overrides if oid in repaired_ids]
+    candidate['fingerprint'] = key({'batch': repaired_ids, 'ir': digest(final_ir)})
+    candidate['files'] = {str(p): digest(p) for p in repaired_base.rglob('*') if p.is_file()}
+    return True
+
+
+def batch_reconstruct_page(service, state, current, directory: Path, *, page: int,
+                           object_ids: list[str] | None = None, include_assets: bool = True,
+                           include_containers: bool = True, use_inpaint: bool = True,
+                           verify_office: bool = True) -> dict:
+    """Parallel local text trials + sequential staging + batch validation candidate (requires commit_candidate)."""
+    from ..recovery.adaptive_policy import AdaptiveBudget
+    from ..recovery.product_pipeline import failure as classify_exc
     from ..recovery.region_candidates import adaptive_candidates
     from .background import inpaint_service
-    from .compiler import compile_local
 
     row = service.page(current, page)
     initial_graph = service.graph(row)
@@ -964,13 +1211,16 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     failed_regions: list[dict] = []
 
     # Phase 1: Parallel local text candidate trials against initial_baseline.
-    text_targets = [t for t in initial_graph.text.texts
-                    if t.id not in initial_graph.selected
-                    and initial_graph.ownership.get(t.id) == 'RESOLVED'
-                    and (wanted_filter is None or t.id in wanted_filter)]
+    text_targets = [
+        t for t in initial_graph.text.texts
+        if t.id not in initial_graph.selected
+        and initial_graph.ownership.get(t.id) == 'RESOLVED'
+        and (wanted_filter is None or t.id in wanted_filter)
+    ]
 
     request = json.loads((state.job / 'request.json').read_text('utf8'))
     budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'))
+    from ..parallel_config import ROOT
     config_file = ROOT / '.runtime/parallel-services.json'
     lama_cfg = json.loads(config_file.read_text('utf8')).get('lama') if (use_inpaint and config_file.exists()) else None
     raw_inpaint = inpaint_service(lama_cfg, state.job / 'cache/lama', budget) if lama_cfg else None
@@ -978,21 +1228,29 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
 
     def _probe_text(text_obj):
         t_dir = directory / 'trials' / f'{text_obj.id}-{key(text_obj.id)[:8]}'
-        stream = adaptive_candidates(initial_graph, text_obj.id, source_path, row.get('layers'),
-                                     t_dir, baseline_directory=initial_baseline, inpaint=safe_inpaint)
+        stream = adaptive_candidates(
+            initial_graph, text_obj.id, source_path, row.get('layers'),
+            t_dir, baseline_directory=initial_baseline, inpaint=safe_inpaint,
+        )
         attempts = []
         try:
             for cand_row in stream:
                 attempts.append({'candidate': cand_row['candidate'], 'status': cand_row['status']})
                 if cand_row['status'] == 'PRECHECK_PASS':
-                    return {'object': text_obj, 'status': 'PRECHECK_PASS',
-                            'trial_dir': t_dir / cand_row['candidate'], 'method': cand_row['method'], 'attempts': attempts}
-            return {'object': text_obj, 'status': 'BLOCKED', 'failure': 'BACKGROUND_REPAIR_FAILED',
-                    'reason': 'no local or inpaint candidate passed precheck', 'trial_root': t_dir, 'attempts': attempts}
+                    return {
+                        'object': text_obj, 'status': 'PRECHECK_PASS',
+                        'trial_dir': t_dir / cand_row['candidate'], 'method': cand_row['method'], 'attempts': attempts,
+                    }
+            return {
+                'object': text_obj, 'status': 'BLOCKED', 'failure': 'BACKGROUND_REPAIR_FAILED',
+                'reason': 'no local or inpaint candidate passed precheck', 'trial_root': t_dir, 'attempts': attempts,
+            }
         except Exception as exc:
-            return {'object': text_obj, 'status': 'BLOCKED',
-                    'failure': getattr(exc, 'code', classify_exc(exc, 'generation')),
-                    'reason': str(exc), 'trial_root': t_dir, 'attempts': attempts}
+            return {
+                'object': text_obj, 'status': 'BLOCKED',
+                'failure': getattr(exc, 'code', classify_exc(exc, 'generation')),
+                'reason': str(exc), 'trial_root': t_dir, 'attempts': attempts,
+            }
         finally:
             stream.close()
 
@@ -1012,126 +1270,20 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                     for png in sorted(root_dir.rglob('*.png')):
                         if png.name in ('source_crop.png', 'written_crop.png'):
                             ev.append(state.register(png, 'candidate_observation')['id'])
-                failed_regions.append({'object_id': t_obj.id, 'kind': 'text', 'text': t_obj.text, 'bbox': t_obj.bbox,
-                                       'failure': item['failure'], 'reason': item['reason'], 'evidence_ids': ev[:4]})
+                failed_regions.append({
+                    'object_id': t_obj.id, 'kind': 'text', 'text': t_obj.text, 'bbox': t_obj.bbox,
+                    'failure': item['failure'], 'reason': item['reason'], 'evidence_ids': ev[:4],
+                })
 
-    sam_cache: dict[str, tuple[Path, Path] | None] = {}
-
-    # Phase 2 & 3: Sequential text staging -> deferred badge merge -> whole-asset extraction & staging.
-    def _chain_stage(trials_list, tag: str, frame_overrides: dict, skip_ids: set[str]):
-        cur_base = initial_baseline
-        staged_ids: list[str] = []
-        stage_errors: list[dict] = []
-        for idx, tr in enumerate(trials_list):
-            t_obj = tr['object']
-            if t_obj.id in skip_ids:
-                continue
-            step_out = directory / tag / f'step-{idx:03d}-{t_obj.id}'
-            frame_opt = {'size': frame_overrides[t_obj.id], 'method': 'office_batch_auto_frame_repair/1'} if t_obj.id in frame_overrides else None
-            try:
-                ir = stage_background(tr['trial_dir'], initial_graph, cur_base, fonts, step_out, frame_minimum=frame_opt)
-                cur_base = ir.parent
-                staged_ids.append(t_obj.id)
-            except Exception as exc:
-                msg = str(exc)
-                code = 'FONT_LAYOUT_FAILED' if 'frame allowance' in msg else ('OWNER_CONFLICT' if 'stable owner' in msg else 'STAGE_REJECTED')
-                stage_errors.append({'object_id': t_obj.id, 'kind': 'text', 'text': t_obj.text,
-                                     'bbox': t_obj.bbox, 'failure': code, 'reason': msg})
-
-        if include_assets and row.get('layers'):
-            cur_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
-            deferred_path = current.get('deferred_assets', {}).get(str(page))
-            if deferred_path and Path(deferred_path).is_file():
-                deferred_list = json.loads(Path(deferred_path).read_text('utf8'))
-                existing_ids = {a.id for a in cur_graph.asset.objects}
-                to_add: list[ClosedObject] = []
-                for raw_obj in deferred_list:
-                    oid = raw_obj.get('id')
-                    if not oid or oid in existing_ids or oid in skip_ids:
-                        continue
-                    if wanted_filter is not None and oid not in wanted_filter:
-                        continue
-                    d_box = raw_obj['bbox']
-                    d_area = max(1.0, d_box[2] * d_box[3])
-                    if any(intersection(a.bbox, d_box) >= 0.30 * min(max(1.0, a.bbox[2] * a.bbox[3]), d_area)
-                           for a in cur_graph.asset.objects):
-                        continue
-                    to_add.append(ClosedObject.model_validate(raw_obj))
-                if to_add:
-                    prep_base = directory / tag / 'deferred-scene-prep'
-                    shutil.copytree(cur_base, prep_base)
-                    for obj in to_add:
-                        cur_graph.asset.objects.append(obj)
-                        cur_graph.ownership[obj.id] = 'RESOLVED'
-                        for t in cur_graph.text.texts:
-                            if intersection(t.bbox, obj.bbox) > 0:
-                                cur_graph.relations.append(Relation(
-                                    source=t.id, target=obj.id, kind='label_for',
-                                    status='AMBIGUOUS', evidence=['source', 'ocr', 'asset-intent']))
-                    write(prep_base / 'scene.json', cur_graph.model_dump())
-                    cur_base = prep_base
-
-            cur_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
-            asset_targets = [a for a in cur_graph.asset.objects
-                             if a.id not in cur_graph.selected
-                             and cur_graph.ownership.get(a.id) == 'RESOLVED'
-                             and a.id not in skip_ids
-                             and (wanted_filter is None or a.id in wanted_filter)]
-            for idx, asset in enumerate(asset_targets):
-                step_dir = directory / tag / f'asset-{idx:03d}-{key(asset.id)[:12]}'
-                step_dir.mkdir(parents=True, exist_ok=True)
-                active_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
-                try:
-                    res = retry_asset_extraction(active_graph, asset.id, source_path, row['layers'],
-                                                 cur_base, step_dir / 'extract', strategy='verified-backing')
-                    if res.get('status') != 'CANDIDATE_READY' and sam_enabled:
-                        if asset.id not in sam_cache:
-                            sam_root = directory / 'sam-cache' / key(asset.id)[:12]
-                            sam_root.mkdir(parents=True, exist_ok=True)
-                            plan_file = sam_root / 'sam-plan.json'
-                            write(plan_file, {
-                                'schema': 'LogicalObjects/2',
-                                'source_sha256': active_graph.source_sha256,
-                                'image_size': active_graph.image_size,
-                                'objects': [a.model_dump() for a in active_graph.asset.objects],
-                                'limitations': [],
-                            })
-                            try:
-                                sam_dir = infer_sam(source_path, plan_file, sam_root / 'sam', 'sam3', [asset.id])
-                            except Exception:
-                                sam_dir = None
-                            sam_cache[asset.id] = (plan_file, Path(sam_dir)) if sam_dir else None
-                        cached_sam = sam_cache.get(asset.id)
-                        if cached_sam is not None:
-                            res_sam = retry_asset_extraction(
-                                active_graph, asset.id, source_path, row['layers'],
-                                cur_base, step_dir / 'extract-sam', strategy='sam',
-                                sam_plan=cached_sam[0], sam_directory=cached_sam[1])
-                            if res_sam.get('status') == 'CANDIDATE_READY':
-                                res = res_sam
-                    if res.get('status') == 'CANDIDATE_READY':
-                        ir = stage_asset_candidate(res['candidate_directory'], active_graph, cur_base,
-                                                   step_dir / 'staged', layer_directory=row['layers'])
-                        cur_base = ir.parent
-                        staged_ids.append(asset.id)
-                    else:
-                        stage_errors.append({'object_id': asset.id, 'kind': 'asset', 'bbox': asset.bbox,
-                                             'failure': 'ASSET_EXTRACTION_UNCERTAIN', 'reason': res.get('reason', 'unverified')})
-                except Exception as exc:
-                    stage_errors.append({'object_id': asset.id, 'kind': 'asset', 'bbox': asset.bbox,
-                                         'failure': classify_exc(exc, 'generation'), 'reason': str(exc)})
-        if include_assets and include_containers and staged_ids and wanted_filter is None:
-            from ..recovery.container_stage import stage_containers_and_surfaces
-            cont_dir = directory / tag / 'containers-staged'
-            try:
-                cont_ir, cont_ids = stage_containers_and_surfaces(cur_base, cont_dir, skip_ids=skip_ids)
-                if cont_ids:
-                    cur_base = cont_ir.parent
-                    staged_ids.extend(cont_ids)
-            except Exception as exc:
-                stage_errors.append({'object_id': 'containers', 'kind': 'surface', 'bbox': [],
-                                     'failure': classify_exc(exc, 'generation'), 'reason': str(exc)})
-        return cur_base, staged_ids, stage_errors
+    trials_spec = [
+        {
+            'object_id': tr['object'].id,
+            'text': tr['object'].text,
+            'bbox': list(tr['object'].bbox),
+            'trial_dir': str(tr['trial_dir']),
+        }
+        for tr in passed_trials
+    ]
 
     logo_ids = {
         x['id'] for x in current.get('scene_relations', {}).get(str(page), {}).get('logo_lockup_candidates', [])
@@ -1141,120 +1293,121 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     def _enriched_failures() -> list[dict]:
         return [_classify_failed_region(err, initial_graph, logo_ids) for err in failed_regions]
 
-    final_base, staged_ids, stage_errors = _chain_stage(passed_trials, 'stage-pass1', {}, set())
+    final_base, staged_ids, stage_errors = _chain_stage_from_spec(
+        initial_graph=initial_graph,
+        initial_baseline=initial_baseline,
+        fonts=fonts,
+        source_path=source_path,
+        layers_dir=row.get('layers'),
+        deferred_path=current.get('deferred_assets', {}).get(str(page)),
+        page_cache_dir=directory,
+        directory=directory,
+        tag='stage-pass1',
+        trials_spec=trials_spec,
+        frame_overrides={},
+        skip_ids=set(),
+        include_assets=include_assets,
+        include_containers=include_containers,
+        wanted_filter=wanted_filter,
+        sam_enabled=sam_enabled,
+    )
     failed_regions.extend(stage_errors)
-    pass1_failed_ids = {err['object_id'] for err in stage_errors}
+    pass1_failed_ids = sorted(err['object_id'] for err in stage_errors if err.get('object_id'))
 
     if not staged_ids:
         enriched = _enriched_failures()
-        return {'status': 'NO_CANDIDATES_STAGED', 'page': page, 'committed_count': 0,
-                'committed_object_ids': [], 'failed_count': len(enriched), 'failed_regions': enriched}
+        return {
+            'status': 'NO_CANDIDATES_STAGED', 'page': page, 'committed_count': 0,
+            'committed_object_ids': [], 'failed_count': len(enriched), 'failed_regions': enriched,
+        }
 
     final_ir = final_base / 'slideir.json'
     batch_cid = 'c-' + key(str(directory.relative_to(state.job)) + ':batch')[:24]
-
-    if not verify_office:
-        cand = {
-            'id': batch_cid, 'page': page, 'object_id': staged_ids[0], 'object_ids': staged_ids,
-            'kind': 'batch', 'status': 'STAGED_LOCAL', 'ir': str(final_ir),
-            'parent_ir_sha256': digest(row['ir']), 'parent_scene_sha256': digest(row['scene']),
-            'strategy': 'batch_backbone', 'code': service.code_binding(),
-            'fingerprint': key({'batch': staged_ids, 'ir': digest(final_ir)}),
-            'files': {str(p): digest(p) for p in final_base.rglob('*') if p.is_file()},
-        }
-        current['candidates'][batch_cid] = cand
-        enriched = _enriched_failures()
-        return {'status': 'STAGED_LOCAL', 'candidate_id': batch_cid, 'page': page,
-                'staged_count': len(staged_ids), 'staged_object_ids': staged_ids,
-                'committed_count': 0, 'failed_count': len(enriched), 'failed_regions': enriched}
-
-    # Phase 4: Single batch compilation + Office verification (+ 1-pass auto frame/culprit repair).
-    def _compile_and_check(ir_path: Path, tag: str):
-        staged_g = SceneGraph.model_validate_json((ir_path.parent / 'scene.json').read_text('utf8'))
-        with lease('compiler'):
-            art = compile_local([ir_path], directory / f'compiled-{tag}', [effective_texts(staged_g, ir_path)])
-        off = service.office_check(state, art['pptx'], [ir_path], directory / f'office-{tag}')
-        return staged_g, art, off
-
-    staged_graph, artifacts, office_res = _compile_and_check(final_ir, 'pass1')
-    auto_repaired_frames = []
-
-    if office_res.get('status') == 'REVIEW_REQUIRED':
-        frame_repairs, bad_ids = _collect_office_defects(office_res, staged_graph, staged_ids)
-        if frame_repairs or (bad_ids and len(bad_ids) < len(staged_ids)):
-            overrides = {oid: fb['measured_frame_minimum_px'] for oid, fb in frame_repairs.items()}
-            repaired_base, repaired_ids, retry_errors = _chain_stage(
-                passed_trials, 'stage-pass2', overrides, bad_ids | pass1_failed_ids)
-            for oid in bad_ids:
-                t_match = next((t for t in staged_graph.text.texts if t.id == oid), None)
-                a_match = next((a for a in staged_graph.asset.objects if a.id == oid), None)
-                s_match = next((s for s in staged_graph.surface.shapes if s.id == oid), None)
-                failed_regions.append({
-                    'object_id': oid,
-                    'kind': 'text' if t_match else ('surface' if s_match else 'asset'),
-                    'text': t_match.text if t_match else '',
-                    'bbox': t_match.bbox if t_match else (s_match.bbox if s_match else (a_match.bbox if a_match else [])),
-                    'failure': 'OFFICE_RESIDUAL_OR_EDIT_FAILED',
-                    'reason': 'isolated during batch Office verification; inspect locally',
-                })
-            for err in retry_errors:
-                if err['object_id'] in frame_repairs:
-                    err['measured_frame_minimum_px'] = frame_repairs[err['object_id']]['measured_frame_minimum_px']
-                failed_regions.append(err)
-            if repaired_ids:
-                final_base = repaired_base
-                final_ir = final_base / 'slideir.json'
-                staged_ids = repaired_ids
-                auto_repaired_frames = [oid for oid in overrides if oid in staged_ids]
-                staged_graph, artifacts, office_res = _compile_and_check(final_ir, 'pass2')
-
-    if office_res.get('status') == 'PASS':
-        row.update(ir=str(final_ir), scene=str(final_ir.parent / 'scene.json'))
-        cand = {
-            'id': batch_cid, 'page': page, 'object_id': staged_ids[0], 'object_ids': staged_ids,
-            'kind': 'batch', 'status': 'COMMITTED', 'ir': str(final_ir),
-            'parent_ir_sha256': digest(initial_baseline / 'slideir.json'),
-            'parent_scene_sha256': digest(initial_baseline / 'scene.json'),
-            'strategy': 'batch_backbone', 'code': service.code_binding(),
-            'fingerprint': key({'batch': staged_ids, 'ir': digest(final_ir)}),
-            'validation': office_res,
-            'files': {str(p): digest(p) for p in final_base.rglob('*') if p.is_file()},
-        }
-        current['candidates'][batch_cid] = cand
-        current['last_verified_bundle'] = {
-            'irs': [digest(final_ir)],
-            'pptx': str(artifacts['pptx']),
-            'pptx_sha256': digest(artifacts['pptx']),
-        }
-        current.pop('composition', None)
-        current.pop('visual_review', None)
-        enriched = _enriched_failures()
-        return {
-            'status': 'COMMITTED', 'office_status': 'PASS', 'already_committed': True,
-            'candidate_id': batch_cid, 'page': page,
-            'committed_count': len(staged_ids), 'committed_object_ids': staged_ids,
-            'auto_repaired_frame_ids': auto_repaired_frames,
-            'failed_count': len(enriched), 'failed_regions': enriched,
-            'next_step': 'Objects in committed_object_ids are ALREADY committed to the page scene (do not call commit_candidate). Proceed to compose_delivery -> validate_office -> get_evidence -> record_visual_review -> finalize_job, or follow recommended_action (at most max_repair_attempts) on high-value failed_regions first.',
-        }
-
-    cand_status = 'STAGED_LOCAL' if office_res.get('status') == 'UNKNOWN' else 'REVIEW_REQUIRED'
     cand = {
-        'id': batch_cid, 'page': page, 'object_id': staged_ids[0], 'object_ids': staged_ids,
-        'kind': 'batch', 'status': cand_status, 'ir': str(final_ir),
-        'parent_ir_sha256': digest(row['ir']), 'parent_scene_sha256': digest(row['scene']),
-        'strategy': 'batch_backbone', 'code': service.code_binding(),
+        'id': batch_cid,
+        'page': page,
+        'object_id': staged_ids[0],
+        'object_ids': staged_ids,
+        'kind': 'batch',
+        'status': 'STAGED_LOCAL',
+        'ir': str(final_ir),
+        'parent_ir_sha256': digest(row['ir']),
+        'parent_scene_sha256': digest(row['scene']),
+        'strategy': 'batch_backbone',
+        'code': service.code_binding(),
         'fingerprint': key({'batch': staged_ids, 'ir': digest(final_ir)}),
-        'validation': office_res,
         'files': {str(p): digest(p) for p in final_base.rglob('*') if p.is_file()},
+        'batch_spec': {
+            'initial_baseline': str(initial_baseline),
+            'cache_dir': str(directory),
+            'trials': trials_spec,
+            'pass1_failed_ids': pass1_failed_ids,
+            'include_assets': bool(include_assets),
+            'include_containers': bool(include_containers),
+            'wanted_filter': sorted(wanted_filter) if wanted_filter is not None else None,
+            'sam_enabled': bool(sam_enabled),
+        },
+        'auto_repaired_frame_ids': [],
+        'isolated_bad_ids': [],
+        'isolation_failures': [],
     }
     current['candidates'][batch_cid] = cand
+    next_version = current['version'] + 1
+
+    if not verify_office:
+        enriched = _enriched_failures()
+        return {
+            'status': 'STAGED_LOCAL',
+            'already_committed': False,
+            'candidate_id': batch_cid,
+            'page': page,
+            'staged_count': len(staged_ids),
+            'staged_object_ids': staged_ids,
+            'committed_count': 0,
+            'committed_object_ids': [],
+            'failed_count': len(enriched),
+            'failed_regions': enriched,
+            'next_step': f'Batch candidate {batch_cid} is staged locally; call commit_candidate(candidate_id="{batch_cid}", expected_version={next_version}) to validate and commit.',
+        }
+
+    # Unified Office check & per-object failure isolation through RuntimeService.validate_candidate.
+    val = service.validate_candidate(state, current, directory / 'validate', candidate_id=batch_cid)
+    failed_regions.extend(cand.get('isolation_failures', []))
+    staged_ids = cand.get('object_ids', staged_ids)
+    auto_repaired_frames = cand.get('auto_repaired_frame_ids', [])
+    isolated_bad_ids = cand.get('isolated_bad_ids', [])
     enriched = _enriched_failures()
+
+    if cand.get('status') == 'VALIDATED' and val.get('status') == 'PASS':
+        return {
+            'status': 'VALIDATED',
+            'office_status': 'PASS',
+            'already_committed': False,
+            'candidate_id': batch_cid,
+            'page': page,
+            'staged_count': len(staged_ids),
+            'staged_object_ids': staged_ids,
+            'committed_count': 0,
+            'committed_object_ids': [],
+            'auto_repaired_frame_ids': auto_repaired_frames,
+            'isolated_dropped_ids': isolated_bad_ids,
+            'failed_count': len(enriched),
+            'failed_regions': enriched,
+            'next_step': f'Batch candidate {batch_cid} is VALIDATED ({len(staged_ids)} staged, 0 committed). Call commit_candidate(candidate_id="{batch_cid}", expected_version={next_version}) to formally commit, then inspect failed_regions or compose_delivery.',
+        }
+
     return {
-        'status': 'OFFICE_UNAVAILABLE' if office_res.get('status') == 'UNKNOWN' else 'REVIEW_REQUIRED',
-        'candidate_id': batch_cid, 'page': page,
-        'staged_count': len(staged_ids), 'staged_object_ids': staged_ids,
-        'committed_count': 0, 'office_status': office_res.get('status'),
-        'failed_count': len(enriched), 'failed_regions': enriched,
-        'next_step': f'Batch candidate {batch_cid} is staged but not yet committed; call commit_candidate(candidate_id="{batch_cid}") to validate and commit.',
+        'status': 'OFFICE_UNAVAILABLE' if val.get('status') == 'UNKNOWN' else 'REVIEW_REQUIRED',
+        'already_committed': False,
+        'candidate_id': batch_cid,
+        'page': page,
+        'staged_count': len(staged_ids),
+        'staged_object_ids': staged_ids,
+        'committed_count': 0,
+        'committed_object_ids': [],
+        'isolated_dropped_ids': isolated_bad_ids,
+        'office_status': val.get('status'),
+        'failed_count': len(enriched),
+        'failed_regions': enriched,
+        'next_step': f'Batch candidate {batch_cid} is not validated (status={val.get("status")}); commit_candidate will remain blocked until hard/Office checks pass.',
     }

@@ -49,7 +49,7 @@ DESCRIPTION.update({
     'record_observation':'Record Agent findings, uncertainty and next action on arbitrary task evidence, including failed experiments.',
     'commit_candidate':'Submit a candidate through source-owner, content and actual-edit safety checks. Exploratory preview approval never bypasses these checks.',
     'prepare_page_evidence':'Run deterministic local OCR, optional LayerD decomposition, pixel-measured foreground color/size extraction, decorative affix splitting, and page-level style clustering in one step. Initializes the RESOLVED draft scene by default.',
-    'batch_reconstruct_page':'Reconstruct all (or selected) uncommitted RESOLVED scene objects in parallel, stage source-safe candidates, run a single batch PowerPoint verification with automatic transparent-frame overflow repair, commit verified objects, and return a compact failed_regions digest for targeted repair.'})
+    'batch_reconstruct_page':'Reconstruct all (or selected) uncommitted RESOLVED scene objects in parallel, stage source-safe candidates, run a single batch PowerPoint verification with per-object failure isolation and transparent-frame overflow repair, and return a VALIDATED batch candidate_id (requiring commit_candidate with expected_version to formally commit) plus a compact failed_regions digest.'})
 
 
 def schemas():

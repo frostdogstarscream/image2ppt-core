@@ -23,6 +23,7 @@ from ..materialize import digest, write
 from ..object_contracts import ClosedObject
 from ..object_extract import rectangle
 from ..parallel_contracts import SceneGraph
+from ..parallel_fusion import fuse_incremental_scene
 from ..parallel_rebuild import adapt, array_sha
 
 
@@ -195,28 +196,77 @@ def _ring_parent_bg(work_plate: np.ndarray, box: list[int], pad: int = 4) -> tup
     return parent_bg, err
 
 
+def _clamped_rect_mask(bbox, size: tuple[int, int], pad: int = 0) -> np.ndarray:
+    w_img, h_img = size
+    bx, by, bw, bh = [float(v) for v in bbox]
+    x0 = max(0, int(math.floor(bx)) - pad)
+    y0 = max(0, int(math.floor(by)) - pad)
+    x1 = min(w_img, int(math.ceil(bx + bw)) + pad)
+    y1 = min(h_img, int(math.ceil(by + bh)) + pad)
+    mask = np.zeros((h_img, w_img), dtype=bool)
+    if x1 > x0 and y1 > y0:
+        mask[y0:y1, x0:x1] = True
+    return mask
+
+
+def _segment_max_err(px: np.ndarray, c0: np.ndarray, c1: np.ndarray) -> np.ndarray:
+    """Maximum per-channel distance from pixel(s) `px` to the RGB segment [c0, c1]."""
+    v = c1 - c0
+    vv = float(np.dot(v, v))
+    if vv < 1.0:
+        return np.abs(px - c0).max(axis=-1)
+    t = np.clip(((px - c0) @ v) / vv, 0.0, 1.0)
+    proj = c0 + t[..., None] * v
+    return np.abs(px - proj).max(axis=-1)
+
+
+def _corner_ext_mask(
+    crop: np.ndarray,
+    parent_bg: np.ndarray,
+    cs: int,
+    *,
+    dilate_barrier: bool,
+) -> tuple[np.ndarray, list[int]]:
+    """Trace connected exterior parent-background corners around borders/chamfers."""
+    h, w = crop.shape[:2]
+    barrier = (np.abs(crop - parent_bg).max(2) > 6.5).astype('uint8')
+    if dilate_barrier:
+        barrier = cv2.dilate(barrier, np.ones((2, 2), np.uint8))
+    ext_mask = np.zeros((h, w), dtype=bool)
+    ext_counts: list[int] = []
+    for cy0, cx0, seed_pt in [
+        (0, 0, (0, 0)),
+        (0, w - cs, (cs - 1, 0)),
+        (h - cs, 0, (0, cs - 1)),
+        (h - cs, w - cs, (cs - 1, cs - 1)),
+    ]:
+        sub_bar = barrier[cy0:cy0 + cs, cx0:cx0 + cs]
+        if sub_bar[seed_pt[1], seed_pt[0]] > 0:
+            ext_counts.append(0)
+            continue
+        ff = sub_bar.copy()
+        ff_mask = np.zeros((cs + 2, cs + 2), np.uint8)
+        cv2.floodFill(ff, ff_mask, seed_pt, 2)
+        filled = ff == 2
+        ext_mask[cy0:cy0 + cs, cx0:cx0 + cs] |= filled
+        ext_counts.append(int(filled.sum()))
+    return ext_mask, ext_counts
+
+
 def _try_fit_native_shape(
     work_plate: np.ndarray,
     box: list[int],
     parent_bg: np.ndarray,
     direct_child_patches: list[np.ndarray],
+    direct_children_mask_local: np.ndarray,
 ) -> dict | None:
     x, y, w, h = box
     if w < 44 or h < 22:
         return None
     crop = work_plate[y:y + h, x:x + w].astype(float)
 
-    # 1. Check corners for large 45-degree chamfer cuts (e.g. tech banner cards).
+    # 1. Inspect core interior fill while reserving full-crop validation below.
     cs = min(18, max(4, w // 8), max(4, h // 4))
-    corners = [
-        crop[:cs, :cs],
-        crop[:cs, -cs:],
-        crop[-cs:, :cs],
-        crop[-cs:, -cs:],
-    ]
-    corner_bg_counts = [int((np.abs(c - parent_bg).max(2) <= 4.5).sum()) for c in corners]
-    # Note: If interior fill == parent_bg (white card with border on white canvas),
-    # measure outside-of-border corner pixels using flood fill from each corner pixel!
     ix = min(12, max(4, w // 8))
     iy = min(10, max(4, h // 5))
     if h - 2 * iy < 6 or w - 2 * ix < 12:
@@ -227,32 +277,14 @@ def _try_fit_native_shape(
     inner_dev = np.abs(inner - fill_med).max(2)
     if float(np.percentile(inner_dev, 95)) > 9.0:
         return None
-    strong_inner = int((inner_dev > 16.0).sum())
-    if strong_inner > max(20, int(0.002 * inner.shape[0] * inner.shape[1])):
-        return None
 
-    # Measure true exterior corner cut pixels (outside border / fill)
-    if np.abs(fill_med - parent_bg).max() <= 6.0:
-        # Bordered card whose fill matches parent_bg: trace exterior corner triangles before hitting border stroke
-        border_barrier = (np.abs(crop - parent_bg).max(2) > 6.5).astype('uint8')
-        border_barrier = cv2.dilate(border_barrier, np.ones((2, 2), np.uint8))
-        ext_counts = []
-        for cy0, cx0, seed_pt in [(0, 0, (0, 0)), (0, w - cs, (cs - 1, 0)),
-                                  (h - cs, 0, (0, cs - 1)), (h - cs, w - cs, (cs - 1, cs - 1))]:
-            c_bar = border_barrier[cy0:cy0 + cs, cx0:cx0 + cs]
-            if c_bar[seed_pt[1], seed_pt[0]] > 0:
-                ext_counts.append(0)
-            else:
-                ff = c_bar.copy()
-                mask_ff = np.zeros((cs + 2, cs + 2), np.uint8)
-                cv2.floodFill(ff, mask_ff, seed_pt, 2)
-                ext_counts.append(int((ff == 2).sum()))
-        corner_bg_counts = ext_counts
-
+    same_fill = np.abs(fill_med - parent_bg).max() <= 6.0
+    ext_corner_mask, corner_bg_counts = _corner_ext_mask(
+        crop, parent_bg, cs, dilate_barrier=same_fill)
     if max(corner_bg_counts) > 58:
         return None
 
-    # 2. Optimize fill_rgb within fill_med +- 4 so every direct child's backing_patch stays <= 7.8 RGB!
+    # 2. Optimize fill_rgb within fill_med +- 6 so every direct child's backing_patch stays <= 8.0 RGB!
     base_rgb = np.rint(fill_med).astype(int)
     best_rgb = base_rgb.copy()
     if direct_child_patches:
@@ -268,7 +300,7 @@ def _try_fit_native_shape(
             return None
         best_rgb = np.clip(cand_rgb, 0, 255)
 
-    # 3. Detect 4-sided border stroke vs borderless solid pill bar
+    # 3. Detect 4-sided border stroke vs borderless solid pill bar.
     edge_strip = min(4, max(2, min(w, h) // 10))
     trim_x = min(20, w // 5)
     trim_y = min(20, h // 5)
@@ -279,7 +311,7 @@ def _try_fit_native_shape(
         crop[trim_y:h - trim_y, w - edge_strip:].transpose(1, 0, 2),  # right -> (strip, len, 3)
     ]
     ref_mid = 0.5 * (best_rgb.astype(float) + parent_bg.astype(float))
-    edge_Contrasts = []
+    edge_contrasts = []
     edge_colors = []
     for e_arr in edges:
         if e_arr.shape[1] < 4:
@@ -292,21 +324,70 @@ def _try_fit_native_shape(
             np.abs(peak_px - best_rgb.astype(float)).max(1),
             np.abs(peak_px - parent_bg.astype(float)).max(1),
         )
-        edge_Contrasts.append(float(np.median(peak_d)))
+        edge_contrasts.append(float(np.median(peak_d)))
         edge_colors.append(np.median(peak_px, axis=0))
 
-    has_border = sum(c >= 6.5 for c in edge_Contrasts) >= 3
+    has_border = sum(c >= 6.5 for c in edge_contrasts) >= 3
     if has_border:
         raw_line = np.median(np.stack(edge_colors, axis=0), axis=0)
         # De-blend ~25% background anti-aliasing on 1px (0.75pt) strokes so border stays crisp
         deblended = np.clip(raw_line + 0.25 * (raw_line - ref_mid), 0, 255)
         line_hex = _hex(deblended)
         line_width_pt = 0.75
+        line_rgb = np.array([int(line_hex[i:i + 2], 16) for i in (0, 2, 4)], dtype=float)
     else:
         if float(np.abs(best_rgb.astype(float) - parent_bg).max()) < 7.0:
             return None
         line_hex = _hex(best_rgb)
         line_width_pt = 0.0
+        raw_line = best_rgb.astype(float)
+        line_rgb = best_rgb.astype(float)
+
+    # 4. Pixel-proven closure check over the ENTIRE (h, w) box, including the outer ix/iy band!
+    # Nothing outside (child_claimed | ext_corner | verified border stroke | verified interior fill)
+    # may contain unexplained foreground pixels (e.g., an unmodeled small icon or low-score badge).
+    border_t = 3
+    perimeter_zone = np.zeros((h, w), dtype=bool)
+    perimeter_zone[:border_t, :] = True
+    perimeter_zone[-border_t:, :] = True
+    perimeter_zone[:, :border_t] = True
+    perimeter_zone[:, -border_t:] = True
+    if ext_corner_mask.any():
+        perimeter_zone |= cv2.dilate(ext_corner_mask.astype('uint8'), np.ones((5, 5), np.uint8)) > 0
+
+    best_f = best_rgb.astype(float)
+    parent_f = parent_bg.astype(float)
+    fill_diff = np.abs(crop - best_f).max(2)
+    non_perim_unclaimed = (~perimeter_zone) & (~direct_children_mask_local)
+    if non_perim_unclaimed.any() and float(np.percentile(fill_diff[non_perim_unclaimed], 95)) > 8.5:
+        return None
+
+    proven_fill = (~ext_corner_mask) & (fill_diff <= 12.0)
+    if has_border:
+        seg_err = np.minimum.reduce([
+            _segment_max_err(crop, parent_f, line_rgb),
+            _segment_max_err(crop, best_f, line_rgb),
+            _segment_max_err(crop, parent_f, raw_line),
+            _segment_max_err(crop, best_f, raw_line),
+            _segment_max_err(crop, parent_f, best_f),
+        ])
+    else:
+        seg_err = _segment_max_err(crop, parent_f, best_f)
+
+    proven_border = perimeter_zone & (~ext_corner_mask) & (seg_err <= 12.0)
+
+    outer_rim = np.zeros((h, w), dtype=bool)
+    outer_rim[0, :] = True
+    outer_rim[-1, :] = True
+    outer_rim[:, 0] = True
+    outer_rim[:, -1] = True
+    if ext_corner_mask.any():
+        outer_rim |= cv2.dilate(ext_corner_mask.astype('uint8'), np.ones((3, 3), np.uint8)) > 0
+    ext_aa_bg = outer_rim & (np.abs(crop - parent_f).max(2) <= 6.5) & (~proven_fill) & (~proven_border)
+
+    explained = direct_children_mask_local | ext_corner_mask | ext_aa_bg | proven_fill | proven_border
+    if int((~explained).sum()) > 0:
+        return None
 
     avg_corner_px = float(np.median(corner_bg_counts))
     est_r = round(math.sqrt(max(0.0, avg_corner_px) / 0.2146))
@@ -318,6 +399,7 @@ def _try_fit_native_shape(
         geometry = 'roundRect'
         corner_r = float(min(max_r, max(4, est_r)))
 
+    erase_mask_local = (direct_children_mask_local | proven_fill | proven_border) & (~ext_corner_mask)
     return {
         'geometry': geometry,
         'fill': _hex(best_rgb),
@@ -325,6 +407,7 @@ def _try_fit_native_shape(
         'line_color': line_hex,
         'line_width_pt': line_width_pt,
         'corner_radius_px': corner_r,
+        'erase_mask_local': erase_mask_local,
     }
 
 
@@ -383,10 +466,46 @@ def stage_containers_and_surfaces(
     unresolved_guard = np.zeros((h_img, w_img), bool)
     for t in graph.text.texts:
         if t.id not in graph.selected:
-            unresolved_guard |= rectangle(t.bbox, size, pad=4)
+            unresolved_guard |= _clamped_rect_mask(t.bbox, size, pad=4)
     for a in graph.asset.objects:
         if a.id not in graph.selected:
-            unresolved_guard |= rectangle(a.bbox, size, pad=4)
+            unresolved_guard |= _clamped_rect_mask(a.bbox, size, pad=4)
+
+    ocr_guard_file = baseline / 'runtime-ocr-protection.json'
+    if ocr_guard_file.is_file():
+        ocr_guard = json.loads(ocr_guard_file.read_text('utf8'))
+        if ocr_guard.get('source_sha256') and ocr_guard['source_sha256'] != graph.source_sha256:
+            raise ValueError('runtime OCR protection source binding mismatch')
+        owners_by_ocr: dict[str, list[str]] = {}
+        for tid, rec in graph.selected.items():
+            if rec.get('kind') == 'text':
+                for lid in graph.text.members.get(tid, []):
+                    owners_by_ocr.setdefault(lid, []).append(tid)
+        for line in ocr_guard.get('lines', []):
+            lid = line.get('id')
+            lbox = line.get('bbox')
+            if not lbox or len(lbox) != 4:
+                continue
+            owners = owners_by_ocr.get(lid, [])
+            if not owners:
+                # Protects all low-score (< 0.85), unowned, or deleted OCR lines inside containers.
+                unresolved_guard |= _clamped_rect_mask(lbox, size, pad=3)
+            else:
+                owner_boxes = [
+                    existing_proofs.get(tid, {}).get('restore_bbox')
+                    or graph.selected[tid].get('restore_bbox')
+                    or graph.selected[tid].get('bbox')
+                    for tid in owners
+                ]
+                l_area = max(1.0, float(lbox[2]) * float(lbox[3]))
+                covered = sum(intersection(lbox, rb) for rb in owner_boxes if rb)
+                if covered < 0.85 * l_area:
+                    line_mask = _clamped_rect_mask(lbox, size, pad=3)
+                    owner_union = np.zeros((h_img, w_img), bool)
+                    for rb in owner_boxes:
+                        if rb:
+                            owner_union |= _clamped_rect_mask(rb, size, pad=1)
+                    unresolved_guard |= (line_mask & ~owner_union)
 
     candidates = _discover_candidates(work_plate, canvas_bg)
     if not candidates:
@@ -440,7 +559,11 @@ def stage_containers_and_surfaces(
                     direct_patches.append(pinfo['backing_patch'][cmask])
                 direct_oids.append(oid)
 
-        shape_fit = _try_fit_native_shape(work_plate, [x, y, w, h], parent_bg, direct_patches) if cand_kind == 'box' else None
+        direct_children_mask_local = already_claimed[y:y + h, x:x + w].copy()
+        shape_fit = (
+            _try_fit_native_shape(work_plate, [x, y, w, h], parent_bg, direct_patches, direct_children_mask_local)
+            if cand_kind == 'box' else None
+        )
 
         if shape_fit is not None:
             while f's-{s_seq:03d}' in used_ids:
@@ -449,16 +572,11 @@ def stage_containers_and_surfaces(
             s_seq += 1
             if sid in skip:
                 continue
-            s_mask = rect_area & ~already_claimed
+            full_erase = np.zeros((h_img, w_img), bool)
+            full_erase[y:y + h, x:x + w] = shape_fit['erase_mask_local']
+            s_mask = full_erase & ~already_claimed
             if int(s_mask.sum()) < 24:
                 continue
-
-            parent_uint8 = np.clip(np.rint(parent_bg), 0, 255).astype(np.uint8)
-            work_plate[y:y + h, x:x + w] = parent_uint8
-            already_claimed |= s_mask
-            surface_claimed_mask |= s_mask
-            claimed_child_ids.update(direct_oids)
-            used_ids.add(sid)
 
             shape_obj = Shape(
                 id=sid,
@@ -470,9 +588,23 @@ def stage_containers_and_surfaces(
                 line_width_pt=float(shape_fit['line_width_pt']),
                 corner_radius_px=shape_fit['corner_radius_px'],
             )
-            graph.surface.shapes.append(shape_obj)
-            graph.ownership[sid] = 'RESOLVED'
+            fused_try = fuse_incremental_scene(
+                baseline,
+                base_graph=graph,
+                added_shapes=[shape_obj],
+                background_hex=_hex(canvas_bg),
+            )
+            if fused_try.ownership.get(sid) != 'RESOLVED':
+                continue
 
+            parent_uint8 = np.clip(np.rint(parent_bg), 0, 255).astype(np.uint8)
+            work_plate[y:y + h, x:x + w][shape_fit['erase_mask_local']] = parent_uint8
+            already_claimed |= s_mask
+            surface_claimed_mask |= s_mask
+            claimed_child_ids.update(direct_oids)
+            used_ids.add(sid)
+
+            graph = fused_try
             proof_file = output / f'{sid}-owner.npz'
             backing_patch = np.broadcast_to(parent_uint8, (h, w, 3)).copy()
             np.savez_compressed(proof_file, mask=s_mask, restore_bbox=[x, y, w, h], backing_patch=backing_patch)
@@ -526,7 +658,7 @@ def stage_containers_and_surfaces(
 
             rgba = extract_rgba(acrop, parent_patch, fg_local)
             if cand_kind == 'box' and aw >= 60 and ah >= 32:
-                # Fill enclosed interior of stylized container card so card fill drags opaque as one unit
+                # Reject container boxes whose enclosed interior contains unmodeled 2D icons/graphics
                 closed_border = cv2.dilate(fg_local.astype('uint8'), np.ones((3, 3), np.uint8))
                 ext_ff = closed_border.copy()
                 ff_mask = np.zeros((ah + 2, aw + 2), np.uint8)
@@ -542,9 +674,51 @@ def stage_containers_and_surfaces(
                         cv2.floodFill(ext_ff, ff_mask, (aw - 1, sy_pt), 2)
                 enclosed = ext_ff != 2
                 interior_solid = cv2.erode(enclosed.astype('uint8'), np.ones((3, 3), np.uint8)) > 0
+                inner_core = cv2.erode(enclosed.astype('uint8'), np.ones((7, 7), np.uint8)) > 0
+                if int(interior_solid.sum()) < 16 or int(inner_core.sum()) < 16:
+                    continue
+                child_local_a = already_claimed[ay:ay + ah, ax:ax + aw]
+                unclaimed_inner = inner_core & ~child_local_a
+                if not unclaimed_inner.any():
+                    continue
+                inner_fill_med = np.median(acrop[unclaimed_inner].astype(float), axis=0)
+                border_ring = enclosed & ~inner_core
+                border_px = acrop[border_ring & ~child_local_a].astype(float)
+                parent_f = parent_bg.astype(float)
+                border_cands = border_px[
+                    (np.abs(border_px - inner_fill_med).max(1) > 12.0)
+                    & (np.abs(border_px - parent_f).max(1) > 8.0)
+                ] if len(border_px) > 0 else np.empty((0, 3), float)
+                if len(border_cands) < 24:
+                    continue
+                b_dists = np.abs(border_cands - inner_fill_med).max(1)
+                peak_cands = border_cands[b_dists >= np.percentile(b_dists, 70)]
+                border_stroke_rgb = np.median(peak_cands, axis=0)
+                all_unclaimed = enclosed & ~child_local_a
+                if all_unclaimed.any():
+                    all_px = acrop[all_unclaimed].astype(float)
+                    min_err = np.minimum.reduce([
+                        _segment_max_err(all_px, parent_f, border_stroke_rgb),
+                        _segment_max_err(all_px, inner_fill_med, border_stroke_rgb),
+                        _segment_max_err(all_px, parent_f, inner_fill_med),
+                    ])
+                    if float(min_err.max()) > 25.0:
+                        continue
+                inner_anom = unclaimed_inner & (np.abs(acrop.astype(float) - inner_fill_med).max(2) > 11.0)
+                if inner_anom.any():
+                    if float(_segment_max_err(acrop[inner_anom].astype(float), inner_fill_med, border_stroke_rgb).max()) > 25.0:
+                        continue
+                    if int((cv2.erode(inner_anom.astype('uint8'), np.ones((4, 4), np.uint8)) > 0).sum()) > 0:
+                        continue
+                    n_ac, _, astats, _ = cv2.connectedComponentsWithStats(inner_anom.astype('uint8'), 8)
+                    if any(min(int(astats[cid_i][2]), int(astats[cid_i][3])) > 4 for cid_i in range(1, n_ac)):
+                        continue
                 rgba[interior_solid, :3] = acrop[interior_solid]
                 rgba[interior_solid, 3] = 255
                 fg_local |= enclosed
+            elif cand_kind == 'box':
+                # Small un-enclosed box frames without verified flat shape fit cannot blindly absorb interiors
+                continue
 
             vis_local = rgba[..., 3] > 0
             if int(vis_local.sum()) < 12:
@@ -553,6 +727,31 @@ def stage_containers_and_surfaces(
             full_vis[ay:ay + ah, ax:ax + aw] = vis_local
             a_mask = full_vis & ~already_claimed
             if int(a_mask.sum()) < 12:
+                continue
+
+            kind_str = 'decoration' if cand_kind in ('line', 'tick') else 'illustration'
+            c_obj = ClosedObject(
+                id=aid,
+                kind=kind_str,
+                bbox=[ax, ay, aw, ah],
+                layers=['layer-00.png'],
+                components=['whole'],
+                parts=[{'name': 'whole', 'bbox': [ax, ay, aw, ah], 'layers': ['layer-00.png']}],
+                exclusions=[],
+                replaces=[],
+                required_owners=[],
+                text_policy='exclude_independent_text',
+                intrinsic_text='',
+                description=f'whole independent container {cand_kind}',
+                prompt_en=f'whole independent container {cand_kind}',
+            )
+            fused_try = fuse_incremental_scene(
+                baseline,
+                base_graph=graph,
+                added_assets=[c_obj],
+                background_hex=_hex(canvas_bg),
+            )
+            if fused_try.ownership.get(aid) != 'RESOLVED':
                 continue
 
             work_plate[ay:ay + ah, ax:ax + aw][vis_local] = parent_uint8
@@ -570,24 +769,7 @@ def stage_containers_and_surfaces(
                 restore_bbox=[ax, ay, aw, ah],
                 backing_patch=np.broadcast_to(parent_uint8, (ah, aw, 3)).copy(),
             )
-            kind_str = 'decoration' if cand_kind in ('line', 'tick') else 'illustration'
-            c_obj = ClosedObject(
-                id=aid,
-                kind=kind_str,
-                bbox=[ax, ay, aw, ah],
-                layers=['layer-00.png'],
-                components=['whole'],
-                parts=[{'name': 'whole', 'bbox': [ax, ay, aw, ah], 'layers': ['layer-00.png']}],
-                exclusions=[],
-                replaces=[],
-                required_owners=[],
-                text_policy='exclude_independent_text',
-                intrinsic_text='',
-                description=f'whole independent container {cand_kind}',
-                prompt_en=f'whole independent container {cand_kind}',
-            )
-            graph.asset.objects.append(c_obj)
-            graph.ownership[aid] = 'RESOLVED'
+            graph = fused_try
             record = {
                 'id': aid,
                 'kind': 'asset',
