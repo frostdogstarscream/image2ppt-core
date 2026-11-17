@@ -25,7 +25,7 @@ TOOLS += ('inspect_image', 'crop_image', 'compare_images', 'run_ocr', 'analyze_t
           'create_scene', 'update_scene', 'create_candidate', 'commit_candidate',
           'rollback_region', 'compile_pptx', 'run_image_script', 'run_parallel_pipeline')
 TOOLS += ('record_observation', 'list_evidence', 'get_progress',
-          'prepare_page_evidence', 'batch_reconstruct_page')
+          'prepare_page_evidence', 'batch_reconstruct_page', 'crop_region')
 
 
 class VisualReview(BaseModel):
@@ -75,7 +75,9 @@ class RuntimeService(ExplorationTools):
                 pages.append({'page':index,'draft_texts':len(graph.text.texts),'draft_assets':len(graph.asset.objects),
                     'committed_objects':len(graph.selected),'native_texts':sum(n['type']=='text' for n in ir['nodes']),
                     'native_shapes':sum(n['type']=='shape' for n in ir['nodes']),
-                    'independent_images':sum(n['type']=='image' and n['id']!='source-plate' for n in ir['nodes'])})
+                    'independent_images':sum(n['type']=='image' and n['id']!='source-plate' for n in ir['nodes']),
+                    'region_crops':sum(1 for r in graph.selected.values() if r.get('region_crop')),
+                    'movable_region_crops':sum(1 for r in graph.selected.values() if r.get('region_crop') and r.get('move_safety')=='MOVABLE')})
             with state.db() as db:
                 recent=[json.loads(r[0]) for r in db.execute('SELECT payload FROM events ORDER BY id DESC LIMIT 12')]
             return {'version':current['version'],'pages':pages,'candidates':[{k:c.get(k) for k in ('id','page','object_id','status','failure')} for c in current['candidates'].values()],
@@ -130,17 +132,56 @@ class RuntimeService(ExplorationTools):
     def graph(page):
         return SceneGraph.model_validate_json(Path(page['scene']).read_text('utf8'))
 
-    def prepare_page_evidence(self, state, current, directory, *, page, auto_create_scene=True, run_layers=True):
+    def prepare_page_evidence(self, state, current, directory, *, page, auto_create_scene=True, run_layers=True, run_layout=None):
         from .batch_backbone import prepare_page_evidence
         return prepare_page_evidence(self, state, current, directory, page=page,
-                                     auto_create_scene=auto_create_scene, run_layers=run_layers)
+                                     auto_create_scene=auto_create_scene, run_layers=run_layers, run_layout=run_layout)
 
     def batch_reconstruct_page(self, state, current, directory, *, page, object_ids=None,
-                               include_assets=True, include_containers=True, use_inpaint=True, verify_office=True):
+                               include_assets=True, include_containers=True, include_region_crops=None,
+                               use_inpaint=True, verify_office=True):
         from .batch_backbone import batch_reconstruct_page
         return batch_reconstruct_page(self, state, current, directory, page=page, object_ids=object_ids,
                                       include_assets=include_assets, include_containers=include_containers,
+                                      include_region_crops=include_region_crops,
                                       use_inpaint=use_inpaint, verify_office=verify_office)
+
+    def crop_region(self, state, current, directory, *, page, object_ids=None, bbox=None, allow_movable=True):
+        from ..recovery.region_crop import stage_region_crops
+        if not object_ids and not bbox:
+            raise ValueError('crop_region requires object_ids or bbox')
+        row = self.page(current, page)
+        graph = self.graph(row)
+        seeds = []
+        if bbox is not None:
+            seeds.append({'id': 'manual-crop', 'kind': 'manual', 'bbox': [float(v) for v in bbox], 'text': ''})
+        wanted = set(object_ids or [])
+        for t in graph.text.texts:
+            if t.id in wanted and t.id not in graph.selected:
+                seeds.append({'id': t.id, 'kind': 'text', 'bbox': list(t.bbox), 'text': t.text})
+        for a in graph.asset.objects:
+            if a.id in wanted and a.id not in graph.selected:
+                seeds.append({'id': a.id, 'kind': 'asset', 'bbox': list(a.bbox), 'text': a.intrinsic_text})
+        if not seeds:
+            raise ValueError('no uncommitted matching objects or bbox for region crop')
+        crop_ir, staged_ids, report = stage_region_crops(
+            Path(row['ir']).parent, directory / 'staged', seeds=seeds, allow_movable=allow_movable)
+        if not staged_ids:
+            return {'status': 'NO_CROPS_STAGED', 'page': page, 'report': report}
+        crop_dir = crop_ir.parent
+        cid = 'c-' + key(str(directory.relative_to(state.job)) + ':crop')[:24]
+        cand = {
+            'id': cid, 'page': page, 'object_id': staged_ids[0], 'object_ids': staged_ids,
+            'kind': 'batch', 'status': 'STAGED_LOCAL', 'ir': str(crop_ir),
+            'parent_ir_sha256': digest(row['ir']), 'parent_scene_sha256': digest(row['scene']),
+            'strategy': 'region_crop', 'code': self.code_binding(),
+            'fingerprint': key({'crop': staged_ids, 'ir': digest(crop_ir)}),
+            'files': {str(p): digest(p) for p in crop_dir.rglob('*') if p.is_file()},
+        }
+        current['candidates'][cid] = cand
+        return {'status': 'STAGED_LOCAL', 'candidate_id': cid, 'page': page,
+                'staged_object_ids': staged_ids, 'report': report,
+                'next_step': f'Call commit_candidate(candidate_id="{cid}", expected_version={current["version"] + 1}) to validate and commit.'}
 
     def run_perception(self, state, current, directory):
         if current['pages']:
@@ -261,7 +302,7 @@ class RuntimeService(ExplorationTools):
                 if not row['layers']:
                     raise ValueError('LayerD evidence unavailable')
                 chosen = 'verified-backing' if strategy == 'auto' else strategy
-                if chosen not in ('verified-backing', 'source-halo', 'sam'):
+                if chosen not in ('verified-backing', 'source-halo', 'sam', 'rmbg2'):
                     raise ValueError('unsupported asset strategy')
                 options = {}
                 if chosen == 'sam':
@@ -325,8 +366,15 @@ class RuntimeService(ExplorationTools):
         for oid in set(graph.selected) - set(original.selected):
             if graph.ownership.get(oid) != 'RESOLVED':
                 raise ValueError(f'cannot commit unresolved object {oid}')
-            ref = graph.selected[oid].get('owner_evidence')
+            rec = graph.selected[oid]
+            ref = rec.get('owner_evidence')
             if not ref:
+                if rec.get('region_crop') and rec.get('move_safety') == 'MOVE_UNSAFE':
+                    aref = rec.get('asset_reference') or {}
+                    afile = (ir.parent / aref.get('path', '')).resolve() if aref.get('path') else None
+                    if not afile or not afile.is_relative_to(ir.parent.resolve()) or digest(afile) != aref.get('sha256'):
+                        raise RuntimeConflict(f'region crop asset binding mismatch for {oid}')
+                    continue
                 raise ValueError(f'missing owner evidence for {oid}')
             pfile = (ir.parent / ref['file']).resolve()
             if not pfile.is_relative_to(ir.parent.resolve()) or digest(pfile) != ref['sha256']:

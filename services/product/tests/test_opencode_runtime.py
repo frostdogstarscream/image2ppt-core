@@ -20,6 +20,7 @@ from product.runtime.office_bridge import pack, unpack, OfficeQueue
 @pytest.fixture
 def job(tmp_path, monkeypatch):
     monkeypatch.setenv('IMAGE2PPT_RESOURCE_ROOT', str(tmp_path/'leases'))
+    monkeypatch.setattr('product.layout_evidence.available', lambda: False)
     root = tmp_path/'jobs'
     identifier = uuid4().hex
     directory = root/identifier
@@ -1665,6 +1666,179 @@ def test_deferred_assets_derive_host_ownership_and_batch_enforces_unified_commit
     assert committed['committed_count'] == 1
     assert committed['object_ids'] == ['t-001']
     assert service.call('get_progress', identifier)['pages'][0]['committed_objects'] == 1
+
+
+def test_batch_reconstruct_stages_region_crops_with_layout_and_commits_cleanly(job, monkeypatch):
+    from PIL import ImageDraw, ImageFont
+    from product import fonts, layout_evidence
+
+    service, identifier, directory = job
+    manifest = fonts.font_manifest([])
+    record = next(r for r in manifest['fonts'] if r['family'] == 'Arial' and not r['bold'])
+    monkeypatch.setattr(fonts, 'font_manifest', lambda texts: {'fonts': [record]})
+
+    w, h = 480, 300
+    bg = (245, 248, 252)
+    img = Image.new('RGB', (w, h), bg)
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.truetype(record['file'], 18, index=record['index'])
+
+    draw.text((36, 26), 'Normal Title', font=font, fill=(20, 45, 95))
+    b1 = draw.textbbox((36, 26), 'Normal Title', font=font)
+
+    # Isolated chart region detected by layout (cleanly on solid canvas -> MOVABLE r-* crop).
+    draw.rectangle((42, 122, 158, 208), fill=(252, 253, 255), outline=(185, 200, 220), width=1)
+    draw.rectangle((56, 156, 76, 198), fill=(30, 115, 215))
+    draw.rectangle((86, 136, 106, 198), fill=(235, 125, 40))
+    draw.rectangle((116, 146, 136, 198), fill=(40, 165, 110))
+
+    # Striped high-contrast card behind NoisyText -> flat background recovery fails -> auto r-* fallback.
+    for xx in range(270, 400, 4):
+        draw.rectangle((xx, 130, min(xx + 1, 399), 189), fill=(35, 75, 155))
+        if xx + 2 < 400:
+            draw.rectangle((xx + 2, 130, min(xx + 3, 399), 189), fill=(252, 246, 230))
+    draw.text((284, 149), 'NoisyText', font=font, fill=(210, 35, 35))
+    b2 = draw.textbbox((284, 149), 'NoisyText', font=font)
+
+    src = directory / 'inputs/01.png'
+    img.save(src)
+    ocr_data = {'lines': [
+        {'id': 'l-title', 'text': 'Normal Title', 'score': 0.99,
+         'bbox': [float(b1[0]), float(b1[1]), float(b1[2] - b1[0]), float(b1[3] - b1[1])]},
+        {'id': 'l-noisy', 'text': 'NoisyText', 'score': 0.99,
+         'bbox': [float(b2[0]), float(b2[1]), float(b2[2] - b2[0]), float(b2[3] - b2[1])]},
+    ]}
+    monkeypatch.setattr(service, 'run_ocr', lambda state, current, d, *, page: (
+        write(d / 'ocr.json', ocr_data),
+        current.setdefault('ocr', {}).update({str(page): str(d / 'ocr.json')}),
+        {'result': ocr_data})[2])
+    monkeypatch.setattr(layout_evidence, 'available', lambda: True)
+    monkeypatch.setattr(layout_evidence, 'detect', lambda snap, cache: {
+        'schema': 'LayoutRegions/1',
+        'source_sha256': snap['source_sha256'],
+        'model': 'PP-DocLayoutV3',
+        'regions': [
+            {'id': 'layout-chart-1', 'label': 'chart', 'kind': 'chart',
+             'bbox': [40.0, 120.0, 120.0, 90.0], 'score': 0.94, 'pictorial': True},
+        ],
+    })
+
+    prep = call(service, identifier, 'prepare_page_evidence', page=1, run_layers=False, run_layout=True)
+    assert prep['status'] == 'PREPARED'
+    assert prep['layout_available'] is True
+    assert prep['layout_region_count'] == 1
+    assert len(prep['layout_pictorial_regions']) == 1
+
+    batch = call(service, identifier, 'batch_reconstruct_page', page=1,
+                 include_assets=True, include_region_crops=True, use_inpaint=False, verify_office=False)
+    assert batch['status'] == 'STAGED_LOCAL'
+    assert 't-001' in batch['staged_object_ids']
+    crop_ids = [oid for oid in batch['staged_object_ids'] if oid.startswith('r-')]
+    assert len(crop_ids) >= 2
+    assert batch['failed_regions']
+    noisy_fail = next(f for f in batch['failed_regions'] if f['object_id'] == 't-002')
+    assert noisy_fail['covered_by_region_crop'].startswith('r-')
+    assert noisy_fail['recommended_action'] == 'already_cropped_as_region_image'
+    assert noisy_fail['max_repair_attempts'] == 0
+
+    committed = call(service, identifier, 'commit_candidate',
+                     candidate_id=batch['candidate_id'], expected_version=batch['version'])
+    assert committed['status'] == 'COMMITTED'
+    page_prog = service.call('get_progress', identifier)['pages'][0]
+    assert page_prog['region_crops'] >= 2
+    assert page_prog['movable_region_crops'] >= 1
+    assert page_prog['committed_objects'] == len(batch['staged_object_ids'])
+
+
+def test_crop_region_tool_uses_host_fusion_and_commits_through_unified_gate(job, monkeypatch):
+    import numpy as np
+    from PIL import ImageDraw, ImageFont
+    from product import fonts
+    from product.parallel_contracts import SceneGraph
+
+    assert 'crop_region' in {t.name for t in schemas()}
+    service, identifier, directory = job
+    manifest = fonts.font_manifest([])
+    record = next(r for r in manifest['fonts'] if r['family'] == 'Arial' and not r['bold'])
+    monkeypatch.setattr(fonts, 'font_manifest', lambda texts: {'fonts': [record]})
+
+    w, h = 480, 300
+    bg = (245, 248, 252)
+    img = Image.new('RGB', (w, h), bg)
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.truetype(record['file'], 18, index=record['index'])
+
+    draw.text((36, 24), 'Keep', font=font, fill=(20, 45, 95))
+    b_keep = draw.textbbox((36, 24), 'Keep', font=font)
+
+    # Clean isolated asset on flat canvas -> MOVABLE crop via object_ids=['a-badge'].
+    draw.rectangle((42, 118, 114, 172), fill=(25, 110, 210), outline=(25, 110, 210))
+    draw.ellipse((60, 128, 96, 162), fill=(240, 140, 40))
+
+    # Large striped field covering >35% of canvas so growth is bounded inside stripes -> MOVE_UNSAFE crop via bbox.
+    for xx in range(215, 475, 4):
+        draw.rectangle((xx, 60, min(xx + 1, 474), 289), fill=(40, 85, 165))
+        if xx + 2 < 475:
+            draw.rectangle((xx + 2, 60, min(xx + 3, 474), 289), fill=(235, 215, 185))
+    draw.rectangle((310, 145, 380, 195), fill=(205, 50, 50))
+
+    src = directory / 'inputs/01.png'
+    img.save(src)
+    ocr_data = {'lines': [
+        {'id': 'l-keep', 'text': 'Keep', 'score': 0.99,
+         'bbox': [float(b_keep[0]), float(b_keep[1]), float(b_keep[2] - b_keep[0]), float(b_keep[3] - b_keep[1])]},
+    ]}
+    write(directory / 'ocr.json', ocr_data)
+    st = service.state(identifier)
+    cur = st.read()
+    cur['ocr'] = {'1': str(directory / 'ocr.json')}
+    write(st.root / 'state.json', cur)
+
+    evidence = {
+        'surface': {'background': 'F5F8FC', 'shapes': []},
+        'text': {
+            'styles': [{'id': 's1', 'role': 'body', 'ea': 'Arial', 'latin': 'Arial', 'size_px': 18.0, 'bold': False, 'color': '142D5F'}],
+            'texts': [{'id': 't-001', 'text': 'Keep', 'bbox': ocr_data['lines'][0]['bbox'], 'style': 's1', 'z': 2}],
+        },
+        'asset': {'objects': [
+            {'id': 'a-badge', 'kind': 'icon', 'bbox': [40, 115, 78, 62], 'layers': ['layer-00.png'],
+             'components': ['whole'], 'parts': [{'name': 'whole', 'bbox': [40, 115, 78, 62], 'layers': ['layer-00.png']}],
+             'replaces': [], 'required_owners': [], 'text_policy': 'exclude_independent_text',
+             'intrinsic_text': '', 'description': 'badge', 'prompt_en': 'badge'},
+        ]},
+    }
+    scene = call(service, identifier, 'create_scene', page=1, evidence=evidence)
+    assert scene['scene']['ownership']['a-badge'] == 'RESOLVED'
+
+    # 1) Movable crop via object_ids -> fused by host, validated & committed through Office gate.
+    crop_mov = call(service, identifier, 'crop_region', page=1, object_ids=['a-badge'])
+    assert crop_mov['status'] == 'STAGED_LOCAL'
+    assert len(crop_mov['staged_object_ids']) == 1
+    rid_mov = crop_mov['staged_object_ids'][0]
+    assert rid_mov.startswith('r-')
+    commit_mov = call(service, identifier, 'commit_candidate',
+                      candidate_id=crop_mov['candidate_id'], expected_version=crop_mov['version'])
+    assert commit_mov['status'] == 'COMMITTED'
+
+    # 2) Textured/striped large zone via explicit bbox -> MOVE_UNSAFE stays in place on plate & still commits!
+    crop_unsafe = call(service, identifier, 'crop_region', page=1, bbox=[310.0, 145.0, 70.0, 50.0])
+    assert crop_unsafe['status'] == 'STAGED_LOCAL'
+    cand_ir = Path(service.state(identifier).read()['candidates'][crop_unsafe['candidate_id']]['ir'])
+    cand_graph = SceneGraph.model_validate_json((cand_ir.parent / 'scene.json').read_text('utf8'))
+    rid_unsafe = crop_unsafe['staged_object_ids'][0]
+    assert cand_graph.selected[rid_unsafe]['region_crop'] is True
+    assert cand_graph.selected[rid_unsafe]['move_safety'] == 'MOVE_UNSAFE'
+    # Verify plate pixels under unsafe crop were NOT erased (unlike MOVABLE crop).
+    plate_arr = np.array(Image.open(cand_ir.parent / 'source-plate.png').convert('RGB'))
+    src_arr = np.array(Image.open(src).convert('RGB'))
+    assert int(np.abs(plate_arr[150:190, 315:375].astype(int) - src_arr[150:190, 315:375].astype(int)).max()) == 0
+
+    commit_unsafe = call(service, identifier, 'commit_candidate',
+                         candidate_id=crop_unsafe['candidate_id'], expected_version=crop_unsafe['version'])
+    assert commit_unsafe['status'] == 'COMMITTED'
+    page_prog = service.call('get_progress', identifier)['pages'][0]
+    assert page_prog['region_crops'] == 2
+    assert page_prog['movable_region_crops'] == 1
 
 
 

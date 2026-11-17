@@ -48,8 +48,9 @@ DESCRIPTION.update({
     'validate_office':'With candidate_id, return actual preview edit diagnostics without approval. With no candidate_id, validate final composition.',
     'record_observation':'Record Agent findings, uncertainty and next action on arbitrary task evidence, including failed experiments.',
     'commit_candidate':'Submit a candidate through source-owner, content and actual-edit safety checks. Exploratory preview approval never bypasses these checks.',
-    'prepare_page_evidence':'Run deterministic local OCR, optional LayerD decomposition, pixel-measured foreground color/size extraction, decorative affix splitting, and page-level style clustering in one step. Initializes the RESOLVED draft scene by default.',
-    'batch_reconstruct_page':'Reconstruct all (or selected) uncommitted RESOLVED scene objects in parallel, stage source-safe candidates, run a single batch PowerPoint verification with per-object failure isolation and transparent-frame overflow repair, and return a VALIDATED batch candidate_id (requiring commit_candidate with expected_version to formally commit) plus a compact failed_regions digest.'})
+    'prepare_page_evidence':'Run deterministic local OCR, optional LayerD decomposition and PP-DocLayout detection, pixel-measured foreground color/size extraction, decorative affix splitting, and page-level style clustering in one step. Initializes the RESOLVED draft scene by default.',
+    'batch_reconstruct_page':'Reconstruct all (or selected) uncommitted RESOLVED scene objects in parallel, stage source-safe candidates (plus optional small-first opaque region crops for remaining complex content), run a single batch PowerPoint verification with per-object failure isolation and transparent-frame overflow repair, and return a VALIDATED batch candidate_id (requiring commit_candidate with expected_version to formally commit) plus a compact failed_regions digest.',
+    'crop_region':'Stage opaque source region crop(s) for specified object_ids or bbox when native/transparent reconstruction is not possible. Returns a STAGED_LOCAL candidate for commit_candidate.'})
 
 
 def schemas():
@@ -62,7 +63,7 @@ def schemas():
         'list_evidence': {'role':string,'limit':{'type':'integer','minimum':1,'maximum':100}},
         'inspect_scene': {'page': {'type': 'integer', 'minimum': 1}},
         'rebuild_region': {'page': {'type': 'integer', 'minimum': 1}, 'object_id': string,
-                           'strategy': {'type': 'string', 'enum': ['auto', 'next_background', 'verified-backing', 'source-halo', 'sam']}},
+                           'strategy': {'type': 'string', 'enum': ['auto', 'next_background', 'verified-backing', 'source-halo', 'sam', 'rmbg2']}},
         'repair_region': {'candidate_id': string, 'strategy': string},
         'validate_candidate': {'candidate_id': string},
         'commit_region': {'candidate_id': string},
@@ -86,10 +87,14 @@ def schemas():
         'commit_candidate': {'candidate_id': string},
         'rollback_region': {'page': page, 'object_ids': strings, 'reason': string},
         'run_image_script': {'script': string, 'inputs': strings},
-        'prepare_page_evidence': {'page': page, 'auto_create_scene': {'type': 'boolean'}, 'run_layers': {'type': 'boolean'}},
+        'prepare_page_evidence': {'page': page, 'auto_create_scene': {'type': 'boolean'}, 'run_layers': {'type': 'boolean'}, 'run_layout': {'type': 'boolean'}},
         'batch_reconstruct_page': {'page': page, 'object_ids': strings, 'include_assets': {'type': 'boolean'},
                                    'include_containers': {'type': 'boolean'},
-                                   'use_inpaint': {'type': 'boolean'}, 'verify_office': {'type': 'boolean'}}})
+                                   'include_region_crops': {'type': 'boolean'},
+                                   'use_inpaint': {'type': 'boolean'}, 'verify_office': {'type': 'boolean'}},
+        'crop_region': {'page': page, 'object_ids': strings,
+                        'bbox': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 4, 'maxItems': 4},
+                        'allow_movable': {'type': 'boolean'}}})
     fields['fit_background'].update(evidence_id=string,bbox={'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},protected_id=string)
     fields['fit_background']['context_width']={'type':'integer','minimum':8,'maximum':128,
         'description':'Unprotected source-strip sampling width in pixels. A changed width supplies different background evidence. All original ownership and fit validation thresholds still apply.'}
@@ -155,7 +160,11 @@ def schemas():
             required.remove('scale')
         if name in ('prepare_page_evidence', 'batch_reconstruct_page'):
             required = ['job_id', 'page']
+        if name == 'crop_region':
+            required = ['job_id', 'page']
         alternatives={}
+        if name == 'crop_region':
+            alternatives = {'anyOf': [{'required': ['object_ids']}, {'required': ['bbox']}]}
         if name=='fit_background':alternatives={'anyOf':[{'required':['page','object_id']},{'required':['evidence_id','bbox']}]}
         if name=='complete_text_mask':alternatives={'anyOf':[{'required':['page','object_id','background_id']},{'required':['evidence_id','original_mask_id','background_id','bbox','glyph_height']}]}
         if name not in READ_ONLY:

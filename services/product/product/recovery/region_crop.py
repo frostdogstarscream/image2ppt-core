@@ -164,11 +164,14 @@ def _committed_boxes(graph: SceneGraph) -> list[list[float]]:
 
 
 def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[dict] | None = None,
-                       allow_movable: bool = True, max_area_fraction=MAX_AREA_FRACTION) -> tuple[Path, list[str], list[dict]]:
+                       allow_movable: bool = True, max_area_fraction=MAX_AREA_FRACTION,
+                       skip_ids: set[str] | None = None) -> tuple[Path, list[str], list[dict]]:
     """Stage crops on a built baseline directory; return (slideir path, staged ids, report)."""
     from ..object_unmix import backing_from_evidence
+    from ..parallel_fusion import fuse_incremental_scene
     from ..parallel_rebuild import adapt, array_sha
     baseline, output = Path(baseline), Path(output)
+    skip = set(skip_ids or ())
     graph = SceneGraph.model_validate_json((baseline / 'scene.json').read_text('utf8'))
     rb = graph.raster_backing or {}
     plate_file = (baseline / rb.get('path', 'source-plate.png')).resolve()
@@ -211,7 +214,22 @@ def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[
         while f'r-{seq:03d}' in used:
             seq += 1
         rid = f'r-{seq:03d}'; seq += 1; used.add(rid)
+        if rid in skip:
+            continue
         x, y, w, h = crop['box']
+        intrinsic = ' / '.join(t.strip() for t in crop['texts'] if t and t.strip())[:200]
+        crop_obj = ClosedObject(
+            id=rid, kind='illustration', bbox=[x, y, w, h], layers=['source-plate.png'],
+            components=['whole'], parts=[{'name': 'whole', 'bbox': [x, y, w, h], 'layers': ['source-plate.png']}],
+            exclusions=[], replaces=[], required_owners=[],
+            text_policy='intrinsic_label' if intrinsic else 'exclude_independent_text', intrinsic_text=intrinsic,
+            description='opaque source region crop (no semantic claim)', prompt_en='opaque source region crop')
+        # Host fusion alone derives object ownership and semantic relations.
+        fused_try = fuse_incremental_scene(baseline, base_graph=graph, added_assets=[crop_obj])
+        if fused_try.ownership.get(rid) != 'RESOLVED':
+            report.append({'id': rid, 'state': 'SKIPPED', 'reason': f"host fusion ownership={fused_try.ownership.get(rid)}",
+                           'bbox': [x, y, w, h], 'seed_ids': crop['seed_ids']})
+            continue
         pixels = appearance[y:y + h, x:x + w].copy()
         safety, backing_meta, backing = 'MOVE_UNSAFE', {'reason': 'not attempted'}, None
         isolated = not any(_intersects(crop['box'], b) for b in committed)
@@ -233,15 +251,7 @@ def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[
                 backing_meta = {'reason': f'backing unavailable: {exc}'}
         png = output / f'{rid}.png'
         Image.fromarray(np.dstack([pixels, np.full((h, w), 255, np.uint8)])).save(png)
-        intrinsic = ' / '.join(t for t in crop['texts'] if t)[:200]
-        graph.asset.objects.append(ClosedObject(
-            id=rid, kind='illustration', bbox=[x, y, w, h], layers=['source-plate.png'],
-            components=['whole'], parts=[{'name': 'whole', 'bbox': [x, y, w, h], 'layers': ['source-plate.png']}],
-            exclusions=[], replaces=[], required_owners=[],
-            text_policy='intrinsic_label' if intrinsic else 'exclude_independent_text', intrinsic_text=intrinsic,
-            description='opaque source region crop (no semantic claim)', prompt_en='opaque source region crop'))
-        # Geometric ownership only: identical pixels at identical position.
-        graph.ownership[rid] = 'RESOLVED'
+        graph = fused_try
         record = {
             'id': rid, 'kind': 'asset', 'region_crop': True, 'move_safety': safety,
             'bbox': [x, y, w, h], 'restore_bbox': [x, y, w, h], 'seed_ids': crop['seed_ids'],
@@ -265,6 +275,9 @@ def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[
         staged.append(rid)
         report.append({'id': rid, 'state': 'STAGED', 'move_safety': safety, 'bbox': [x, y, w, h],
                        'seed_ids': crop['seed_ids'], **backing_meta})
+    if not staged:
+        shutil.rmtree(output, ignore_errors=True)
+        return baseline / 'slideir.json', [], report
     if movable_mask.any():
         Image.fromarray(np.dstack([plate, plate_rgba[..., 3]])).save(output / plate_file.name)
         graph.raster_backing = {**rb, 'sha256': digest(output / plate_file.name)}

@@ -26,8 +26,21 @@ def _preprocess(crop_img: Image.Image, size: int) -> np.ndarray:
 
 
 def load_pytorch_birefnet(model_dir: Path):
+    import sys
+    import types
     import safetensors.torch as st
     import torch
+
+    if 'kornia.filters' not in sys.modules:
+        try:
+            __import__('kornia.filters')
+        except ModuleNotFoundError:
+            kornia_mod = sys.modules.get('kornia') or types.ModuleType('kornia')
+            filters_mod = types.ModuleType('kornia.filters')
+            filters_mod.laplacian = lambda *args, **kwargs: None
+            kornia_mod.filters = filters_mod
+            sys.modules['kornia'] = kornia_mod
+            sys.modules['kornia.filters'] = filters_mod
 
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')

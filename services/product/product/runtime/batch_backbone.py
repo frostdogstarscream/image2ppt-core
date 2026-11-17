@@ -33,6 +33,7 @@ def _merge_structural_ocr_items(
     source: np.ndarray,
     raw_items: list[dict],
     asset_records: list[dict],
+    extra_logo_boxes: list[list[float]] | None = None,
 ) -> tuple[list[dict], dict]:
     """Perform pre-scene structural grouping and relation analysis (Astra Step 2).
 
@@ -64,7 +65,9 @@ def _merge_structural_ocr_items(
     for it in items:
         x, y, w, h = it['bbox']
         in_top_right = x >= 0.80 * w_img and y <= 0.14 * h_img and w <= 0.18 * w_img
-        hits_logo = any(intersection(it['bbox'], la['bbox']) > 0 for la in logo_assets)
+        hits_logo = any(intersection(it['bbox'], la['bbox']) > 0 for la in logo_assets) or any(
+            intersection(it['bbox'], lb) > 0 for lb in (extra_logo_boxes or ())
+        )
         if in_top_right or hits_logo:
             logo_ids.add(it['id'])
     # Propagate logo lockup flag to immediate vertical partner lines in top-right quadrant.
@@ -333,7 +336,12 @@ def _merge_structural_ocr_items(
     return cleaned, scene_relations
 
 
-def _classify_failed_region(entry: dict, graph: SceneGraph, logo_candidate_ids: set[str] | None = None) -> dict:
+def _classify_failed_region(
+    entry: dict,
+    graph: SceneGraph,
+    logo_candidate_ids: set[str] | None = None,
+    staged_crop_boxes: list[tuple[str, list[float]]] | None = None,
+) -> dict:
     """Attach prescriptive failure taxonomy and repair cap (Astra Step 3)."""
     oid = entry.get('object_id', '')
     kind = entry.get('kind', '')
@@ -390,13 +398,26 @@ def _classify_failed_region(entry: dict, graph: SceneGraph, logo_candidate_ids: 
     else:
         category, action, cap = 'OTHER_REPAIR_FAILURE', 'retain_in_source_plate', 0
 
-    return {
+    covered_by = None
+    if len(bbox) == 4 and staged_crop_boxes:
+        area = max(1.0, float(bbox[2]) * float(bbox[3]))
+        for rid, cbox in staged_crop_boxes:
+            if intersection(bbox, cbox) >= 0.8 * area:
+                covered_by = rid
+                action = 'already_cropped_as_region_image'
+                cap = 0
+                break
+
+    out = {
         **entry,
         'diagnostic_category': category,
         'conflicting_peer_ids': peers,
         'recommended_action': action,
         'max_repair_attempts': cap,
     }
+    if covered_by is not None:
+        out['covered_by_region_crop'] = covered_by
+    return out
 
 
 def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list[float], str]:
@@ -659,8 +680,10 @@ def discover_layerd_assets(source: np.ndarray, layers_dir: Path,
 
 
 def prepare_page_evidence(service, state, current, directory: Path, *, page: int,
-                          auto_create_scene: bool = True, run_layers: bool = True) -> dict:
-    """Run local OCR, optional LayerD, pixel ink color/size measurement, and style tiering."""
+                          auto_create_scene: bool = True, run_layers: bool = True,
+                          run_layout: bool | None = None) -> dict:
+    """Run local OCR, optional LayerD/PP-DocLayout, pixel ink measurement, and style tiering."""
+    from .. import layout_evidence
     source_path = service.source(state, page)
     if str(page) not in current.get('ocr', {}):
         ocr_dir = directory / 'ocr'
@@ -745,8 +768,29 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         except Exception:
             immediate_assets, deferred_assets = [], []
 
+    layout_data: dict | None = None
+    layout_status = 'SKIPPED'
+    do_layout = bool(run_layers) if run_layout is None else bool(run_layout)
+    if str(page) in current.get('layout', {}) and Path(current['layout'][str(page)]).is_file():
+        layout_data = json.loads(Path(current['layout'][str(page)]).read_text('utf8'))
+        layout_status = 'CACHED'
+    elif do_layout and layout_evidence.available():
+        try:
+            snap_info = {'path': str(source_path), 'source_sha256': digest(source_path)}
+            layout_data = layout_evidence.detect(snap_info, state.job / 'cache')
+            layout_file = directory / 'layout-regions.json'
+            write(layout_file, layout_data)
+            current.setdefault('layout', {})[str(page)] = str(layout_file)
+            layout_status = 'READY'
+        except Exception as exc:
+            layout_status = f'UNAVAILABLE:{type(exc).__name__}'
+    extra_logo_boxes = [
+        list(r['bbox']) for r in (layout_data or {}).get('regions', [])
+        if r.get('label') in ('header_image', 'seal') and float(r.get('score', 0)) >= 0.5
+    ]
+
     measured_items, scene_relations = _merge_structural_ocr_items(
-        source, raw_items, [*immediate_assets, *deferred_assets])
+        source, raw_items, [*immediate_assets, *deferred_assets], extra_logo_boxes=extra_logo_boxes)
     for item in measured_items:
         est_px = item['est_size_px']
         item['role'] = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
@@ -870,6 +914,13 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         'scene_already_existed': bool(existing),
         'layerd_status': layerd_status,
         'layer_images': layer_images,
+        'layout_available': layout_evidence.available(),
+        'layout_status': layout_status,
+        'layout_region_count': len((layout_data or {}).get('regions', [])),
+        'layout_pictorial_regions': [
+            r for r in (layout_data or {}).get('regions', [])
+            if r.get('label') in layout_evidence.CROP_LABELS and float(r.get('score', 0)) >= 0.5
+        ],
         'sam_available': bool(os.environ.get('IMAGE2PPT_SAM_URL') or os.environ.get('SAM_URL')),
         'text_count': len(measured_items),
         'resolved_text_count': resolved_count,
@@ -903,13 +954,14 @@ def _threadsafe_inpaint(raw_inpaint):
 
 
 def _collect_office_defects(office_result: dict, graph: SceneGraph, staged_ids: list[str]) -> tuple[dict, set[str]]:
+    from ..parallel_residual_gate import residual_accepted
     from .office import frame_feedback
     frame_repairs = {}
     bad_ids: set[str] = set()
     staged_set = set(staged_ids)
     for page_rows in office_result.get('residuals', []):
         for rec in page_rows:
-            if rec.get('id') not in staged_set or rec.get('residual_check_status') == 'PASS':
+            if rec.get('id') not in staged_set or residual_accepted(rec):
                 continue
             if rec.get('reason') == 'missing source-owner or actual-delete evidence':
                 continue
@@ -950,9 +1002,13 @@ def _chain_stage_from_spec(
     skip_ids: set[str],
     include_assets: bool,
     include_containers: bool,
+    include_region_crops: bool = True,
+    layout_path: str | None = None,
+    unrecoverable_text_ids: set[str] | None = None,
     wanted_filter: set[str] | None,
     sam_enabled: bool,
 ) -> tuple[Path, list[str], list[dict]]:
+    from .. import layout_evidence, matting
     from ..object_stage import infer_sam
     from ..recovery.agent_asset_stage import stage_asset_candidate
     from ..recovery.asset_retry import retry_asset_extraction
@@ -1072,6 +1128,16 @@ def _chain_stage_from_spec(
                         )
                         if res_sam.get('status') == 'CANDIDATE_READY':
                             res = res_sam
+                if res.get('status') != 'CANDIDATE_READY' and matting.available():
+                    try:
+                        res_matte = retry_asset_extraction(
+                            active_graph, asset.id, source_path, layers_dir,
+                            cur_base, step_dir / 'extract-rmbg2', strategy='rmbg2',
+                        )
+                        if res_matte.get('status') == 'CANDIDATE_READY':
+                            res = res_matte
+                    except Exception:
+                        pass
                 if res.get('status') == 'CANDIDATE_READY':
                     ir = stage_asset_candidate(
                         res['candidate_directory'], active_graph, cur_base,
@@ -1103,6 +1169,47 @@ def _chain_stage_from_spec(
                 'object_id': 'containers', 'kind': 'surface', 'bbox': [],
                 'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
             })
+
+    if include_region_crops and wanted_filter is None:
+        from ..recovery.region_crop import stage_region_crops
+        cur_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
+        unrec_texts = set(unrecoverable_text_ids or ())
+        crop_seeds = [
+            {'id': a.id, 'kind': 'asset', 'bbox': list(a.bbox), 'text': a.intrinsic_text}
+            for a in cur_graph.asset.objects
+            if a.id not in cur_graph.selected and a.id not in skip_ids
+        ] + [
+            {'id': t.id, 'kind': 'text', 'bbox': list(t.bbox), 'text': t.text}
+            for t in cur_graph.text.texts
+            if t.id not in cur_graph.selected and t.id not in skip_ids and t.id in unrec_texts
+        ]
+        layout_data = None
+        if layout_path and Path(layout_path).is_file():
+            layout_data = json.loads(Path(layout_path).read_text('utf8'))
+        elif layout_evidence.available():
+            try:
+                layout_data = layout_evidence.detect(
+                    {'path': source_path, 'source_sha256': cur_graph.source_sha256},
+                    page_cache_dir / 'layout-cache',
+                )
+            except Exception:
+                layout_data = None
+        if layout_data:
+            crop_seeds.extend(layout_evidence.crop_seeds(layout_data, cur_graph))
+        if crop_seeds:
+            crop_dir = directory / tag / 'region-crops-staged'
+            try:
+                crop_ir, crop_ids, _ = stage_region_crops(
+                    cur_base, crop_dir, seeds=crop_seeds, skip_ids=skip_ids,
+                )
+                if crop_ids:
+                    cur_base = crop_ir.parent
+                    staged_ids.extend(crop_ids)
+            except Exception as exc:
+                stage_errors.append({
+                    'object_id': 'region_crops', 'kind': 'asset', 'bbox': [],
+                    'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
+                })
 
     return cur_base, staged_ids, stage_errors
 
@@ -1150,6 +1257,9 @@ def restage_batch_candidate_subset(
         skip_ids=skip,
         include_assets=bool(spec.get('include_assets', True)),
         include_containers=bool(spec.get('include_containers', True)),
+        include_region_crops=bool(spec.get('include_region_crops', False)),
+        layout_path=spec.get('layout_path'),
+        unrecoverable_text_ids=set(spec.get('unrecoverable_text_ids', [])),
         wanted_filter=wanted_filter,
         sam_enabled=bool(spec.get('sam_enabled', False)),
     )
@@ -1190,8 +1300,8 @@ def restage_batch_candidate_subset(
 
 def batch_reconstruct_page(service, state, current, directory: Path, *, page: int,
                            object_ids: list[str] | None = None, include_assets: bool = True,
-                           include_containers: bool = True, use_inpaint: bool = True,
-                           verify_office: bool = True) -> dict:
+                           include_containers: bool = True, include_region_crops: bool | None = None,
+                           use_inpaint: bool = True, verify_office: bool = True) -> dict:
     """Parallel local text trials + sequential staging + batch validation candidate (requires commit_candidate)."""
     from ..recovery.adaptive_policy import AdaptiveBudget
     from ..recovery.product_pipeline import failure as classify_exc
@@ -1289,9 +1399,27 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         x['id'] for x in current.get('scene_relations', {}).get(str(page), {}).get('logo_lockup_candidates', [])
         if x.get('id')
     }
+    crop_flag = bool(include_assets) if include_region_crops is None else bool(include_region_crops)
+    layout_path = current.get('layout', {}).get(str(page))
+    unrecoverable_text_ids = (
+        {fr['object_id'] for fr in failed_regions
+         if fr.get('kind') == 'text' and fr.get('failure') in (
+             'MASK_INCOMPLETE', 'BACKGROUND_REPAIR_FAILED', 'OWNER_CONFLICT', 'INSUFFICIENT_CONTEXT')}
+        | {t.id for t in initial_graph.text.texts
+           if t.id not in initial_graph.selected and (t.id in logo_ids or initial_graph.ownership.get(t.id) != 'RESOLVED')}
+    )
+
+    cand_ir_ref: list[Path] = []
 
     def _enriched_failures() -> list[dict]:
-        return [_classify_failed_region(err, initial_graph, logo_ids) for err in failed_regions]
+        staged_crop_boxes: list[tuple[str, list[float]]] = []
+        if cand_ir_ref and cand_ir_ref[0].is_file():
+            cg = SceneGraph.model_validate_json((cand_ir_ref[0].parent / 'scene.json').read_text('utf8'))
+            staged_crop_boxes = [
+                (rid, list(rec['bbox'])) for rid, rec in cg.selected.items()
+                if rec.get('region_crop') and len(rec.get('bbox', [])) == 4
+            ]
+        return [_classify_failed_region(err, initial_graph, logo_ids, staged_crop_boxes) for err in failed_regions]
 
     final_base, staged_ids, stage_errors = _chain_stage_from_spec(
         initial_graph=initial_graph,
@@ -1308,6 +1436,9 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         skip_ids=set(),
         include_assets=include_assets,
         include_containers=include_containers,
+        include_region_crops=crop_flag,
+        layout_path=layout_path,
+        unrecoverable_text_ids=unrecoverable_text_ids,
         wanted_filter=wanted_filter,
         sam_enabled=sam_enabled,
     )
@@ -1322,6 +1453,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         }
 
     final_ir = final_base / 'slideir.json'
+    cand_ir_ref.append(final_ir)
     batch_cid = 'c-' + key(str(directory.relative_to(state.job)) + ':batch')[:24]
     cand = {
         'id': batch_cid,
@@ -1344,6 +1476,9 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'pass1_failed_ids': pass1_failed_ids,
             'include_assets': bool(include_assets),
             'include_containers': bool(include_containers),
+            'include_region_crops': bool(crop_flag),
+            'layout_path': layout_path,
+            'unrecoverable_text_ids': sorted(unrecoverable_text_ids),
             'wanted_filter': sorted(wanted_filter) if wanted_filter is not None else None,
             'sam_enabled': bool(sam_enabled),
         },
@@ -1372,6 +1507,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
 
     # Unified Office check & per-object failure isolation through RuntimeService.validate_candidate.
     val = service.validate_candidate(state, current, directory / 'validate', candidate_id=batch_cid)
+    cand_ir_ref[0] = Path(cand['ir'])
     failed_regions.extend(cand.get('isolation_failures', []))
     staged_ids = cand.get('object_ids', staged_ids)
     auto_repaired_frames = cand.get('auto_repaired_frame_ids', [])
