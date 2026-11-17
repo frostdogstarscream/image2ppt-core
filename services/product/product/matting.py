@@ -188,8 +188,10 @@ def _run_subprocess(cfg: dict, model_str: str, crop: np.ndarray) -> np.ndarray:
         if cfg['python_path']:
             env['PYTHONPATH'] = os.pathsep.join(filter(None, [cfg['python_path'], env.get('PYTHONPATH', '')]))
         with _gpu_lease(cfg):
+            run_kwargs = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt' else {}
             subprocess.run([cfg['python'], str(WORKER), model_str, str(src), str(out)], check=True,
-                           timeout=cfg['timeout'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                           timeout=cfg['timeout'], env=env, stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **run_kwargs)
         return np.asarray(Image.open(out).convert('L'), np.float32) / 255.0
 
 

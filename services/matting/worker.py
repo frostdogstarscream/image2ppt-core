@@ -44,26 +44,23 @@ def load_pytorch_birefnet(model_dir: Path):
 
     _sentinel = object()
     saved_tf = sys.modules.get('transformers', _sentinel)
-    try:
-        from transformers import PreTrainedModel as _PTM, PretrainedConfig as _PTC  # noqa: F401
-    except Exception:
-        tf_mod = types.ModuleType('transformers')
+    tf_mod = types.ModuleType('transformers')
 
-        class _PretrainedConfig:
-            def __init__(self, **kwargs):
-                for k, v in kwargs.items():
-                    setattr(self, k, v)
+    class _PretrainedConfig:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
 
-        class _PreTrainedModel(torch.nn.Module):
-            def __init__(self, *args, **kwargs):
-                super().__init__()
+    class _PreTrainedModel(torch.nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
 
-            def post_init(self):
-                pass
+        def post_init(self):
+            pass
 
-        tf_mod.PretrainedConfig = _PretrainedConfig
-        tf_mod.PreTrainedModel = _PreTrainedModel
-        sys.modules['transformers'] = tf_mod
+    tf_mod.PretrainedConfig = _PretrainedConfig
+    tf_mod.PreTrainedModel = _PreTrainedModel
+    sys.modules['transformers'] = tf_mod
 
     try:
         with warnings.catch_warnings():
