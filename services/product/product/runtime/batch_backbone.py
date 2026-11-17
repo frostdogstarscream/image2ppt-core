@@ -1181,7 +1181,7 @@ def _chain_stage_from_spec(
         ] + [
             {'id': t.id, 'kind': 'text', 'bbox': list(t.bbox), 'text': t.text}
             for t in cur_graph.text.texts
-            if t.id not in cur_graph.selected and t.id not in skip_ids and t.id in unrec_texts
+            if t.id not in cur_graph.selected and t.id in unrec_texts
         ]
         layout_data = None
         if layout_path and Path(layout_path).is_file():
@@ -1195,7 +1195,7 @@ def _chain_stage_from_spec(
             except Exception:
                 layout_data = None
         if layout_data:
-            crop_seeds.extend(layout_evidence.crop_seeds(layout_data, cur_graph))
+            crop_seeds.extend(s for s in layout_evidence.crop_seeds(layout_data, cur_graph) if s['id'] not in skip_ids)
         if crop_seeds:
             crop_dir = directory / tag / 'region-crops-staged'
             try:
@@ -1237,7 +1237,11 @@ def restage_batch_candidate_subset(
     initial_graph = SceneGraph.model_validate_json((initial_baseline / 'scene.json').read_text('utf8'))
     fonts = json.loads(Path(current['fonts']).read_text('utf8'))
     overrides = {oid: fb['measured_frame_minimum_px'] for oid, fb in frame_repairs.items()}
-    skip = bad_ids | set(spec.get('pass1_failed_ids', []))
+    bad_crop_ids = {oid for oid in bad_ids if staged_graph.selected.get(oid, {}).get('region_crop')}
+    bad_crop_seeds = {sid for oid in bad_crop_ids for sid in staged_graph.selected[oid].get('seed_ids', [])}
+    bad_text_ids = {oid for oid in bad_ids if any(t.id == oid for t in staged_graph.text.texts)}
+    skip = (bad_ids - bad_crop_ids) | bad_crop_seeds | set(spec.get('pass1_failed_ids', []))
+    unrec_pass2 = (set(spec.get('unrecoverable_text_ids', [])) | bad_text_ids) - bad_crop_seeds
     wanted_list = spec.get('wanted_filter')
     wanted_filter = set(wanted_list) if wanted_list is not None else None
 
@@ -1259,7 +1263,7 @@ def restage_batch_candidate_subset(
         include_containers=bool(spec.get('include_containers', True)),
         include_region_crops=bool(spec.get('include_region_crops', False)),
         layout_path=spec.get('layout_path'),
-        unrecoverable_text_ids=set(spec.get('unrecoverable_text_ids', [])),
+        unrecoverable_text_ids=unrec_pass2,
         wanted_filter=wanted_filter,
         sam_enabled=bool(spec.get('sam_enabled', False)),
     )
