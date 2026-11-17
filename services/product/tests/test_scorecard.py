@@ -67,6 +67,7 @@ def test_ownership_classes_and_content_fractions(tmp_path):
     icon[5:35, 5:55] = [200, 30, 30, 255]  # transparent border -> asset
     crop = np.dstack([src[50:90, 10:60], np.full((40, 50), 255, np.uint8)])  # opaque -> opaque_picture
     plate = np.dstack([src, np.full((100, 200), 255, np.uint8)])
+    plate[50:90, 10:60, :3] = 255  # crop pixels moved out of the plate
     pptx = tmp_path / 'r.pptx'
     build_pptx(pptx, (200, 100), [
         _pic('rIdPlate', 'source-plate', 0, 0, 200, 100),
@@ -101,6 +102,18 @@ def test_raster_only_page_has_zero_editable_content(tmp_path):
     result = scorecard.score_page(src_path, pptx)
     assert result['editable_content_fraction'] == 0.0
     assert result['raster_plate_content_fraction'] == 1.0
+
+
+def test_crop_over_unchanged_plate_is_duplicate_not_editable(tmp_path):
+    src, src_path = _source(tmp_path)
+    pptx = tmp_path / 'dup.pptx'
+    plate = np.dstack([src, np.full((100, 200), 255, np.uint8)])
+    crop = np.dstack([src[50:90, 10:60], np.full((40, 50), 255, np.uint8)])
+    build_pptx(pptx, (200, 100), [_pic('rIdP', 'source-plate', 0, 0, 200, 100), _pic('rIdC', 'r-001', 10, 50, 50, 40)],
+               {'rIdP': _png(plate), 'rIdC': _png(crop)})
+    result = scorecard.score_page(src_path, pptx)
+    assert result['object_counts'] == {'plate': 1, 'duplicate_picture': 1}
+    assert result['editable_content_fraction'] == 0.0
 
 
 def test_ciede2000_reference_pairs():

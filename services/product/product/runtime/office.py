@@ -33,7 +33,7 @@ def frame_feedback(result,graph,identifier):
 def check_local(pptx, irs, directory):
     from ..parallel_office import inspect, OfficeValidationError
     from ..parallel_edit_probe import inspect_text
-    from ..parallel_residual_gate import inspect_residuals
+    from ..parallel_residual_gate import inspect_residuals, residual_accepted
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     result = {'status': 'UNKNOWN', 'pptx_sha256': digest(pptx), 'office_directory': str(directory/'office')}
@@ -59,7 +59,7 @@ def check_local(pptx, irs, directory):
         else:
             passed = (actual['status'] == 'PASS_APP_AUTOMATED'
                       and replacement['status'] in ('PASS', 'NOT_APPLICABLE')
-                      and all(r['residual_check_status'] == 'PASS' for page in residuals for r in page))
+                      and all(residual_accepted(r) for page in residuals for r in page))
             result.update(status='PASS' if passed else 'REVIEW_REQUIRED', office=actual,
                           replacements=replacement, residuals=residuals)
     except Exception as exc:

@@ -13,6 +13,8 @@ picture pixels fall through):
   table/chart native graphic frame
   asset       picture with meaningful transparency (movable graphic)
   opaque_picture opaque picture smaller than the page (region crop or opaque container layer)
+  duplicate_picture opaque picture whose pixels still exist unchanged in the plate beneath
+              (e.g. MOVE_UNSAFE region crop); visually faithful but not counted as editable
   plate       page-sized picture (source-plate / raster backing)
   background  slide background only
 """
@@ -38,7 +40,7 @@ NS = {
     'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
     'rel': 'http://schemas.openxmlformats.org/package/2006/relationships',
 }
-CLASSES = ('background', 'plate', 'opaque_picture', 'asset', 'shape', 'table', 'chart', 'text')
+CLASSES = ('background', 'plate', 'duplicate_picture', 'opaque_picture', 'asset', 'shape', 'table', 'chart', 'text')
 EDITABLE = ('opaque_picture', 'asset', 'shape', 'table', 'chart', 'text')
 PLATE_AREA_FRACTION = 0.90
 TRANSPARENT_FRACTION = 0.02
@@ -186,6 +188,7 @@ def inspect_pptx(pptx: str | Path, canvas: tuple[int, int], slide: int = 1) -> d
         tree = root.find('p:cSld/p:spTree', NS)
         owner = np.zeros((height, width), np.uint8)  # index into CLASSES; 0 background
         objects = []
+        plate_rgb = None
         for z, (element, kind, emu) in enumerate(_walk(tree, (1.0, 1.0, 0.0, 0.0))):
             x0 = int(round(emu[0] * kx)); y0 = int(round(emu[1] * ky))
             x1 = int(round((emu[0] + emu[2]) * kx)); y1 = int(round((emu[1] + emu[3]) * ky))
@@ -203,10 +206,25 @@ def inspect_pptx(pptx: str | Path, canvas: tuple[int, int], slide: int = 1) -> d
                     transparent = float((pixels[..., 3] < 250).mean())
                 if area_fraction >= PLATE_AREA_FRACTION:
                     cls = 'plate'
+                    if pixels is not None:
+                        plate_rgb = np.full((height, width, 3), 255, np.uint8)
+                        px0, py0 = max(0, x0), max(0, y0)
+                        px1, py1 = min(width, x1), min(height, y1)
+                        plate_rgb[py0:py1, px0:px1] = pixels[py0 - y0:py1 - y0, px0 - x0:px1 - x0, :3]
                 elif transparent >= TRANSPARENT_FRACTION:
                     cls = 'asset'
                 else:
                     cls = 'opaque_picture'
+                    if pixels is not None and plate_rgb is not None:
+                        qx0, qy0 = max(0, x0), max(0, y0)
+                        qx1, qy1 = min(width, x1), min(height, y1)
+                        if qx1 > qx0 and qy1 > qy0:
+                            pic = pixels[qy0 - y0:qy1 - y0, qx0 - x0:qx1 - x0, :3].astype(np.int16)
+                            under = plate_rgb[qy0:qy1, qx0:qx1].astype(np.int16)
+                            same = float((np.abs(pic - under).max(2) <= 3).mean())
+                            record['same_as_plate_fraction'] = round(same, 4)
+                            if same >= 0.9:
+                                cls = 'duplicate_picture'
                 record['transparent_fraction'] = round(transparent, 4)
             elif kind == 'text':
                 record['text'] = _text_of(element)

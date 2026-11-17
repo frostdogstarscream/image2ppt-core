@@ -17,7 +17,7 @@ from ..parallel_review import PROMPT,panels
 from ..parallel_store import key
 from ..parallel_office import inspect
 from ..parallel_edit_probe import inspect_text
-from ..parallel_residual_gate import inspect_residuals
+from ..parallel_residual_gate import inspect_residuals,residual_accepted
 from ..resource_lease import lease
 from .background_adapter import RecoveryBlocked
 from .region_candidates import generate, adaptive_candidates
@@ -456,7 +456,7 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
             replacements=inspect_text(artifacts['pptx'],irs,attempt/'replacements',**({'include_long':False} if adaptive else {}))
         if office_receipt.get('status')!='PASS_APP_AUTOMATED':raise ValueError('combined Office failed')
         residuals=[inspect_residuals(ir,office_dir,i+1,attempt/f'residuals-{i+1:02d}.json') for i,ir in enumerate(irs)]
-        owner_ok=all(r['residual_check_status']=='PASS' for rows in residuals for r in rows)
+        owner_ok=all(residual_accepted(r) for rows in residuals for r in rows)
         if not owner_ok or replacements['status']!='PASS':raise ValueError('combined editable consistency failed')
         office_ok=True
     except Exception as exc:
@@ -505,7 +505,7 @@ def run(job,request,snaps,graphs,irs,baseline,fonts,store,expected,*,compiler,re
             residuals=[]
             for i,(snap,ir,preview) in enumerate(zip(snaps,irs,previews)):
                 residuals.append(inspect_residuals(ir,office_dir,i+1,attempt/f'rollback-residuals-{i+1:02d}.json'))
-                if any(r['residual_check_status']!='PASS' for r in residuals[-1]):
+                if not all(residual_accepted(r) for r in residuals[-1]):
                     raise ValueError('rollback source-owner residual check failed')
                 try:reviews[i]=review(store,reviewer,snap,ir,preview,office_dir,i+1,attempt/f'rollback-review-panels-{i+1:02d}',adaptive=adaptive)
                 except Exception as exc:reviews[i]={'status':'UNKNOWN','failure':failure(exc,'qa'),'verified_regions_retained':True}

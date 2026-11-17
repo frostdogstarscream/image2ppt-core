@@ -420,10 +420,15 @@ def adapt(graph,directory):
     def attrs(s):return {'font':{'ea':s.ea,'latin':s.latin,'size_pt':s.size_px*.75},'bold':s.bold,'color':s.color}
     container_assets=sorted([c for c in chosen if c['kind']=='asset' and c.get('container_layer')],
                             key=lambda c:-(c['bbox'][2]*c['bbox'][3]))
-    foreground_assets=[c for c in chosen if c['kind']=='asset' and not c.get('container_layer')]
-    ordered=container_assets+foreground_assets+[c for c in chosen if c['kind'] not in ('surface','asset')]
+    # Opaque region crops sit above backings/containers and below editable foreground.
+    region_crops=[c for c in chosen if c['kind']=='asset' and c.get('region_crop')]
+    foreground_assets=[c for c in chosen if c['kind']=='asset' and not c.get('container_layer') and not c.get('region_crop')]
+    ordered=container_assets+region_crops+foreground_assets+[c for c in chosen if c['kind'] not in ('surface','asset')]
     for z,c in enumerate(ordered,len(surfaces)+1):
-        if c['kind']=='asset':
+        if c['kind']=='asset' and c.get('region_crop'):
+            file=reference(c['asset_reference'])
+            image(c['id'],c['bbox'],file,'Opaque source region crop ('+c.get('move_safety','MOVE_UNSAFE')+'); intrinsic content is not editable',z)
+        elif c['kind']=='asset':
             file=reference(c['asset_reference']);meta=c['payload']
             image(c['id'],c['bbox'],file,'Complete transparent graphic candidate; '+meta['method'],z)
         elif c['kind']=='text':

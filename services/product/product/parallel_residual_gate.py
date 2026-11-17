@@ -10,6 +10,12 @@ from PIL import Image
 from .materialize import digest,write
 
 
+def residual_accepted(row):
+    """PASS, or an explicitly MOVE_UNSAFE region crop that erased nothing."""
+    return row['residual_check_status']=='PASS' or (
+        row['residual_check_status']=='NOT_APPLICABLE' and row.get('move_safety')=='MOVE_UNSAFE')
+
+
 def inspect_residuals(irfile,office_dir,page,output):
     irfile=Path(irfile);scene=json.loads((irfile.parent/'scene.json').read_text(encoding='utf-8'))
     ir=json.loads(irfile.read_text(encoding='utf-8')) if irfile.is_file() else {'nodes':[]}
@@ -26,6 +32,10 @@ def inspect_residuals(irfile,office_dir,page,output):
     for record in records:
         identifier=record['id'];deleted=Path(office_dir)/f'{page:02d}-{identifier}-delete.png'
         base={'id':identifier,'residual_check_status':'UNKNOWN','residual_pixels_confirmed':None,'reference_sha256':record.get('owner_evidence',{}).get('sha256')}
+        if record.get('region_crop') and record.get('move_safety')=='MOVE_UNSAFE' and not record.get('owner_evidence'):
+            # Nothing was erased: the plate keeps identical pixels beneath this copy.
+            results.append({**base,'residual_check_status':'NOT_APPLICABLE','move_safety':'MOVE_UNSAFE',
+                'reason':'opaque region crop over unchanged source plate; deletion reveals identical source pixels by design'});continue
         if identifier not in proofs or not deleted.exists():results.append({**base,'reason':'missing source-owner or actual-delete evidence'});continue
         data=proofs[identifier];mask=data['mask'].astype(bool).copy();x,y,w,h=map(int,data['restore_bbox'])
         for other,proof in proofs.items():

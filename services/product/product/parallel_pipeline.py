@@ -42,6 +42,8 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
     from .parallel_candidate_engine import engine_mode,shadow_discover
     candidate_engine=engine_mode(request.get('candidate_engine',os.environ.get('IMAGE2PPT_CANDIDATE_ENGINE','off')))
     pipeline_mode=mode(request.get('pipeline_mode','parallel_review'));route=strategy(request.get('object_extraction','default'))
+    region_fallback=request.get('region_fallback','plate')
+    if region_fallback not in ('plate','crop'):raise ValueError('unknown region_fallback')
     cache=Path(os.environ.get('IMAGE2PPT_PARALLEL_CACHE',str(ROOT/'.runtime/parallel-cache')));cache.mkdir(parents=True,exist_ok=True)
     store=Store(job/'state');call_store=Store(cache/'model-calls')
     from .parallel_catalog import Catalog
@@ -226,6 +228,17 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
                         folder/'local-repair-1',baseline,route)
                 except Exception as exc:
                     write(folder/'local-repair-failure.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
+            if region_fallback=='crop':
+                # Remaining source content becomes small opaque region crops; MOVE_UNSAFE
+                # crops erase nothing, MOVABLE crops carry their own owner receipt.
+                from .recovery.region_crop import stage_region_crops
+                from uuid import uuid4
+                try:
+                    crop_ir,crop_ids,_=stage_region_crops(ir.parent,folder/('region-crops-'+uuid4().hex[:8]))
+                    if crop_ids:
+                        ir=crop_ir;graph=SceneGraph.model_validate_json((ir.parent/'scene.json').read_text(encoding='utf-8'))
+                except Exception as exc:
+                    write(folder/'region-crop-failure.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
             store.task('scene-'+snap['source_sha256'],'scene','STAGED',{'ir':str(ir),'failures':failures},
                        [key({'source':snap['source_sha256'],'branch':b,'version':'r10/1','repair':None}) for b in ('text','asset','surface')])
             return graph,ir,report,failures
