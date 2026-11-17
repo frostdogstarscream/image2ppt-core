@@ -42,29 +42,57 @@ def load_pytorch_birefnet(model_dir: Path):
             sys.modules['kornia'] = kornia_mod
             sys.modules['kornia.filters'] = filters_mod
 
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore')
-        pkg_name = '_rmbg2_local'
-        if pkg_name not in sys.modules:
-            pkg = type(sys)(pkg_name)
-            pkg.__path__ = [str(model_dir)]
-            sys.modules[pkg_name] = pkg
-        if f'{pkg_name}.BiRefNet_config' not in sys.modules:
-            sc = importlib.util.spec_from_file_location(f'{pkg_name}.BiRefNet_config', model_dir / 'BiRefNet_config.py')
-            mc = importlib.util.module_from_spec(sc)
-            sys.modules[f'{pkg_name}.BiRefNet_config'] = mc
-            sc.loader.exec_module(mc)
-        else:
-            mc = sys.modules[f'{pkg_name}.BiRefNet_config']
-        if f'{pkg_name}.birefnet' not in sys.modules:
-            sb = importlib.util.spec_from_file_location(f'{pkg_name}.birefnet', model_dir / 'birefnet.py')
-            mb = importlib.util.module_from_spec(sb)
-            sys.modules[f'{pkg_name}.birefnet'] = mb
-            sb.loader.exec_module(mb)
-        else:
-            mb = sys.modules[f'{pkg_name}.birefnet']
+    _sentinel = object()
+    saved_tf = sys.modules.get('transformers', _sentinel)
+    try:
+        from transformers import PreTrainedModel as _PTM, PretrainedConfig as _PTC  # noqa: F401
+    except Exception:
+        tf_mod = types.ModuleType('transformers')
 
-    net = mb.BiRefNet(config=mc.BiRefNetConfig(bb_pretrained=False))
+        class _PretrainedConfig:
+            def __init__(self, **kwargs):
+                for k, v in kwargs.items():
+                    setattr(self, k, v)
+
+        class _PreTrainedModel(torch.nn.Module):
+            def __init__(self, *args, **kwargs):
+                super().__init__()
+
+            def post_init(self):
+                pass
+
+        tf_mod.PretrainedConfig = _PretrainedConfig
+        tf_mod.PreTrainedModel = _PreTrainedModel
+        sys.modules['transformers'] = tf_mod
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            pkg_name = '_rmbg2_local'
+            if pkg_name not in sys.modules:
+                pkg = type(sys)(pkg_name)
+                pkg.__path__ = [str(model_dir)]
+                sys.modules[pkg_name] = pkg
+            if f'{pkg_name}.BiRefNet_config' not in sys.modules:
+                sc = importlib.util.spec_from_file_location(f'{pkg_name}.BiRefNet_config', model_dir / 'BiRefNet_config.py')
+                mc = importlib.util.module_from_spec(sc)
+                sys.modules[f'{pkg_name}.BiRefNet_config'] = mc
+                sc.loader.exec_module(mc)
+            else:
+                mc = sys.modules[f'{pkg_name}.BiRefNet_config']
+            if f'{pkg_name}.birefnet' not in sys.modules:
+                sb = importlib.util.spec_from_file_location(f'{pkg_name}.birefnet', model_dir / 'birefnet.py')
+                mb = importlib.util.module_from_spec(sb)
+                sys.modules[f'{pkg_name}.birefnet'] = mb
+                sb.loader.exec_module(mb)
+            else:
+                mb = sys.modules[f'{pkg_name}.birefnet']
+        net = mb.BiRefNet(config=mc.BiRefNetConfig(bb_pretrained=False))
+    finally:
+        if saved_tf is _sentinel:
+            sys.modules.pop('transformers', None)
+        else:
+            sys.modules['transformers'] = saved_tf
     sd = st.load_file(str(model_dir / 'model.safetensors'))
     net.load_state_dict(sd, strict=True)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
