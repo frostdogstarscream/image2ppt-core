@@ -92,6 +92,8 @@ def test_ownership_classes_and_content_fractions(tmp_path):
     text = result['text']
     assert text['ocr_lines'] == 2 and text['matched_lines'] == 1
     assert text['line_recall'] == 0.5 and text['unmatched'][0]['ocr_text'] == '\u7f3a\u5931'
+    scorecard.save_owner_preview(src_path, pptx, tmp_path / 'owner.png')
+    assert (tmp_path / 'owner.png').is_file()
 
 
 def test_raster_only_page_has_zero_editable_content(tmp_path):

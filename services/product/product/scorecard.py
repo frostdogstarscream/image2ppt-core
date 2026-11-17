@@ -411,7 +411,7 @@ def save_owner_preview(source_path: str | Path, pptx_path: str | Path, out_png: 
     """Colour-coded ownership overlay for human inspection."""
     source = np.asarray(Image.open(source_path).convert('RGB'))
     owner = inspect_pptx(pptx_path, (source.shape[1], source.shape[0]), slide)['owner']
-    palette = np.array([[255, 255, 255], [220, 40, 40], [255, 160, 0], [40, 170, 60],
+    palette = np.array([[255, 255, 255], [220, 40, 40], [255, 160, 0], [250, 220, 60], [40, 170, 60],
                         [60, 120, 230], [150, 80, 200], [0, 170, 170], [30, 30, 30]], np.float32)
     overlay = (0.45 * source.astype(np.float32) + 0.55 * palette[owner]).clip(0, 255).astype(np.uint8)
     Image.fromarray(overlay).save(out_png)

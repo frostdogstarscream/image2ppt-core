@@ -234,7 +234,17 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
                 from .recovery.region_crop import stage_region_crops
                 from uuid import uuid4
                 try:
-                    crop_ir,crop_ids,_=stage_region_crops(ir.parent,folder/('region-crops-'+uuid4().hex[:8]))
+                    from .recovery.region_crop import default_seeds
+                    from . import layout_evidence
+                    crop_seeds=default_seeds(graph)
+                    if layout_evidence.available():
+                        try:
+                            layout=layout_evidence.detect(snap,cache)
+                            write(folder/'layout-regions.json',layout)
+                            crop_seeds+=layout_evidence.crop_seeds(layout,graph)
+                        except Exception as exc:
+                            write(folder/'layout-failure.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
+                    crop_ir,crop_ids,_=stage_region_crops(ir.parent,folder/('region-crops-'+uuid4().hex[:8]),seeds=crop_seeds)
                     if crop_ids:
                         ir=crop_ir;graph=SceneGraph.model_validate_json((ir.parent/'scene.json').read_text(encoding='utf-8'))
                 except Exception as exc:
