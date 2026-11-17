@@ -318,7 +318,7 @@ def asset_background(source, box, mask, protected, layers, fitted, *, raw_source
 
 def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_directory,output,*,strategy='source-halo',sam_directory=None,sam_plan=None):
     """Return one private candidate package, or retain explicit blocking evidence."""
-    if strategy not in ('source-halo','verified-backing','sam'):raise ValueError('unsupported asset repair strategy')
+    if strategy not in ('source-halo','verified-backing','sam','rmbg2'):raise ValueError('unsupported asset repair strategy')
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=False)
     baseline=Path(baseline_directory).resolve();source_file=Path(source_file).resolve()
     if digest(source_file)!=graph.source_sha256:
@@ -354,7 +354,14 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
         if error:raise ValueError(error)
         sam_binding={'directory':str(Path(sam_directory).resolve()),'plan':str(Path(sam_plan).resolve()),
             'files':{str(p.resolve()):digest(p) for p in [Path(sam_plan),*[p for p in Path(sam_directory).iterdir() if p.is_file()]]}}
-    seeds=asset_candidates(obj,work_source,layers,protected,(),'auto',sam=sam,surface=surface)
+    if strategy=='rmbg2':
+        from ..matting import matte_candidate
+        try:
+            seeds=[matte_candidate(obj,work_source,protected,surface)]
+        except (ValueError,OSError) as exc:
+            seeds=[];result['rmbg2_failure']=str(exc)
+    else:
+        seeds=asset_candidates(obj,work_source,layers,protected,(),'auto',sam=sam,surface=surface)
     if strategy=='sam':
         source_seeds=list(seeds)
         seeds=[(seed,meta) for seed,meta in seeds if meta['method']=='sam3']

@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import subprocess
 import re
 from pathlib import Path
 import sys
@@ -108,6 +109,12 @@ def asset_candidates(obj,source,layers,protected,stable,strategy,sam=None,cache=
     with lease('pixel-'+lock,capacity=1):return _asset_candidates(obj,source,layers,protected,stable,strategy,sam,cache,surface)
 
 
+def _matting_binding(strategy):
+    if strategy in ('alpha','off'):return None
+    from . import matting
+    return matting.binding()
+
+
 def _asset_candidates(obj,source,layers,protected,stable,strategy,sam=None,cache=None,surface=None):
     size=(source.shape[1],source.shape[0]);results=[]
     # A stable source-bound PNG wins without resampling or a new segmentation.
@@ -130,7 +137,7 @@ def _asset_candidates(obj,source,layers,protected,stable,strategy,sam=None,cache
         'protection':array_sha(protected),'strategy':strategy,
         'sam_masks':[array_sha(c['mask']) for c in sam or []],
         'surfaces':[{k:v for k,v in s.model_dump().items() if k!='id'} for s in surface.shapes] if surface is not None else [],
-        'implementation':[CODE_SHA,UNMIX_CODE_SHA]})
+        'implementation':[CODE_SHA,UNMIX_CODE_SHA],**({'matting':matting_binding} if (matting_binding:=_matting_binding(strategy)) else {})})
     cache=Path(cache)/identity if cache else None
     if cache and (cache/'manifest.json').exists():
         rows=json.loads((cache/'manifest.json').read_text(encoding='utf-8'));restored=[]
@@ -148,6 +155,11 @@ def _asset_candidates(obj,source,layers,protected,stable,strategy,sam=None,cache
     if strategy not in ('alpha','off'):
         try:results.append(matte_from_evidence(obj,source,protected,original_alpha=prior,surface=surface))
         except ValueError:pass
+        if _matting_binding(strategy):
+            from .matting import matte_candidate
+            # Matting model hypothesis; acceptance remains the shared backing/owner gates.
+            try:results.append(matte_candidate(obj,source,protected,surface))
+            except (ValueError,OSError,subprocess.SubprocessError):pass
     if sam and layers:
         # Each model mask remains a separate assembly hypothesis. Good stable
         # assets above return early, so SAM cannot replace their bytes.
