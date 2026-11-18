@@ -207,8 +207,7 @@ def run(job, out, references, cases):
                 sheet.paste(im, (j * 836, 30))
                 draw.text((j * 836 + 10, 7), ("Source", "PowerPoint")[j], fill="black")
             sheet.save(out / f"page-{i}-comparison.png")
-    with lease("office"):
-        probe_edits(deck, out / "edit-tests", cases)
+    probe_edits(deck, out / "edit-tests", cases)
     edits = read(out / "edit-tests/report.json")
     counts = collections.Counter()
     attempted = collections.Counter()

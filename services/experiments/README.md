@@ -87,3 +87,23 @@ $deck = (Get-ChildItem "$newOut/composition" -Recurse -Filter deck.pptx).FullNam
 python services/experiments/probe_fields.py $deck "$newOut/edits" --cases $editCases
 ```
 
+## Fresh free-planner run (2026-11-18)
+
+The combined upload using OpenCode Go `hy4-flash-free` and the reconstruction code at `72aefc0` completed in 48.3 minutes. It used the two original page images and fresh planning. The agent committed 47 objects on page 1 and 21 on page 2 and had composed both pages at 45 minutes. Finalization returned `SUCCEEDED` with `PARTIAL_EDITABLE`; the delivered file matched the Office-tested file byte for byte (SHA-256 `3a6d0bde2dc19acc8836b1eb2936103313abac32723e9e8310d8773131284fd9`).
+
+**Four of six prescribed edits passed in PowerPoint.** The numeric field, the single-selection role group, the project-name field and a native table cell all retained their edits after save/reopen with zero changed pixels outside their expected regions. Two operations lacked a target:
+
+- The software screenshot was detected at IoU 0.848. The planner assigned it to `preserve`, leaving no independently deletable picture.
+- The industry card was detected at IoU 0.920. The planner omitted it. The geometric fallback proposed a surface, but one selected child text field required a different backing from the sampled card fill. Repeating the surface check against the retained scene reproduced that rejection. The final slide had no independently recolorable shape for this card.
+
+| Page | Matched native fields | Native structured-content area | Verified movable area | Duplicate area | Raster plate area | RGB MAE | SSIM |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 28/93 | 30.60% | 1.99% | 0% | 67.41% | 8.097 | 0.8617 |
+| 2 | 46/74 | 46.54% | 3.99% | 0% | 49.46% | 12.252 | 0.7762 |
+
+Office passed 136 object-edit records, 84 text replacement records and all 68 residual checks. The two native tables remained visually different from the source in alignment and border color. Automated visual review was performed by the OpenCode agent. Human and WPS acceptance are unverified.
+
+The remote call receipts recorded two candidate responses each for PP-DocLayout-L, DocLayout-YOLO and OmniParser, 24 for ViTMatte/PyMatting, 28 for local LayerD and eight for VTracer. All eight evaluated SVG candidates were rejected. The agent transcript reported 31 assistant messages and cost 0. The separate synthetic image probe returned HTTP 200 with the requested model ID and zero reported Go allowance. These results measure the combined configuration; they do not isolate individual model contributions.
+
+An earlier fresh upload at `d42dd5e` reproduced a page-2 OCR preparation failure. That agent still finalized a two-page file with one independent text object on page 1 and only the raster plate on page 2. Office passed the available objects, but all six prescribed targets were absent. The repair at `72aefc0` removes a stale dependency on the merge step's internal line list.
+
