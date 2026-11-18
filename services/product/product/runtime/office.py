@@ -63,7 +63,7 @@ def check_local(pptx, irs, directory):
             result.update(status='PASS' if passed else 'REVIEW_REQUIRED', office=actual,
                           replacements=replacement, residuals=residuals)
     except Exception as exc:
-        result.update(error_type=type(exc).__name__, failure='QA_INFRASTRUCTURE_UNAVAILABLE')
+        result.update(error_type=type(exc).__name__, reason=str(exc)[:300], failure='QA_INFRASTRUCTURE_UNAVAILABLE')
     write(directory/'checks.json', result)
-    result['files'] = {str(p): digest(p) for p in directory.rglob('*') if p.is_file()}
+    result['files'] = {str(p): digest(p) for p in directory.rglob('*') if p.is_file() and not p.name.startswith('~$')}
     return result

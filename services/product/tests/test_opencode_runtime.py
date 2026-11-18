@@ -1849,3 +1849,20 @@ def test_crop_region_tool_uses_host_fusion_and_commits_through_unified_gate(job,
 
 
 
+
+
+def test_office_receipt_excludes_transient_office_owner_file(tmp_path, monkeypatch):
+    from product import parallel_office
+    from product.runtime.office import check_local
+
+    deck = tmp_path / 'sample.pptx'
+    deck.write_bytes(b'fixture')
+    output = tmp_path / 'qa'
+    output.mkdir()
+    owner = output / '~$sample.pptx'
+    owner.write_bytes(b'transient owner file')
+    monkeypatch.setattr(parallel_office, 'inspect', lambda *args: {'status': 'PASS_APP_AUTOMATED'})
+    result = check_local(deck, [], output)
+    assert result['status'] == 'PASS'
+    assert str(owner) not in result['files']
+    assert str(output / 'checks.json') in result['files']
