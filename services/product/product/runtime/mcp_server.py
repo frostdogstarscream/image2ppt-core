@@ -189,7 +189,14 @@ def create_server(root, bound_job=None):
             profile=request.get('tool_profile','all')
         shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region',
                    'prepare_page_evidence','batch_reconstruct_page'} if profile=='basic' else set()
-        return [tool for tool in schemas() if tool.name not in shortcuts]
+        tools = [tool for tool in schemas() if tool.name not in shortcuts]
+        if bound_job:
+            for tool in tools:
+                schema = tool.inputSchema
+                schema['properties']['job_id'] = {'type': 'string', 'enum': [bound_job],
+                                                 'description': 'Optional in this job-bound session.'}
+                schema['required'].remove('job_id')
+        return tools
 
     @server.list_tools()
     async def list_tools():
@@ -198,6 +205,8 @@ def create_server(root, bound_job=None):
     @server.call_tool()
     async def call_tool(name, arguments):
         arguments = dict(arguments or {})
+        if bound_job:
+            arguments.setdefault('job_id', bound_job)
         if bound_job and arguments.get('job_id') != bound_job:
             raise ValueError('tool is bound to another job')
         from jsonschema import validate
