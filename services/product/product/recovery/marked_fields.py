@@ -1,10 +1,15 @@
 """Locate independent caption fields using both OCR wording and the source separator."""
 
 import re
+import unicodedata
 
 import numpy as np
 
 from ..parallel_typography import measure_text_appearance
+
+
+class FieldWidthMismatch(ValueError):
+    """A uniform-width title field occupies a different number of source glyphs."""
 
 
 def separated_fields(source, text, bbox):
@@ -30,6 +35,16 @@ def separated_fields(source, text, bbox):
     if len(matches) != 1:
         return []
     end, start = matches[0]
+    left_text, right_text = parts[1].strip(), parts[3].strip()
+    if min(len(left_text), len(right_text)) >= 3 and all(
+        unicodedata.east_asian_width(ch) in ('W', 'F') for ch in left_text + right_text
+    ):
+        left_ink = np.flatnonzero(ink[:, : end - 3].any(0))
+        right_ink = np.flatnonzero(ink[:, start:].any(0))
+        if left_ink.size and right_ink.size:
+            pitch = (np.ptp(left_ink) + 1) / len(left_text)
+            if abs((np.ptp(right_ink) + 1) / pitch - len(right_text)) > 0.65:
+                raise FieldWidthMismatch('OCR character count and source field width disagree')
     boxes = [[x, y, end + 1, h], [x + start - 1, y, w - start + 1, h]]
     fields = []
     for value, box in zip((parts[1] + parts[2], parts[3]), boxes):
@@ -40,12 +55,25 @@ def separated_fields(source, text, bbox):
     return fields
 
 
-def split_items(source, items):
+def split_items(source, items, preserved):
     result = []
     for item in items:
-        fields = (
-            separated_fields(source, item['text'], item['bbox']) if len(item['ocr_line_ids']) == 1 else []
-        )
+        try:
+            fields = (
+                separated_fields(source, item['text'], item['bbox'])
+                if len(item['ocr_line_ids']) == 1
+                else []
+            )
+        except FieldWidthMismatch as exc:
+            preserved.append(
+                {
+                    'id': item['id'],
+                    'ocr_ids': item['ocr_line_ids'],
+                    'bbox': item['bbox'],
+                    'reason': str(exc),
+                }
+            )
+            continue
         if not fields:
             result.append(item)
             continue

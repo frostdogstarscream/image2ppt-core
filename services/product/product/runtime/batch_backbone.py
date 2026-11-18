@@ -808,7 +808,8 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         source, raw_items, [*immediate_assets, *deferred_assets], extra_logo_boxes=extra_logo_boxes)
     if profile and profile != 'baseline':
         from ..recovery.marked_fields import split_items
-        measured_items = split_items(source, measured_items)
+        retained_fields = scene_relations.setdefault('source_retained_fields', [])
+        measured_items = split_items(source, measured_items, retained_fields)
     for item in measured_items:
         est_px = item['est_size_px']
         item['role'] = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))

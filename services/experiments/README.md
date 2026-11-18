@@ -46,3 +46,42 @@ All six remote workers returned model receipts. Hy4 selected a software screensh
 
 At 45 minutes the combined job had composed a two-page deck with 42 and 15 committed objects. Its SHA-256 was `3befe29bb8dfff9f3c917b477762959b9aae82e89d2a281997625457887d2051`. Office passed 114 move/scale or delete records, 86 text replacement records and 57 residual checks on those bytes. Both agents subsequently ended in `REVIEW_REQUIRED` after `compaction.failed`. Human and WPS acceptance are unverified. This comparison covers the baseline and combined configuration on these two pages. It does not rank the six individual groups.
 
+## Executing the marked plans (2026-11-18)
+
+**Recorded-plan replay: 6/6 prescribed edits in desktop PowerPoint. Fresh combined upload: no deck.** The replay reused the two pages' original Hy4 marks, plans and text trials, applied the new product reconstruction stages, and incorporated frame/exclusion feedback from a preceding Office pass. The independent edit cases were used after compilation. Production did not receive their answers. This experiment measures the reconstruction changes on fixed planning evidence. The separate fresh upload stopped at the first Hy4 inference with HTTP 429 (`provider.quota`), before either page had a plan. Its terminal status was `REVIEW_REQUIRED` and QA was `UNKNOWN`.
+
+| Page | Actual edit after save/reopen | Actual PowerPoint target | Changed pixels outside expected region |
+| --- | --- | --- | --- |
+| 1 | Replace numeric field | Text box | 0 |
+| 1 | Move role and label together | One native group | 0 |
+| 1 | Delete dashboard screenshot | Movable picture with verified backing | 0 |
+| 2 | Change the project name independently | Separate native text box | 0 |
+| 2 | Replace the industry field | Left native table, row 3, column 3 | 0 |
+| 2 | Recolor industry card | Native shape | 0 |
+
+| Page | Matched native fields | Native structured-content area | Verified movable area | Duplicate area | Raster plate area | RGB MAE | SSIM |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 29/93 | 32.05% | 3.96% | 0% | 63.99% | 8.482 | 0.8550 |
+| 2 | 43/74 | 45.04% | 5.51% | 0% | 49.45% | 11.568 | 0.7834 |
+
+All area shares use structured source content as the denominator. Native cells count toward field recall. The checked deck SHA-256 is `b35cf1c11f0e3e49b8fddcd0f6d2f695b225fe5e50f189e7bd48e95a8b788334`. On those bytes Office passed 140 move/scale or delete records, 82 text replacement records and 70 residual checks. The numeric field had a recorded LayerD-backed expansion trial in the original run and was listed among its first-pass failures. The replay committed the recovered text. A different card title with a suspected missing OCR glyph stayed source-backed. Both pages fell in whole-page SSIM against the paired baseline. Page 2's editable tables have left-aligned text and dark rules where the source has centered text and pale blue rules. Human and WPS acceptance are pending.
+
+Independent OpenSSH calls on the 4090 host also produced the following receipts. Counts are detector outputs before planner selection. The asset runs do not establish which method contributed to the edit score.
+
+| Worker | Real input | Output |
+| --- | --- | --- |
+| PP-DocLayout-L | Both source pages | 50 and 24 boxes |
+| DocLayout-YOLO | Both source pages | 55 and 36 boxes |
+| OmniParser V2 detection | Both pages with local windows | 152 and 179 boxes |
+| ViTMatte-Small + PyMatting | 28 × 28 padded source crop and recorded foreground mask | RGBA |
+| Local LayerD | 168 × 168 padded dashboard crop | Four layers |
+| VTracer | 12 × 12 transparent icon | SVG |
+
+Run the replay against a retained job with source-bound artifacts. Each output directory must be new. Set the optional repair argument to the preceding replay directory only when it contains hash-matched Office checks and their location in `office-check-path.txt`. The two-page evaluator joins mark and plan evidence, SceneGraph owners, actual slide object names and save/reopen probe results in `field_evidence`.
+
+```powershell
+python services/experiments/replay_marked.py $job $newOut --repair-from $previousOfficeReplay
+$deck = (Get-ChildItem "$newOut/composition" -Recurse -Filter deck.pptx).FullName
+python services/experiments/probe_fields.py $deck "$newOut/edits" --cases $editCases
+```
+

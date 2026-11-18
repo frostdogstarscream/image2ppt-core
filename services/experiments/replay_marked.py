@@ -19,7 +19,7 @@ from product.runtime.batch_backbone import _chain_stage_from_spec, _collect_offi
 from product.runtime.compiler import compile_local
 from product.runtime.marked_routes import bind_plan
 from product.parallel_fusion import fuse_incremental_scene
-from product.recovery.marked_fields import separated_fields
+from product.recovery.marked_fields import FieldWidthMismatch, separated_fields
 from product.recovery.region_candidates import adaptive_candidates
 
 
@@ -31,8 +31,14 @@ def replay_split_trials(base, graph, row, recorded, out):
     styles = {s.id: s for s in graph.text.styles}
     wanted = {t['object_id'] for t in recorded}
     for text in list(graph.text.texts):
-        fields = separated_fields(image, text.text, text.bbox)
-        if not fields or len(graph.text.members.get(text.id, [])) != 1 or text.id in graph.selected:
+        if len(graph.text.members.get(text.id, [])) != 1 or text.id in graph.selected:
+            continue
+        try:
+            fields = separated_fields(image, text.text, text.bbox)
+        except FieldWidthMismatch:
+            wanted.discard(text.id)
+            continue
+        if not fields:
             continue
         graph.text.texts.remove(text)
         for i, (value, box, color) in enumerate(fields):

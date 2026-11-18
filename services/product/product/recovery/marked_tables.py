@@ -16,6 +16,7 @@ from ..parallel_contracts import SceneGraph
 from ..parallel_fusion import fuse_incremental_scene
 from ..parallel_rebuild import adapt, array_sha
 from ..parallel_store import key
+from ..pipeline import ROOT, compiler_runtime
 from .container_stage import _hex
 from .marked_ownership import record_claims
 
@@ -120,8 +121,6 @@ def table_from_mark(image, mark, lines, fonts):
 
 
 def stage_tables(baseline, output, fields, skip):
-    from ..pipeline import compiler_runtime, ROOT
-
     _, node = compiler_runtime()
     check = subprocess.run(
         [

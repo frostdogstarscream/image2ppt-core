@@ -1,6 +1,8 @@
 """Evaluate a two-page research job against private edit cases and field references."""
 
 import argparse, collections, hashlib, json, pathlib, shutil, sys
+from xml.etree import ElementTree
+from zipfile import ZipFile
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "product"))
@@ -51,6 +53,11 @@ def field_evidence(state, cases):
                         k: r[k]
                         for k in (
                             "id",
+                            "mark",
+                            "parent",
+                            "ocr_ids",
+                            "intersecting_ocr_ids",
+                            "sources",
                             "label",
                             "role",
                             "route",
@@ -76,6 +83,39 @@ def field_evidence(state, cases):
             }
         )
     return evidence
+
+
+def edit_lineage(state, cases, edits, deck, pages):
+    """Join independent edit probes to source marks, selected owners and saved slide XML."""
+    fields = field_evidence(state, cases)
+    probe_by_target = {(e["page"], e["target"]): e for e in edits}
+    shape_name = "{http://schemas.openxmlformats.org/presentationml/2006/main}cNvPr"
+    with ZipFile(deck) as archive:
+        for page, row in enumerate(pages, 1):
+            ir_path = pathlib.Path(row["ir"])
+            ir = read(ir_path)
+            graph = read(pathlib.Path(row.get("scene", ir_path.parent / "scene.json")))
+            groups = {g["id"]: g["member_ids"] for g in ir.get("groups", [])}
+            slide = ElementTree.fromstring(archive.read(f"ppt/slides/slide{page}.xml"))
+            names = {n.get("name") for n in slide.iter(shape_name)}
+            for field in (f for f in fields if f["page"] == page):
+                probe = probe_by_target.get((page, field["target"]), {})
+                target = probe.get("object") or ""
+                name = target.split("[", 1)[0]
+                owners = []
+                for oid in groups.get(name, [name]):
+                    rec = graph["selected"].get(oid)
+                    if rec:
+                        keys = ("id", "kind", "bbox", "method", "state", "mark_id", "seed_ids")
+                        owners.append({k: rec[k] for k in keys if k in rec})
+                field.update(
+                    selected_owners=owners,
+                    pptx_object=name if name in names else None,
+                    tested_target=target or None,
+                    office_edit=probe.get("status", "UNTESTED"),
+                    outside_pixels=probe.get("outside_pixels"),
+                )
+    return fields
 
 
 def run(job, out, references, cases):
@@ -204,7 +244,7 @@ def run(job, out, references, cases):
         "svg_decisions": dict(trace),
         "human_acceptance": "unreviewed",
     }
-    report["field_evidence"] = field_evidence(state, cases)
+    report["field_evidence"] = edit_lineage(state, cases, edits, deck, rows)
     (out / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf8"
     )

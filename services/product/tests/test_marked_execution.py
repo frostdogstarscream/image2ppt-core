@@ -9,7 +9,7 @@ from product.experiment import mark_page, mark_blocks
 from product.experiment_assets import contrast_edge_score
 from product.parallel_store import Store, BudgetExceeded
 from product.recovery.adaptive_policy import AdaptiveBudget
-from product.recovery.marked_fields import striped_backing
+from product.recovery.marked_fields import split_items, striped_backing
 from product.runtime.marked_routes import apply_move_groups
 from product.recovery.marked_tables import table_from_mark
 
@@ -79,6 +79,19 @@ def test_stripe_requires_two_unobstructed_consistent_sides():
     assert fit['validation_p95_rgb'] == 0 and np.all(ref[18, 42] == 118)
     blocked[17, 23] = True
     assert striped_backing(image, [28, 10, 32, 20], blocked) is None
+
+
+def test_split_retains_source_when_uniform_field_is_missing_a_glyph():
+    source = np.full((45, 150, 3), 245, dtype='uint8')
+    for x in (5, 20, 35, 77, 92, 107, 122):
+        source[10:28, x:x + 11] = 15
+    source[9:29, 62:64] = 30
+    title = {'id': 'title', 'text': '项目名丨行业类', 'bbox': [3, 7, 134, 24], 'ocr_line_ids': ['line']}
+    other = {'id': 'other', 'text': '2026', 'bbox': [3, 33, 55, 8], 'ocr_line_ids': ['other-line']}
+    preserved = []
+    assert split_items(source, [title, other], preserved) == [other]
+    assert preserved[0]['id'] == 'title' and preserved[0]['ocr_ids'] == ['line']
+    assert preserved[0]['bbox'] == title['bbox']
 
 
 def test_new_background_proxy_is_unavailable_for_opaque_image():
