@@ -24,14 +24,15 @@ def record(client, args, profile, images, label):
     inputs=[hashlib.sha256(p.read_bytes()).hexdigest() for p in images]
     if receipt.exists():
         job=json.loads(receipt.read_text(encoding='utf8'))
-        if job['inputs']!=inputs or job['profile']!=profile:raise ValueError('resume input mismatch')
+        if job['inputs']!=inputs or job['profile']!=profile or job.get('agent_model','hy4')!=args.agent_model:
+            raise ValueError('resume input, profile or planner mismatch')
         if 'id' not in job:raise RuntimeError('admission unknown; reconcile API queue before retry')
     else:
-        job={'inputs':inputs,'profile':profile,'started':time.time()}
+        job={'inputs':inputs,'profile':profile,'agent_model':args.agent_model,'started':time.time()}
         save(receipt,job)
         with contextlib.ExitStack() as stack:
             files=[('files',(p.name,stack.enter_context(p.open('rb')),'image/png')) for p in images]
-            r=client.post('/api/v1/jobs',params={'experiment_profile':profile,'agent_steps':192,
+            r=client.post('/api/v1/jobs',params={'experiment_profile':profile,'agent_model':args.agent_model,'agent_steps':192,
                 'runtime_seconds':10800,'goal':'Reconstruct all pages as faithful editable presentations. Preserve independently editable business fields, cards, tables and images.'},files=files)
         r.raise_for_status()
         job['id']=r.json()['id']
@@ -65,6 +66,7 @@ def main():
     p.add_argument('--images',required=True,nargs='+',type=Path)
     p.add_argument('--holdout',action='append',type=Path,default=[])
     p.add_argument('--profiles',nargs='+',choices=PROFILES,default=PROFILES)
+    p.add_argument('--agent-model',choices=('hy4','hy4-flash-free'),default='hy4')
     args=p.parse_args()
     with httpx.Client(base_url=args.url,headers={'Authorization':'Bearer '+os.environ['IMAGE2PPT_PRODUCT_TOKEN']},timeout=120,trust_env=False) as client:
         for profile in args.profiles:record(client,args,profile,args.images,profile)

@@ -15,7 +15,9 @@ Set `IMAGE2PPT_EXPERIMENT_CONFIG` on the experiment product host to a JSON objec
 
 Use the same command for doclayout, vitmatte, local-layerd and vtracer. For v3 and pp-l use the existing layout-venv interpreter with `--device cpu` and the remote PaddleX cache. Configure the SSH host alias with the correct wired interface and existing identity. Layout-L was tested with oneDNN disabled. Weight file size and upstream SHA for LFS files are verified on acquisition; per-file SHA-256 and source revision are persisted.
 
-Submit `experiment_profile` through `POST /api/v1/jobs` or `python services/product/opencode_client.py ... submit --experiment-profile <name>`. Use OpenCode Go hy4. `run_comparison.py --url <local-api> --jobs <job-root> --out <run-output> --images page1.png page2.png --holdout p08.png --holdout p07.png` runs the matched matrix using the service access token in the environment. It preserves admissions, the 45-minute snapshot for still-running jobs, and terminal stage results. A missing result or absent model receipt is unknown. Count only independently tested PPTX edits as successful.
+Submit `experiment_profile` through `POST /api/v1/jobs` or `python services/product/opencode_client.py ... submit --experiment-profile <name>`. The comparison defaults to OpenCode Go `hy4`. To test the free planner, pass `--agent-model hy4-flash-free` to the client or comparison runner, or send `agent_model=hy4-flash-free` to the upload API. Use a new output directory for a different planner.
+
+`run_comparison.py --url <local-api> --jobs <job-root> --out <run-output> --images page1.png page2.png --holdout p08.png --holdout p07.png` runs the matched matrix using the service access token in the environment. It preserves admissions, the 45-minute snapshot for still-running jobs, and terminal stage results. A missing result or absent model receipt is unknown. Count only independently tested PPTX edits as successful.
 
 ## Deployment smoke test
 

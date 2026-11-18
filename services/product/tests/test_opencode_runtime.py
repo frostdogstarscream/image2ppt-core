@@ -1212,6 +1212,32 @@ def test_odd_tenth_size_px_snaps_cleanly_for_ooxml_compile_and_office_packet_pru
     assert Path(compiled['pptx']).is_file()
 
 
+@pytest.mark.parametrize('model,expected', [(None, 'hy4'), ('hy4-flash-free', 'hy4-flash-free'), ('other', None)])
+def test_comparison_planner_reaches_job_request(tmp_path, monkeypatch, model, expected):
+    import io
+    from product import app, pipeline
+
+    monkeypatch.setenv('IMAGE2PPT_AGENT_PROVIDER', 'opencode_go')
+    monkeypatch.setattr(app, 'ROOT', tmp_path)
+    monkeypatch.setattr(pipeline, 'settings', lambda: object())
+    root = tmp_path / 'jobs'
+    client = TestClient(app.create_app(root, token='t' * 32, run_worker=False))
+    picture = io.BytesIO()
+    Image.new('RGB', (80, 60)).save(picture, 'PNG')
+    params = {'experiment_profile': 'combined'}
+    if model is not None:
+        params['agent_model'] = model
+    response = client.post('/api/v1/jobs', params=params,
+                           files={'files': ('test.png', picture.getvalue(), 'image/png')},
+                           headers={'Authorization': 'Bearer ' + 't' * 32})
+    if expected is None:
+        assert response.status_code == 422
+    else:
+        assert response.status_code == 202
+        request = json.loads((root / response.json()['id'] / 'request.json').read_text('utf8'))
+        assert (request['agent_inference_provider'], request['agent_model']) == ('opencode_go', expected)
+
+
 def test_submit_accepts_vendor_prefixed_moma_agent_model_and_rejects_traversal(job, tmp_path, monkeypatch):
     import io
     import product.app as app_module

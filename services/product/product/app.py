@@ -242,9 +242,10 @@ def create_app(root=None, token=None, run_worker=True):
         if experiment_profile is not None:
             if experiment_profile not in PROFILES or tool_profile!='all':
                 raise HTTPException(422,'unsupported experiment profile or tool catalog')
-            if agent_model not in (None,'hy4') or os.environ.get('IMAGE2PPT_AGENT_PROVIDER')!='opencode_go':
-                raise HTTPException(422,'comparison requires OpenCode Go hy4')
-            orchestrator,agent_model='opencode','hy4'
+            agent_model = 'hy4' if agent_model is None else agent_model
+            if agent_model not in ('hy4', 'hy4-flash-free') or os.environ.get('IMAGE2PPT_AGENT_PROVIDER')!='opencode_go':
+                raise HTTPException(422,'comparison requires OpenCode Go hy4 or hy4-flash-free')
+            orchestrator = 'opencode'
         agent_steps = agent_steps if agent_steps is not None else (192 if experiment_profile else 64)
         runtime_seconds = runtime_seconds if runtime_seconds is not None else (10800 if experiment_profile else 7200)
         if agent_model is not None and ('..' in agent_model or not re.fullmatch(r'[A-Za-z0-9._:-]{1,40}(?:/[A-Za-z0-9._:-]{1,60})?',agent_model)):raise HTTPException(422,'模型标识格式无效')
