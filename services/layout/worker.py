@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import time
 from pathlib import Path
 
 os.environ.setdefault('PADDLE_PDX_MODEL_SOURCE', 'modelscope')
@@ -31,9 +32,12 @@ def main():
     parser.add_argument('--model', default='PP-DocLayoutV3')
     parser.add_argument('--device', default='cpu')
     args = parser.parse_args()
+    started = time.monotonic()
     from paddleocr import LayoutDetection
     model = LayoutDetection(model_name=args.model, device=args.device)
+    ready = time.monotonic()
     result = list(model.predict(args.image, batch_size=1, layout_nms=True))[0]
+    predicted = time.monotonic()
     data = result.json.get('res', result.json)
     regions = []
     for index, box in enumerate(data.get('boxes', []), 1):
@@ -47,6 +51,7 @@ def main():
     model_dir = cache / 'official_models' / args.model
     files = sorted(p for p in model_dir.glob('*') if p.is_file()) if model_dir.is_dir() else []
     payload = {'schema': 'LayoutRegions/1', 'model': args.model, 'source_sha256': sha(args.image),
+               'timing_seconds': {'load': ready - started, 'inference': predicted - ready},
                'model_files': {p.name: sha(p) for p in files}, 'regions': regions}
     Path(args.output).write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding='utf8')
 

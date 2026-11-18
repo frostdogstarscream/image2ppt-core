@@ -78,7 +78,7 @@ def _merge_structural_ocr_items(
     while changed:
         changed = False
         for it in items:
-            if it['id'] in logo_ids:
+            if it['id'] in logo_ids or any(c.isdigit() for c in it['text']):
                 continue
             x, y, w, h = it['bbox']
             if x < 0.78 * w_img or y > 0.18 * h_img or w > 0.20 * w_img:
@@ -376,7 +376,9 @@ def _classify_failed_region(
 
     in_top_right_logo = (
         oid in logo_ids
-        or (kind == 'text' and any(a.kind == 'logo' and a.id in peers for a in graph.asset.objects))
+        or (kind == 'text' and len(bbox) == 4 and any(
+            a.kind == 'logo' and intersection(bbox, a.bbox) >= 0.8 * max(1.0, bbox[2] * bbox[3])
+            for a in graph.asset.objects))
     )
 
     if kind == 'asset' or kind == 'surface':
@@ -413,6 +415,8 @@ def _classify_failed_region(
     out = {
         **entry,
         'diagnostic_category': category,
+        'text_edit_intent': ('intrinsic' if in_top_right_logo else 'native_field' if cap else 'unresolved')
+                            if kind == 'text' else None,
         'conflicting_peer_ids': peers,
         'recommended_action': action,
         'max_repair_attempts': cap,
@@ -1180,11 +1184,11 @@ def _chain_stage_from_spec(
                     'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
                 })
 
-    if include_containers and wanted_filter is None:
+    if include_containers and (wanted_filter is None or any(i.startswith(('s-', 'a-c')) for i in wanted_filter)):
         from ..recovery.container_stage import stage_containers_and_surfaces
         cont_dir = directory / tag / 'containers-staged'
         try:
-            cont_ir, cont_ids = stage_containers_and_surfaces(cur_base, cont_dir, skip_ids=skip_ids)
+            cont_ir, cont_ids = stage_containers_and_surfaces(cur_base, cont_dir, skip_ids=skip_ids, wanted_ids=wanted_filter)
             if cont_ids:
                 cur_base = cont_ir.parent
                 staged_ids.extend(cont_ids)
@@ -1216,8 +1220,9 @@ def _chain_stage_from_spec(
                     {'path': source_path, 'source_sha256': cur_graph.source_sha256},
                     page_cache_dir / 'layout-cache',
                 )
-            except Exception:
-                layout_data = None
+            except Exception as exc:
+                stage_errors.append({'object_id': 'layout', 'kind': 'asset', 'bbox': [],
+                                     'failure': 'LAYOUT_INFERENCE_FAILED', 'reason': str(exc)})
         if layout_data:
             crop_seeds.extend(s for s in layout_evidence.crop_seeds(layout_data, cur_graph) if s['id'] not in skip_ids)
         if crop_seeds:

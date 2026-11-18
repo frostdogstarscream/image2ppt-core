@@ -167,3 +167,24 @@ def test_cropping_inside_native_card_does_not_paint_card_color_on_canvas(tmp_pat
     assert np.all(np.asarray(Image.open(ir.parent/g.raster_backing['path']).convert('RGB'))==255)
     with np.load(ir.parent/child['owner_evidence']['file']) as data:
         assert np.all(data['backing_patch']==[212,232,248])
+
+
+def test_icon_crop_has_transparent_exterior_but_photo_like_illustration_stays_rectangular(tmp_path):
+    src, baseline = scene(tmp_path)
+    file = baseline / 'scene.json'
+    scene_data = json.loads(file.read_text(encoding='utf8'))
+    scene_data['asset']['objects'][0]['kind'] = 'icon'
+    file.write_text(json.dumps(scene_data), encoding='utf8')
+    ir, staged, _ = stage_region_crops(baseline, tmp_path / 'icon-crops')
+    graph = SceneGraph.model_validate_json((ir.parent / 'scene.json').read_text('utf8'))
+    for rid in staged:
+        record = graph.selected[rid]
+        rgba = np.array(Image.open(ir.parent / record['asset_reference']['path']).convert('RGBA'))
+        if 'a-1' in record['seed_ids']:
+            assert record['payload']['matte_method'] == 'verified-backing-unmix'
+            assert (rgba[..., 3] == 0).any()
+            x, y, w, h = record['bbox']
+            alpha = rgba[..., 3:4] / 255
+            np.testing.assert_allclose(rgba[..., :3] * alpha + 255 * (1 - alpha), src[y:y+h, x:x+w], atol=3)
+        else:
+            assert (rgba[..., 3] == 255).all()

@@ -11,3 +11,7 @@ The reference implementation is 056a356. Results below distinguish a complete hi
 The p08 replay PPTX SHA-256 is `3d1d68b69f9b3489023db26e1080b113971111236755d6ce226377fe08ed0e6f`. Supply the actual Office checks.json to the scorecard with `--checks` to measure the verified movable fraction. A score without these checks leaves this metric unknown. Independent non-logo line recall needs a reference inventory.
 
 For the real-page model comparison, submit the same two source images through OpenCode using the baseline model, model-only switch and revised pipeline. Record terminal status and whether each job produced a deliverable before comparing editability. Early baseline OCR environment retries affect elapsed-time comparisons.
+
+## Held-out crop-stage replay
+
+Page 07 was held out from crop tuning. The 4090 PP-DocLayout worker returned 54 regions. Production local OCR supplied 37 lines and layout supplied 24 pictorial seeds. Starting from a source-backed scene, 21 movable crops passed actual Office move/scale, delete and residual checks. They own 16.57% of structured source content. Native text reconstruction was outside this stage. Source SHA-256 is `7eb253667f654d9de95e81629dc3dbdbb7aecf37989cc300295bdcdc90ecd225` and the compiled PPTX SHA-256 is `60ddbc660df902ad204d5fe4ae94179b11f356e04366c5132aa2ea36b3c56497`.
