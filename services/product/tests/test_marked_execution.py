@@ -94,6 +94,21 @@ def test_split_retains_source_when_uniform_field_is_missing_a_glyph():
     assert preserved[0]['bbox'] == title['bbox']
 
 
+def test_split_uses_public_fields_of_merged_ocr_item():
+    source = np.full((45, 150, 3), 245, dtype='uint8')
+    for x in (5, 20, 35, 77, 92, 107):
+        source[10:28, x:x + 11] = 15
+    source[9:29, 62:64] = 30
+    title = {'id': 'title', 'text': '项目名丨行业类', 'bbox': [3, 7, 122, 24],
+             'ocr_line_ids': ['source-line'], 'est_size_px': 17, 'bold': True}
+    preserved = []
+    fields = split_items(source, [title], preserved)
+    assert [f['text'] for f in fields] == ['项目名丨', '行业类']
+    assert [f['id'] for f in fields] == ['title', 'title-detail']
+    assert all(f['ocr_line_ids'] == title['ocr_line_ids'] and f['bold'] for f in fields)
+    assert not preserved
+
+
 def test_new_background_proxy_is_unavailable_for_opaque_image():
     assert contrast_edge_score(Image.new('RGBA', (18, 18), 'red')) is None
     image = np.zeros((18, 18, 4), dtype='uint8')

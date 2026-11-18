@@ -79,7 +79,6 @@ def split_items(source, items, preserved):
             continue
         for index, (value, box, color) in enumerate(fields):
             rgb = list(bytes.fromhex(color))
-            line = {**item['lines'][0], 'text': value, 'bbox': box, 'rgb': rgb}
             result.append(
                 {
                     **item,
@@ -88,7 +87,6 @@ def split_items(source, items, preserved):
                     'text': value,
                     'color_hex': color,
                     'rgb': rgb,
-                    'lines': [line],
                 }
             )
     return result
