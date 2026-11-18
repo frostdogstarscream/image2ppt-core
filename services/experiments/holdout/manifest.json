@@ -1,0 +1,209 @@
+{
+  "version": 1,
+  "annotation_base_commit": "b913f38f79d564b1aa75cc8bd7feb966e9913c0c",
+  "probe": "services/experiments/probe_fields.py",
+  "probe_sha256_lf": "faa70b3e9a5b3c86c2562674d9e020a4d8704c893cedf719ff0ce2ac916429f7",
+  "cases": "cases.json",
+  "cases_sha256_lf": "1ee8b59803b89b1c9c44307e7c11ed7ba1d0c611bf3eaac3f87c39e78e9c9290",
+  "probe_size": [
+    1672,
+    941
+  ],
+  "excluded_development_pages": [
+    {
+      "sha256": "9436c0a94097a38395b9061f67c0fab2a27cef5a6dc74f59081efb36018a7143",
+      "rgb_sha256": "b3d674a3a353727ff5c2e614bd097d140289e6f3b1014cd9066ccf0901b4b9e0"
+    },
+    {
+      "sha256": "d8b8088dd54eb648d2e808467c406135955a28a13ecb2315bf7285ba6eb66cb7",
+      "rgb_sha256": "71ca513d9a41553deecad292bcadbf6e0fc76aff7e54dea41dd174179ae7cde6"
+    }
+  ],
+  "pages": [
+    {
+      "page": 1,
+      "source_root": "project",
+      "path": "inputs/xuzhou-20261029/03.png",
+      "family": "工匠评审",
+      "layout": "荣誉时间线与箭头卡片",
+      "features": [
+        "timeline",
+        "cards"
+      ],
+      "case_count": 4,
+      "size": [
+        1672,
+        941
+      ],
+      "sha256": "47f588df1800925511be4d744a5d8ef66a17c29206ba6b5c7198ffd3b45079a6",
+      "rgb_sha256": "ab052248f49ed947384db75f513c25fdc1bc2573432f30dfac5c6ff95bd2d539"
+    },
+    {
+      "page": 2,
+      "source_root": "project",
+      "path": "inputs/xuzhou-20261029/05.png",
+      "family": "工匠评审",
+      "layout": "平台拓扑、应用卡与指标",
+      "features": [
+        "cards",
+        "kpi",
+        "icons"
+      ],
+      "case_count": 4,
+      "size": [
+        1672,
+        941
+      ],
+      "sha256": "09a46240f041dbedc98b99c60f73a8f26f711fed3b26d3bba5e026e32b8dac3e",
+      "rgb_sha256": "3ee6691519e7c7c5bf51a3d033411c69aef90b3aca8b44cc4ae28f252d5bca2d"
+    },
+    {
+      "page": 3,
+      "source_root": "project",
+      "path": "inputs/xuzhou-20261029/10.png",
+      "family": "工匠评审",
+      "layout": "五栏能力总结与行动横条",
+      "features": [
+        "columns",
+        "icons"
+      ],
+      "case_count": 3,
+      "size": [
+        1672,
+        941
+      ],
+      "sha256": "500a48c4b880be2e37af17407c96a8129dfc61957aa9743f37727f322e750509",
+      "rgb_sha256": "968e2a53ced9491bd2f1569c41d384840b724b421a31b91603860d652a9f1eae"
+    },
+    {
+      "page": 4,
+      "source_root": "project",
+      "path": "qa-inputs/xuzhou-20261103/source/04_总体思路.png",
+      "family": "高新区建设",
+      "layout": "分层架构与能力矩阵",
+      "features": [
+        "matrix",
+        "icons",
+        "cards"
+      ],
+      "case_count": 4,
+      "size": [
+        1672,
+        941
+      ],
+      "sha256": "512d7b9e4ef36bf26af842e72f056d5f2a29b2147d59798b5565cef6127b201b",
+      "rgb_sha256": "39e63fe76a54b5769d5d3fcba4ceae0293335b824b752dc26520985f794db8af"
+    },
+    {
+      "page": 5,
+      "source_root": "project",
+      "path": "qa-inputs/xuzhou-20261103/source/09_园区治理.png",
+      "family": "高新区建设",
+      "layout": "安全应急与生态环保双栏对照表",
+      "features": [
+        "table",
+        "icons"
+      ],
+      "case_count": 4,
+      "size": [
+        1672,
+        941
+      ],
+      "sha256": "daa9c8a72a7c6a891126ecdefae4375a05f164a89b7e536f7348fc9ff313258d",
+      "rgb_sha256": "684e80c8245d6ebf577f9101847058112432661ff2738a7cf4db5202048591ad"
+    },
+    {
+      "page": 6,
+      "source_root": "project",
+      "path": "qa-inputs/xuzhou-20261103/source/12_服务保障与合作建议.png",
+      "family": "高新区建设",
+      "layout": "三列保障卡与合作步骤",
+      "features": [
+        "cards",
+        "process"
+      ],
+      "case_count": 4,
+      "size": [
+        1672,
+        941
+      ],
+      "sha256": "9b59da0e4bc6cb71e26864a08d263b1aa8ae2b56e5e59abe94ba1901f7fd2460",
+      "rgb_sha256": "c8f4a990173982048facbc794012a0784028ce98d50069681acc2719b8fb527f"
+    },
+    {
+      "page": 7,
+      "source_root": "project",
+      "path": "PPT图片/13.png",
+      "family": "行业监督",
+      "layout": "五栏行业照片与横向条形图",
+      "features": [
+        "photo",
+        "chart",
+        "gradient"
+      ],
+      "case_count": 4,
+      "size": [
+        1672,
+        941
+      ],
+      "sha256": "1913c1ab09cab01c11f3887927c50c37bbf9a24ed929dc24de1d661335a5dced",
+      "rgb_sha256": "33ed2ea67e69a0e55691e008d0fbd930b0e904efbbf1ee529d38da0b33a044ea"
+    },
+    {
+      "page": 8,
+      "source_root": "project",
+      "path": "PPT图片/15.png",
+      "family": "行业监督",
+      "layout": "深色平台看板与两侧业务栏",
+      "features": [
+        "dashboard",
+        "screenshot",
+        "icons"
+      ],
+      "case_count": 4,
+      "size": [
+        1672,
+        941
+      ],
+      "sha256": "a71baa7fb45da26f4dafef5d8cb46eaf8d5793b8219cc66b4a6c084913b1e0c3",
+      "rgb_sha256": "1722b3b88a79a5ffa9a79e722fef8784f3f9f1ee5a927a1d8c32604a08b505df"
+    },
+    {
+      "page": 9,
+      "source_root": "workbench_inputs",
+      "path": "01_封面.png",
+      "family": "政务工作台",
+      "layout": "城市背景与蓝色渐变封面",
+      "features": [
+        "cover",
+        "gradient"
+      ],
+      "case_count": 3,
+      "size": [
+        1672,
+        941
+      ],
+      "sha256": "e4422f974785edef14bc87fd880bb8c974897929d6bbfaebfdb2cdc30e80cfd8",
+      "rgb_sha256": "c44a2bb0ad3973519cfc686f96125ed4575a0147665e34dc0d7e497b68ff7a67"
+    },
+    {
+      "page": 10,
+      "source_root": "workbench_inputs",
+      "path": "03_统一入口.png",
+      "family": "政务工作台",
+      "layout": "完整工作台界面与四张功能卡",
+      "features": [
+        "screenshot",
+        "cards",
+        "kpi"
+      ],
+      "case_count": 4,
+      "size": [
+        1672,
+        941
+      ],
+      "sha256": "4edce8a94f6c0665b015346b964a0f03aab1c9e13bc12aa250819fb4857ddbb0",
+      "rgb_sha256": "b82b273d2d1d7096baf80f5bcc057b8e955c8c6c4e49953e63d0dc18eb8a4743"
+    }
+  ]
+}
