@@ -75,7 +75,7 @@ def test_isolated_complex_regions_become_movable_crops(tmp_path):
 
 def test_move_unsafe_crop_erases_nothing_and_is_not_a_residual_pass(tmp_path):
     src, baseline = scene(tmp_path)
-    ir_file, staged, _ = stage_region_crops(baseline, tmp_path / 'crops', allow_movable=False)
+    ir_file, staged, _ = stage_region_crops(baseline, tmp_path / 'crops', allow_movable=False, include_in_place=True)
     out = ir_file.parent
     plate = np.array(Image.open(out / 'source-plate.png').convert('RGB'))
     assert np.array_equal(plate, src)
@@ -105,3 +105,65 @@ def test_no_remaining_content_means_no_crop(tmp_path):
                                            seeds=[{'id': 'blank', 'kind': 'asset', 'bbox': [100, 10, 20, 10]}])
     assert staged == [] and report[0]['reason'] == 'NO_VISIBLE_CONTENT'
     assert not (tmp_path / 'crops').exists() and graph.selected == {}
+
+def test_parent_fill_and_canvas_have_separate_delete_references(tmp_path):
+    from product.materialize import digest
+    from product.recovery.region_crop import _under_parent
+    source = np.full((90, 120, 3), 255, np.uint8)
+    card = [8, 8, 100, 70]
+    source[8:78, 8:108] = (212, 232, 248)
+    source[32:42, 50:66] = (20, 75, 130)
+    proof = tmp_path / 'parent.npz'
+    np.savez_compressed(proof,backing_patch=np.full((70,100,3),255,np.uint8))
+    parent = {'kind':'surface','method':'container-surface-confirmed/1','restore_bbox':card,
+              'payload':{'fill':'D4E8F8','geometry':'roundRect','corner_radius_px':5},
+              'owner_evidence':{'file':proof.name,'sha256':digest(proof)}}
+    visible, canvas = _under_parent(parent,[48,30,20,15],source,tmp_path)
+    assert np.all(visible == [212,232,248]) and np.all(canvas == 255)
+    assert _under_parent(parent,[8,8,20,15],source,tmp_path) is None
+
+
+def test_default_delivery_skips_unsafe_and_keeps_stable_crop_ids(tmp_path):
+    _, baseline = scene(tmp_path)
+    ir, ids, details = stage_region_crops(baseline,tmp_path/'unsafe',allow_movable=False)
+    assert not ids and all(r['reason']=='IN_PLACE_ONLY' for r in details)
+    seeds=[{'id':'a-1','kind':'asset','bbox':[22,22,30,30]},
+           {'id':'a-2','kind':'asset','bbox':[152,72,40,20]}]
+    _, both, _ = stage_region_crops(baseline,tmp_path/'both',seeds=seeds)
+    _, only, _ = stage_region_crops(baseline,tmp_path/'only',seeds=seeds[1:])
+    assert only==both[1:]
+
+def test_cropping_inside_native_card_does_not_paint_card_color_on_canvas(tmp_path):
+    from product.contracts import Shape
+    from product.materialize import digest, write
+    from product.parallel_rebuild import adapt
+    src = np.full((120,240,3),255,np.uint8)
+    src[10:102,15:215] = [212,232,248]
+    src[44:63,72:96] = [5,100,180]
+    path = tmp_path/'source.png'
+    Image.fromarray(src).save(path)
+    snap, evidence = branches(path)
+    shape = Shape(id='s-card',bbox=[15,10,200,92],z=1,geometry='rect',fill='D4E8F8')
+    evidence['surface'].shapes.append(shape)
+    g = fuse(snap,evidence,{'lines':[]})
+    b = tmp_path/'before'
+    build(g,snap,{'fonts':[]},b,strategy='off',text_candidates=False,surface_candidates=False)
+    g = SceneGraph.model_validate_json((b/'scene.json').read_text('utf8'))
+    mask=np.zeros(src.shape[:2],bool);mask[10:102,15:215]=True
+    proof=b/'card.npz'
+    np.savez_compressed(proof,mask=mask,restore_bbox=[15,10,200,92],backing_patch=np.full((92,200,3),255,np.uint8))
+    rec={'id':'s-card','kind':'surface','method':'container-surface-confirmed/1','bbox':shape.bbox,
+         'restore_bbox':shape.bbox,'payload':shape.model_dump(),'owner_evidence':{'file':proof.name,'sha256':digest(proof)}}
+    g.selected['s-card']=rec
+    plate=b/g.raster_backing['path']
+    Image.fromarray(np.full_like(src,255)).save(plate)
+    g.raster_backing['sha256']=digest(plate)
+    write(b/'scene.json',g.model_dump());write(b/'slideir.json',adapt(g,b))
+    ir,ids,_=stage_region_crops(b,tmp_path/'after',seeds=[{'id':'manual-icon','kind':'asset','bbox':[70,42,28,23]}])
+    assert len(ids)==1
+    g=SceneGraph.model_validate_json((ir.parent/'scene.json').read_text('utf8'))
+    child=g.selected[ids[0]]
+    assert child['payload']['background_parent_id']=='s-card'
+    assert np.all(np.asarray(Image.open(ir.parent/g.raster_backing['path']).convert('RGB'))==255)
+    with np.load(ir.parent/child['owner_evidence']['file']) as data:
+        assert np.all(data['backing_patch']==[212,232,248])

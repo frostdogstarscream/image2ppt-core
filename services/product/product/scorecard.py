@@ -21,6 +21,7 @@ picture pixels fall through):
 from __future__ import annotations
 
 from difflib import SequenceMatcher
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -33,7 +34,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-SCHEMA = 'PageScorecard/1'
+SCHEMA = 'PageScorecard/2'
 NS = {
     'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
     'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
@@ -41,7 +42,7 @@ NS = {
     'rel': 'http://schemas.openxmlformats.org/package/2006/relationships',
 }
 CLASSES = ('background', 'plate', 'duplicate_picture', 'opaque_picture', 'asset', 'shape', 'table', 'chart', 'text')
-EDITABLE = ('opaque_picture', 'asset', 'shape', 'table', 'chart', 'text')
+EDITABLE = ('shape', 'table', 'chart', 'text')
 PLATE_AREA_FRACTION = 0.90
 TRANSPARENT_FRACTION = 0.02
 
@@ -187,6 +188,7 @@ def inspect_pptx(pptx: str | Path, canvas: tuple[int, int], slide: int = 1) -> d
         root = ET.fromstring(archive.read(part))
         tree = root.find('p:cSld/p:spTree', NS)
         owner = np.zeros((height, width), np.uint8)  # index into CLASSES; 0 background
+        owner_z = np.full((height, width), -1, np.int32)
         objects = []
         plate_rgb = None
         for z, (element, kind, emu) in enumerate(_walk(tree, (1.0, 1.0, 0.0, 0.0))):
@@ -238,7 +240,8 @@ def inspect_pptx(pptx: str | Path, canvas: tuple[int, int], slide: int = 1) -> d
             if alpha is not None:
                 region = alpha[cy0 - y0:cy1 - y0, cx0 - x0:cx1 - x0]
             owner[cy0:cy1, cx0:cx1][region] = CLASSES.index(cls)
-    return {'slide_count': len(parts), 'objects': objects, 'owner': owner}
+            owner_z[cy0:cy1, cx0:cx1][region] = z
+    return {'slide_count': len(parts), 'objects': objects, 'owner': owner, 'owner_z': owner_z}
 
 
 def content_mask(source: np.ndarray, std_threshold: float = 6.0) -> np.ndarray:
@@ -366,7 +369,7 @@ def text_metrics(objects: list[dict], ocr_lines: list[dict], min_score: float = 
 
 
 def score_page(source_path: str | Path, pptx_path: str | Path, *, render_path: str | Path | None = None,
-               ocr: dict | None = None, slide: int = 1) -> dict:
+               ocr: dict | None = None, slide: int = 1, checks: dict | None = None) -> dict:
     source = np.asarray(Image.open(source_path).convert('RGB'))
     height, width = source.shape[:2]
     inspected = inspect_pptx(pptx_path, (width, height), slide)
@@ -389,6 +392,9 @@ def score_page(source_path: str | Path, pptx_path: str | Path, *, render_path: s
         'object_counts': counts,
         'visible_area_fraction': area,
         'content_fraction': content_share,
+        'picture_content_fraction': round(content_share['opaque_picture'] + content_share['asset'], 4),
+        'duplicate_picture_fraction': content_share['duplicate_picture'],
+        'native_editable_fraction': round(sum(content_share[c] for c in ('shape','table','chart','text')), 4),
         'editable_content_fraction': round(sum(content_share[c] for c in EDITABLE), 4),
         'native_content_fraction': round(sum(content_share[c] for c in ('shape', 'table', 'chart', 'text')), 4),
         'raster_plate_content_fraction': content_share['plate'],
@@ -397,10 +403,38 @@ def score_page(source_path: str | Path, pptx_path: str | Path, *, render_path: s
             'Measurements only: not human, WPS or publication acceptance.',
         ],
     }
+    result['movable_asset_fraction'] = None
+    if checks is not None:
+        digest = hashlib.sha256(Path(pptx_path).read_bytes()).hexdigest()
+        office = checks.get('office', {})
+        if checks.get('pptx_sha256') != digest or office.get('pptx_sha256') != digest:
+            raise ValueError('Office checks refer to another PPTX')
+        pages = checks.get('residuals', [])
+        if office.get('status') == 'PASS_APP_AUTOMATED' and len(pages) >= slide:
+            passed = {r['id'] for r in pages[slide - 1] if r.get('residual_check_status') == 'PASS'
+                      and r.get('residual_pixels_confirmed') == 0}
+            actions = {}
+            for row in office.get('records', []):
+                if row.get('page') == slide and row.get('saved_reopened') and row.get('outside_pixels') == 0:
+                    actions.setdefault(row['id'], set()).add(row['action'])
+            verified = [obj['z'] for obj in inspected['objects'] if obj['class'] in ('opaque_picture', 'asset')
+                        and obj['name'] in passed and {'move-scale', 'delete'} <= actions.get(obj['name'], set())]
+            pixels = np.isin(inspected['owner_z'], verified) & content
+            result['movable_asset_fraction'] = round(float(pixels.sum()) / content_total, 4)
     if render_path is not None:
         render = np.asarray(Image.open(render_path).convert('RGB'))
         result['fidelity'] = fidelity(source, render)
         result['render'] = str(render_path)
+    result['non_logo_native_line_recall'] = None
+    if ocr is not None and ocr.get('scope')=='independent_non_logo_editable_lines':
+        lines = ocr.get('lines', [])
+        native = [obj for obj in inspected['objects'] if obj['class']=='text']
+        hits = sum(any(_norm(line['text']) in _norm(obj['text'])
+                       and _overlap(line['bbox'],obj['bbox']) > 0.5*line['bbox'][2]*line['bbox'][3]
+                       for obj in native) for line in lines if _norm(line['text']))
+        count = sum(bool(_norm(line['text'])) for line in lines)
+        result.update(non_logo_reference_lines=count, non_logo_matched_lines=hits,
+                      non_logo_native_line_recall=round(hits/count,4) if count else None)
     if ocr is not None:
         result['text'] = text_metrics(inspected['objects'], ocr.get('lines', []))
     result['objects'] = inspected['objects']

@@ -244,11 +244,13 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
                             crop_seeds+=layout_evidence.crop_seeds(layout,graph)
                         except Exception as exc:
                             write(folder/'layout-failure.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
-                    crop_ir,crop_ids,_=stage_region_crops(ir.parent,folder/('region-crops-'+uuid4().hex[:8]),seeds=crop_seeds)
+                    crop_ir,crop_ids,_=stage_region_crops(ir.parent,folder/('region-crops-'+uuid4().hex[:8]),seeds=crop_seeds,ocr_lines=ocr.get('lines', []))
                     if crop_ids:
                         ir=crop_ir;graph=SceneGraph.model_validate_json((ir.parent/'scene.json').read_text(encoding='utf-8'))
                 except Exception as exc:
-                    write(folder/'region-crop-failure.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
+                    detail={'stage':'region_crop','reason':type(exc).__name__+':'+str(exc)[:300]}
+                    write(folder/'region-crop-failure.json',detail)
+                    failures['region_crop']=detail['reason']
             store.task('scene-'+snap['source_sha256'],'scene','STAGED',{'ir':str(ir),'failures':failures},
                        [key({'source':snap['source_sha256'],'branch':b,'version':'r10/1','repair':None}) for b in ('text','asset','surface')])
             return graph,ir,report,failures

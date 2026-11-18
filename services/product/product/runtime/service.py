@@ -146,7 +146,7 @@ class RuntimeService(ExplorationTools):
                                       include_region_crops=include_region_crops,
                                       use_inpaint=use_inpaint, verify_office=verify_office)
 
-    def crop_region(self, state, current, directory, *, page, object_ids=None, bbox=None, allow_movable=True):
+    def crop_region(self, state, current, directory, *, page, object_ids=None, bbox=None, allow_movable=True, include_in_place=False):
         from ..recovery.region_crop import stage_region_crops
         if not object_ids and not bbox:
             raise ValueError('crop_region requires object_ids or bbox')
@@ -165,7 +165,7 @@ class RuntimeService(ExplorationTools):
         if not seeds:
             raise ValueError('no uncommitted matching objects or bbox for region crop')
         crop_ir, staged_ids, report = stage_region_crops(
-            Path(row['ir']).parent, directory / 'staged', seeds=seeds, allow_movable=allow_movable)
+            Path(row['ir']).parent, directory / 'staged', seeds=seeds, allow_movable=allow_movable, include_in_place=include_in_place)
         if not staged_ids:
             return {'status': 'NO_CROPS_STAGED', 'page': page, 'report': report}
         crop_dir = crop_ir.parent
@@ -681,7 +681,9 @@ class RuntimeService(ExplorationTools):
             state.evidence(reference['id'])
         selected = [self.graph(page).selected for page in current['pages']]
         # Completeness has no independent denominator in this first integration.
-        status = 'PARTIAL_EDITABLE' if any(selected) else 'RASTER_ONLY'
+        in_place = [sorted(k for k,v in page.items() if v.get('move_safety') == 'MOVE_UNSAFE') for page in selected]
+        editable = [sorted(set(page) - set(excluded)) for page, excluded in zip(selected, in_place)]
+        status = 'PARTIAL_EDITABLE' if any(editable) else 'RASTER_ONLY'
         delivery = state.job/'delivery'
         delivery.mkdir(exist_ok=True)
         shutil.copyfile(composition['artifacts']['pptx'], delivery/'result.pptx')
@@ -701,10 +703,12 @@ class RuntimeService(ExplorationTools):
         office_dir = Path(composition['office']['office_directory'])
         for index in range(1, len(current['pages'])+1):
             shutil.copyfile(office_dir/f'page-{index:02d}-before.png', delivery/f'page-{index:02d}.png')
-        delivery_state='SUCCEEDED' if any(selected) else 'REVIEW_REQUIRED'
-        result = {'status': delivery_state, 'completion': status, 'reconstruction_succeeded':any(selected), 'visual_review_backend': 'opencode',
+        delivery_state='SUCCEEDED' if any(editable) else 'REVIEW_REQUIRED'
+        result = {'status': delivery_state, 'completion': status, 'reconstruction_succeeded':any(editable), 'visual_review_backend': 'opencode',
                   'office_pass': True, 'visual_review': visual, 'pages': len(selected),
-                  'editable_objects': [sorted(page) for page in selected],
+                  'editable_objects': editable, 'in_place_crops': in_place,
+                  'native_objects': [sorted(k for k,v in page.items() if v.get('kind') in ('text','surface','shape','table','chart')) for page in selected],
+                  'movable_assets': [sorted(k for k,v in page.items() if v.get('kind')=='asset' and k not in excluded) for page,excluded in zip(selected,in_place)],
                   'unresolved_objects': [[identifier for identifier in self.graph(page).ownership
                                           if identifier not in chosen]
                                          for page, chosen in zip(current['pages'], selected)],

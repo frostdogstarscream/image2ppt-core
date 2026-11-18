@@ -94,7 +94,7 @@ def schemas():
                                    'use_inpaint': {'type': 'boolean'}, 'verify_office': {'type': 'boolean'}},
         'crop_region': {'page': page, 'object_ids': strings,
                         'bbox': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 4, 'maxItems': 4},
-                        'allow_movable': {'type': 'boolean'}}})
+                        'include_in_place': {'type':'boolean'}, 'allow_movable': {'type': 'boolean'}}})
     fields['fit_background'].update(evidence_id=string,bbox={'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},protected_id=string)
     fields['fit_background']['context_width']={'type':'integer','minimum':8,'maximum':128,
         'description':'Unprotected source-strip sampling width in pixels. A changed width supplies different background evidence. All original ownership and fit validation thresholds still apply.'}

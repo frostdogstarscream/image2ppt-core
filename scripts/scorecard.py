@@ -37,6 +37,7 @@ def main() -> int:
     parser.add_argument('--source', required=True)
     parser.add_argument('--pptx', required=True)
     parser.add_argument('--render')
+    parser.add_argument('--checks', help='PowerPoint checks.json bound to this PPTX')
     parser.add_argument('--ocr')
     parser.add_argument('--ocr-manifest')
     parser.add_argument('--ocr-python-path')
@@ -46,7 +47,8 @@ def main() -> int:
     parser.add_argument('--cache', default=str(ROOT / 'outputs/scorecard-cache'))
     args = parser.parse_args()
     ocr = _ocr(args, Path(args.cache))
-    result = scorecard.score_page(args.source, args.pptx, render_path=args.render, ocr=ocr, slide=args.slide)
+    result = scorecard.score_page(args.source, args.pptx, render_path=args.render, ocr=ocr, slide=args.slide,
+                                  checks=json.loads(Path(args.checks).read_text(encoding='utf-8')) if args.checks else None)
     if args.owner_preview:
         scorecard.save_owner_preview(args.source, args.pptx, args.owner_preview, args.slide)
         result['owner_preview'] = args.owner_preview
@@ -54,7 +56,8 @@ def main() -> int:
         scorecard.write_json(args.out, result)
     summary = {k: result[k] for k in ('object_counts', 'visible_area_fraction', 'content_fraction',
                                       'editable_content_fraction', 'native_content_fraction',
-                                      'raster_plate_content_fraction')}
+                                      'raster_plate_content_fraction', 'picture_content_fraction',
+                                      'duplicate_picture_fraction', 'movable_asset_fraction', 'non_logo_native_line_recall')}
     for k in ('fidelity', 'text'):
         if k in result:
             summary[k] = {kk: vv for kk, vv in result[k].items() if kk != 'unmatched'}

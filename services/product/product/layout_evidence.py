@@ -12,6 +12,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
+from uuid import uuid4
 
 from .materialize import digest, write
 from .parallel_config import ROOT
@@ -41,6 +43,7 @@ def available() -> bool:
 
 def detect(snap: dict, cache: str | Path) -> dict:
     """Return LayoutRegions/1 for a source snapshot; raises when unavailable."""
+    start = time.monotonic()
     cfg = _config()
     if not available():
         raise RuntimeError('layout detector is not configured')
@@ -51,12 +54,12 @@ def detect(snap: dict, cache: str | Path) -> dict:
         result = json.loads(file.read_text(encoding='utf-8'))
         if result.get('source_sha256') != snap['source_sha256']:
             raise ValueError('layout cache binding mismatch')
-        return result
+        return {**result,'cache_hit':True,'elapsed_seconds':time.monotonic()-start}
     file.parent.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, 'PADDLE_PDX_MODEL_SOURCE': os.environ.get('PADDLE_PDX_MODEL_SOURCE', 'modelscope')}
     if cfg['cache_home']:
         env['PADDLE_PDX_CACHE_HOME'] = cfg['cache_home']
-    temporary = file.with_suffix('.tmp.json')
+    temporary = file.with_suffix('.'+uuid4().hex+'.tmp.json')
     run_kwargs = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt' else {}
     subprocess.run([cfg['python'], str(WORKER), snap['path'], str(temporary), '--model', cfg['model'],
                     '--device', cfg['device']], check=True, timeout=cfg['timeout'], env=env,
@@ -65,8 +68,9 @@ def detect(snap: dict, cache: str | Path) -> dict:
     if result.get('source_sha256') != snap['source_sha256']:
         raise ValueError('layout result source mismatch')
     result['identity'] = identity
-    write(file, result)
-    temporary.unlink(missing_ok=True)
+    result.update(cache_hit=False,elapsed_seconds=time.monotonic()-start)
+    write(temporary, result)
+    temporary.replace(file)
     return result
 
 
@@ -90,5 +94,5 @@ def crop_seeds(layout: dict, graph, *, min_score: float = 0.5, max_committed_ove
             covered += ix * iy
         if covered / area > max_committed_overlap:
             continue
-        rows.append({'id': region['id'], 'kind': 'layout:' + region['label'], 'bbox': [x, y, w, h], 'text': ''})
+        rows.append({'id': 'layout:'+region['id'], 'kind': 'layout:' + region['label'], 'bbox': [x, y, w, h], 'text': ''})
     return rows

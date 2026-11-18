@@ -1738,18 +1738,17 @@ def test_batch_reconstruct_stages_region_crops_with_layout_and_commits_cleanly(j
     assert batch['status'] == 'STAGED_LOCAL'
     assert 't-001' in batch['staged_object_ids']
     crop_ids = [oid for oid in batch['staged_object_ids'] if oid.startswith('r-')]
-    assert len(crop_ids) >= 2
+    assert len(crop_ids) == 1
     assert batch['failed_regions']
     noisy_fail = next(f for f in batch['failed_regions'] if f['object_id'] == 't-002')
-    assert noisy_fail['covered_by_region_crop'].startswith('r-')
-    assert noisy_fail['recommended_action'] == 'already_cropped_as_region_image'
-    assert noisy_fail['max_repair_attempts'] == 0
+    assert 'covered_by_region_crop' not in noisy_fail
+    assert noisy_fail['max_repair_attempts'] >= 1
 
     committed = call(service, identifier, 'commit_candidate',
                      candidate_id=batch['candidate_id'], expected_version=batch['version'])
     assert committed['status'] == 'COMMITTED'
     page_prog = service.call('get_progress', identifier)['pages'][0]
-    assert page_prog['region_crops'] >= 2
+    assert page_prog['region_crops'] == 1
     assert page_prog['movable_region_crops'] >= 1
     assert page_prog['committed_objects'] == len(batch['staged_object_ids'])
 
@@ -1825,7 +1824,7 @@ def test_crop_region_tool_uses_host_fusion_and_commits_through_unified_gate(job,
     assert commit_mov['status'] == 'COMMITTED'
 
     # 2) Textured/striped large zone via explicit bbox -> MOVE_UNSAFE stays in place on plate & still commits!
-    crop_unsafe = call(service, identifier, 'crop_region', page=1, bbox=[310.0, 145.0, 70.0, 50.0])
+    crop_unsafe = call(service, identifier, 'crop_region', page=1, bbox=[310.0, 145.0, 70.0, 50.0], include_in_place=True)
     assert crop_unsafe['status'] == 'STAGED_LOCAL'
     cand_ir = Path(service.state(identifier).read()['candidates'][crop_unsafe['candidate_id']]['ir'])
     cand_graph = SceneGraph.model_validate_json((cand_ir.parent / 'scene.json').read_text('utf8'))

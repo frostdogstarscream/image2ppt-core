@@ -28,6 +28,7 @@ import numpy as np
 from PIL import Image
 
 from ..materialize import digest, write
+from ..parallel_store import key
 from ..object_contracts import ClosedObject
 from ..object_extract import rectangle
 from ..parallel_contracts import SceneGraph
@@ -94,11 +95,8 @@ def grow_seed(content: np.ndarray, seed, size, *, max_grow=MAX_GROW_PX):
 
 
 def default_seeds(graph: SceneGraph) -> list[dict]:
-    """Every scene object that did not become an editable owner."""
+    """Unselected visual assets; native text needs an explicit fallback decision."""
     rows = []
-    for t in graph.text.texts:
-        if t.id not in graph.selected:
-            rows.append({'id': t.id, 'kind': 'text', 'bbox': list(t.bbox), 'text': t.text})
     for a in graph.asset.objects:
         if a.id not in graph.selected:
             rows.append({'id': a.id, 'kind': 'asset', 'bbox': list(a.bbox), 'text': a.intrinsic_text})
@@ -106,38 +104,40 @@ def default_seeds(graph: SceneGraph) -> list[dict]:
 
 
 def plan_region_crops(graph: SceneGraph, plate: np.ndarray, seeds: list[dict] | None = None, *,
-                      max_area_fraction=MAX_AREA_FRACTION) -> tuple[list[dict], list[dict]]:
+                      max_area_fraction=MAX_AREA_FRACTION, protected_text_boxes=()) -> tuple[list[dict], list[dict]]:
     size = (plate.shape[1], plate.shape[0])
     content = _content(plate)
     seeds = default_seeds(graph) if seeds is None else seeds
-    remaining_text = [s for s in default_seeds(graph) if s['kind'] == 'text']
+    text_seeds = {s['id'] for s in seeds if s['kind'] == 'text'}
+    protected = [t.bbox for t in graph.text.texts if t.id not in graph.selected and t.id not in text_seeds]
+    protected.extend(protected_text_boxes)
+    max_area = max_area_fraction * size[0] * size[1]
     crops, report = [], []
     for seed in seeds:
         box, cuts = grow_seed(content, seed['bbox'], size)
+        if any(_intersects(box, t) for t in protected):
+            report.append({'seed_ids': [seed['id']], 'bbox': box, 'state': 'SKIPPED', 'reason': 'PROTECTED_TEXT'})
+            continue
         crops.append({'box': box, 'seed_ids': [seed['id']], 'texts': [seed.get('text') or ''], 'cuts': cuts})
     changed = True
     while changed:
         changed = False
-        # Never cut a remaining text line: absorb partially covered lines whole.
-        for crop in crops:
-            for t in remaining_text:
-                tb = _clip(t['bbox'], size)
-                if _intersects(crop['box'], tb) and not _contains(crop['box'], tb):
-                    crop['box'] = _clip(_union(crop['box'], [tb[0] - 2, tb[1] - 2, tb[2] + 4, tb[3] + 4]), size)
-                    if t['id'] not in crop['seed_ids']:
-                        crop['seed_ids'].append(t['id']); crop['texts'].append(t.get('text') or '')
-                    changed = True
         merged = []
         for crop in crops:
-            target = next((m for m in merged if _intersects(m['box'], crop['box'], gap=2)), None)
-            if target is None:
+            for other in merged:
+                if not _intersects(other['box'], crop['box'], gap=2):
+                    continue
+                union = _union(other['box'], crop['box'])
+                if union[2] * union[3] > max_area or any(_intersects(union,t) for t in protected):
+                    continue
+                other['box'] = union
+                other['seed_ids'].extend(i for i in crop['seed_ids'] if i not in other['seed_ids'])
+                other['texts'].extend(crop['texts'])
+                other['cuts'] |= crop['cuts']
+                changed = True
+                break
+            else:
                 merged.append(crop)
-                continue
-            target['box'] = _union(target['box'], crop['box'])
-            target['seed_ids'] += [i for i in crop['seed_ids'] if i not in target['seed_ids']]
-            target['texts'] += crop['texts']
-            target['cuts'] = target['cuts'] or crop['cuts']
-            changed = True
         crops = merged
     accepted = []
     page = float(size[0] * size[1])
@@ -154,18 +154,39 @@ def plan_region_crops(graph: SceneGraph, plate: np.ndarray, seeds: list[dict] | 
     return accepted, report
 
 
-def _committed_boxes(graph: SceneGraph) -> list[list[float]]:
-    boxes = []
-    for record in graph.selected.values():
-        box = record.get('restore_bbox') or record.get('bbox')
-        if box and len(box) == 4:
-            boxes.append([float(v) for v in box])
-    return boxes
+def _under_parent(record, box, source, baseline):
+    # Only a single proven flat interior can be treated as backing for its child.
+    shape = record.get('payload', {})
+    fill = shape.get('fill', '')
+    if (record.get('kind') != 'surface' or record.get('method') != 'container-surface-confirmed/1'
+            or shape.get('fill_gradient') or shape.get('geometry') not in ('rect','roundRect')
+            or len(fill) != 6):
+        return None
+    x,y,w,h = box
+    px,py,pw,ph = map(int,record['restore_bbox'])
+    margin = int(np.ceil(max(shape.get('corner_radius_px') or 0, 2*(shape.get('line_width_pt') or 0))))+4
+    if not _contains([px+margin,py+margin,pw-2*margin,ph-2*margin],box):
+        return None
+    color = np.array(list(bytes.fromhex(fill)),dtype=np.uint8)
+    border = source[y-2:y+h+2,x-2:x+w+2]
+    ring = np.concatenate([border[:2].reshape(-1,3),border[-2:].reshape(-1,3),
+                           border[2:-2,:2].reshape(-1,3),border[2:-2,-2:].reshape(-1,3)])
+    if np.percentile(np.abs(ring.astype(float)-color).max(1),95)>MOVABLE_RING_ERROR:
+        return None
+    ref = record['owner_evidence']
+    proof = (baseline/ref['file']).resolve()
+    if not proof.is_relative_to(baseline.resolve()) or digest(proof)!=ref['sha256']:
+        raise ValueError('parent backing binding mismatch')
+    with np.load(proof,allow_pickle=False) as receipt:
+        canvas = receipt['backing_patch'][y-py:y-py+h,x-px:x-px+w].copy()
+    if canvas.shape != (h,w,3):
+        raise ValueError('parent backing footprint mismatch')
+    return np.broadcast_to(color,(h,w,3)).copy(),canvas
 
 
 def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[dict] | None = None,
-                       allow_movable: bool = True, max_area_fraction=MAX_AREA_FRACTION,
-                       skip_ids: set[str] | None = None) -> tuple[Path, list[str], list[dict]]:
+                       allow_movable: bool = True, include_in_place: bool = False, max_area_fraction=MAX_AREA_FRACTION,
+                       skip_ids: set[str] | None = None, ocr_lines=None) -> tuple[Path, list[str], list[dict]]:
     """Stage crops on a built baseline directory; return (slideir path, staged ids, report)."""
     from ..object_unmix import backing_from_evidence
     from ..parallel_fusion import fuse_incremental_scene
@@ -200,22 +221,31 @@ def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[
         with np.load(proof, allow_pickle=False) as data:
             foreground |= data['mask'].astype(bool)
     appearance = np.where(foreground[..., None], plate, source)
-    crops, report = plan_region_crops(graph, plate, seeds, max_area_fraction=max_area_fraction)
+    protection_file = baseline/'runtime-ocr-protection.json'
+    if ocr_lines is None and protection_file.is_file():
+        inventory = json.loads(protection_file.read_text(encoding='utf8'))
+        if inventory.get('source_sha256') != graph.source_sha256:
+            raise ValueError('OCR protection source mismatch')
+        ocr_lines = inventory.get('lines',[])
+    released = set(graph.selected)
+    released.update(s['id'] for s in seeds or [] if s['kind']=='text')
+    handled = {lid for tid in released for lid in graph.text.members.get(tid, [])}
+    protected_boxes = [line['bbox'] for line in ocr_lines or [] if line['id'] not in handled]
+    crops, report = plan_region_crops(graph, appearance, seeds, max_area_fraction=max_area_fraction,
+                                      protected_text_boxes=protected_boxes)
     if not crops:
         return baseline / 'slideir.json', [], report
     if output.exists():
         raise ValueError('region crop output already exists')
     shutil.copytree(baseline, output)
-    committed = _committed_boxes(graph)
     used = {x.id for x in [*graph.text.texts, *graph.asset.objects, *graph.surface.shapes]}
-    staged, seq = [], 1
+    staged = []
     movable_mask = np.zeros(plate.shape[:2], bool)
     for crop in crops:
-        while f'r-{seq:03d}' in used:
-            seq += 1
-        rid = f'r-{seq:03d}'; seq += 1; used.add(rid)
-        if rid in skip:
+        rid = 'r-' + key([graph.source_sha256,sorted(crop['seed_ids']),crop['box']])[:16]
+        if rid in used or rid in skip or skip.intersection(crop['seed_ids']):
             continue
+        used.add(rid)
         x, y, w, h = crop['box']
         intrinsic = ' / '.join(t.strip() for t in crop['texts'] if t and t.strip())[:200]
         crop_obj = ClosedObject(
@@ -232,11 +262,19 @@ def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[
             continue
         pixels = appearance[y:y + h, x:x + w].copy()
         safety, backing_meta, backing = 'MOVE_UNSAFE', {'reason': 'not attempted'}, None
-        isolated = not any(_intersects(crop['box'], b) for b in committed)
+        overlaps = [r for r in graph.selected.values() if (r.get('restore_bbox') or r.get('bbox'))
+                    and _intersects(crop['box'], r.get('restore_bbox') or r['bbox'])]
+        parent_patch = None
         if not allow_movable:
             backing_meta = {'reason': 'movable crops disabled'}
-        elif not isolated:
-            backing_meta = {'reason': 'overlaps committed editable object'}
+        elif overlaps:
+            pair = _under_parent(overlaps[0], crop['box'], source, baseline) if len(overlaps)==1 and not crop['cuts'] else None
+            if pair is None:
+                backing_meta = {'reason': 'overlaps committed object without proven flat interior'}
+            else:
+                backing, parent_patch = pair
+                backing_meta = {'background_parent_id':overlaps[0]['id'],'method':'verified-native-parent-interior'}
+                safety = 'MOVABLE'
         elif crop['cuts']:
             backing_meta = {'reason': 'crop boundary cuts continuing content'}
         else:
@@ -249,6 +287,10 @@ def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[
                     backing_meta = {'reason': 'surrounding backing not independently fitted', 'ring_error': float(error)}
             except ValueError as exc:
                 backing_meta = {'reason': f'backing unavailable: {exc}'}
+        if safety == 'MOVE_UNSAFE' and not include_in_place:
+            report.append({'state':'SKIPPED','reason':'IN_PLACE_ONLY','seed_ids':crop['seed_ids'],
+                           'bbox':crop['box'],'detail':backing_meta})
+            continue
         png = output / f'{rid}.png'
         Image.fromarray(np.dstack([pixels, np.full((h, w), 255, np.uint8)])).save(png)
         graph = fused_try
@@ -268,7 +310,7 @@ def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[
             np.savez_compressed(proof, mask=region, restore_bbox=[x, y, w, h], backing_patch=backing.astype(np.uint8))
             record['mask_sha256'] = array_sha(region.astype('uint8'))
             record['owner_evidence'] = {'file': proof.name, 'sha256': digest(proof), 'method': 'region-crop-lateral-backing/1'}
-            plate[y:y + h, x:x + w] = np.clip(np.rint(backing), 0, 255).astype(np.uint8)
+            plate[y:y + h, x:x + w] = np.clip(np.rint(parent_patch if parent_patch is not None else backing), 0, 255).astype(np.uint8)
             movable_mask |= region
         graph.transactions.append(record)
         graph.selected[rid] = record

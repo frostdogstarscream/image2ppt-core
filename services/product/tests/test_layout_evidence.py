@@ -16,5 +16,5 @@ def test_layout_crop_seeds_keep_pictorial_regions_still_in_plate():
         't-1': {'kind': 'text', 'bbox': [10, 10, 30, 10]},           # small native label over photo
     })
     seeds = layout_evidence.crop_seeds(layout, graph)
-    assert [s['id'] for s in seeds] == ['l-001']
+    assert [s['id'] for s in seeds] == ['layout:l-001']
     assert seeds[0]['kind'] == 'layout:image'

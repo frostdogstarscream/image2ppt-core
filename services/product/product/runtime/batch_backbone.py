@@ -60,7 +60,6 @@ def _merge_structural_ocr_items(
     logo_assets = [
         a for a in asset_records
         if a.get('kind') == 'logo'
-        or (a['bbox'][0] >= 0.78 * w_img and a['bbox'][1] <= 0.14 * h_img)
     ]
     for it in items:
         x, y, w, h = it['bbox']
@@ -68,7 +67,11 @@ def _merge_structural_ocr_items(
         hits_logo = any(intersection(it['bbox'], la['bbox']) > 0 for la in logo_assets) or any(
             intersection(it['bbox'], lb) > 0 for lb in (extra_logo_boxes or ())
         )
-        if in_top_right or hits_logo:
+        paired_wordmark = in_top_right and any(
+            peer['id'] != it['id'] and not any(c.isdigit() for c in it['text']+peer['text'])
+            and abs(peer['bbox'][0]-x) <= 3 and max(abs(a-b) for a,b in zip(peer['rgb'],it['rgb'])) <= 30
+            and intersection([x-2,y-6,w+4,h+12],peer['bbox']) > 0 for peer in items)
+        if paired_wordmark or hits_logo:
             logo_ids.add(it['id'])
     # Propagate logo lockup flag to immediate vertical partner lines in top-right quadrant.
     changed = True
@@ -347,7 +350,6 @@ def _classify_failed_region(
     kind = entry.get('kind', '')
     failure = entry.get('failure', '')
     bbox = entry.get('bbox') or []
-    w_img, h_img = graph.image_size if graph.image_size else (1920, 1080)
     logo_ids = logo_candidate_ids or set()
 
     peers: list[str] = []
@@ -374,7 +376,6 @@ def _classify_failed_region(
 
     in_top_right_logo = (
         oid in logo_ids
-        or (kind == 'text' and len(bbox) == 4 and bbox[0] >= 0.80 * w_img and bbox[1] <= 0.16 * h_img and bbox[2] <= 0.18 * w_img)
         or (kind == 'text' and any(a.kind == 'logo' and a.id in peers for a in graph.asset.objects))
     )
 
@@ -394,7 +395,7 @@ def _classify_failed_region(
         else:
             category, action, cap = 'PROTECTED_NEIGHBOR_CONFLICT', 'shrink_text_bbox_2px', 1
     elif failure in ('MASK_INCOMPLETE', 'BACKGROUND_REPAIR_FAILED', 'OWNER_CONFLICT'):
-        category, action, cap = 'COMPLEX_OR_DUAL_COLOR_BACKING', 'retain_in_source_plate', 0
+        category, action, cap = 'COMPLEX_OR_DUAL_COLOR_BACKING', 'inspect_local_backing_and_retry', 1
     else:
         category, action, cap = 'OTHER_REPAIR_FAILURE', 'retain_in_source_plate', 0
 
@@ -404,8 +405,9 @@ def _classify_failed_region(
         for rid, cbox in staged_crop_boxes:
             if intersection(bbox, cbox) >= 0.8 * area:
                 covered_by = rid
-                action = 'already_cropped_as_region_image'
-                cap = 0
+                if oid in graph.selected.get(rid, {}).get('seed_ids', []) and (kind != 'text' or in_top_right_logo):
+                    action = 'already_cropped_as_region_image'
+                    cap = 0
                 break
 
     out = {
@@ -1103,7 +1105,9 @@ def _chain_stage_from_spec(
                     active_graph, asset.id, source_path, layers_dir,
                     cur_base, step_dir / 'extract', strategy='verified-backing',
                 )
-                if res.get('status') != 'CANDIDATE_READY' and sam_enabled:
+                choices = [('verified-backing', res)]
+                compare = asset.kind in ('icon', 'logo', 'decoration')
+                if (compare or res.get('status') != 'CANDIDATE_READY') and sam_enabled:
                     sam_root = page_cache_dir / 'sam-cache' / key(asset.id)[:12]
                     plan_file = sam_root / 'sam-plan.json'
                     sam_out = sam_root / 'sam'
@@ -1121,23 +1125,43 @@ def _chain_stage_from_spec(
                         except Exception:
                             pass
                     if plan_file.is_file() and sam_out.is_dir():
-                        res_sam = retry_asset_extraction(
-                            active_graph, asset.id, source_path, layers_dir,
-                            cur_base, step_dir / 'extract-sam', strategy='sam',
-                            sam_plan=plan_file, sam_directory=sam_out,
-                        )
-                        if res_sam.get('status') == 'CANDIDATE_READY':
-                            res = res_sam
-                if res.get('status') != 'CANDIDATE_READY' and matting.available():
+                        try:
+                            res_sam = retry_asset_extraction(
+                                active_graph, asset.id, source_path, layers_dir,
+                                cur_base, step_dir / 'extract-sam', strategy='sam',
+                                sam_plan=plan_file, sam_directory=sam_out,
+                            )
+                            choices.append(('sam',res_sam))
+                            if res_sam.get('status') == 'CANDIDATE_READY':
+                                res = res_sam
+                        except (ValueError,OSError,RuntimeError) as exc:
+                            choices.append(('sam',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
+                if compare and matting.available():
                     try:
                         res_matte = retry_asset_extraction(
                             active_graph, asset.id, source_path, layers_dir,
                             cur_base, step_dir / 'extract-rmbg2', strategy='rmbg2',
                         )
-                        if res_matte.get('status') == 'CANDIDATE_READY':
-                            res = res_matte
-                    except Exception:
-                        pass
+                        choices.append(('rmbg2',res_matte))
+                    except Exception as exc:
+                        choices.append(('rmbg2',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
+                scored = []
+                for strategy, candidate in choices:
+                    if candidate.get('status') != 'CANDIDATE_READY':
+                        continue
+                    attempt = next(a for a in candidate['attempts'] if a['status']=='CANDIDATE_READY')
+                    folder = Path(candidate['candidate_directory'])
+                    with Image.open(folder/'asset.png') as im:
+                        graphic = im.convert('RGBA')
+                        contrast = Image.new('RGBA',graphic.size,'#70368C')
+                        contrast.alpha_composite(graphic)
+                        contrast.convert('RGB').save(step_dir/(strategy+'-contrast.png'))
+                    scored.append((attempt['source_recomposition_p95'], attempt['background_error'],strategy,candidate))
+                write(step_dir/'strategy-comparison.json',{
+                    'attempts':[{'strategy':name,'status':c.get('status'),'reason':c.get('reason')} for name,c in choices],
+                    'ranked':[{'strategy':s,'recomposition_p95':e,'background_error':b} for e,b,s,_ in sorted(scored,key=lambda v:v[:3])]})
+                if scored:
+                    res = min(scored,key=lambda v:v[:3])[-1]
                 if res.get('status') == 'CANDIDATE_READY':
                     ir = stage_asset_candidate(
                         res['candidate_directory'], active_graph, cur_base,
@@ -1156,7 +1180,7 @@ def _chain_stage_from_spec(
                     'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
                 })
 
-    if include_assets and include_containers and staged_ids and wanted_filter is None:
+    if include_containers and wanted_filter is None:
         from ..recovery.container_stage import stage_containers_and_surfaces
         cont_dir = directory / tag / 'containers-staged'
         try:
@@ -1239,9 +1263,8 @@ def restage_batch_candidate_subset(
     overrides = {oid: fb['measured_frame_minimum_px'] for oid, fb in frame_repairs.items()}
     bad_crop_ids = {oid for oid in bad_ids if staged_graph.selected.get(oid, {}).get('region_crop')}
     bad_crop_seeds = {sid for oid in bad_crop_ids for sid in staged_graph.selected[oid].get('seed_ids', [])}
-    bad_text_ids = {oid for oid in bad_ids if any(t.id == oid for t in staged_graph.text.texts)}
     skip = (bad_ids - bad_crop_ids) | bad_crop_seeds | set(spec.get('pass1_failed_ids', []))
-    unrec_pass2 = (set(spec.get('unrecoverable_text_ids', [])) | bad_text_ids) - bad_crop_seeds
+    unrec_pass2 = set(spec.get('unrecoverable_text_ids', [])) - bad_crop_seeds
     wanted_list = spec.get('wanted_filter')
     wanted_filter = set(wanted_list) if wanted_list is not None else None
 
@@ -1403,15 +1426,9 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         x['id'] for x in current.get('scene_relations', {}).get(str(page), {}).get('logo_lockup_candidates', [])
         if x.get('id')
     }
-    crop_flag = bool(include_assets) if include_region_crops is None else bool(include_region_crops)
+    crop_flag = bool(include_region_crops)
     layout_path = current.get('layout', {}).get(str(page))
-    unrecoverable_text_ids = (
-        {fr['object_id'] for fr in failed_regions
-         if fr.get('kind') == 'text' and fr.get('failure') in (
-             'MASK_INCOMPLETE', 'BACKGROUND_REPAIR_FAILED', 'OWNER_CONFLICT', 'INSUFFICIENT_CONTEXT')}
-        | {t.id for t in initial_graph.text.texts
-           if t.id not in initial_graph.selected and (t.id in logo_ids or initial_graph.ownership.get(t.id) != 'RESOLVED')}
-    )
+    unrecoverable_text_ids = logo_ids
 
     cand_ir_ref: list[Path] = []
 
@@ -1423,7 +1440,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                 (rid, list(rec['bbox'])) for rid, rec in cg.selected.items()
                 if rec.get('region_crop') and len(rec.get('bbox', [])) == 4
             ]
-        return [_classify_failed_region(err, initial_graph, logo_ids, staged_crop_boxes) for err in failed_regions]
+        return [_classify_failed_region(err, cg if staged_crop_boxes else initial_graph, logo_ids, staged_crop_boxes) for err in failed_regions]
 
     final_base, staged_ids, stage_errors = _chain_stage_from_spec(
         initial_graph=initial_graph,
