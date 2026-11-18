@@ -59,7 +59,7 @@ class Queue:
                     try:
                         request=json.loads((self.root/id/'request.json').read_text(encoding='utf-8'))
                         resume=request.get('pipeline_mode') in ('parallel_review','parallel_shadow') and (self.root/id/'state/parallel.sqlite').is_file()
-                        resume=resume or (request.get('orchestrator')=='opencode' and (self.root/id/'runtime/session.json').is_file())
+                        resume=resume or (request.get('orchestrator')=='opencode' and ((self.root/id/'runtime/session.json').is_file() or (self.root/id/'host-baseline/started.json').is_file()))
                     except (OSError,ValueError):pass
                 db.execute('UPDATE jobs SET state=? WHERE id=?',('QUEUED' if resume else 'INTERRUPTED',id))
         count=int(os.environ.get('IMAGE2PPT_JOB_WORKERS','1'))
@@ -96,10 +96,20 @@ class Queue:
                     pass
                 if process.poll() is None:
                     self.kill(process)
-                    self.set(id,'INTERRUPTED' if self.stop_event.is_set() else 'FAILED')
+                    if not self.stop_event.is_set() and (job/'host-baseline/manifest.json').is_file():
+                        from .runtime.host_baseline import publish
+                        outcome=publish(job,{'reason':'Job watchdog deadline expired'},['TIME_BUDGET_EXHAUSTED'])
+                        self.set(id,outcome['status'])
+                    else:
+                        self.set(id,'INTERRUPTED' if self.stop_event.is_set() else 'FAILED')
                 else:
                     try:result=json.loads((job/'result.json').read_text(encoding='utf-8'))
                     except (OSError,ValueError):result={'status':'FAILED'}
+                    if (job/'host-baseline/manifest.json').is_file() and result.get('status')!='CANCELLED':
+                        selection=job/'runtime/delivery-selection.json'
+                        if not selection.is_file() or json.loads(selection.read_text('utf8')).get('result_sha256')!=digest(job/'result.json'):
+                            from .runtime.host_baseline import publish
+                            result=publish(job,{'reason':'Worker exited before selecting a verified delivery'},['WORKER_INTERRUPTED'])
                     self.set(id,result['status'] if result.get('status') in TERMINAL else 'FAILED')
                 with self.lock:self.processes.pop(id,None)
 
@@ -143,6 +153,10 @@ class Queue:
                                     for name in sorted({c['status'] for c in state['candidates'].values()})},
                 'committed_objects':committed,'recall':None,
                 'visual_qa':state.get('visual_review',{}).get('status','UNKNOWN')}
+            if state.get('host_evidence'):
+                result['runtime']['host_evidence']={k:{name:v for name,v in rec.items() if name!='blocks'}
+                                                    for k,rec in state['host_evidence'].items()}
+                result['runtime']['baseline_frozen']=(self.root/id/'host-baseline/manifest.json').is_file()
         return result
 
 
@@ -261,8 +275,9 @@ def create_app(root=None, token=None, run_worker=True):
         if not (1<=agent_steps<=(192 if experiment_profile else 128) and 60<=runtime_seconds<=21600 and 1<=candidate_limit<=12
                 and 0<=model_calls<=200 and 1<=office_validations<=200):raise HTTPException(422,'执行预算超出支持范围')
         from .pipeline import settings
-        try:settings()
-        except (RuntimeError,OSError):raise HTTPException(503,'未配置 MoMA 密钥，请使用启动器配置') from None
+        if orchestrator!='opencode':
+            try:settings()
+            except (RuntimeError,OSError):raise HTTPException(503,'未配置 MoMA 密钥，请使用启动器配置') from None
         if orchestrator!='opencode' and not os.environ.get('OPENCODE_GO_API_KEY'):raise HTTPException(503,'未配置 OpenCode Go 复核密钥')
         if not 1<=len(goal)<=4000:raise HTTPException(422,'交付目标长度无效')
         # Serialize admission, bounded decode and queue insertion.
@@ -296,7 +311,8 @@ def create_app(root=None, token=None, run_worker=True):
                                      'agent_inference_provider':os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma'),
                                      'agent_model':agent_model or os.environ.get('IMAGE2PPT_AGENT_MODEL'),
                                      'object_extraction':object_route,'pipeline_mode':selected_mode,'original_inputs':original_refs,
-                                     'orchestrator':orchestrator,'visual_review_backend':'opencode' if orchestrator=='opencode' else 'go',
+                                     'orchestrator':orchestrator,'host_stage0':orchestrator=='opencode',
+                                     'visual_review_backend':'opencode' if orchestrator=='opencode' else 'go',
                                      'goal':goal,'fresh_perception':fresh_perception,'candidate_engine':'r12-regional' if orchestrator=='opencode' else 'off',
                                      'agent_steps':agent_steps,'runtime_seconds':runtime_seconds,
                                      'tool_profile':tool_profile, **({'experiment_profile':experiment_profile} if experiment_profile else {}),

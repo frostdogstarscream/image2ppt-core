@@ -118,9 +118,10 @@ def edit_lineage(state, cases, edits, deck, pages):
     return fields
 
 
-def run(job, out, references, cases):
+def run(job, out, references, cases, arm='final'):
     out.mkdir(exist_ok=True, parents=True)
-    state = read(job / "runtime/state.json")
+    baseline = arm == "baseline"
+    state = read(job / ("host-baseline/state.json" if baseline else "runtime/state.json"))
     result = read(job / "result.json") if (job / "result.json").exists() else {}
     rows = state.get("pages", [])
     if len(rows) != 2 or not all(rows):
@@ -132,7 +133,14 @@ def run(job, out, references, cases):
         original = pathlib.Path(c["artifacts"]["pptx"])
         if sha(original) != c["files"][str(original)]:
             raise ValueError("composition hash mismatch")
-        origin = "agent-composed"
+        origin = "deterministic-baseline" if baseline else result.get("origin","agent-composed")
+        if baseline:
+            frozen = job / "host-baseline/baseline.pptx"
+            if sha(frozen) != read(job/"host-baseline/manifest.json")["files"]["baseline.pptx"] or sha(frozen)!=sha(original):
+                raise ValueError("baseline hash mismatch")
+            original = frozen
+        elif result.get("origin") and sha(job/"delivery/result.pptx")!=sha(original):
+            raise ValueError("final delivery differs from selected composition")
         shutil.copyfile(original, deck)
     else:
         if not result:
@@ -244,6 +252,22 @@ def run(job, out, references, cases):
         "human_acceptance": "unreviewed",
     }
     report["field_evidence"] = edit_lineage(state, cases, edits, deck, rows)
+    if (job/"host-baseline/manifest.json").exists():
+        from product.runtime.host_baseline import local_errors
+        report["arm"] = arm
+        report["agent_usage"] = ({"reported_model_messages":0,"tokens":{"input":0,"output":0,"reasoning":0}}
+                                 if baseline else result.get("agent",{}).get("usage",{}))
+        report["agent_status"] = "NOT_STARTED" if baseline else result.get("agent",{})
+        for i,row in enumerate(rows,1):
+            render = out / f"page-{i}.png"
+            if render.exists():
+                marks = [{"id":label,"bbox":bbox} for pg,label,bbox,*_ in cases if pg==i]
+                errors = local_errors(row["snapshot"]["path"],render,marks)
+                pages[i-1]["target_rgb_mae"] = {m["id"]:errors[m["id"]] for m in marks}
+                pages[i-1]["max_tile_mae"] = max(v for k,v in errors.items() if k.startswith("tile-"))
+        if baseline:
+            report.update(status="BASELINE_FROZEN",reason=None)
+        report.update(independent_go_review="UNKNOWN",wps_acceptance="unreviewed")
     (out / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf8"
     )
@@ -259,5 +283,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("job", "out", "references", "cases"):
         parser.add_argument("--" + name, type=pathlib.Path, required=True)
+    parser.add_argument("--arm", choices=("baseline","final"), default="final")
     args = parser.parse_args()
-    run(args.job, args.out, args.references, read(args.cases))
+    run(args.job, args.out, args.references, read(args.cases), args.arm)

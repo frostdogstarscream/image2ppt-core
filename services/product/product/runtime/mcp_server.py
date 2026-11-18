@@ -199,6 +199,22 @@ def create_server(root, bound_job=None):
         if bound_job and request.get('experiment_profile') in (None,'baseline'):
             shortcuts.update(('plan_marked_page','inspect_marked_region'))
         tools = [tool for tool in schemas() if tool.name not in shortcuts]
+        if bound_job and request.get('host_stage0'):
+            from .host_evidence import AGENT_TOOLS, ROLES
+            tools = [t for t in schemas() if t.name in AGENT_TOOLS]
+            for t in tools:
+                props = t.inputSchema['properties']
+                if t.name=='plan_marked_page':
+                    props['fields']['maxItems']=30
+                    props['fields']['items']['properties']['role']={'enum':ROLES}
+                if t.name=='batch_reconstruct_page':
+                    for n in ('include_assets','include_containers','include_region_crops','use_inpaint','verify_office'):
+                        props.pop(n,None)
+                    props['block']={'type':'integer','minimum':1}
+                    t.inputSchema['anyOf']=[{'required':['block']},{'required':['object_ids']}]
+                if t.name=='prepare_page_evidence':
+                    for n in ('auto_create_scene','run_layers','run_layout'):
+                        props.pop(n,None)
         if bound_job:
             for tool in tools:
                 schema = tool.inputSchema
@@ -231,7 +247,15 @@ def create_server(root, bound_job=None):
                 content.append(ImageContent(type='image', mimeType='image/png',
                                             data=base64.b64encode(path.read_bytes()).decode('ascii')))
             else:
-                content.append(TextContent(type='text', text=json.dumps(reference)+'\n'+path.read_text('utf8')))
+                data = path.read_text('utf8')
+                if reference['role']=='hard_checks' and len(data)>12000 and bound_job and json.loads(
+                        (service.state(bound_job).job/'request.json').read_text('utf8')).get('host_stage0'):
+                    checks = json.loads(data)
+                    data = json.dumps({'status':checks.get('status'),'pptx_sha256':checks.get('pptx_sha256'),
+                        'office':checks.get('office',{}).get('status'),'action_count':len(checks.get('office',{}).get('records',[])),
+                        'residuals':[[{'id':r.get('id'),'status':r.get('residual_check_status')} for r in page
+                                      if r.get('residual_check_status')!='PASS'] for page in checks.get('residuals',[])]})
+                content.append(TextContent(type='text', text=json.dumps(reference)+'\n'+data))
         # A supplied-image receipt records transport provision, not proof of model cognition.
         state = service.state(arguments['job_id'])
         for identifier in arguments['evidence_ids']:

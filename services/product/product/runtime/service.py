@@ -63,6 +63,14 @@ class RuntimeService(ExplorationTools):
         if tool not in TOOLS:
             raise ValueError('unknown runtime tool')
         state = self.state(job_id)
+        request = json.loads((state.job/'request.json').read_text('utf8'))
+        host = request.get('host_stage0')
+        if host:
+            from .host_evidence import AGENT_TOOLS, context, normalize_arguments
+            if tool not in AGENT_TOOLS:
+                raise ValueError('tool unavailable in the host-precomputed workflow')
+            if tool in ('get_job_context','get_progress'):
+                return context(state,request)
         if tool == 'list_evidence':
             limit=max(1,min(int(arguments.get('limit',30)),100))
             with state.db() as db:
@@ -129,8 +137,26 @@ class RuntimeService(ExplorationTools):
         if tool=='fit_background' and not (all(arguments.get(k) is not None for k in ('page','object_id')) or all(arguments.get(k) is not None for k in ('evidence_id','bbox'))):
             raise ValueError('fit_background requires page+object_id OR evidence_id+bbox; no operation was reserved')
         method = getattr(self, tool)
-        return state.mutate(tool, arguments, expected_version, idempotency_key,
-                            lambda current, directory: method(state, current, directory, **arguments))
+        def execute(current,directory):
+            if not host:
+                return method(state,current,directory,**arguments)
+            from .host_evidence import compact, refresh
+            if tool=='prepare_page_evidence':
+                return refresh(self,state,current,directory,arguments['page'])
+            args = normalize_arguments(state,current,tool,arguments)
+            outcome = method(state,current,directory,**args)
+            if tool=='batch_reconstruct_page':
+                k = str(args['page'])
+                old = current.setdefault('regional_failures',{}).get(k,[])
+                touched = set(args['object_ids'])
+                current['regional_failures'][k] = [r for r in old if r['object_id'] not in touched]+outcome.get('failed_regions',[])
+            if tool=='commit_candidate' and outcome.get('status')=='COMMITTED':
+                from .host_evidence import questions
+                page = current['candidates'][args['candidate_id']]['page']
+                failures = current.get('regional_failures',{}).get(str(page),[])
+                current['questions'][str(page)] = questions(state,current,page,failures,directory)
+            return compact(tool,outcome)
+        return state.mutate(tool, arguments, expected_version, idempotency_key,execute)
 
     @staticmethod
     def page(current, page):
@@ -759,7 +785,8 @@ class RuntimeService(ExplorationTools):
         in_place = [sorted(k for k,v in page.items() if v.get('move_safety') == 'MOVE_UNSAFE') for page in selected]
         editable = [sorted(set(page) - set(excluded)) for page, excluded in zip(selected, in_place)]
         status = 'PARTIAL_EDITABLE' if any(editable) else 'RASTER_ONLY'
-        delivery = state.job/'delivery'
+        host = (state.job/'host-baseline/manifest.json').is_file()
+        delivery = state.root/'agent-delivery' if host else state.job/'delivery'
         delivery.mkdir(exist_ok=True)
         shutil.copyfile(composition['artifacts']['pptx'], delivery/'result.pptx')
         from ..parallel_rebuild import build
@@ -792,6 +819,6 @@ class RuntimeService(ExplorationTools):
                                       'final_qa': 'PASS', 'automatic_publication': 'GATED'}}
         write(delivery/'summary.json', result)
         result['artifacts'] = {p.name: digest(p) for p in delivery.iterdir() if p.is_file()}
-        write(state.job/'result.json', result)
+        write(state.root/'agent-result.json' if host else state.job/'result.json', result)
         current['status'] = delivery_state
         return result

@@ -74,12 +74,12 @@ def overlap(a,b):
     return max(0,min(x+w,u+p)-max(x,u))*max(0,min(y+h,v+q)-max(y,v))
 
 
-def detect(source, profile, directory, window=None):
+def detect(source, profile, directory, window=None, *, detectors=None):
     img = Image.open(source).convert('RGB')
     W,H = img.size
     models = ['pp-l','doclayout'] if profile=='combined' else [profile if profile in ('pp-l','doclayout') else 'v3']
     rows, receipts = [], []
-    for op in models + (['omni'] if profile in ('combined','omni') else []):
+    for op in detectors if detectors is not None else models + (['omni'] if profile in ('combined','omni') else []):
         windows = [[0,0,W,H]]
         if window:
             windows = [window]

@@ -7,6 +7,7 @@ hundreds of Agent tool turns to a single batch backbone pass plus targeted repai
 from __future__ import annotations
 
 from collections import Counter
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
@@ -694,7 +695,15 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     if str(page) not in current.get('ocr', {}):
         ocr_dir = directory / 'ocr'
         ocr_dir.mkdir(parents=True, exist_ok=True)
-        service.run_ocr(state, current, ocr_dir, page=page)
+        try:
+            service.run_ocr(state, current, ocr_dir, page=page)
+        except (OSError, RuntimeError, KeyError, ValueError, subprocess.SubprocessError) as exc:
+            if not json.loads((state.job/'request.json').read_text('utf8')).get('host_stage0'):
+                raise
+            file = ocr_dir/'ocr-unavailable.json'
+            write(file,{'source_sha256':digest(source_path),'status':'UNAVAILABLE',
+                        'error_type':type(exc).__name__,'lines':[]})
+            current.setdefault('ocr',{})[str(page)]=str(file)
     ocr = json.loads(Path(current['ocr'][str(page)]).read_text('utf8'))
     if 'fonts' not in current:
         font_dir = directory / 'fonts'
@@ -779,7 +788,29 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     do_layout = bool(run_layers) if run_layout is None else bool(run_layout)
     request = json.loads((state.job/'request.json').read_text(encoding='utf8'))
     profile = request.get('experiment_profile')
-    if profile and do_layout and str(page) not in current.get('layout', {}):
+    preflight = request.get('host_stage0')
+    if preflight and do_layout and str(page) not in current.get('layout', {}):
+        from ..experiment import detect
+        config = os.environ.get('IMAGE2PPT_EXPERIMENT_CONFIG')
+        configured = json.loads(Path(config).read_text(encoding='utf-8-sig')) if config else {}
+        detectors = [name for name in ('v3','pp-l','doclayout','omni') if name in configured]
+        layout_data = detect(source_path, profile, directory/'model-runs', detectors=detectors)
+        if 'v3' not in detectors and layout_evidence.available():
+            try:
+                native = layout_evidence.detect({'path':str(source_path),'source_sha256':digest(source_path)}, state.job/'cache')
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+                layout_data['models'].append({'model':'v3','status':'unavailable','error_type':type(exc).__name__})
+            else:
+                layout_data['regions'].extend(native['regions'])
+                layout_data['models'].append({'model':'v3','status':'candidate' if native['regions'] else 'no_candidates'})
+        for name in ('v3','omni'):
+            if not any(m['model']==name for m in layout_data['models']):
+                layout_data['models'].append({'model':name,'status':'unavailable'})
+        layout_file = directory/'layout-regions.json'
+        write(layout_file, layout_data)
+        current.setdefault('layout', {})[str(page)] = str(layout_file)
+        layout_status = 'READY' if any(m['status'] in ('candidate','no_candidates') for m in layout_data['models']) else 'UNAVAILABLE'
+    elif profile and do_layout and str(page) not in current.get('layout', {}):
         from ..experiment import detect
         layout_data = detect(source_path, profile, directory/'model-runs')
         layout_file = directory/'layout-regions.json'
@@ -806,7 +837,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
 
     measured_items, scene_relations = _merge_structural_ocr_items(
         source, raw_items, [*immediate_assets, *deferred_assets], extra_logo_boxes=extra_logo_boxes)
-    if profile and profile != 'baseline':
+    if preflight or (profile and profile != 'baseline'):
         from ..recovery.marked_fields import split_items
         retained_fields = scene_relations.setdefault('source_retained_fields', [])
         measured_items = split_items(source, measured_items, retained_fields)
@@ -954,10 +985,13 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         'styles': final_styles,
         'items': measured_items,
     }
-    if profile and profile!='baseline':
+    if preflight or (profile and profile!='baseline'):
         from ..experiment import mark_page,mark_blocks
         layout = layout_data or {'regions':[]}
-        marks = mark_page(source_path, layout, [*measured_items,*asset_summaries], directory)
+        low_confidence = [{'id':'ocr-review-'+str(line['id']), 'kind':'uncertain_ocr',
+                           'text':line['text'], 'bbox':line['bbox'], 'ocr_line_ids':[line['id']]}
+                          for line in ocr.get('lines', []) if preflight and line.get('text') and line.get('score',0)<0.85]
+        marks = mark_page(source_path, layout, [*measured_items,*asset_summaries,*low_confidence], directory)
         current.setdefault('experiment_marks',{})[str(page)] = str(directory/'marks.json')
         payload['marked_image']=state.register(directory/'marks.png','numbered_layout')
         payload['mark_inventory']=state.register(directory/'marks.json','numbered_inventory')
@@ -1354,15 +1388,29 @@ def _chain_stage_from_spec(
     if marked_routes:
         from .marked_routes import route_trace,plan_move_groups
         graph=SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
-        groups=plan_move_groups(marked_routes,graph)
-        if groups and staged_ids:
+        movement_routes = [r if wanted_filter is None or r['id'] in wanted_filter
+                           else {**r,'move_with':[]} for r in marked_routes]
+        groups = [g for g in plan_move_groups(movement_routes,graph)
+                  if not graph.selected[g[0]].get('move_members') and not set(g).intersection(skip_ids)]
+        if groups:
             from ..parallel_rebuild import adapt
             for group in groups:
-                record=graph.selected[group[0]]
-                if not record.get('move_members'):
-                    record['move_members']=group
-            write(cur_base/'scene.json',graph.model_dump())
-            write(cur_base/'slideir.json',adapt(graph,cur_base))
+                graph.selected[group[0]]['move_members']=group
+            ir = adapt(graph,cur_base)
+            written = {frozenset(g['member_ids']) for g in ir.get('groups',[])}
+            accepted = [g for g in groups if frozenset(g) in written]
+            if accepted:
+                for group in groups:
+                    if group not in accepted:
+                        graph.selected[group[0]].pop('move_members',None)
+                if cur_base == initial_baseline:
+                    grouped = directory/tag/'movement'
+                    shutil.copytree(cur_base,grouped)
+                    cur_base = grouped
+                write(cur_base/'scene.json',graph.model_dump())
+                write(cur_base/'slideir.json',ir)
+                # A group-only change must go through the same compile and Office commit.
+                staged_ids.extend(i for g in accepted for i in g if i not in staged_ids)
         write(directory/tag/'route-trace.json',route_trace(marked_routes,graph))
     return cur_base, staged_ids, stage_errors
 
@@ -1469,7 +1517,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     from .background import inpaint_service
 
     request=json.loads((state.job/'request.json').read_text(encoding='utf8'))
-    if request.get('experiment_profile') not in (None,'baseline'):
+    if not request.get('host_stage0') and request.get('experiment_profile') not in (None,'baseline'):
         missing=[i for i in range(1,len(request['sources'])+1) if not current.get('marked_plans',{}).get(str(i))]
         if missing:
             return {'status':'PAGE_PLANS_REQUIRED','pages':missing}
@@ -1483,7 +1531,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     wanted_filter = set(object_ids) if object_ids is not None else None
     fields = current.get('marked_plans', {}).get(str(page), [])
     routes = []
-    if fields and request.get('experiment_profile') not in (None, 'baseline'):
+    if fields and (request.get('host_stage0') or request.get('experiment_profile') not in (None, 'baseline')):
         from .marked_routes import bind_plan
         routes = bind_plan(fields, current['experiment_marks'][str(page)], initial_graph, source_path)
         if wanted_filter is not None:
