@@ -1750,7 +1750,8 @@ def test_batch_reconstruct_stages_region_crops_with_layout_and_commits_cleanly(j
     page_prog = service.call('get_progress', identifier)['pages'][0]
     assert page_prog['region_crops'] == 1
     assert page_prog['movable_region_crops'] >= 1
-    assert page_prog['committed_objects'] == len(batch['staged_object_ids'])
+    assert set(crop_ids) <= set(committed['object_ids']) <= set(batch['staged_object_ids'])
+    assert page_prog['committed_objects'] == committed['committed_count']
 
 
 def test_crop_region_tool_uses_host_fusion_and_commits_through_unified_gate(job, monkeypatch):

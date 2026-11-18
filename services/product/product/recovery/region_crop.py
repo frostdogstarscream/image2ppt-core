@@ -111,6 +111,8 @@ def plan_region_crops(graph: SceneGraph, plate: np.ndarray, seeds: list[dict] | 
     text_seeds = {s['id'] for s in seeds if s['kind'] == 'text'}
     protected = [t.bbox for t in graph.text.texts if t.id not in graph.selected and t.id not in text_seeds]
     protected.extend(protected_text_boxes)
+    committed = [(row.get('restore_bbox') or row.get('bbox'), row.get('kind') == 'surface' or row.get('container_layer'))
+                 for row in graph.selected.values() if row.get('restore_bbox') or row.get('bbox')]
     max_area = max_area_fraction * size[0] * size[1]
     crops, report = [], []
     for seed in seeds:
@@ -129,6 +131,9 @@ def plan_region_crops(graph: SceneGraph, plate: np.ndarray, seeds: list[dict] | 
                     continue
                 union = _union(other['box'], crop['box'])
                 if union[2] * union[3] > max_area or any(_intersects(union,t) for t in protected):
+                    continue
+                if any(_intersects(union, box) and not (parent and _contains(box, union))
+                       for box, parent in committed):
                     continue
                 other['box'] = union
                 other['seed_ids'].extend(i for i in crop['seed_ids'] if i not in other['seed_ids'])
@@ -240,6 +245,7 @@ def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[
     shutil.copytree(baseline, output)
     used = {x.id for x in [*graph.text.texts, *graph.asset.objects, *graph.surface.shapes]}
     staged = []
+    asset_kinds = {obj.id: obj.kind for obj in graph.asset.objects}
     movable_mask = np.zeros(plate.shape[:2], bool)
     for crop in crops:
         rid = 'r-' + key([graph.source_sha256,sorted(crop['seed_ids']),crop['box']])[:16]
@@ -292,7 +298,19 @@ def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[
                            'bbox':crop['box'],'detail':backing_meta})
             continue
         png = output / f'{rid}.png'
-        Image.fromarray(np.dstack([pixels, np.full((h, w), 255, np.uint8)])).save(png)
+        rgba = np.dstack([pixels, np.full((h, w), 255, np.uint8)])
+        if safety == 'MOVABLE' and all(asset_kinds.get(i) in ('icon', 'logo') for i in crop['seed_ids']):
+            from reconstruction import extract_rgba
+            delta = np.abs(pixels.astype(float) - backing).max(axis=2)
+            perimeter = np.concatenate((delta[0], delta[-1], delta[:, 0], delta[:, -1]))
+            if not crop['cuts'] and np.max(perimeter) <= MOVABLE_RING_ERROR:
+                matte = extract_rgba(pixels, backing, delta > 2)
+                alpha = matte[..., 3:4] / 255.0
+                rendered = matte[..., :3] * alpha + backing * (1 - alpha)
+                if np.abs(rendered - pixels).max() <= 3:
+                    rgba = matte
+                    backing_meta['matte_method'] = 'verified-backing-unmix'
+        Image.fromarray(rgba).save(png)
         graph = fused_try
         record = {
             'id': rid, 'kind': 'asset', 'region_crop': True, 'move_safety': safety,
