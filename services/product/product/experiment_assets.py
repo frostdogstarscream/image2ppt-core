@@ -85,3 +85,30 @@ def trace_asset(png_file, stage, identifier, directory):
     write(sidecar,records)
     write(directory/'selection.json',{'status':'staged','contrast_p95':errors})
 
+def contrast_edge_score(graphic):
+    """Proxy for spill on a changed background on near-flat, antialiased edges."""
+    import cv2
+    import numpy as np
+
+    pixels = np.asarray(graphic, dtype=float)
+    alpha = pixels[..., 3] / 255
+    core = alpha >= .97
+    if not core.any():
+        return None
+    distance, labels = cv2.distanceTransformWithLabels((~core).astype('uint8'),cv2.DIST_L2,5,
+                                                        labelType=cv2.DIST_LABEL_PIXEL)
+    edge = (alpha > .08) & (alpha < .92) & (distance <= 3)
+    if edge.sum() < 8:
+        return None
+    colors = np.zeros((int(labels.max())+1,3))
+    colors[labels[core]] = pixels[...,:3][core]
+    a = alpha[edge,None]
+    rgb = pixels[...,:3][edge]
+    # Treat the adjacent opaque interior as a local foreground estimate.
+    # This is an edge proxy, not a labelled alternate-background reference.
+    intended = colors[labels[edge]]
+    backdrop = np.array([112,54,140])
+    difference = abs((rgb*a+backdrop*(1-a))-(intended*a+backdrop*(1-a))).max(1)
+    return {'p90':float(np.percentile(difference,90)), 'samples':int(edge.sum()),
+            'visible':int((alpha>.08).sum())}
+

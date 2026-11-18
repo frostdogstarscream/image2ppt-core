@@ -64,10 +64,10 @@ def schemas():
                               'move_with':{'type':'array','items':{'type':'integer','minimum':1}},
                               'route':{'enum':['text','surface','asset','table','preserve']}}}
     fields = {
-        'plan_marked_page':{'page':page,'fields':{'type':'array','items':plan_field,'maxItems':150}},
+        'plan_marked_page':{'page':page,'fields':{'type':'array','items':plan_field,'maxItems':150},'append':{'type':'boolean'}},
         'inspect_marked_region':{'page':page,'bbox':{'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4}},
         'list_evidence': {'role':string,'limit':{'type':'integer','minimum':1,'maximum':100}},
-        'inspect_scene': {'page': {'type': 'integer', 'minimum': 1}},
+        'inspect_scene': {'page': {'type': 'integer', 'minimum': 1}, 'full':{'type':'boolean'}},
         'rebuild_region': {'page': {'type': 'integer', 'minimum': 1}, 'object_id': string,
                            'strategy': {'type': 'string', 'enum': ['auto', 'next_background', 'verified-backing', 'source-halo', 'sam', 'rmbg2']}},
         'repair_region': {'candidate_id': string, 'strategy': string},
@@ -143,6 +143,7 @@ def schemas():
         if 'candidate_id' in properties:properties['candidate_id']={'type':'string','pattern':'^c-[a-f0-9]{24}$','description':'Candidate ID returned by create_candidate/rebuild_region. Never a region- ID or object ID.'}
         required = list(properties)
         if name=='list_evidence':required=['job_id']
+        if name=='plan_marked_page':required.remove('append')
         if name=='update_scene':required.remove('remove_object_ids')
         if name in ('rebuild_region', 'unmix_foreground'):
             required.remove('strategy')
@@ -164,7 +165,7 @@ def schemas():
             required.remove('layout_id')
         if name == 'crop_image':
             required.remove('scale')
-        if name in ('prepare_page_evidence', 'batch_reconstruct_page'):
+        if name in ('prepare_page_evidence', 'batch_reconstruct_page','inspect_scene'):
             required = ['job_id', 'page']
         if name == 'crop_region':
             required = ['job_id', 'page']

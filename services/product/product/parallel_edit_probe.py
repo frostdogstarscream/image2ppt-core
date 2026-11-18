@@ -23,6 +23,7 @@ def layout_result(frame, bounds, lines, original_lines):
 
 
 def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True):
+    from .parallel_office import leaf_shapes
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=False)
     pptx=Path(pptx).resolve();original=digest(pptx);records=[];deck=None;initialized=False
     result={'schema':'TextEditProbe/1','status':'UNKNOWN','pptx_sha256':original,'records':records,'human_acceptance':False}
@@ -33,7 +34,7 @@ def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True):
         app=win32com.client.Dispatch('PowerPoint.Application')
         def signature(slide):
             return {str(s.Name):(float(s.Left),float(s.Top),float(s.Width),float(s.Height),float(s.Rotation),
-                str(s.TextFrame.TextRange.Text) if s.HasTextFrame and s.TextFrame.HasText else '') for s in slide.Shapes}
+                str(s.TextFrame.TextRange.Text) if s.HasTextFrame and s.TextFrame.HasText else '') for s in leaf_shapes(slide.Shapes)}
         for page,irfile in enumerate(irs,1):
             ir=json.loads(Path(irfile).read_text(encoding='utf-8'))
             for node in ir['nodes']:
@@ -42,7 +43,7 @@ def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True):
                     action='replace-'+variant;name=node['id'];longer=variant=='long'
                     file=output/f'{page:02d}-{name}-{action}.pptx';shutil.copyfile(pptx,file)
                     deck=app.Presentations.Open(str(file),ReadOnly=False,Untitled=False,WithWindow=False)
-                    slide=deck.Slides(page);sig=signature(slide);s=next(s for s in slide.Shapes if str(s.Name)==name)
+                    slide=deck.Slides(page);sig=signature(slide);s=next(s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name)
                     pw,ph=ir['canvas']['source_px'];sx=pw/float(deck.PageSetup.SlideWidth);sy=ph/float(deck.PageSetup.SlideHeight)
                     before=output/f'{page:02d}-{name}-{action}-before.png';slide.Export(str(before),'PNG',pw,ph)
                     count=int(s.TextFrame.TextRange.Lines().Count)
@@ -50,7 +51,7 @@ def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True):
                     s.TextFrame.TextRange.Text=value
                     deck.Save();deck.Close();deck=None
                     deck=app.Presentations.Open(str(file),ReadOnly=True,Untitled=False,WithWindow=False)
-                    slide=deck.Slides(page);got=signature(slide);s=next(s for s in slide.Shapes if str(s.Name)==name);tr=s.TextFrame.TextRange
+                    slide=deck.Slides(page);got=signature(slide);s=next(s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name);tr=s.TextFrame.TextRange
                     layout=layout_result(got[name][:4],(float(tr.BoundLeft),float(tr.BoundTop),float(tr.BoundWidth),float(tr.BoundHeight)),int(tr.Lines().Count),count)
                     png=output/f'{page:02d}-{name}-{action}.png';slide.Export(str(png),'PNG',pw,ph)
                     a=np.array(Image.open(before).convert('RGB'));b=np.array(Image.open(png).convert('RGB'))

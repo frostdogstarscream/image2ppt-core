@@ -110,6 +110,38 @@ def _text_of(element) -> str:
     return '\n'.join(paragraphs).strip()
 
 
+def _table_fields(element, record):
+    table = element.find('.//a:tbl', NS)
+    if table is None:
+        return []
+    widths = [int(c.get('w',0)) for c in table.findall('a:tblGrid/a:gridCol',NS)]
+    rows = table.findall('a:tr',NS)
+    heights = [int(r.get('h',0)) for r in rows]
+    if not widths or not rows or min(widths+heights)<=0:
+        return []
+    x,y,w,h = record['bbox']
+    xs = x+np.cumsum([0]+widths)*w/sum(widths)
+    ys = y+np.cumsum([0]+heights)*h/sum(heights)
+    cells=[]
+    for r,row in enumerate(rows):
+        for c,cell in enumerate(row.findall('a:tc',NS)):
+            if c>=len(widths) or any(cell.get(k) in ('1','true') for k in ('vMerge','hMerge')):
+                continue
+            right=min(c+int(cell.get('gridSpan',1)),len(widths))
+            bottom=min(r+int(cell.get('rowSpan',1)),len(heights))
+            value='\n'.join(''.join(t.text or '' for t in p.iter(_q('a:t')))
+                            for p in cell.findall('a:txBody/a:p',NS))
+            if value:
+                cells.append({'name':f"{record['name']}[{r+1},{c+1}]",'text':value,
+                              'bbox':[xs[c],ys[r],xs[right]-xs[c],ys[bottom]-ys[r]]})
+    return cells
+
+
+def _native_fields(objects):
+    return [o for o in objects if o['class']=='text'] + [
+        cell for o in objects if o['class']=='table' for cell in o.get('cells',())]
+
+
 def _walk(tree, transform):
     """Yield (element, kind, emu_bbox) in document (z) order, flattening groups."""
     sx, sy, ox, oy = transform
@@ -230,6 +262,8 @@ def inspect_pptx(pptx: str | Path, canvas: tuple[int, int], slide: int = 1) -> d
                 record['transparent_fraction'] = round(transparent, 4)
             elif kind == 'text':
                 record['text'] = _text_of(element)
+            elif kind == 'table':
+                record['cells'] = _table_fields(element,record)
             record['class'] = cls
             objects.append(record)
             cx0, cy0 = max(0, x0), max(0, y0)
@@ -327,7 +361,7 @@ def _overlap(a, b) -> float:
 
 def text_metrics(objects: list[dict], ocr_lines: list[dict], min_score: float = 0.5) -> dict:
     """Match independent OCR lines to native text frames by spatial overlap and wording."""
-    natives = [o for o in objects if o['class'] == 'text']
+    natives = _native_fields(objects)
     lines = [ln for ln in ocr_lines if _norm(ln.get('text')) and ln.get('score', 1.0) >= min_score]
     total_chars = sum(len(_norm(ln['text'])) for ln in lines)
     matched_chars = 0.0
@@ -359,7 +393,8 @@ def text_metrics(objects: list[dict], ocr_lines: list[dict], min_score: float = 
         'reference': 'independent OCR lines (not a human inventory)',
         'ocr_lines': len(lines),
         'ocr_chars': total_chars,
-        'native_text_objects': len(natives),
+        'native_text_objects': sum(o['class']=='text' for o in objects),
+        'native_table_cells_with_text': sum(len(o.get('cells',())) for o in objects),
         'matched_lines': matched_lines,
         'line_recall': round(matched_lines / len(lines), 4) if lines else None,
         'char_recall': round(matched_chars / total_chars, 4) if total_chars else None,
@@ -428,7 +463,7 @@ def score_page(source_path: str | Path, pptx_path: str | Path, *, render_path: s
     result['non_logo_native_line_recall'] = None
     if ocr is not None and ocr.get('scope')=='independent_non_logo_editable_lines':
         lines = ocr.get('lines', [])
-        native = [obj for obj in inspected['objects'] if obj['class']=='text']
+        native = _native_fields(inspected['objects'])
         hits = sum(any(_norm(line['text']) in _norm(obj['text'])
                        and _overlap(line['bbox'],obj['bbox']) > 0.5*line['bbox'][2]*line['bbox'][3]
                        for obj in native) for line in lines if _norm(line['text']))

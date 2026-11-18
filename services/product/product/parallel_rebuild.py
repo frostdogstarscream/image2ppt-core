@@ -443,6 +443,15 @@ def adapt(graph,directory):
         elif c['kind']=='asset':
             file=reference(c['asset_reference']);meta=c['payload']
             image(c['id'],c['bbox'],file,'Complete transparent graphic candidate; '+meta['method'],z)
+        elif c['kind']=='table':
+            ev='ev-'+c['id']
+            ir['evidence'].append({'id':ev,'kind':'shape','bbox':c['bbox']})
+            refs=[ev]
+            for line in c['cell_evidence']:
+                eid=ev+'-'+line['id']
+                ir['evidence'].append({'id':eid,'kind':'text','bbox':line['bbox'],'text':line['text']})
+                refs.append(eid)
+            ir['nodes'].append({'id':c['id'],'type':'table','bbox':c['bbox'],'z':z,'evidence_ids':refs,**c['payload']})
         elif c['kind']=='text':
             t=next(t for t in graph.text.texts if t.id==c['id']);s=styles[t.style];ev='ev-'+t.id
             ir['evidence'].append({'id':ev,'kind':'text','bbox':t.bbox,'text':t.text})
@@ -458,4 +467,8 @@ def adapt(graph,directory):
                 if t.line_spacing_px:p['line_spacing_pt']=t.line_spacing_px*.75
                 node['paragraphs'].append(p)
             ir['nodes'].append(node)
+    movement=[c['move_members'] for c in chosen if c.get('move_members')]
+    if movement:
+        from .runtime.marked_routes import apply_move_groups
+        apply_move_groups(ir,movement)
     return ir

@@ -123,10 +123,18 @@ def mark_page(source, layout, objects, directory):
     rows.sort(key=lambda r:(r['bbox'][1],r['bbox'][0],r['id']))
     img=Image.open(source).convert('RGB')
     draw=ImageDraw.Draw(img)
+    def can_contain(p):
+        if p['label']!='icon':
+            return p['label']!='text'
+        x,y,w,h=p['bbox']
+        return w>=60 and h>=22 and w>=1.4*h and any(
+            t.get('ocr_line_ids') and t['bbox'][2]*t['bbox'][3]<=.55*w*h
+            and overlap(p['bbox'],t['bbox'])>=.95*t['bbox'][2]*t['bbox'][3] for t in objects)
+    containers=[r for r in rows if can_contain(r)]
     for n,row in enumerate(rows,1):
         x,y,w,h=row['bbox']
         row['mark']=n
-        parents=[p for p in rows if p['id']!=row['id'] and p['label'] not in ('icon','text') and
+        parents=[p for p in containers if p['id']!=row['id'] and
                  p['bbox'][2]*p['bbox'][3]>w*h*1.1 and overlap(row['bbox'],p['bbox'])>=w*h*.95]
         row['parent']=min(parents,key=lambda p:p['bbox'][2]*p['bbox'][3])['id'] if parents else None
         row['intersecting_ocr_ids']=sorted({lid for t in objects if overlap(t['bbox'],row['bbox'])>0 for lid in t.get('ocr_line_ids',[])})
@@ -139,4 +147,39 @@ def mark_page(source, layout, objects, directory):
     img.save(directory/'marks.png')
     write(directory/'marks.json',{'source_sha256':digest(source),'rows':rows})
     return rows
+
+
+def mark_blocks(source, rows, directory):
+    """Partition spatially without renumbering, dropping, or duplicating marks."""
+    with Image.open(source) as im:
+        original=im.convert('RGB')
+    def partition(part):
+        if len(part)<=30:
+            yield part
+            return
+        centers=np.array([[r['bbox'][k]+.5*r['bbox'][k+2] for k in (0,1)] for r in part])
+        axis=int(np.argmax(np.ptp(centers,axis=0)))
+        ordered=[part[i] for i in np.argsort(centers[:,axis],kind='stable')]
+        mid=len(ordered)//2
+        yield from partition(ordered[:mid])
+        yield from partition(ordered[mid:])
+    for n,part in enumerate(partition(rows)):
+        if not part:continue
+        boxes=[r['bbox'] for r in part]
+        l,t=[max(0,int(min(b[k] for b in boxes))-4) for k in (0,1)]
+        r,b=[min(original.size[k],int(np.ceil(max(b[k]+b[k+2] for b in boxes)))+5) for k in (0,1)]
+        tile=original.crop((l,t,r,b))
+        pen=ImageDraw.Draw(tile)
+        for row in part:
+            x,y,w,h=row['bbox']
+            pos=(x-l,y-t)
+            pen.rectangle([*pos,x+w-l,y+h-t],outline='#00659d')
+            label=str(row['mark'])
+            pen.rectangle(pen.textbbox(pos,label),fill='#00659d')
+            pen.text(pos,label,fill='white')
+        pic=directory/f'marks-{n}.png'
+        info=directory/f'marks-{n}.json'
+        tile.save(pic)
+        write(info,[{k:row[k] for k in ('id','mark','label','bbox','parent','text') if k in row} for row in part])
+        yield {'bbox':[l,t,r-l,b-t],'count':len(part)},pic,info
 

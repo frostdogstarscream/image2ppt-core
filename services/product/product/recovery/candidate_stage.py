@@ -75,7 +75,7 @@ def _find_non_colliding_frame(text, payload_bbox, spacing, max_font_px, max_glyp
     return best
 
 
-def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_size=None, exploratory=False):
+def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_size=None, exploratory=False, fit_origin=False):
     """Fit installed font bearings/leading within this local replacement scope."""
     used = {text.style, *[span.style for span in text.spans]}
     records = {(font['family'], font['bold']): font for font in fonts['fonts']}
@@ -115,13 +115,23 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
         clamped = _find_non_colliding_frame(
             text, payload['bbox'], spacing, max_font_px, max_glyph_bottom, max_line_len,
             source_size, protected, minimum_size)
+        # An OCR box begins at visible ink. The native font also needs top bearing.
+        # Move only that transparent frame, leaving the source mask and peer masks fixed.
+        if clamped is None and fit_origin and len(lines) == 1:
+            for dy in range(1, min(bearing, math.ceil(max_font_px * .22)) + 1):
+                proposed = [left, top-dy, width, height+dy]
+                clamped = _find_non_colliding_frame(
+                    text, proposed, spacing, max_font_px, max_glyph_bottom, max_line_len,
+                    source_size, protected, minimum_size)
+                if clamped is not None:
+                    break
         if clamped is None:
             raise ValueError('native font frame allowance conflicts with canvas or protected peers')
         payload['bbox'] = clamped
     return payload
 
 
-def stage_background(trial_directory, graph, baseline_directory, fonts, output, *, typography=None, frame_minimum=None):
+def stage_background(trial_directory, graph, baseline_directory, fonts, output, *, typography=None, frame_minimum=None, fit_origin=False):
     """Recompute all local prechecks, then atomically expose one trial directory.
 
     Failed trials leave the baseline and already staged regions untouched.
@@ -168,6 +178,12 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
     if type(reference_ctx) is not int or not 8 <= reference_ctx <= 128:
         raise ValueError('invalid source context width')
     reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx)
+    if ((saved.get('provenance') or {}).get('fit') or {}).get('method') == 'scanline-lateral':
+        from .marked_fields import striped_backing
+        stripe = striped_backing(source,box,context_protected)
+        if stripe is None:
+            raise ValueError('scanline backing no longer corroborated')
+        reference, fit_report = stripe
     completion = TextMaskCompletion.analyze(source, original, protected, box, reference,
                                              glyph_height=styles[text.style].size_px)
     selected = np.array(Image.open(trial_directory/'mask.png').convert('L'))
@@ -192,7 +208,7 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
         raise ValueError('trial writeback mismatch')
     output.parent.mkdir(parents=True, exist_ok=True)
     identity = {'source': graph.source_sha256, 'scene': key(graph.model_dump()), 'text': text.id,
-                'typography':typography,'frame_minimum':frame_minimum,
+                'typography':typography,'frame_minimum':frame_minimum,'fit_origin':fit_origin,
                 'trial_hashes': hashes, 'fonts': key(fonts), 'font_files': font_bindings(graph, fonts),
                 'implementation_sha256': digest(__file__)}
     cid = 'c-'+key(identity)
@@ -217,7 +233,24 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
             definitions=[style.model_dump()]
             styles={**styles,style.id:style};proposed.style=style.id
         frame_options={'minimum_size':frame_minimum['size']} if frame_minimum else {}
-        text_payload = native_frame(proposed, styles, fonts, source.shape[1::-1], protected, box,**frame_options)
+        if fit_origin:
+            frame_options['fit_origin'] = True
+        text_payload = native_frame(proposed, styles, fonts, source.shape[1::-1], protected, box, **frame_options)
+        if fit_origin and proposed.align == 'left' and any(k!=text.id and ids==graph.text.members[text.id]
+                                                         for k,ids in graph.text.members.items()):
+            # Reserve transparent editing room only along a measured blank run.
+            # No source pixel or peer geometry changes when the frame grows.
+            fx,fy,fw,fh = map(round,text_payload['bbox'])
+            x0 = fx+fw
+            room = source[fy:fy+fh,x0:x0+round(styles[text.style].size_px*2)].astype(float)
+            blocked = protected[fy:fy+fh,x0:x0+room.shape[1]]
+            if room.shape[1]>=4:
+                variation = abs(room-np.median(room[:,:4],axis=1,keepdims=True)).max((0,2))
+                # An isolated low-contrast antialias pixel may lie just beyond
+                # the OCR extent. A repeated edge or distinct ink stops growth.
+                gradient = np.percentile(abs(np.diff(room,axis=1,prepend=room[:,:1])).max(2),90,axis=0)
+                clean = (variation<=12) & (gradient<=8) & ~blocked.any(0)
+                text_payload['bbox'][2] += int(np.cumprod(clean).sum())
         fitted=proposed.model_copy(update={'bbox':text_payload['bbox']})
         fitted_styles={fitted.style,*[span.style for span in fitted.spans]}
         font_gate(SimpleNamespace(styles=[styles[i] for i in fitted_styles],texts=[fitted]),fonts)

@@ -57,8 +57,11 @@ class AdaptiveBudget:
     Cost units are configurable operation weights, not an asserted currency
     price. Exhaustion stops new work while keeping completed regional receipts.
     """
-    def __init__(self, store, options=None):
+    def __init__(self, store, options=None, *, model_page=None):
         self.store = store
+        self.model_page = model_page
+        if model_page and not (1 <= model_page[0] <= model_page[1]):
+            raise ValueError('invalid model reservation page')
         self.limits = {**DEFAULTS, **(options or {})}
         if set(self.limits) != set(DEFAULTS) or any(
                 not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v < 0
@@ -71,6 +74,8 @@ class AdaptiveBudget:
                 raise ValueError('budget count must be an integer')
         with store.db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS adaptive_usage (fingerprint TEXT PRIMARY KEY, kind TEXT, units REAL, created REAL)')
+            if model_page:
+                db.execute('CREATE TABLE IF NOT EXISTS adaptive_model_pages (fingerprint TEXT PRIMARY KEY, page INTEGER)')
 
     def reserve(self, kind, identity):
         fingerprint = key({'kind': kind, 'identity': identity})
@@ -84,6 +89,13 @@ class AdaptiveBudget:
                 raise BudgetExceeded('execution time budget exhausted')
             if kind in self.limits and sum(row[0] == kind for row in rows) >= self.limits[kind]:
                 raise BudgetExceeded(kind+' budget exhausted')
+            if kind == 'model_calls' and self.model_page:
+                page, total = self.model_page
+                quotient, remainder = divmod(int(self.limits[kind]), total)
+                used = db.execute('SELECT count(*) FROM adaptive_model_pages WHERE page=?', (page,)).fetchone()[0]
+                if used >= quotient + (page <= remainder):
+                    raise BudgetExceeded(f'page {page} model_calls budget exhausted')
+                db.execute('INSERT INTO adaptive_model_pages VALUES(?,?)', (fingerprint,page))
             units = WEIGHTS.get(kind, 0)
             if sum(row[1] for row in rows)+units > self.limits['cost_units']:
                 raise BudgetExceeded('execution cost-unit budget exhausted')

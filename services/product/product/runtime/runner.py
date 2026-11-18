@@ -53,9 +53,9 @@ def prepare_workspace(job):
     profile=request.get('experiment_profile')
     if profile and profile!='baseline':
         configuration['agents']['image2ppt-runtime']['system'] += (
-            '\nFirst prepare every page sequentially. Request original images, numbered_layout PNGs and numbered_inventory '
-            'from get_evidence. Use mark numbers to choose priority editing fields and their parents on EVERY page before '
-            'bulk processing. Record the plan with plan_marked_page, including independent field roles and movement groups. '
+            '\nFirst prepare every page sequentially. Read the original and use get_evidence on one numbered block image '
+            'and its compact inventory at a time. Keep page-wide mark numbers. Choose fields on EVERY page before '
+            'bulk processing. Record each block with plan_marked_page(append=true), including independent field roles and movement groups. '
             'When a region is missing use inspect_marked_region. Use update_scene to split mixed labels, associate table '
             'row/column and stage the returned priority scene IDs across pages first. Keep intrinsic screenshot UI intact.')
     write(workspace/'opencode.json', configuration)

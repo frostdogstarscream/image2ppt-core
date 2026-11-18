@@ -1,5 +1,6 @@
 """Business tools reuse production perception, recovery and private adapters."""
 import json
+from collections import Counter
 import os
 from pathlib import Path
 import shutil
@@ -109,6 +110,10 @@ class RuntimeService(ExplorationTools):
             page = self.page(state.read(), arguments['page'])
             graph = SceneGraph.model_validate_json(Path(page['scene']).read_text('utf8'))
             from ..parallel_regions import regions
+            marked = str(arguments['page']) in state.read().get('experiment_marks',{})
+            if marked and not arguments.get('full'):
+                return {'version':state.read()['version'],'ownership_counts':dict(Counter(graph.ownership.values())),
+                        'selected_ids':list(graph.selected),'perception_failures':page['failures']}
             diagnostics=[{'object_id':text.id,'owner':graph.ownership[text.id],
                           'ocr_members':graph.text.members.get(text.id,[]),
                           'missing_ocr_members':not graph.text.members.get(text.id)} for text in graph.text.texts
@@ -151,7 +156,7 @@ class RuntimeService(ExplorationTools):
                                       include_region_crops=include_region_crops,
                                       use_inpaint=use_inpaint, verify_office=verify_office)
 
-    def plan_marked_page(self, state, current, directory, *, page, fields):
+    def plan_marked_page(self, state, current, directory, *, page, fields, append=False):
         from ..materialize import write
         path=current.get('experiment_marks',{}).get(str(page))
         if not path:
@@ -164,9 +169,11 @@ class RuntimeService(ExplorationTools):
             parents=[by_mark[n]['id'] for n in field['move_with']]
             plans.append({'id':row['id'],'bbox':row['bbox'],'role':field['role'],
                           'move_with':parents,'route':field['route'],'source_text':row.get('text','')})
-        write(directory/'plan.json',plans)
-        current.setdefault('marked_plans',{})[str(page)]=plans
-        return {'page':page,'fields':plans}
+        previous=current.get('marked_plans',{}).get(str(page),[]) if append else []
+        merged={r['id']:r for r in [*previous,*plans]}
+        write(directory/'plan.json',list(merged.values()))
+        current.setdefault('marked_plans',{})[str(page)]=list(merged.values())
+        return {'page':page,'fields':plans,'planned_count':len(merged)}
 
     def inspect_marked_region(self, state, current, directory, *, page, bbox):
         from ..experiment import detect
@@ -566,6 +573,25 @@ class RuntimeService(ExplorationTools):
                 artifacts = compile_pages(irs, directory/'compiled',
                                           [effective_texts(self.graph(p), ir) for p, ir in zip(current['pages'], irs)])
         binding = {str(p): digest(p) for p in [Path(artifacts['pptx']), *irs]}
+        if current.get('marked_plans'):
+            from xml.etree import ElementTree
+            from zipfile import ZipFile
+            from .marked_routes import bind_plan,route_trace
+            traces=[]
+            with ZipFile(artifacts['pptx']) as deck:
+                for i,page in enumerate(current['pages'],1):
+                    if str(i) not in current['marked_plans']:
+                        continue
+                    graph=self.graph(page)
+                    plans=bind_plan(current['marked_plans'][str(i)],current['experiment_marks'][str(i)],graph,page['snapshot']['path'])
+                    slide=ElementTree.fromstring(deck.read(f'ppt/slides/slide{i}.xml'))
+                    names={n.get('name') for n in slide.iter('{http://schemas.openxmlformats.org/presentationml/2006/main}cNvPr')}
+                    fields=route_trace(plans,graph)
+                    for f in fields:
+                        f['pptx_ids']=sorted(names.intersection(f['selected_ids']))
+                    traces.append({'page':i,'fields':fields})
+            write(directory/'delivery-route-trace.json',{'pptx_sha256':digest(artifacts['pptx']),'pages':traces})
+            binding[str(directory/'delivery-route-trace.json')]=digest(directory/'delivery-route-trace.json')
         current['composition'] = {'artifacts': artifacts, 'files': binding, 'office': {'status': 'NOT_RUN'}}
         current.pop('visual_review', None)
         return {'status': 'COMPOSED', 'pptx_sha256': digest(artifacts['pptx'])}

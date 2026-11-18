@@ -235,7 +235,11 @@ def stage_region_crops(baseline: str | Path, output: str | Path, *, seeds: list[
     released = set(graph.selected)
     released.update(s['id'] for s in seeds or [] if s['kind']=='text')
     handled = {lid for tid in released for lid in graph.text.members.get(tid, [])}
-    protected_boxes = [line['bbox'] for line in ocr_lines or [] if line['id'] not in handled]
+    # Only the single source-refined screenshot may own its enclosed UI lettering.
+    # Draft native fields, boundary-crossing OCR and outside captions stay protected.
+    frame = seeds[0].get('picture_frame') if seeds and len(seeds) == 1 else None
+    protected_boxes = [line['bbox'] for line in ocr_lines or [] if line['id'] not in handled
+                       and not (frame is not None and _contains(frame, line['bbox']))]
     crops, report = plan_region_crops(graph, appearance, seeds, max_area_fraction=max_area_fraction,
                                       protected_text_boxes=protected_boxes)
     if not crops:

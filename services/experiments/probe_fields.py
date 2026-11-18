@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import argparse, json, shutil
+import sys
 from PIL import Image
 import numpy as np
 import win32com.client
@@ -35,19 +36,30 @@ def name_text(s):
         return ""
 
 
-def editable_shapes(shapes, depth=0):
+def named_shapes(shapes, depth=0):
     for shape in shapes:
-        yield shape
+        yield shape.Name, shape
         if shape.HasTable:
             table = shape.Table
             for row in range(1, table.Rows.Count + 1):
                 for col in range(1, table.Columns.Count + 1):
-                    yield table.Cell(row, col).Shape
+                    yield f"{shape.Name}[{row},{col}]", table.Cell(row, col).Shape
         if shape.Type == 6 and depth < 5:
-            yield from editable_shapes(shape.GroupItems, depth + 1)
+            yield from named_shapes(shape.GroupItems, depth + 1)
+
+
+def editable_shapes(shapes):
+    return (shape for _,shape in named_shapes(shapes))
 
 
 def run(pptx, out, cases, single_page=None):
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'product'))
+    from product.resource_lease import lease
+    with lease('office'):
+        return _run_office(pptx,out,cases,single_page)
+
+
+def _run_office(pptx, out, cases, single_page=None):
     out.mkdir(exist_ok=True, parents=True)
     app = win32com.client.DispatchEx("PowerPoint.Application")
     results = []
@@ -67,7 +79,7 @@ def run(pptx, out, cases, single_page=None):
                 sw = pres.PageSetup.SlideWidth
                 shh = pres.PageSetup.SlideHeight
                 matches = []
-                for s in editable_shapes(slide.Shapes):
+                for name,s in named_shapes(slide.Shapes):
                     b = box(s, sw, shh)
                     over = intersects(b, target)
                     area = b[2] * b[3]
@@ -90,14 +102,13 @@ def run(pptx, out, cases, single_page=None):
                         s.Type != 1 or over / max(1, area + ta - over) < 0.65
                     ):
                         continue
-                    matches.append((over / (area + ta - over), s, b))
+                    matches.append((over / (area + ta - over), s, b, name))
                 row = {"page": pg, "target": label, "action": action}
                 results.append(row)
                 if not matches:
                     row["status"] = "NO_TARGET_OBJECT"
                     continue
-                _, shape, b = max(matches, key=lambda item: item[0])
-                row["object"] = shape.Name
+                _, shape, b, row["object"] = max(matches, key=lambda item: item[0])
                 before = out / f"{idx}-before.png"
                 after = out / f"{idx}-after.png"
                 slide.Export(str(before.resolve()), "PNG", 1672, 941)
@@ -145,9 +156,9 @@ def run(pptx, out, cases, single_page=None):
                 slide.Export(str(after.resolve()), "PNG", 1672, 941)
                 if action == "text":
                     row["saved_value"] = any(
-                        normalized(name_text(s)) == normalized(value)
+                        name == row["object"] and normalized(name_text(s)) == normalized(value)
                         and intersects(box(s, sw, shh), b) > 0
-                        for s in editable_shapes(slide.Shapes)
+                        for name,s in named_shapes(slide.Shapes)
                     )
                 if action == "move":
                     shifted = [
@@ -173,7 +184,7 @@ def run(pptx, out, cases, single_page=None):
                     )
                 if action == "delete":
                     row["saved_value"] = all(
-                        s.Name != row["object"] for s in editable_shapes(slide.Shapes)
+                        name != row["object"] for name,_ in named_shapes(slide.Shapes)
                     )
                 if action == "fill":
                     row["saved_value"] = (

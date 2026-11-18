@@ -1,0 +1,96 @@
+"""Locate independent caption fields using both OCR wording and the source separator."""
+
+import re
+
+import numpy as np
+
+from ..parallel_typography import measure_text_appearance
+
+
+def separated_fields(source, text, bbox):
+    parts = re.fullmatch(r'([^|丨｜\n]+)([|丨｜])([^|丨｜\n]+)', text)
+    if not parts or min(len(parts[1].strip()), len(parts[3].strip())) < 2:
+        return []
+    x, y, w, h = map(round, bbox)
+    patch = source[y : y + h, x : x + w].astype(float)
+    if min(w, h) < 8 or patch.shape[:2] != (h, w):
+        return []
+    background = np.median(patch.reshape(-1, 3), axis=0)
+    ink = np.abs(patch - background).max(2) > 65
+    transitions = np.diff(np.pad(ink.any(0).astype(int), 1))
+    runs = list(zip(np.flatnonzero(transitions == 1), np.flatnonzero(transitions == -1)))
+    matches = []
+    for previous, (left, right), following in zip(runs, runs[1:], runs[2:]):
+        if (
+            right - left <= max(2, 0.10 * h)
+            and ink[:, left:right].sum(0).max() >= 0.52 * h
+            and min(left - previous[1], following[0] - right) >= max(3, 0.20 * h)
+        ):
+            matches.append((int(right), int(following[0])))
+    if len(matches) != 1:
+        return []
+    end, start = matches[0]
+    boxes = [[x, y, end + 1, h], [x + start - 1, y, w - start + 1, h]]
+    fields = []
+    for value, box in zip((parts[1] + parts[2], parts[3]), boxes):
+        appearance = measure_text_appearance(source, box)
+        if not appearance:
+            return []
+        fields.append((value, box, appearance['color_hex']))
+    return fields
+
+
+def split_items(source, items):
+    result = []
+    for item in items:
+        fields = (
+            separated_fields(source, item['text'], item['bbox']) if len(item['ocr_line_ids']) == 1 else []
+        )
+        if not fields:
+            result.append(item)
+            continue
+        for index, (value, box, color) in enumerate(fields):
+            rgb = list(bytes.fromhex(color))
+            line = {**item['lines'][0], 'text': value, 'bbox': box, 'rgb': rgb}
+            result.append(
+                {
+                    **item,
+                    'id': item['id'] + ('-detail' if index else ''),
+                    'bbox': box,
+                    'text': value,
+                    'color_hex': color,
+                    'rgb': rgb,
+                    'lines': [line],
+                }
+            )
+    return result
+
+
+def striped_backing(source, box, protected):
+    """Fit a horizontal ramp independently on each scanline, with held-out columns."""
+    x, y, w, h = box
+    margin = 7
+    if x < margin or x + w + margin > source.shape[1] or w < 16:
+        return None
+    left = source[y : y + h, x - margin : x].astype(float)
+    right = source[y : y + h, x + w : x + w + margin].astype(float)
+    blocked = protected[y : y + h]
+    if blocked[:, x - margin : x].any() or blocked[:, x + w : x + w + margin].any():
+        return None
+    a = np.median(left[:, ::2], axis=1)[:, None, :]
+    b = np.median(right[:, ::2], axis=1)[:, None, :]
+    if np.max(np.abs(a - b)) > 18:
+        return None
+    errors = np.concatenate((np.abs(left[:, 1::2] - a), np.abs(right[:, 1::2] - b)), axis=1).max(2)
+    p95 = float(np.percentile(errors, 95))
+    if p95 > 3 or errors.max() > 8:
+        return None
+    ramp = (np.arange(w) + 4) / (w + 7)
+    reference = source.copy()
+    reference[y : y + h, x : x + w] = np.rint(a + (b - a) * ramp[None, :, None]).astype('uint8')
+    return reference, {
+        'method': 'scanline-lateral',
+        'validation_p95_rgb': p95,
+        'validation_pixels': int(errors.size),
+        'margin': margin,
+    }
