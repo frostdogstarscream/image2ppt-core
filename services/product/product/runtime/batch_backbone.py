@@ -777,7 +777,16 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     layout_data: dict | None = None
     layout_status = 'SKIPPED'
     do_layout = bool(run_layers) if run_layout is None else bool(run_layout)
-    if str(page) in current.get('layout', {}) and Path(current['layout'][str(page)]).is_file():
+    request = json.loads((state.job/'request.json').read_text(encoding='utf8'))
+    profile = request.get('experiment_profile')
+    if profile and do_layout and str(page) not in current.get('layout', {}):
+        from ..experiment import detect
+        layout_data = detect(source_path, profile, directory/'model-runs')
+        layout_file = directory/'layout-regions.json'
+        write(layout_file, layout_data)
+        current.setdefault('layout', {})[str(page)] = str(layout_file)
+        layout_status = 'READY' if any(r['status'] in ('candidate','no_candidates') for r in layout_data['models']) else 'UNAVAILABLE'
+    elif str(page) in current.get('layout', {}) and Path(current['layout'][str(page)]).is_file():
         layout_data = json.loads(Path(current['layout'][str(page)]).read_text('utf8'))
         layout_status = 'CACHED'
     elif do_layout and layout_evidence.available():
@@ -920,7 +929,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         'scene_already_existed': bool(existing),
         'layerd_status': layerd_status,
         'layer_images': layer_images,
-        'layout_available': layout_evidence.available(),
+        'layout_available': bool(layout_data) if profile else layout_evidence.available(),
         'layout_status': layout_status,
         'layout_region_count': len((layout_data or {}).get('regions', [])),
         'layout_pictorial_regions': [
@@ -941,6 +950,14 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         'styles': final_styles,
         'items': measured_items,
     }
+    if profile and profile!='baseline':
+        from ..experiment import mark_page
+        layout = layout_data or {'regions':[]}
+        marks = mark_page(source_path, layout, [*measured_items,*asset_summaries], directory)
+        current.setdefault('experiment_marks',{})[str(page)] = str(directory/'marks.json')
+        payload['marked_image']=state.register(directory/'marks.png','numbered_layout')
+        payload['mark_inventory']=state.register(directory/'marks.json','numbered_inventory')
+        payload['mark_count']=len(marks)
     write(directory / 'page-evidence.json', payload)
     evidence_ref = state.register(directory / 'page-evidence.json', 'page_evidence_summary')
     return {**payload, 'evidence': evidence_ref}
@@ -1013,6 +1030,7 @@ def _chain_stage_from_spec(
     unrecoverable_text_ids: set[str] | None = None,
     wanted_filter: set[str] | None,
     sam_enabled: bool,
+    experiment_profile: str | None = None,
 ) -> tuple[Path, list[str], list[dict]]:
     from .. import layout_evidence, matting
     from ..object_stage import infer_sam
@@ -1149,6 +1167,19 @@ def _chain_stage_from_spec(
                         choices.append(('rmbg2',res_matte))
                     except Exception as exc:
                         choices.append(('rmbg2',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
+                for op in ('vitmatte','local-layerd'):
+                    if experiment_profile not in (op,'combined'):
+                        continue
+                    if op=='vitmatte' and not compare:
+                        continue
+                    if op=='local-layerd' and any(c.get('status')=='CANDIDATE_READY' for _,c in choices):
+                        continue
+                    try:
+                        candidate=retry_asset_extraction(active_graph,asset.id,source_path,layers_dir,
+                            cur_base,step_dir/op,strategy=op)
+                        choices.append((op,candidate))
+                    except (ValueError, OSError, RuntimeError) as exc:
+                        choices.append((op,{'status':'UNAVAILABLE','reason':str(exc)[:300]}))
                 scored = []
                 for strategy, candidate in choices:
                     if candidate.get('status') != 'CANDIDATE_READY':
@@ -1173,6 +1204,12 @@ def _chain_stage_from_spec(
                     )
                     cur_base = ir.parent
                     staged_ids.append(asset.id)
+                    if compare and experiment_profile in ('vtracer','combined'):
+                        from ..experiment_assets import trace_asset
+                        try:
+                            trace_asset(Path(res['candidate_directory'])/'asset.png',cur_base,asset.id,step_dir/'trace')
+                        except (ValueError, RuntimeError, OSError, ImportError) as exc:
+                            write(step_dir/'trace-failure.json',{'reason':str(exc)[:300]})
                 else:
                     stage_errors.append({
                         'object_id': asset.id, 'kind': 'asset', 'bbox': list(asset.bbox),
@@ -1284,6 +1321,7 @@ def restage_batch_candidate_subset(
         page_cache_dir=Path(spec['cache_dir']),
         directory=directory,
         tag='stage-pass2',
+        experiment_profile=spec.get('experiment_profile'),
         trials_spec=spec['trials'],
         frame_overrides=overrides,
         skip_ids=skip,
@@ -1340,6 +1378,11 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     from ..recovery.region_candidates import adaptive_candidates
     from .background import inpaint_service
 
+    request=json.loads((state.job/'request.json').read_text(encoding='utf8'))
+    if request.get('experiment_profile') not in (None,'baseline'):
+        missing=[i for i in range(1,len(request['sources'])+1) if not current.get('marked_plans',{}).get(str(i))]
+        if missing:
+            return {'status':'PAGE_PLANS_REQUIRED','pages':missing}
     row = service.page(current, page)
     initial_graph = service.graph(row)
     if 'fonts' not in current:
@@ -1457,6 +1500,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         page_cache_dir=directory,
         directory=directory,
         tag='stage-pass1',
+        experiment_profile=request.get('experiment_profile'),
         trials_spec=trials_spec,
         frame_overrides={},
         skip_ids=set(),
@@ -1497,6 +1541,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         'files': {str(p): digest(p) for p in final_base.rglob('*') if p.is_file()},
         'batch_spec': {
             'initial_baseline': str(initial_baseline),
+            'experiment_profile':request.get('experiment_profile'),
             'cache_dir': str(directory),
             'trials': trials_spec,
             'pass1_failed_ids': pass1_failed_ids,

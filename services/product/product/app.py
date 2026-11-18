@@ -237,7 +237,16 @@ def create_app(root=None, token=None, run_worker=True):
     @app.post('/api/v1/jobs',status_code=202,dependencies=[Depends(auth)])
     def submit(request:Request,files:list[UploadFile]=File(...),object_extraction:str='default',pipeline_mode:str='parallel_review',
                orchestrator:str='pipeline',goal:str='Restore these images as an editable PPTX.',fresh_perception:bool=True,
-               agent_steps:int=64,runtime_seconds:int=7200,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=False,agent_model:str|None=None):
+               experiment_profile:str|None=None,agent_steps:int|None=None,runtime_seconds:int|None=None,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=False,agent_model:str|None=None):
+        from .experiment import PROFILES
+        if experiment_profile is not None:
+            if experiment_profile not in PROFILES or tool_profile!='all':
+                raise HTTPException(422,'unsupported experiment profile or tool catalog')
+            if agent_model not in (None,'hy4') or os.environ.get('IMAGE2PPT_AGENT_PROVIDER')!='opencode_go':
+                raise HTTPException(422,'comparison requires OpenCode Go hy4')
+            orchestrator,agent_model='opencode','hy4'
+        agent_steps = agent_steps if agent_steps is not None else (192 if experiment_profile else 64)
+        runtime_seconds = runtime_seconds if runtime_seconds is not None else (10800 if experiment_profile else 7200)
         if agent_model is not None and ('..' in agent_model or not re.fullmatch(r'[A-Za-z0-9._:-]{1,40}(?:/[A-Za-z0-9._:-]{1,60})?',agent_model)):raise HTTPException(422,'模型标识格式无效')
         if request.url.path=='/api/v1/jobs' and orchestrator=='pipeline':orchestrator='opencode'
         if os.environ.get('IMAGE2PPT_DEFAULT_ORCHESTRATOR')=='opencode' and orchestrator=='pipeline':orchestrator='opencode'
@@ -248,7 +257,7 @@ def create_app(root=None, token=None, run_worker=True):
         except ValueError:raise HTTPException(422,'未知对象提取模式') from None
         max_pages=32 if orchestrator=='opencode' else 12
         if not 1<=len(files)<=max_pages:raise HTTPException(422,f'请上传 1–{max_pages} 张图片')
-        if not (1<=agent_steps<=128 and 60<=runtime_seconds<=21600 and 1<=candidate_limit<=12
+        if not (1<=agent_steps<=(192 if experiment_profile else 128) and 60<=runtime_seconds<=21600 and 1<=candidate_limit<=12
                 and 0<=model_calls<=200 and 1<=office_validations<=200):raise HTTPException(422,'执行预算超出支持范围')
         from .pipeline import settings
         try:settings()
@@ -289,7 +298,7 @@ def create_app(root=None, token=None, run_worker=True):
                                      'orchestrator':orchestrator,'visual_review_backend':'opencode' if orchestrator=='opencode' else 'go',
                                      'goal':goal,'fresh_perception':fresh_perception,'candidate_engine':'r12-regional' if orchestrator=='opencode' else 'off',
                                      'agent_steps':agent_steps,'runtime_seconds':runtime_seconds,
-                                     'tool_profile':tool_profile,
+                                     'tool_profile':tool_profile, **({'experiment_profile':experiment_profile} if experiment_profile else {}),
                                      'agent_thinking':agent_thinking,
                                      **({'adaptive_budget':{'region_candidates':min(2,candidate_limit),'complex_region_candidates':candidate_limit,
                                          'model_calls':model_calls,'office_validations':office_validations,'max_seconds':runtime_seconds}} if orchestrator=='opencode' else {})})

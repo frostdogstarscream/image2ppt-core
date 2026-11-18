@@ -59,7 +59,13 @@ def schemas():
     page = {'type': 'integer', 'minimum': 1}
     strings = {'type': 'array', 'items': string}
     region = {'page': page, 'object_id': string}
+    plan_field={'type':'object','additionalProperties':False,'required':['mark','role','move_with','route'],
+                'properties':{'mark':{'type':'integer','minimum':1},'role':string,
+                              'move_with':{'type':'array','items':{'type':'integer','minimum':1}},
+                              'route':{'enum':['text','surface','asset','table','preserve']}}}
     fields = {
+        'plan_marked_page':{'page':page,'fields':{'type':'array','items':plan_field,'maxItems':150}},
+        'inspect_marked_region':{'page':page,'bbox':{'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4}},
         'list_evidence': {'role':string,'limit':{'type':'integer','minimum':1,'maximum':100}},
         'inspect_scene': {'page': {'type': 'integer', 'minimum': 1}},
         'rebuild_region': {'page': {'type': 'integer', 'minimum': 1}, 'object_id': string,
@@ -189,6 +195,8 @@ def create_server(root, bound_job=None):
             profile=request.get('tool_profile','all')
         shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region',
                    'prepare_page_evidence','batch_reconstruct_page'} if profile=='basic' else set()
+        if bound_job and request.get('experiment_profile') in (None,'baseline'):
+            shortcuts.update(('plan_marked_page','inspect_marked_region'))
         tools = [tool for tool in schemas() if tool.name not in shortcuts]
         if bound_job:
             for tool in tools:

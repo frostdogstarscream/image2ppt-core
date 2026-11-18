@@ -28,6 +28,9 @@ TOOLS += ('record_observation', 'list_evidence', 'get_progress',
           'prepare_page_evidence', 'batch_reconstruct_page', 'crop_region')
 
 
+TOOLS += ('plan_marked_page','inspect_marked_region')
+
+
 class VisualReview(BaseModel):
     model_config = ConfigDict(extra='forbid')
     passed: bool
@@ -94,6 +97,8 @@ class RuntimeService(ExplorationTools):
             request=json.loads((state.job/'request.json').read_text('utf8'))
             shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region',
                        'prepare_page_evidence','batch_reconstruct_page'} if request.get('tool_profile')=='basic' else set()
+            if request.get('experiment_profile') in (None,'baseline'):
+                shortcuts.update(('plan_marked_page','inspect_marked_region'))
             result['tool_catalog'] = [name for name in TOOLS if name not in shortcuts]
             result['goal'] = json.loads((state.job/'request.json').read_text('utf8')).get('goal', 'Faithful editable PPTX')
             result['budget']={'remaining_seconds':state.remaining_seconds(),
@@ -145,6 +150,50 @@ class RuntimeService(ExplorationTools):
                                       include_assets=include_assets, include_containers=include_containers,
                                       include_region_crops=include_region_crops,
                                       use_inpaint=use_inpaint, verify_office=verify_office)
+
+    def plan_marked_page(self, state, current, directory, *, page, fields):
+        from ..materialize import write
+        path=current.get('experiment_marks',{}).get(str(page))
+        if not path:
+            raise ValueError('prepare numbered evidence for this page first')
+        rows=json.loads(Path(path).read_text(encoding='utf8'))['rows']
+        by_mark={r['mark']:r for r in rows}
+        plans=[]
+        for field in fields:
+            row=by_mark[field['mark']]
+            parents=[by_mark[n]['id'] for n in field['move_with']]
+            plans.append({'id':row['id'],'bbox':row['bbox'],'role':field['role'],
+                          'move_with':parents,'route':field['route'],'source_text':row.get('text','')})
+        write(directory/'plan.json',plans)
+        current.setdefault('marked_plans',{})[str(page)]=plans
+        return {'page':page,'fields':plans}
+
+    def inspect_marked_region(self, state, current, directory, *, page, bbox):
+        from ..experiment import detect
+        source=self.source(state,page)
+        request=json.loads((state.job/'request.json').read_text(encoding='utf8'))
+        profile=request.get('experiment_profile')
+        if profile in (None,'baseline'):
+            raise ValueError('local numbered inspection requires a marked profile')
+        from PIL import Image
+        with Image.open(source) as im:
+            x,y,w,h=bbox
+            if min(x,y)<0 or min(w,h)<=0 or x+w>im.width or y+h>im.height:
+                raise ValueError('invalid local inspection window')
+        data=detect(source,profile,directory/'models',bbox)
+        inventory=Path(current['experiment_marks'][str(page)])
+        old=json.loads(inventory.read_text(encoding='utf8'))
+        previous={r['id']:r for r in old['rows']}
+        next_mark=max((r['mark'] for r in previous.values()),default=0)+1
+        for row in data['regions']:
+            if row['id'] not in previous:
+                row['mark']=next_mark
+                next_mark+=1
+                previous[row['id']]=row
+        old['rows']=list(previous.values())
+        write(directory/'marks.json',old)
+        current['experiment_marks'][str(page)]=str(directory/'marks.json')
+        return {'detected':[previous[r['id']] for r in data['regions']], 'models':data['models']}
 
     def crop_region(self, state, current, directory, *, page, object_ids=None, bbox=None, allow_movable=True, include_in_place=False):
         from ..recovery.region_crop import stage_region_crops

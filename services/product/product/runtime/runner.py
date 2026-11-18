@@ -50,6 +50,14 @@ def prepare_workspace(job):
             'command': [sys.executable, '-m', 'product.runtime.mcp_server', '--root', str(job.parent), '--job', job.name],
             'cwd': str(ROOT), 'environment': {'PYTHONPATH': str(ROOT/'services/product')},
             'timeout': 3600000}}}}
+    profile=request.get('experiment_profile')
+    if profile and profile!='baseline':
+        configuration['agents']['image2ppt-runtime']['system'] += (
+            '\nFirst prepare every page sequentially. Request original images, numbered_layout PNGs and numbered_inventory '
+            'from get_evidence. Use mark numbers to choose priority editing fields and their parents on EVERY page before '
+            'bulk processing. Record the plan with plan_marked_page, including independent field roles and movement groups. '
+            'When a region is missing use inspect_marked_region. Use update_scene to split mixed labels, associate table '
+            'row/column and stage the returned priority scene IDs across pages first. Keep intrinsic screenshot UI intact.')
     write(workspace/'opencode.json', configuration)
     return workspace
 
