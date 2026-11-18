@@ -2,6 +2,7 @@
 import os
 
 
+DEFAULT_GO_MODEL='hy4'
 GO_BASE_URL='https://opencode.ai/inference/go/openai/v1'
 
 
@@ -17,7 +18,7 @@ def configure_model(job=None):
         key=os.environ.get('IMAGE2PPT_AGENT_API_KEY') or os.environ.get('OPENCODE_GO_API_KEY')
         if not key:
             raise RuntimeError('OpenCode Go Agent credential absent')
-        model=request.get('agent_model') or os.environ.get('IMAGE2PPT_AGENT_MODEL','qwen3.8-max')
+        model=request.get('agent_model') or os.environ.get('IMAGE2PPT_AGENT_MODEL',DEFAULT_GO_MODEL)
         os.environ.update(PLANNER_API_KEY=key,PLANNER_BASE_URL=GO_BASE_URL,PLANNER_MODEL=model)
     elif provider!='moma':
         raise ValueError('unsupported Agent inference provider')

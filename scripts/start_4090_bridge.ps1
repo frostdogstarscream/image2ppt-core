@@ -3,8 +3,8 @@
     [string]$BindAddress = '10.36.154.44',
     [string]$RemoteUser = 'cmcc',
     [string]$IdentityFile = (Join-Path $env:USERPROFILE '.ssh\aitoy_tts_4090_ed25519'),
-    [string]$AgentProvider = 'moma',
-    [string]$AgentModel = 'qwen/qwen3.7-flash',
+    [ValidateSet('opencode_go','moma')][string]$AgentProvider = 'opencode_go',
+    [string]$AgentModel = $(if ($AgentProvider -eq 'opencode_go') { 'hy4' } else { 'qwen/qwen3.7-flash' }),
     [int]$LocalTunnelPort = 18772,
     [switch]$BootRemoteIfStopped
 )

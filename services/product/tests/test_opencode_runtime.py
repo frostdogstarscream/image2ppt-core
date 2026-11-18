@@ -446,7 +446,8 @@ def test_transcript_pagination_preserves_full_decision_trace():
     assert [m['id'] for m in result['data']]==['a','b']
 
 
-def test_go_agent_configuration_and_tool_planner_use_the_selected_provider(job,monkeypatch):
+@pytest.mark.parametrize('override,expected', [(None,'hy4'),('qwen3.8-flash','qwen3.8-flash')])
+def test_go_agent_configuration_and_tool_planner_use_the_selected_provider(job,monkeypatch,override,expected):
     from product.runtime.runner import prepare_workspace
     from product.runtime.provider import planning_actor,GO_BASE_URL
     _,_,directory=job
@@ -454,17 +455,20 @@ def test_go_agent_configuration_and_tool_planner_use_the_selected_provider(job,m
         monkeypatch.setenv(name,'initial')
     monkeypatch.setenv('IMAGE2PPT_AGENT_PROVIDER','opencode_go')
     monkeypatch.setenv('IMAGE2PPT_AGENT_API_KEY','synthetic-agent-secret')
-    monkeypatch.setenv('IMAGE2PPT_AGENT_MODEL','qwen3.8-flash')
+    if override:
+        monkeypatch.setenv('IMAGE2PPT_AGENT_MODEL',override)
+    else:
+        monkeypatch.delenv('IMAGE2PPT_AGENT_MODEL',raising=False)
     workspace=prepare_workspace(directory)
     encoded=(workspace/'opencode.json').read_text('utf8')
     configuration=json.loads(encoded)
     provider=configuration['providers']['image2ppt-go']
     assert provider['settings']['baseURL']==GO_BASE_URL
-    assert provider['models']['vision']['modelID']=='qwen3.8-flash'
+    assert provider['models']['vision']['modelID']==expected
     assert provider['models']['vision']['capabilities']['tools'] is True
     assert 'synthetic-agent-secret' not in encoded
     actor=planning_actor(directory)
-    assert actor.model=='qwen3.8-flash' and actor.base_url==GO_BASE_URL
+    assert actor.model==expected and actor.base_url==GO_BASE_URL
     assert actor.session==directory.name
 
 

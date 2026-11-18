@@ -43,9 +43,11 @@ def receive(pipe_name, root):
         'IMAGE2PPT_OPENCODE_BIN':str(app/'opencode.exe')})
     if configuration.get('agent_provider')=='opencode_go':
         os.environ.update(IMAGE2PPT_AGENT_PROVIDER='opencode_go',
-            IMAGE2PPT_AGENT_API_KEY=configuration['agent_api_key'],
-            IMAGE2PPT_AGENT_MODEL=configuration.get('agent_model','qwen3.8-max'))
+            IMAGE2PPT_AGENT_API_KEY=configuration['agent_api_key'])
+        if configuration.get('agent_model'):
+            os.environ['IMAGE2PPT_AGENT_MODEL']=configuration['agent_model']
     else:
+        os.environ['IMAGE2PPT_AGENT_PROVIDER']='moma'
         os.environ['MOMA_API_KEY']=configuration['moma']
         if configuration.get('agent_model'):
             os.environ['IMAGE2PPT_AGENT_MODEL']=configuration['agent_model']

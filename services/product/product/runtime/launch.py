@@ -37,6 +37,10 @@ def main():
     parser.add_argument('--prompt-key', action='store_true')
     options = parser.parse_args()
     configure()
+    from .provider import DEFAULT_GO_MODEL
+    provider=os.environ.setdefault('IMAGE2PPT_AGENT_PROVIDER','opencode_go')
+    if provider=='opencode_go':
+        os.environ.setdefault('IMAGE2PPT_AGENT_MODEL',DEFAULT_GO_MODEL)
     if options.prompt_key:
         go=os.environ.get('IMAGE2PPT_AGENT_PROVIDER')=='opencode_go'
         os.environ['IMAGE2PPT_AGENT_API_KEY' if go else 'MOMA_API_KEY'] = getpass.getpass('Agent model key (hidden): ')

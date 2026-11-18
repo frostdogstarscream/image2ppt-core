@@ -13,7 +13,7 @@
 | 任务存储 | F:/i2oc/jobs |
 | 业务 API | 4090 本机 http://127.0.0.1:8772 |
 | OpenCode Server | 4090 本机 http://127.0.0.1:14100，固定版本 2.1.4 |
-| Agent 模型 | OpenCode Go / qwen3.8-max（默认推荐配置，支持按任务 `--agent-model` 指定） |
+| Agent 模型 | OpenCode Go / hy4（默认推荐配置，支持按任务 `--agent-model` 指定） |
 | MCP | OpenCode 为每个任务启动 Python stdio 服务，绑定 job_id |
 | Office | 当前用户 Windows 电脑上的 PowerPoint Worker，认证后主动领取任务 |
 | LayerD / LaMa | 4090 本机 18847 / 18841；LaMa 路径 /inpaint |
@@ -52,12 +52,12 @@ $job = '<提交返回的32位任务ID>'
 ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -b 10.36.154.44 -i C:/Users/83895/.ssh/aitoy_tts_4090_ed25519 -L 18772:127.0.0.1:8772 cmcc@10.36.154.54
 ```
 
-也可直接运行仓库内置一键联调脚本 `.\scripts\start_4090_bridge.ps1`（自动检测远端 `8772` 状态、按需安全隐藏输入模型密钥拉起 `qwen3.8-max` 远端宿主、建立 `18772` 有线隧道并启动本机 `office_bridge`）。
+也可直接运行仓库内置一键联调脚本 `.\scripts\start_4090_bridge.ps1`（自动检测远端 `8772` 状态、按需安全隐藏输入模型密钥拉起 `hy4` 远端宿主、建立 `18772` 有线隧道并启动本机 `office_bridge`）。
 
 隧道终端保持运行，另开 PowerShell。当前产品工作树下已有 `.runtime/opencode-client.dpapi`，可用同一 Windows 用户的 Python 环境执行：
 
 ```powershell
-python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi submit D:/input/01.png --goal '恢复可编辑 PPTX，保留源内容，执行实际 Office 检查和视觉自检。' --agent-model qwen3.8-max --agent-steps 32 --seconds 1800
+python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi submit D:/input/01.png --goal '恢复可编辑 PPTX，保留源内容，执行实际 Office 检查和视觉自检。' --agent-model hy4 --agent-steps 32 --seconds 1800
 python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi status <任务ID>
 python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi artifacts <任务ID> --output outputs/download-new-job
 ```
@@ -104,7 +104,7 @@ python -m product.runtime.office_bridge --url http://127.0.0.1:18772 --root C:/U
 Set-Location F:/i2oc/app
 $env:PYTHONPATH = 'F:/i2oc/app/services/product'
 $env:IMAGE2PPT_AGENT_PROVIDER = 'opencode_go'
-$env:IMAGE2PPT_AGENT_MODEL = 'qwen3.8-max'
+$env:IMAGE2PPT_AGENT_MODEL = 'hy4'
 $env:IMAGE2PPT_OFFICE_MODE = 'remote'
 $env:IMAGE2PPT_OPENCODE_BIN = 'F:/i2oc/app/opencode.exe'
 $env:IMAGE2PPT_NODE = 'F:/code/image2ppt/.runtime/bundle/node.exe'
