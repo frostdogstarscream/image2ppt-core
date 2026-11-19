@@ -261,3 +261,18 @@ def test_no_remaining_content_means_no_crop(tmp_path):
                                            seeds=[{'id': 'blank', 'kind': 'asset', 'bbox': [100, 10, 20, 10]}])
     assert staged == [] and report[0]['reason'] == 'NO_VISIBLE_CONTENT'
     assert not (tmp_path / 'crops').exists() and graph.selected == {}
+
+
+def test_omni_surface_proposal_uses_current_canvas_and_ring_adapter(tmp_path):
+    from PIL import ImageDraw
+    from product.recovery.marked_surfaces import stage_marked_surfaces
+    source = tmp_path/'input.png'
+    image = Image.new('RGB', (260, 148), 'white')
+    ImageDraw.Draw(image).rounded_rectangle((40, 35, 218, 100), radius=5, fill='#daeaf4', outline='#367cbc', width=2)
+    image.save(source)
+    snap, evidence = branches(source)
+    graph = fuse(snap, evidence, {'lines':[]})
+    base = tmp_path/'base'
+    build(graph, snap, {'fonts':[]}, base, strategy='off', text_candidates=False)
+    ir, ids = stage_marked_surfaces(base, tmp_path/'staged', [{'id':'m-card','bbox':[40,35,179,66]}], set())
+    assert ids and any(obj['type']=='shape' for obj in json.loads(ir.read_text())['nodes'])

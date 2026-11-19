@@ -14,7 +14,8 @@ from ..parallel_contracts import SceneGraph
 from ..parallel_fusion import fuse_incremental_scene
 from ..parallel_rebuild import adapt, array_sha
 from ..parallel_store import key
-from .container_stage import _discover_candidates, _estimate_canvas_bg, _hex, _ring_parent_bg
+from .container_stage import _discover_candidates, _ring_parent_patch
+from .native_shapes import estimate_canvas_field, hex_rgb as _hex
 from .marked_ownership import record_claims
 
 
@@ -53,10 +54,9 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
     if digest(src) != graph.source_sha256 or digest(plate_path) != plate_ref['sha256']:
         raise ValueError('stale card source or plate')
     plate = np.array(Image.open(plate_path).convert('RGBA'))
-    canvas, error = _estimate_canvas_bg(plate[..., :3])
-    if error > 6:
-        return baseline / 'slideir.json', []
-    boxes = [b for k, b in _discover_candidates(plate[..., :3], canvas) if k == 'box']
+    canvas, _, scenery, flat = estimate_canvas_field(plate[..., :3])
+    boxes = [b for k, b in _discover_candidates(plate[..., :3], canvas, scenery, is_flat_canvas=flat)
+             if k == 'box']
     staged = []
     for field in routes:
         box = max(boxes, key=lambda b: iou(b, field['bbox']), default=None)
@@ -73,10 +73,11 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         ):
             continue
         patch = plate[y : y + h, x : x + w, :3].copy()
-        ring = _ring_parent_bg(plate[..., :3], box)
-        if not ring or ring[1] > 4:
+        ring = _ring_parent_patch(plate[..., :3], canvas, box)
+        if ring is None or ring[2] > 4 or scenery[y:y+h,x:x+w].any():
             continue
-        parent = np.rint(ring[0]).astype(np.uint8)
+        parent_patch = np.clip(np.rint(ring[0]), 0, 255).astype(np.uint8)
+        parent = np.clip(np.rint(ring[1]), 0, 255).astype(np.uint8)
         fit = _fit(patch, parent)
         if fit is None:
             continue
@@ -105,6 +106,8 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         sample, paper, face = patch.astype(float), parent.astype(float), fill.astype(float)
         explain = np.minimum.reduce(
             [
+                _segment_max_err(sample, face, stroke),
+                _segment_max_err(sample, paper, stroke),
                 _segment_max_err(sample, face, stronger),
                 _segment_max_err(sample, paper, stronger),
                 _segment_max_err(sample, paper, face),
@@ -183,7 +186,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
             shutil.copytree(baseline, output)
         graph = fused
         for identifier, kind, bbox, local_mask, backing in [
-            (sid, 'surface', box, ~(ink | owned), parent)
+            (sid, 'surface', box, ~(ink | owned), parent_patch)
         ] + ([(aid, 'asset', ibox, ink[iy : iy + ih, ix : ix + iw], fill)] if assets else []):
             ax, ay, aw, ah = bbox
             mask = np.zeros(plate.shape[:2], bool)
@@ -231,7 +234,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
             graph.selected[identifier] = rec
             graph.transactions.append(rec)
             staged.append(identifier)
-        plate[y : y + h, x : x + w, :3] = parent
+        plate[y : y + h, x : x + w, :3] = parent_patch
     if not staged:
         return baseline / 'slideir.json', []
     Image.fromarray(plate).save(output / plate_path.name)

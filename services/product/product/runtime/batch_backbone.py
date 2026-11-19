@@ -1380,12 +1380,18 @@ def _chain_stage_from_spec(
     surface_routes = [r for r in marked_routes if r['route']=='surface'
                       and (wanted_filter is None or r['id'] in wanted_filter)]
     if include_containers and surface_routes:
-        from ..recovery.marked_surfaces import stage_marked_surfaces
-        card_ir, card_ids = stage_marked_surfaces(cur_base, directory/tag/'marked-cards',
-                                                  surface_routes, skip_ids)
-        if card_ids:
-            cur_base = card_ir.parent
-            staged_ids.extend(card_ids)
+        try:
+            from ..recovery.marked_surfaces import stage_marked_surfaces
+            card_ir, card_ids = stage_marked_surfaces(cur_base, directory/tag/'marked-cards',
+                                                      surface_routes, skip_ids)
+        except (ImportError, OSError, ValueError, RuntimeError) as exc:
+            for proposal in surface_routes:
+                stage_errors.append({'object_id':proposal['id'], 'kind':'surface', 'bbox':proposal['bbox'],
+                                     'failure':classify_exc(exc, 'generation'), 'reason':str(exc)[:300]})
+        else:
+            if card_ids:
+                cur_base = card_ir.parent
+                staged_ids.extend(card_ids)
 
     if include_region_crops and wanted_filter is None:
         from ..recovery.region_crop import collect_crop_seeds, stage_region_crops
