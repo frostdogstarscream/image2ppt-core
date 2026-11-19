@@ -107,18 +107,36 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes):
         return None
     ink = (delta > 12) & ~photos
     # Keep complete islands such as photographs (including their light interiors).
-    contours, _ = cv2.findContours(ink.astype('uint8'), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    solid = (delta > 42) & ~photos
+    contours, _ = cv2.findContours(solid.astype('uint8'), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     for contour in contours:
         ax, ay, aw, ah = cv2.boundingRect(contour)
         if min(aw, ah) >= 12 and aw * ah < 0.55 * w * h and cv2.contourArea(contour) > 0.64 * aw * ah:
             local = np.zeros_like(sample, dtype='uint8')
-            cv2.drawContours(local, [contour], -1, 1, -1)
-            ink |= local.astype(bool)
+            hull = cv2.convexHull(contour)
+            # Large, nearly rectangular picture tiles can have pale details open to
+            # their outer edge. Keep their full convex silhouette opaque on a new fill.
+            picture_tile = (
+                0.06 * w * h < aw * ah
+                and 0.55 < aw / ah < 3.5
+                and cv2.contourArea(hull) > 0.94 * aw * ah
+                and cv2.contourArea(contour) > 0.78 * aw * ah
+            )
+            cv2.drawContours(local, [hull if picture_tile else contour], -1, 1, -1)
+            solid |= local.astype(bool)
+    ink |= solid
     # Where a rounded card meets its page, faint antialiasing belongs to the edge of
     # the shape. Keeping it as movable artwork makes the old outline follow the photo.
     border = np.ones_like(ink)
     border[margin:-margin, margin:-margin] = False
     edge_blend = border & (exterior_error <= 20) & (delta <= 26)
     ink &= ~(photos | edge_blend)
-    rgba = np.dstack([patch, np.uint8(ink) * 255])
+    # Paper tint must follow a new card colour. Preserve full-opacity photo and label
+    # interiors; express the low-contrast shading elsewhere as a translucent tint.
+    opacity = np.where(solid, 1.0, np.minimum(delta / 170.0, 0.24))
+    opacity = np.where(ink, opacity, 0.0)
+    color = field + (patch.astype(float) - field) / np.maximum(opacity[..., None], 1 / 255)
+    rgba = np.dstack(
+        [np.clip(color, 0, 255).round().astype(np.uint8), (opacity * 255).round().astype(np.uint8)]
+    )
     return fill, gradient, field, owned, ink, rgba

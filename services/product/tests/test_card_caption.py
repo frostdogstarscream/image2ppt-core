@@ -54,6 +54,19 @@ def test_conflicting_quantities_are_never_written_as_guesses(old, new):
     assert quantity_changed(old, new)
 
 
+def test_recolor_preserves_pale_picture_details_and_blends_the_paper_tint(tmp_path):
+    patch = np.full((130, 210, 3), 243, dtype=np.uint8)
+    patch[16:29, 32:100] = [225, 238, 245]
+    patch[50:108, 70:150] = [31, 91, 140]
+    patch[50:72, 91:108] = 246
+    parent = np.full_like(patch, 246)
+    result = frame_layers(patch, parent, [0, 0, 210, 130], [], tmp_path, [])
+    assert result is not None
+    rgba = result[-1]
+    assert rgba[60, 100, 3] == 255
+    assert rgba[22, 50, 3] < 64
+
+
 def test_detected_caption_edge_stays_on_slide_when_photo_is_removed():
     from product.recovery.region_crop import _separate_photo_caption
 
