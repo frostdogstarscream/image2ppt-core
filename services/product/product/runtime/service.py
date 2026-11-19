@@ -25,7 +25,8 @@ TOOLS += ('inspect_image', 'crop_image', 'compare_images', 'run_ocr', 'analyze_t
           'create_scene', 'update_scene', 'create_candidate', 'commit_candidate',
           'rollback_region', 'compile_pptx', 'run_image_script', 'run_parallel_pipeline')
 TOOLS += ('record_observation', 'list_evidence', 'get_progress',
-          'prepare_page_evidence', 'batch_reconstruct_page', 'crop_region')
+          'prepare_page_evidence', 'batch_reconstruct_page', 'crop_region',
+          'parse_page_structure', 'audit_delivery')
 
 
 class VisualReview(BaseModel):
@@ -132,10 +133,37 @@ class RuntimeService(ExplorationTools):
     def graph(page):
         return SceneGraph.model_validate_json(Path(page['scene']).read_text('utf8'))
 
-    def prepare_page_evidence(self, state, current, directory, *, page, auto_create_scene=True, run_layers=True, run_layout=None):
+    def prepare_page_evidence(self, state, current, directory, *, page, auto_create_scene=True,
+                              run_layers=True, run_layout=None, run_structure=None):
         from .batch_backbone import prepare_page_evidence
         return prepare_page_evidence(self, state, current, directory, page=page,
-                                     auto_create_scene=auto_create_scene, run_layers=run_layers, run_layout=run_layout)
+                                     auto_create_scene=auto_create_scene, run_layers=run_layers,
+                                     run_layout=run_layout, run_structure=run_structure)
+
+    def parse_page_structure(self, state, current, directory, *, page, use_vlm=True):
+        from .page_structure import parse_page_structure
+        source_path = self.source(state, page)
+        if str(page) not in current.get('ocr', {}):
+            ocr_dir = directory / 'ocr'
+            ocr_dir.mkdir(parents=True, exist_ok=True)
+            self.run_ocr(state, current, ocr_dir, page=page)
+        ocr = json.loads(Path(current['ocr'][str(page)]).read_text('utf8'))
+        fonts = json.loads(Path(current['fonts']).read_text('utf8')) if 'fonts' in current else None
+        layout_file = current.get('layout', {}).get(str(page))
+        layout_data = json.loads(Path(layout_file).read_text('utf8')) if (layout_file and Path(layout_file).is_file()) else None
+        info = parse_page_structure(state, source_path, ocr, layout=layout_data, fonts=fonts, use_vlm=bool(use_vlm))
+        if info.get('applied_ocr_corrections'):
+            proof_file = directory / 'ocr-proofread.json'
+            write(proof_file, ocr)
+            current.setdefault('ocr', {})[str(page)] = str(proof_file)
+        out_file = directory / 'page-structure.json'
+        write(out_file, info)
+        current.setdefault('page_structure', {})[str(page)] = str(out_file)
+        return info
+
+    def audit_delivery(self, state, current, directory, *, use_vlm=True):
+        from .independent_review import run_delivery_audit
+        return run_delivery_audit(self, state, current, directory, use_vlm=bool(use_vlm))
 
     def batch_reconstruct_page(self, state, current, directory, *, page, object_ids=None,
                                include_assets=True, include_containers=True, include_region_crops=False,
@@ -148,7 +176,7 @@ class RuntimeService(ExplorationTools):
                                       use_inpaint=use_inpaint, verify_office=verify_office)
 
     def crop_region(self, state, current, directory, *, page, object_ids=None, bbox=None,
-                    allow_movable=True, allow_move_unsafe=False):
+                    allow_movable=True, allow_move_unsafe=False, upgrade_containers=True):
         from .. import layout_evidence
         from ..recovery.region_crop import collect_crop_seeds, stage_region_crops
         row = self.page(current, page)
@@ -207,6 +235,17 @@ class RuntimeService(ExplorationTools):
         full_report = [*layout_report, *report]
         if not staged_ids:
             return {'status': 'NO_CROPS_STAGED', 'page': page, 'report': full_report}
+        if upgrade_containers and object_ids is None and bbox is None:
+            from ..recovery.container_stage import stage_containers_and_surfaces
+            try:
+                cont_ir, cont_ids = stage_containers_and_surfaces(
+                    crop_ir.parent, directory / 'post-crop-containers', logo_ids=logo_ids
+                )
+                if cont_ids:
+                    crop_ir = cont_ir
+                    staged_ids = [*staged_ids, *cont_ids]
+            except Exception as exc:
+                full_report.append({'id': 'post_crop_containers', 'state': 'SKIPPED', 'reason': str(exc)})
         crop_dir = crop_ir.parent
         cid = 'c-' + key(str(directory.relative_to(state.job)) + ':crop')[:24]
         cand = {
@@ -674,7 +713,10 @@ class RuntimeService(ExplorationTools):
         required.append(state.register(directory/'checks.json', 'hard_checks'))
         composition['required_evidence'] = required
         current.pop('visual_review', None)
-        return {**result, 'required_evidence': required}
+        current.pop('independent_audit', None)
+        from .independent_review import run_delivery_audit
+        det_audit = run_delivery_audit(self, state, current, directory/'scorecard-audit', use_vlm=False)
+        return {**result, 'required_evidence': required, 'scorecard_audit': det_audit}
 
     @staticmethod
     def composition(current):
@@ -750,17 +792,55 @@ class RuntimeService(ExplorationTools):
         office_dir = Path(composition['office']['office_directory'])
         for index in range(1, len(current['pages'])+1):
             shutil.copyfile(office_dir/f'page-{index:02d}-before.png', delivery/f'page-{index:02d}.png')
-        delivery_state = 'SUCCEEDED' if any(editable) else 'REVIEW_REQUIRED'
+        # Ensure independent scorecard & optional stateless VLM audit match exact composition
+        from .independent_review import run_delivery_audit
+        from ..tolerance_config import load_tolerance_config
+        audit = current.get('independent_audit')
+        has_vlm_creds = bool(
+            os.environ.get('IMAGE2PPT_AGENT_API_KEY')
+            or os.environ.get('OPENCODE_GO_API_KEY')
+            or os.environ.get('MOMA_API_KEY')
+        )
+        if not audit or audit.get('composition_sha256') != key(composition):
+            audit = run_delivery_audit(self, state, current, directory/'final-audit', use_vlm=has_vlm_creds)
+        elif has_vlm_creds and all(p.get('vlm_audit', {}).get('status') == 'SKIPPED' for p in audit.get('pages', [])):
+            audit = run_delivery_audit(self, state, current, directory/'final-audit', use_vlm=True)
+
+        recalls = []
+        for p_audit in audit.get('pages', []):
+            pidx = p_audit['page']
+            sc_src = Path(p_audit['scorecard_file'])
+            ow_src = Path(p_audit['owner_preview_file'])
+            if sc_src.is_file():
+                shutil.copyfile(sc_src, delivery/('scorecard.json' if len(current['pages']) == 1 else f'scorecard-{pidx:02d}.json'))
+            if ow_src.is_file():
+                shutil.copyfile(ow_src, delivery/('owner-preview.png' if len(current['pages']) == 1 else f'owner-preview-{pidx:02d}.png'))
+            if p_audit.get('inventory', {}).get('recall') is not None:
+                recalls.append(p_audit['inventory']['recall'])
+
+        tol_cfg = load_tolerance_config()
+        sc_gate = tol_cfg.get('scorecard_gate', {})
+        max_plate = float(sc_gate.get('max_succeeded_raster_plate_content_fraction', 0.85))
+        plate_exceeded = any(
+            float(p.get('summary', {}).get('raster_plate_content_fraction', 0.0)) > max_plate
+            for p in audit.get('pages', [])
+        )
+        audit_ok = bool(audit.get('passed', True)) and not plate_exceeded
+        delivery_state = 'SUCCEEDED' if (any(editable) and audit_ok) else 'REVIEW_REQUIRED'
+        avg_recall = round(sum(recalls) / len(recalls), 4) if recalls else None
         result = {'status': delivery_state, 'completion': status, 'reconstruction_succeeded': any(editable), 'visual_review_backend': 'opencode',
-                  'office_pass': True, 'visual_review': visual, 'pages': len(editable),
+                  'office_pass': True, 'visual_review': visual, 'independent_audit': audit,
+                  'tolerance_profile': tol_cfg.get('profile'),
+                  'pages': len(editable),
                   'editable_objects': [sorted(page) for page in editable],
                   'in_place_region_crops': in_place_crops,
                   'unresolved_objects': [[identifier for identifier in self.graph(page).ownership
                                           if identifier not in chosen]
                                          for page, chosen in zip(current['pages'], raw_selected)],
-                  'recall': None, 'human_acceptance': False, 'automatic_publication': False,
+                  'recall': avg_recall, 'human_acceptance': False, 'automatic_publication': False,
                   'workflow_states': {'candidate_generation': 'COMPLETED', 'regional_commit': 'COMPLETED',
-                                      'final_qa': 'PASS', 'automatic_publication': 'GATED'}}
+                                      'final_qa': 'PASS' if audit_ok else 'REVIEW_REQUIRED',
+                                      'automatic_publication': 'GATED'}}
         write(delivery/'summary.json', result)
         result['artifacts'] = {p.name: digest(p) for p in delivery.iterdir() if p.is_file()}
         write(state.job/'result.json', result)

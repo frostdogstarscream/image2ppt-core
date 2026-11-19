@@ -6,45 +6,78 @@ from ..object_extract import rectangle
 from .background_adapter import RecoveryBlocked, _sha
 
 
-def fit_gradient(source, bbox, protected, context=14):
+def fit_gradient(source, bbox, protected, context=14, *, allow_vertical: bool = False):
     h, w = source.shape[:2]
     scope = rectangle(bbox, (w, h))
     window = rectangle(bbox, (w, h), pad=context)
-    # The text may sit in a card with horizontal borders immediately above or
-    # below it. Lateral strips stay on the same backing at every sampled row.
-    _, by, _, bh = map(round, bbox)
-    window[:max(0, by)] = False
-    window[min(h, by+bh):] = False
+    bx, by, bw, bh = map(round, bbox)
+    if not allow_vertical:
+        # Default lateral-only mode: stays on the same horizontal rows to avoid
+        # crossing tight card borders above or below a line of text.
+        window[:max(0, by)] = False
+        window[min(h, by+bh):] = False
     yy, xx = np.nonzero(window)
+    if len(xx) == 0:
+        raise RecoveryBlocked('INSUFFICIENT_CONTEXT', 'empty context window')
     x0, x1, y0, y1 = xx.min(), xx.max() + 1, yy.min(), yy.max() + 1
     y, x = np.mgrid[y0:y1, x0:x1]
     nx, ny = (x-x0)/max(1, x1-x0), (y-y0)/max(1, y1-y0)
     rgb = source[y0:y1, x0:x1].astype(float)
     clean = (~scope & window & ~protected)[y0:y1, x0:x1]
-    bx, _, bw, _ = map(round, bbox)
     min_side = max(30, bh*2)
-    if min(int((clean & (x < bx)).sum()), int((clean & (x >= bx+bw)).sum())) < min_side:
-        raise RecoveryBlocked('INSUFFICIENT_CONTEXT', 'both lateral sides need independent unprotected samples')
-    # Exclude discrete high-contrast foreign foreground intrusions (such as an
-    # adjacent unmodeled icon or badge) only when both lateral sides still
-    # retain substantial independent support on the shared continuous backing.
+
+    if not allow_vertical:
+        if min(int((clean & (x < bx)).sum()), int((clean & (x >= bx+bw)).sum())) < min_side:
+            raise RecoveryBlocked('INSUFFICIENT_CONTEXT', 'both lateral sides need independent unprotected samples')
+        left_mask = clean & (x < bx)
+        right_mask = clean & (x >= bx+bw)
+        med_l = np.median(rgb[left_mask], axis=0)
+        med_r = np.median(rgb[right_mask], axis=0)
+        nxl = float(np.median(nx[left_mask]))
+        nxr = float(np.median(nx[right_mask]))
+        slope_x = (med_r - med_l) / max(1e-3, nxr - nxl)
+        seed_pred = med_l + (nx - nxl)[..., None] * slope_x
+        seed_res = rgb - seed_pred
+        near_h = clean & (np.abs(seed_res).max(2) <= 24.0)
+        if int(near_h.sum()) >= 60:
+            ny_c = ny - float(np.median(ny[near_h]))
+            denom = float((ny_c[near_h] ** 2).sum())
+            if denom > 1e-3:
+                slope_y = (ny_c[near_h, None] * seed_res[near_h]).sum(0) / denom
+                seed_pred = seed_pred + ny_c[..., None] * slope_y
+    else:
+        # Multi-sided context mode: when a heading sits next to a sequence number,
+        # icon, or page margin so one lateral strip is blocked, combine consistent
+        # unprotected strips from {left, right, top, bottom}.
+        min_strip = max(24, min(bh, bw))
+        strips = {
+            'left': clean & (x < bx) & (y >= by) & (y < by + bh),
+            'right': clean & (x >= bx + bw) & (y >= by) & (y < by + bh),
+            'top': clean & (y < by),
+            'bottom': clean & (y >= by + bh),
+        }
+        active = {k: m for k, m in strips.items() if int(m.sum()) >= min_strip}
+        if len(active) < 2:
+            raise RecoveryBlocked('INSUFFICIENT_CONTEXT', 'need at least two independent context strips')
+        # Anchor on the largest lateral strip if available, else the largest strip overall.
+        anchor_key = max(
+            active.keys(),
+            key=lambda k: (1 if k in ('left', 'right') else 0, int(active[k].sum())),
+        )
+        anchor_med = np.median(rgb[active[anchor_key]], axis=0)
+        compatible_keys = [
+            k for k, m in active.items()
+            if float(np.abs(np.median(rgb[m], axis=0) - anchor_med).max()) <= 14.0
+        ]
+        if len(compatible_keys) < 2:
+            raise RecoveryBlocked('INSUFFICIENT_CONTEXT', 'context strips disagree across horizontal/vertical boundary')
+        compat_union = np.zeros_like(clean)
+        for k in compatible_keys:
+            compat_union |= active[k]
+        clean = compat_union
+        seed_pred = np.broadcast_to(anchor_med, rgb.shape).copy()
+
     excluded_foreground_pixels = 0
-    left_mask = clean & (x < bx)
-    right_mask = clean & (x >= bx+bw)
-    med_l = np.median(rgb[left_mask], axis=0)
-    med_r = np.median(rgb[right_mask], axis=0)
-    nxl = float(np.median(nx[left_mask]))
-    nxr = float(np.median(nx[right_mask]))
-    slope_x = (med_r - med_l) / max(1e-3, nxr - nxl)
-    seed_pred = med_l + (nx - nxl)[..., None] * slope_x
-    seed_res = rgb - seed_pred
-    near_h = clean & (np.abs(seed_res).max(2) <= 24.0)
-    if int(near_h.sum()) >= 60:
-        ny_c = ny - float(np.median(ny[near_h]))
-        denom = float((ny_c[near_h] ** 2).sum())
-        if denom > 1e-3:
-            slope_y = (ny_c[near_h, None] * seed_res[near_h]).sum(0) / denom
-            seed_pred = seed_pred + ny_c[..., None] * slope_y
     coarse_design = np.stack([np.ones_like(nx), nx, ny], axis=2)
     coarse_keep = clean & (np.abs(rgb - seed_pred).max(2) <= 18.0)
     for _ in range(5):
@@ -65,9 +98,12 @@ def fit_gradient(source, bbox, protected, context=14):
         if foreign.any():
             foreign_dilated = (cv2.dilate(foreign.astype('uint8'), np.ones((3, 3), np.uint8)) > 0) & clean
             candidate_clean = clean & ~foreign_dilated
-            if (int((candidate_clean & (x < bx)).sum()) >= min_side
-                    and int((candidate_clean & (x >= bx+bw)).sum()) >= min_side
-                    and int(candidate_clean.sum()) >= max(130, round(0.55 * int(clean.sum())))):
+            lateral_ok = (
+                allow_vertical
+                or (int((candidate_clean & (x < bx)).sum()) >= min_side
+                    and int((candidate_clean & (x >= bx+bw)).sum()) >= min_side)
+            )
+            if lateral_ok and int(candidate_clean.sum()) >= max(130, round(0.55 * int(clean.sum()))):
                 excluded_foreground_pixels = int(clean.sum() - candidate_clean.sum())
                 clean = candidate_clean
     validation = clean & ((x + 3*y) % 5 == 0)
@@ -97,10 +133,9 @@ def fit_gradient(source, bbox, protected, context=14):
         if fits[-1][0] <= 3:
             break
     p95, degree, prediction, coefficients, errors, keep = min(fits, key=lambda fit: fit[0])
-    # Outliers are reported on the complete independent validation set. A fit
-    # cannot remove inconvenient validation pixels to approve itself.
     report = {'schema': 'LocalGradientBacking/1', 'source_pixels_sha256': _sha(source),
               'bbox': list(bbox), 'context': context, 'degree': degree,
+              'allow_vertical_context': allow_vertical,
               'training_pixels': int(training.sum()), 'inlier_pixels': int(keep.sum()),
               'validation_pixels': int(validation.sum()),
               'excluded_foreground_context_pixels': excluded_foreground_pixels,
@@ -108,7 +143,8 @@ def fit_gradient(source, bbox, protected, context=14):
               'validation_mae_rgb': float(errors[validation].mean()),
               'coefficients': coefficients.tolist(),
               'fit_candidates': [{'degree': fit[1], 'validation_p95_rgb': fit[0]} for fit in fits],
-              'reference': 'independent unprotected lateral source strips outside the text search scope'}
+              'reference': ('multi-sided unprotected context strips' if allow_vertical
+                            else 'independent unprotected lateral source strips outside the text search scope')}
     result = source.copy()
     result[y0:y1, x0:x1] = np.clip(np.rint(prediction), 0, 255).astype('uint8')
     result.setflags(write=False)

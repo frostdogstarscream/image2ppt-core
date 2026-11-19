@@ -22,17 +22,68 @@ def _with_context_provenance(provenance, ctx_w):
     return prov
 
 
+def _safe_background_model(source, box, excluded):
+    try:
+        return background_model(source, box, excluded)
+    except ValueError:
+        height, width = source.shape[:2]
+        x, y, w, h = [int(v) for v in box]
+        strips = []
+        for top, bot in ((max(0, y - 7), max(0, y - 1)), (min(height, y + h + 1), min(height, y + h + 7))):
+            if bot <= top:
+                continue
+            sub = source[top:bot, x:x + w].astype(float)
+            allow = ~excluded[top:bot, x:x + w]
+            vals = sub[allow]
+            if len(vals) >= max(8, w // 4):
+                strips.append(np.median(vals, axis=0))
+        if not strips:
+            raise
+        c0, c1 = strips[0], strips[-1]
+        t = np.linspace(0.0, 1.0, h)[:, None, None]
+        est = np.broadcast_to(c0[None, None, :] * (1.0 - t) + c1[None, None, :] * t, (h, w, 3))
+        return np.clip(np.rint(est), 0, 255).astype(np.uint8), 4.0
+
+
 def _fit_gradient_adaptive(source, box, context_protected):
     last_exc = None
-    for ctx_w in (14, 28, 44):
-        try:
-            ref, fit = fit_gradient(source, box, context_protected, context=ctx_w)
-            return ref, fit, ctx_w
-        except RecoveryBlocked as exc:
-            if exc.code != 'INSUFFICIENT_CONTEXT':
-                raise
-            last_exc = exc
+    best = None
+    for allow_vert, widths in ((False, (14, 28, 44)), (True, (14, 22, 34))):
+        for ctx_w in widths:
+            try:
+                ref, fit = fit_gradient(source, box, context_protected, context=ctx_w, allow_vertical=allow_vert)
+                if fit['validation_p95_rgb'] <= 3.0:
+                    return ref, fit, ctx_w
+                if best is None or fit['validation_p95_rgb'] < best[1]['validation_p95_rgb']:
+                    best = (ref, fit, ctx_w)
+            except RecoveryBlocked as exc:
+                if exc.code != 'INSUFFICIENT_CONTEXT':
+                    raise
+                last_exc = exc
+    if best is not None:
+        return best
     raise last_exc
+
+
+def _fallback_nonplanar_reference(source, box, backing, original, layer_directory):
+    bx, by, bw, bh = box
+    ref = source.copy()
+    ref[by:by + bh, bx:bx + bw] = backing
+    if layer_directory:
+        try:
+            lows = lower_backgrounds(source, layer_directory, original)
+            if lows:
+                ref = lows[0].image.copy()
+        except Exception:
+            pass
+    ref.setflags(write=False)
+    return ref, {
+        'schema': 'NonPlanarFallbackReference/1',
+        'bbox': list(box),
+        'validation_p95_rgb': 99.0,
+        'validation_mae_rgb': 99.0,
+        'reference': 'nonplanar fallback reference; requires LayerD ring or Big-LaMa seam+ablation proof',
+    }, 14
 
 
 def adaptive_candidates(graph, identifier, source_file, layer_directory, directory, *, inpaint=None, budget=None, baseline_directory=None):
@@ -56,12 +107,21 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
     bx,by,bw,bh = box
     if min(bx,by)<0 or bx+bw>source.shape[1] or by+bh>source.shape[0]:
         raise RecoveryBlocked('MASK_INCOMPLETE','text scope leaves source')
-    backing,_ = background_model(source,box,context_protected)
+    try:
+        backing,_ = _safe_background_model(source,box,context_protected)
+    except ValueError as exc:
+        raise RecoveryBlocked('INSUFFICIENT_CONTEXT', str(exc)) from None
     style = next(s for s in graph.text.styles if s.id==text.style)
     ink,_ = glyph_evidence(source,box,style.color,backing)
     original = np.zeros(source.shape[:2],bool)
     original[by:by+bh,bx:bx+bw] = ink
-    reference,fit,ctx_w = _fit_gradient_adaptive(source,box,context_protected)
+    try:
+        reference,fit,ctx_w = _fit_gradient_adaptive(source,box,context_protected)
+    except RecoveryBlocked as exc:
+        if exc.code == 'INSUFFICIENT_CONTEXT' and (layer_directory or inpaint):
+            reference,fit,ctx_w = _fallback_nonplanar_reference(source,box,backing,original,layer_directory)
+        else:
+            raise
     completion = TextMaskCompletion.analyze(source,original,protected,box,reference,glyph_height=style.size_px)
     write(directory/'mask-completion.json',completion.report)
     np.savez_compressed(directory/'mask-evidence.npz',**completion.evidence,**completion.masks)
@@ -156,11 +216,20 @@ def generate(graph,identifier,source_file,layer_directory,directory,*,inpaint=No
     x,y,w,h=map(round,text.bbox);box=[x-3,y-3,w+6,h+6];bx,by,bw,bh=box
     if min(bx,by)<0 or bx+bw>source.shape[1] or by+bh>source.shape[0]:
         raise RecoveryBlocked('MASK_INCOMPLETE','text scope leaves source')
-    backing,_=background_model(source,box,context_protected)
+    try:
+        backing,_=_safe_background_model(source,box,context_protected)
+    except ValueError as exc:
+        raise RecoveryBlocked('INSUFFICIENT_CONTEXT', str(exc)) from None
     style=next(s for s in graph.text.styles if s.id==text.style)
     ink,_=glyph_evidence(source,box,style.color,backing)
     original=np.zeros(source.shape[:2],bool);original[by:by+bh,bx:bx+bw]=ink
-    reference,fit,ctx_w=_fit_gradient_adaptive(source,box,context_protected)
+    try:
+        reference,fit,ctx_w=_fit_gradient_adaptive(source,box,context_protected)
+    except RecoveryBlocked as exc:
+        if exc.code == 'INSUFFICIENT_CONTEXT' and (layer_directory or inpaint):
+            reference,fit,ctx_w=_fallback_nonplanar_reference(source,box,backing,original,layer_directory)
+        else:
+            raise
     completion=TextMaskCompletion.analyze(source,original,protected,box,reference,glyph_height=style.size_px)
     write(directory/'mask-completion.json',completion.report)
     np.savez_compressed(directory/'mask-evidence.npz',**completion.evidence,**completion.masks)

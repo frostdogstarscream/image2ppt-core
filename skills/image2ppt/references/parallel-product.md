@@ -2,9 +2,13 @@
 
 ## Entrypoints and evidence
 
-Run from the worktree that contains `services/product/product/parallel_pipeline.py`. Read `services/product/PARALLEL_R10.md` there for current runtime configuration. Inspect CLI `--help` before adapting commands. Typical PowerShell entrypoints are:
+Run from the product worktree. The primary automatic mainline is the OpenCode runtime (`services/product/OPENCODE_RUNTIME.md`, `/api/v1/jobs`, `services/product/opencode_client.py`, and `skills/image2ppt-runtime/SKILL.md`), with two-tier hard-safety vs soft-fidelity gates configured in `configs/fidelity_tolerance.json`. `services/product/product/parallel_pipeline.py` (`PARALLEL_R10.md`) is retained as a frozen comparison baseline. Inspect CLI `--help` before adapting commands. Typical PowerShell entrypoints are:
 
 ```powershell
+# Primary OpenCode mainline (against 4090 / local tunnel):
+.\scripts\start_4090_bridge.ps1
+python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi submit C:/slides/page.png --tool-profile all
+# Frozen r10/R12 comparison baseline:
 python services/product/launch.py --port 8770
 python services/product/run_local.py --image C:/slides/page.png --output outputs/new-job --pipeline-mode parallel_review --object-extraction auto --prompt-key
 python services/product/run_parallel_baseline.py <baseline.json> <new-output-directory> --prompt-keys

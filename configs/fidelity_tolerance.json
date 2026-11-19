@@ -1,0 +1,37 @@
+{
+  "schema": "FidelityTolerance/1",
+  "profile": "opencode_native_first_v1",
+  "hard_gates": {
+    "forbid_duplicate_text": true,
+    "forbid_unknown_erasure": true,
+    "forbid_residual_ink_ghost": true,
+    "require_actual_office": true
+  },
+  "fidelity": {
+    "max_delta_e2000_p95": 10.0,
+    "hard_max_delta_e2000_p95": 26.0,
+    "min_ssim": 0.85,
+    "hard_min_ssim": 0.72,
+    "max_mae_rgb": 12.0
+  },
+  "residual_gate": {
+    "plate_backing_rgb": 8.0,
+    "native_surface_backing_rgb": 26.0,
+    "source_ink_contrast_rgb": 12.0
+  },
+  "shape_fitting": {
+    "solid_interior_p95_rgb": 13.5,
+    "gradient_interior_p95_rgb": 16.5,
+    "border_segment_max_rgb": 15.0,
+    "max_unexplained_pixel_fraction": 0.035,
+    "max_unexplained_component_min_side_px": 4,
+    "max_unexplained_component_area_px": 20,
+    "shadow_halo_pad_px": 7,
+    "shadow_max_rgb_diff": 28.0
+  },
+  "scorecard_gate": {
+    "target_raster_plate_content_fraction": 0.15,
+    "warn_raster_plate_content_fraction": 0.35,
+    "max_succeeded_raster_plate_content_fraction": 0.85
+  }
+}

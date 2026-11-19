@@ -5,7 +5,7 @@ description: Develop, debug, run and validate the Image2PPT parallel_pipeline au
 
 # Image2PPT automatic product engineering
 
-The primary workflow is the r10 automatic product: `product.parallel_pipeline.run`. Codex develops and diagnoses the product; the backend performs planning and reconstruction. **Do not hand-author SlideIR, manually substitute a page plan, or manually assemble a better-looking deck in place of automatic product planning.** Such an output cannot count as an automatic regression result. Diagnostic fixtures and explicitly requested manual comparisons must be labeled and kept separate.
+The primary automatic product mainline is the OpenCode runtime (`orchestrator=opencode`, `/api/v1/jobs`, `services/product/opencode_client.py`, and `skills/image2ppt-runtime/SKILL.md`), targeting maximally native-editable output (`text`, `shape` with solid/gradient/preset geometry, `chart`, `table`, and independent image modules) under the two-tier safety/tolerance config (`configs/fidelity_tolerance.json`). The r10/R12 pipeline (`product.parallel_pipeline.run`) is retained as a frozen comparison baseline. Codex develops and diagnoses the product; the backend performs planning and reconstruction. **Do not hand-author SlideIR, manually substitute a page plan, or manually assemble a better-looking deck in place of automatic product planning.** Such an output cannot count as an automatic regression result. Diagnostic fixtures and explicitly requested manual comparisons must be labeled and kept separate.
 
 Preserve source wording, numbers, hierarchy, layout, colors and proportions. Preserve originals, historical outputs, existing services and unrelated worktree changes. Use the existing fixed compiler and public SlideIR contract.
 

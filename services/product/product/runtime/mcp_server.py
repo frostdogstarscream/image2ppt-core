@@ -48,9 +48,11 @@ DESCRIPTION.update({
     'validate_office':'With candidate_id, return actual preview edit diagnostics without approval. With no candidate_id, validate final composition.',
     'record_observation':'Record Agent findings, uncertainty and next action on arbitrary task evidence, including failed experiments.',
     'commit_candidate':'Submit a candidate through source-owner, content and actual-edit safety checks. Exploratory preview approval never bypasses these checks.',
-    'prepare_page_evidence':'Run deterministic local OCR, optional LayerD decomposition and PP-DocLayout detection, pixel-measured foreground color/size extraction, decorative affix splitting, and page-level style clustering in one step. Initializes the RESOLVED draft scene by default.',
-    'batch_reconstruct_page':'Reconstruct all (or selected) uncommitted RESOLVED scene objects in parallel, stage source-safe textboxes, transparent PNG assets, and container cards without pre-empting repairable texts with region crops (optional include_region_crops=true), run a single batch PowerPoint verification with per-object defect isolation and transparent-frame overflow repair, and return a VALIDATED batch candidate_id (requiring commit_candidate with expected_version to formally commit) plus a compact failed_regions digest.',
-    'crop_region':'Stage post-repair movable fallback crops (auto mode when object_ids and bbox are omitted, protecting repairable texts) or targeted crops for specified object_ids/bbox. Eligible transparent crops upgrade to RGBA assets; MOVE_UNSAFE in-place crops require allow_move_unsafe=true. Returns a STAGED_LOCAL candidate for commit_candidate.'})
+    'prepare_page_evidence':'Run deterministic local OCR, optional LayerD decomposition, PP-DocLayout detection, VLM OCR typo proofreading & object inventory, pixel-measured color/size extraction, decorative affix splitting, and style clustering in one step. Initializes the RESOLVED draft scene by default.',
+    'batch_reconstruct_page':'Reconstruct all (or selected) uncommitted RESOLVED scene objects in parallel, stage source-safe textboxes, transparent PNG assets, native charts, and solid/gradient/preset native shapes (`roundRect`, `pentagon`, `chevron`, `ellipse`, `rect`), run batch PowerPoint verification with per-object defect isolation, and return a VALIDATED batch candidate_id (requiring commit_candidate with expected_version) plus a failed_regions digest.',
+    'crop_region':'Stage post-repair movable fallback crops (auto mode when object_ids and bbox are omitted, protecting repairable texts) and upgrade newly cleaned enclosing cards into native shapes. Eligible transparent crops upgrade to RGBA assets; MOVE_UNSAFE in-place crops require allow_move_unsafe=true. Returns a STAGED_LOCAL candidate for commit_candidate.',
+    'parse_page_structure':'Run VLM + deterministic page structure inventory and pixel-verified OCR typo proofreading for a page, returning `PageStructureInventory/1` denominator and verified OCR corrections.',
+    'audit_delivery':'Run independent `PageScorecard/1`, inventory recall, two-tier fidelity tolerance check, and stateless VLM visual audit on the composed PPTX and actual PowerPoint render.'})
 
 
 def schemas():
@@ -87,7 +89,7 @@ def schemas():
         'commit_candidate': {'candidate_id': string},
         'rollback_region': {'page': page, 'object_ids': strings, 'reason': string},
         'run_image_script': {'script': string, 'inputs': strings},
-        'prepare_page_evidence': {'page': page, 'auto_create_scene': {'type': 'boolean'}, 'run_layers': {'type': 'boolean'}, 'run_layout': {'type': 'boolean'}},
+        'prepare_page_evidence': {'page': page, 'auto_create_scene': {'type': 'boolean'}, 'run_layers': {'type': 'boolean'}, 'run_layout': {'type': 'boolean'}, 'run_structure': {'type': 'boolean'}},
         'batch_reconstruct_page': {'page': page, 'object_ids': strings, 'include_assets': {'type': 'boolean'},
                                    'include_containers': {'type': 'boolean'},
                                    'include_region_crops': {'type': 'boolean'},
@@ -96,7 +98,10 @@ def schemas():
         'crop_region': {'page': page, 'object_ids': strings,
                         'bbox': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 4, 'maxItems': 4},
                         'allow_movable': {'type': 'boolean'},
-                        'allow_move_unsafe': {'type': 'boolean'}}})
+                        'allow_move_unsafe': {'type': 'boolean'},
+                        'upgrade_containers': {'type': 'boolean'}},
+        'parse_page_structure': {'page': page, 'use_vlm': {'type': 'boolean'}},
+        'audit_delivery': {'use_vlm': {'type': 'boolean'}}})
     fields['fit_background'].update(evidence_id=string,bbox={'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},protected_id=string)
     fields['fit_background']['context_width']={'type':'integer','minimum':8,'maximum':128,
         'description':'Unprotected source-strip sampling width in pixels. A changed width supplies different background evidence. All original ownership and fit validation thresholds still apply.'}
@@ -160,10 +165,10 @@ def schemas():
             required.remove('layout_id')
         if name == 'crop_image':
             required.remove('scale')
-        if name in ('prepare_page_evidence', 'batch_reconstruct_page'):
+        if name in ('prepare_page_evidence', 'batch_reconstruct_page', 'parse_page_structure', 'crop_region'):
             required = ['job_id', 'page']
-        if name == 'crop_region':
-            required = ['job_id', 'page']
+        if name == 'audit_delivery':
+            required = ['job_id']
         alternatives={}
         if name=='fit_background':alternatives={'anyOf':[{'required':['page','object_id']},{'required':['evidence_id','bbox']}]}
         if name=='complete_text_mask':alternatives={'anyOf':[{'required':['page','object_id','background_id']},{'required':['evidence_id','original_mask_id','background_id','bbox','glyph_height']}]}

@@ -443,6 +443,16 @@ def adapt(graph,directory):
         elif c['kind']=='asset':
             file=reference(c['asset_reference']);meta=c['payload']
             image(c['id'],c['bbox'],file,'Complete transparent graphic candidate; '+meta['method'],z)
+        elif c['kind']=='chart':
+            meta=c['payload'];ev='ev-'+c['id']
+            ir['evidence'].append({'id':ev,'kind':'shape','bbox':c['bbox'],'description':'Source data chart reconstructed as native PowerPoint chart'})
+            cnode={'id':c['id'],'type':'chart','bbox':c['bbox'],'z':z,'evidence_ids':[ev],
+                   'chart_type':meta['chart_type'],'font':meta['font'],
+                   'categories':meta['categories'],'series':meta['series']}
+            if meta.get('title'):cnode['title']=meta['title']
+            if 'has_legend' in meta:cnode['has_legend']=bool(meta['has_legend'])
+            if meta.get('legend_position'):cnode['legend_position']=meta['legend_position']
+            ir['nodes'].append(cnode)
         elif c['kind']=='text':
             t=next(t for t in graph.text.texts if t.id==c['id']);s=styles[t.style];ev='ev-'+t.id
             ir['evidence'].append({'id':ev,'kind':'text','bbox':t.bbox,'text':t.text})

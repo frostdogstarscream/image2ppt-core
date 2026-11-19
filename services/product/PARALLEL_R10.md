@@ -1,6 +1,8 @@
-# r10 独立三分支
+# OpenCode 主线与 r10 对照基线
 
-## OpenCode 自主工具运行路径
+> 当前产品主线已切换至 **OpenCode Runtime**（`orchestrator=opencode`、`/api/v1/jobs`、`services/product/OPENCODE_RUNTIME.md`、`skills/image2ppt-runtime/SKILL.md`），采用两级门禁（`configs/fidelity_tolerance.json`：安全硬门禁保持不变，视觉轻微偏差按容差记入 `minor_deviations`，优先输出全原生 `text`/`shape`/`chart`）。r10/R12（`product.parallel_pipeline.run`）冻结为对照基线保留，不再新增特性。
+
+## OpenCode 自主工具运行路径（当前主线）
 
 `orchestrator=opencode` 与 `visual_review_backend=opencode` 启用独立 Runtime。业务入口为 `/api/v1/jobs`，任务由 OpenCode Session 选择基础 MCP 工具、高级区域工具或流水线快捷工具。OCR、LayerD、SAM、图像观察、背景、Mask 和场景工具可以独立组合。场景归属由已有融合与像素检查推导，候选提交绑定父场景、代码、文件及实际 Office 收据。
 

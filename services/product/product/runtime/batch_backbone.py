@@ -681,9 +681,11 @@ def discover_layerd_assets(source: np.ndarray, layers_dir: Path,
 
 def prepare_page_evidence(service, state, current, directory: Path, *, page: int,
                           auto_create_scene: bool = True, run_layers: bool = True,
-                          run_layout: bool | None = None) -> dict:
-    """Run local OCR, optional LayerD/PP-DocLayout, pixel ink measurement, and style tiering."""
+                          run_layout: bool | None = None,
+                          run_structure: bool | None = None) -> dict:
+    """Run local OCR, optional LayerD/PP-DocLayout, VLM OCR proofreading/inventory, pixel ink measurement, and style tiering."""
     from .. import layout_evidence
+    from .page_structure import parse_page_structure
     source_path = service.source(state, page)
     if str(page) not in current.get('ocr', {}):
         ocr_dir = directory / 'ocr'
@@ -722,6 +724,42 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     if not cjk_family:
         cjk_family = next((f['family'] for f in fonts['fonts'] if f.get('cjk')), 'Arial')
     latin_family = next((f['family'] for f in fonts['fonts'] if f['family'] in ('Arial', 'Segoe UI', 'Calibri')), cjk_family)
+
+    layout_data: dict | None = None
+    layout_status = 'SKIPPED'
+    do_layout = bool(run_layers) if run_layout is None else bool(run_layout)
+    if str(page) in current.get('layout', {}) and Path(current['layout'][str(page)]).is_file():
+        layout_data = json.loads(Path(current['layout'][str(page)]).read_text('utf8'))
+        layout_status = 'CACHED'
+    elif do_layout and layout_evidence.available():
+        try:
+            snap_info = {'path': str(source_path), 'source_sha256': digest(source_path)}
+            layout_data = layout_evidence.detect(snap_info, state.job / 'cache')
+            layout_file = directory / 'layout-regions.json'
+            write(layout_file, layout_data)
+            current.setdefault('layout', {})[str(page)] = str(layout_file)
+            layout_status = 'READY'
+        except Exception as exc:
+            layout_status = f'UNAVAILABLE:{type(exc).__name__}'
+
+    # Run deterministic + optional VLM page structure inventory & pixel-verified OCR proofreading
+    has_vlm_creds = bool(
+        os.environ.get('IMAGE2PPT_AGENT_API_KEY')
+        or os.environ.get('OPENCODE_GO_API_KEY')
+        or os.environ.get('MOMA_API_KEY')
+        or os.environ.get('PLANNER_API_KEY')
+    )
+    do_vlm_structure = (bool(run_layers) and has_vlm_creds) if run_structure is None else bool(run_structure)
+    structure_info = parse_page_structure(
+        state, source_path, ocr, layout=layout_data, assets=[], fonts=fonts, use_vlm=do_vlm_structure
+    )
+    if structure_info.get('applied_ocr_corrections'):
+        proof_ocr_file = directory / 'ocr-proofread.json'
+        write(proof_ocr_file, ocr)
+        current.setdefault('ocr', {})[str(page)] = str(proof_ocr_file)
+    structure_file = directory / 'page-structure.json'
+    write(structure_file, structure_info)
+    current.setdefault('page_structure', {})[str(page)] = str(structure_file)
 
     valid_lines = [row for row in ocr.get('lines', []) if row.get('score', 0) >= 0.85 and row.get('text', '').strip()]
     line_rects = [rectangle(row['bbox'], (w_img, h_img), pad=1) for row in valid_lines]
@@ -768,25 +806,12 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         except Exception:
             immediate_assets, deferred_assets = [], []
 
-    layout_data: dict | None = None
-    layout_status = 'SKIPPED'
-    do_layout = bool(run_layers) if run_layout is None else bool(run_layout)
-    if str(page) in current.get('layout', {}) and Path(current['layout'][str(page)]).is_file():
-        layout_data = json.loads(Path(current['layout'][str(page)]).read_text('utf8'))
-        layout_status = 'CACHED'
-    elif do_layout and layout_evidence.available():
-        try:
-            snap_info = {'path': str(source_path), 'source_sha256': digest(source_path)}
-            layout_data = layout_evidence.detect(snap_info, state.job / 'cache')
-            layout_file = directory / 'layout-regions.json'
-            write(layout_file, layout_data)
-            current.setdefault('layout', {})[str(page)] = str(layout_file)
-            layout_status = 'READY'
-        except Exception as exc:
-            layout_status = f'UNAVAILABLE:{type(exc).__name__}'
     extra_logo_boxes = [
         list(r['bbox']) for r in (layout_data or {}).get('regions', [])
         if r.get('label') in ('header_image', 'seal') and float(r.get('score', 0)) >= 0.5
+    ] + [
+        list(el['bbox']) for el in structure_info.get('elements', [])
+        if el.get('category') == 'logo' and len(el.get('bbox', [])) == 4
     ]
 
     measured_items, scene_relations = _merge_structural_ocr_items(
@@ -932,6 +957,9 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         'scene_relations': scene_relations,
         'backing_summary': {'FLAT': counts.get('FLAT', 0), 'GRADIENT': counts.get('GRADIENT', 0),
                             'COMPLEX': counts.get('COMPLEX', 0)},
+        'page_structure_status': structure_info.get('vlm_status', 'SKIPPED'),
+        'ocr_corrections_applied': structure_info.get('applied_ocr_corrections', []),
+        'inventory_count': len(structure_info.get('elements', [])),
         'styles': final_styles,
         'items': measured_items,
     }
@@ -1159,10 +1187,26 @@ def _chain_stage_from_spec(
                 })
 
     if include_assets and include_containers and staged_ids and wanted_filter is None:
+        from ..recovery.chart_stage import stage_native_charts
         from ..recovery.container_stage import stage_containers_and_surfaces
+        chart_layout = json.loads(Path(layout_path).read_text('utf8')) if (layout_path and Path(layout_path).is_file()) else None
+        if chart_layout:
+            chart_dir = directory / tag / 'charts-staged'
+            try:
+                ch_ir, ch_ids = stage_native_charts(cur_base, chart_dir, layout=chart_layout, fonts=fonts, skip_ids=skip_ids)
+                if ch_ids:
+                    cur_base = ch_ir.parent
+                    staged_ids.extend(ch_ids)
+            except Exception as exc:
+                stage_errors.append({
+                    'object_id': 'charts', 'kind': 'chart', 'bbox': [],
+                    'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
+                })
         cont_dir = directory / tag / 'containers-staged'
         try:
-            cont_ir, cont_ids = stage_containers_and_surfaces(cur_base, cont_dir, skip_ids=skip_ids)
+            cont_ir, cont_ids = stage_containers_and_surfaces(
+                cur_base, cont_dir, skip_ids=skip_ids, logo_ids=logo_ids
+            )
             if cont_ids:
                 cur_base = cont_ir.parent
                 staged_ids.extend(cont_ids)
@@ -1210,6 +1254,15 @@ def _chain_stage_from_spec(
                 if crop_ids:
                     cur_base = crop_ir.parent
                     staged_ids.extend(crop_ids)
+                    if include_containers:
+                        from ..recovery.container_stage import stage_containers_and_surfaces
+                        post_cont_dir = directory / tag / 'post-crop-containers-staged'
+                        pc_ir, pc_ids = stage_containers_and_surfaces(
+                            cur_base, post_cont_dir, skip_ids=skip_ids, logo_ids=logo_ids
+                        )
+                        if pc_ids:
+                            cur_base = pc_ir.parent
+                            staged_ids.extend(pc_ids)
             except Exception as exc:
                 stage_errors.append({
                     'object_id': 'region_crops', 'kind': 'asset', 'bbox': [],
