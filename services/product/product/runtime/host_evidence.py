@@ -54,6 +54,8 @@ def deterministic_plan(rows, relations):
             route, role = 'preserve', 'brand'
         elif r.get('ocr_ids') and label == 'text':
             route, role = 'text', 'field'
+        elif label == 'card_frame':
+            route, role = 'surface', 'card'
         elif label == 'table':
             route, role = 'table', 'table'
         elif label == 'image':

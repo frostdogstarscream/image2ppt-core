@@ -68,85 +68,98 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         if sid in graph.selected or {field['id'], sid} & skip_ids:
             continue
         peers = [r for r in graph.selected.values() if intersection(box, r['bbox'])]
-        if any(
-            r['kind'] != 'text' or intersection(box, r['bbox']) < r['bbox'][2] * r['bbox'][3] for r in peers
-        ):
+        from .layered_card import contained_peers, frame_layers
+        layered = field.get('label') == 'card_frame'
+        if not contained_peers(box, peers):
             continue
-        patch = plate[y : y + h, x : x + w, :3].copy()
+        if layered != any(r['kind']=='asset' for r in peers):
+            continue
+        patch = plate[y:y+h,x:x+w,:3].copy()
         ring = _ring_parent_patch(plate[..., :3], canvas, box)
-        if ring is None or ring[2] > 4 or scenery[y:y+h,x:x+w].any():
+        if ring is None or ring[2] > (8 if layered else 4) or scenery[y:y+h,x:x+w].any():
             continue
         parent_patch = np.clip(np.rint(ring[0]), 0, 255).astype(np.uint8)
         parent = np.clip(np.rint(ring[1]), 0, 255).astype(np.uint8)
-        fit = _fit(patch, parent)
-        if fit is None:
-            continue
-        fill, stroke = fit
-        # Preserve every interior pixel significantly different from the
-        # measured fill in a transparent foreground. Exclude the proven edge.
-        delta = abs(patch.astype(float) - fill).max(2)
-        interior = np.zeros((h, w), bool)
-        interior[4:-4, 4:-4] = True
-        ink = interior & (delta > 6)
-        # Anti-aliased rounded corners belong to the frame. Keep all other
-        # interior ink, including text the reconstruction has yet to recover.
-        radius = min(12, h // 4, w // 4)
-        corners = np.zeros_like(ink)
-        for ys in (slice(0, radius), slice(h - radius, h)):
-            for xs in (slice(0, radius), slice(w - radius, w)):
-                corners[ys, xs] = True
-        ink &= ~corners
-        # An unknown foreground touching an edge invalidates this decomposition.
-        edge = ~interior | corners
-        from .container_stage import _segment_max_err
+        gradient = None
+        if layered:
+            ignored = [o.bbox for o in [*graph.text.texts,*graph.asset.objects]
+                       if o.bbox[2]*o.bbox[3] < .65*w*h and intersection(box,o.bbox)]
+            result = frame_layers(patch, parent_patch, box, peers, baseline, ignored)
+            if result is None:
+                continue
+            fill, gradient, backing_field, owned, ink, rgba = result
+            stroke = fill
+            radius = min(12,h//4,w//4)
+        else:
+            fit = _fit(patch, parent)
+            if fit is None:
+                continue
+            fill, stroke = fit
+            # Preserve every interior pixel significantly different from the
+            # measured fill in a transparent foreground. Exclude the proven edge.
+            delta = abs(patch.astype(float) - fill).max(2)
+            interior = np.zeros((h, w), bool)
+            interior[4:-4, 4:-4] = True
+            ink = interior & (delta > 6)
+            # Anti-aliased rounded corners belong to the frame. Keep all other
+            # interior ink, including text the reconstruction has yet to recover.
+            radius = min(12, h // 4, w // 4)
+            corners = np.zeros_like(ink)
+            for ys in (slice(0, radius), slice(h - radius, h)):
+                for xs in (slice(0, radius), slice(w - radius, w)):
+                    corners[ys, xs] = True
+            ink &= ~corners
+            # An unknown foreground touching an edge invalidates this decomposition.
+            edge = ~interior | corners
+            from .container_stage import _segment_max_err
 
-        # Curves can expose fully covered stroke pixels where the horizontal
-        # one-pixel edge samples were antialiased. Test their colour direction.
-        stronger = np.clip(fill + 2 * (stroke - fill), 0, 255)
-        sample, paper, face = patch.astype(float), parent.astype(float), fill.astype(float)
-        explain = np.minimum.reduce(
-            [
-                _segment_max_err(sample, face, stroke),
-                _segment_max_err(sample, paper, stroke),
-                _segment_max_err(sample, face, stronger),
-                _segment_max_err(sample, paper, stronger),
-                _segment_max_err(sample, paper, face),
-            ]
-        )
-        if np.max(explain[edge]) > 28:
-            continue
-        # A faint one-pixel colour transition along the measured frame is part
-        # of that frame. Emitting it as a separate picture creates an occluded
-        # owner beneath the label and a spurious selectable object.
-        rim = np.ones_like(ink)
-        rim[5:-5, 5:-5] = False
-        ink &= ~(rim & (delta <= 14) & (explain <= 4))
-        # Previously staged text already has its own backing proof.
-        owned = np.zeros((h, w), bool)
-        child_backings_match = True
-        for r in peers:
-            ref = r['owner_evidence']
-            file = baseline / ref['file']
-            if digest(file) != ref['sha256']:
-                raise ValueError('card child owner mismatch')
-            with np.load(file, allow_pickle=False) as data:
-                owned |= data['mask'][y : y + h, x : x + w].astype(bool)
-                px,py,pw,ph=map(int,data['restore_bbox'])
-                child_mask=data['mask'][py:py+ph,px:px+pw].astype(bool)
-                # Deleting a child in Office will reveal this fill. Preserve its
-                # original backing if any proven pixel would exceed the gate.
-                if np.any(abs(data['backing_patch'][child_mask].astype(float)-fill)>8):
-                    child_backings_match=False
-                    break
-        if not child_backings_match:
-            continue
-        ink &= ~owned
-        if ink.any() and aid in skip_ids:
-            continue
-        rgba = extract_rgba(patch, np.broadcast_to(fill, patch.shape), ink)
-        alpha = rgba[..., 3:4].astype(float) / 255
-        if ink.any() and abs((rgba[..., :3] * alpha + fill * (1 - alpha) - patch)[ink]).max() > 2:
-            continue
+            # Curves can expose fully covered stroke pixels where the horizontal
+            # one-pixel edge samples were antialiased. Test their colour direction.
+            stronger = np.clip(fill + 2 * (stroke - fill), 0, 255)
+            sample, paper, face = patch.astype(float), parent.astype(float), fill.astype(float)
+            explain = np.minimum.reduce(
+                [
+                    _segment_max_err(sample, face, stroke),
+                    _segment_max_err(sample, paper, stroke),
+                    _segment_max_err(sample, face, stronger),
+                    _segment_max_err(sample, paper, stronger),
+                    _segment_max_err(sample, paper, face),
+                ]
+            )
+            if np.max(explain[edge]) > 28:
+                continue
+            # A faint one-pixel colour transition along the measured frame is part
+            # of that frame. Emitting it as a separate picture creates an occluded
+            # owner beneath the label and a spurious selectable object.
+            rim = np.ones_like(ink)
+            rim[5:-5, 5:-5] = False
+            ink &= ~(rim & (delta <= 14) & (explain <= 4))
+            # Previously staged text already has its own backing proof.
+            owned = np.zeros((h, w), bool)
+            child_backings_match = True
+            for r in peers:
+                ref = r['owner_evidence']
+                file = baseline / ref['file']
+                if digest(file) != ref['sha256']:
+                    raise ValueError('card child owner mismatch')
+                with np.load(file, allow_pickle=False) as data:
+                    owned |= data['mask'][y : y + h, x : x + w].astype(bool)
+                    px,py,pw,ph=map(int,data['restore_bbox'])
+                    child_mask=data['mask'][py:py+ph,px:px+pw].astype(bool)
+                    # Deleting a child in Office will reveal this fill. Preserve its
+                    # original backing if any proven pixel would exceed the gate.
+                    if np.any(abs(data['backing_patch'][child_mask].astype(float)-fill)>8):
+                        child_backings_match=False
+                        break
+            if not child_backings_match:
+                continue
+            ink &= ~owned
+            if ink.any() and aid in skip_ids:
+                continue
+            rgba = extract_rgba(patch, np.broadcast_to(fill, patch.shape), ink)
+            alpha = rgba[..., 3:4].astype(float) / 255
+            if ink.any() and abs((rgba[..., :3] * alpha + fill * (1 - alpha) - patch)[ink]).max() > 2:
+                continue
         shape = Shape(
             id=sid,
             bbox=box,
@@ -154,7 +167,8 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
             geometry='roundRect',
             fill=_hex(fill),
             line_color=_hex(stroke),
-            line_width_pt=0.75,
+            line_width_pt=0 if layered else 0.75,
+            fill_gradient=gradient,
             corner_radius_px=float(radius),
         )
         assets = []
@@ -173,7 +187,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
                     text_policy='exclude_independent_text',
                     intrinsic_text='',
                     replaces=[],
-                    description='Retained card foreground pixels',
+                    description='Measured foreground artwork' if layered else 'Retained card foreground pixels',
                     prompt_en='retained source foreground',
                 )
             )
@@ -187,7 +201,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         graph = fused
         for identifier, kind, bbox, local_mask, backing in [
             (sid, 'surface', box, ~(ink | owned), parent_patch)
-        ] + ([(aid, 'asset', ibox, ink[iy : iy + ih, ix : ix + iw], fill)] if assets else []):
+        ] + ([(aid, 'asset', ibox, (ink & ~owned)[iy:iy+ih, ix:ix+iw], backing_field[iy:iy+ih, ix:ix+iw] if layered else fill)] if assets else []):
             ax, ay, aw, ah = bbox
             mask = np.zeros(plate.shape[:2], bool)
             mask[ay : ay + ah, ax : ax + aw] = local_mask
@@ -226,6 +240,9 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
                     'bbox': bbox,
                 }
                 rec['payload'] = {'method': 'retained-card-foreground', 'background_parent_id': sid}
+                if layered:
+                    rec['container_layer'] = True
+                    rec['retained_card_artwork'] = True
             elif len(peers) == 1 and h <= 2.3 * peers[0]['bbox'][3] and w >= 2.4 * h:
                 # A single-label control can be moved as one native group.
                 contained = [t.id for t in graph.text.texts if intersection(t.bbox, box)]
@@ -234,7 +251,17 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
             graph.selected[identifier] = rec
             graph.transactions.append(rec)
             staged.append(identifier)
-        plate[y : y + h, x : x + w, :3] = parent_patch
+        if layered:
+            # Only replace material accounted for by the shape, retained artwork or proven children.
+            # The outer corners of a roundRect belong to the page outside the card.
+            yy, xx = np.ogrid[:h, :w]
+            dx = np.maximum(radius-xx-.5, np.maximum(xx+.5-(w-radius), 0))
+            dy = np.maximum(radius-yy-.5, np.maximum(yy+.5-(h-radius), 0))
+            footprint = dx*dx+dy*dy <= radius*radius
+            replace = footprint | ink | owned
+            plate[y:y+h,x:x+w,:3][replace] = parent_patch[replace]
+        else:
+            plate[y:y+h,x:x+w,:3] = parent_patch
     if not staged:
         return baseline / 'slideir.json', []
     Image.fromarray(plate).save(output / plate_path.name)

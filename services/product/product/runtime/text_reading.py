@@ -1,5 +1,6 @@
 """Read doubtful numbered text from the source crop after the host baseline is frozen."""
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -21,14 +22,35 @@ class CropReading(BaseModel):
     text: str = Field(max_length=500)
 
 
+class ReadingChoice(BaseModel):
+    index: int = Field(ge=1, le=2)
+
+
+_QUANTITIES = re.compile(
+    r'[负正+-]?(?:\d+[.,]?\d*|[零〇一二两三四五六七八九十百千万亿]+)(?:\s*(?:万|亿|千|百))?'
+    r'(?:\s*(?:个百分点|万元|亿元|人民币|公里|千米|公斤|小时|分钟|秒|米|吨|项|套|名|个|例|人|元|年|月|日|万|亿|%|％|‰|[A-Za-z]+))?'
+    r'|[￥¥$€£%％‰]|(?<![A-Za-z])(?:kg|km|cm|mm|ms|GB|MB|kWh)(?![A-Za-z])'
+)
+
+
+def quantity_changed(before, after):
+    from unicodedata import normalize
+    return _QUANTITIES.findall(normalize('NFKC',before)) != _QUANTITIES.findall(normalize('NFKC',after))
+
+
 def authorize_readings(original, revised, receipt):
     before = {t.id:t.text for t in original.text.texts}
     after = {t.id:t.text for t in revised.text.texts}
     if receipt and receipt.get('source_sha256') == original.source_sha256:
         for row in receipt['changes']:
             oid = row['object_id']
-            if (before.get(oid) != row['before'] or row.get('iou_before') is None
-                    or row.get('iou_after') is None or not row.get('crop_sha256')):
+            tentative = row.get('status') == 'pending_confirmation'
+            if tentative:
+                valid = (row.get('after') in row.get('alternatives', []) and row.get('context_sha256')
+                         and row.get('choice_receipt') and not quantity_changed(row['before'],row['after']))
+            else:
+                valid = row.get('iou_before') is not None and row.get('iou_after') is not None
+            if before.get(oid) != row['before'] or not valid or not row.get('crop_sha256'):
                 raise ValueError('invalid source reading evidence')
             before[oid] = row['after']
     if before != after:
@@ -49,20 +71,36 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
     image = Image.open(source).convert('RGB')
     pixels = np.asarray(image)
     changes, observ = [], []
-    actor = planning_actor(state.job)
+    reading_model = os.environ.get('IMAGE2PPT_MOMA_READING_MODEL')
+    if reading_model:
+        from .moma_review import MomaReviewer
+        actor = MomaReviewer(reading_model)
+    else:
+        actor = planning_actor(state.job)
+    from ..contracts import intersection
+    flagged_boxes = [defect['bbox'] for audit in current.get('independent_audit', {}).get('pages', [])
+                     if audit['page'] == page for defect in audit.get('vlm_audit', {}).get('critical_defects', [])
+                     if defect.get('category') == 'text_corruption' and len(defect.get('bbox') or []) == 4]
     for obj in scene.text.texts:
         members = scene.text.members.get(obj.id, [])
         if (obj.id not in object_ids or obj.id not in scene.selected or len(members) != 1
                 or obj.spans or scene.selected[obj.id].get('kind') != 'text'):
             continue
         line = lines.get(members[0], {})
-        if line.get('text') != obj.text or line.get('score', 1) >= .94:
+        flagged = any(intersection(obj.bbox, box) >= .5 * obj.bbox[2] * obj.bbox[3] for box in flagged_boxes)
+        if line.get('text') != obj.text or line.get('reading_status') or (line.get('score', 1) >= .94 and not flagged):
             continue
         x, y, w, h = map(round, line['bbox'])
         crop = image.crop((x,y,x+w,y+h))
         crop_path = directory / (obj.id+'.png')
         crop.resize((2*w,2*h), Image.Resampling.LANCZOS).save(crop_path)
         evidence = {'object_id':obj.id, 'before':obj.text, 'crop_sha256':digest(crop_path)}
+        margin = max(1, round(h * .55))
+        context_path = directory / (obj.id+'-context.png')
+        image.crop((max(0,x-margin),max(0,y-margin),min(image.width,x+w+margin),
+                    min(image.height,y+h+margin))).save(context_path)
+        evidence['context_sha256'] = digest(context_path)
+        evidence['ocr_id'] = line['id']
         observ.append(evidence)
         identity = {**evidence,'model':actor.model,'source':scene.source_sha256,'tool':'proofread-text/1'}
         if not budget.reserve('model_calls', identity):
@@ -70,27 +108,53 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
             continue
         reading = CropReading.model_validate(actor.ask(
             'Transcribe only the exact visible glyphs. If a character is malformed or unreadable, return legible=false. Do not infer words from context.',
-            {},[crop_path],CropReading))
+            {},[crop_path,context_path],CropReading))
         evidence.update(reading=reading.text,legible=reading.legible,model=actor.model)
-        if not reading.legible or reading.text == obj.text:
+        if not reading.text.strip() or reading.text == obj.text:
+            evidence['status'] = 'agreed' if reading.legible else 'pending_confirmation'
             continue
-        if re.findall(r'[\d%‰]+',reading.text) != re.findall(r'[\d%‰]+',obj.text):
+        if quantity_changed(obj.text,reading.text):
+            evidence['status'] = 'pending_confirmation'
             evidence['reason'] = 'numeric_change_requires_independent_confirmation'
             continue
         _, verified = verify_and_apply_ocr_corrections(pixels, {'lines':[dict(line)]}, [
             OCRCorrection(ocr_id=line['id'], corrected_text=reading.text, reason='numbered-source-crop')], fonts)
-        if not verified or verified[0]['iou_before'] is None or verified[0]['iou_after'] is None:
+        if reading_model:
+            choices = [obj.text, reading.text.strip()]
+            decision = {'tool':'choose-source-reading/1','model':actor.model,'source':scene.source_sha256,
+                        'crops':[evidence['crop_sha256'],evidence['context_sha256']], 'alternatives':choices}
+            if not budget.reserve('model_calls', decision):
+                evidence.update(status='pending_confirmation',reason='choice_reserved_or_unknown')
+                continue
+            picked = ReadingChoice.model_validate(actor.ask(
+                'Select the most likely reading of the printed label from the numbered candidates. Compare the visible glyphs in the tight and context images. Return only the index.',
+                {'candidates':dict(enumerate(choices,1))},[crop_path,context_path],ReadingChoice))
+            evidence.update(alternatives=choices, choice_receipt=key([decision,picked.index]),status='pending_confirmation')
+            if picked.index == 1:
+                continue
+        elif not reading.legible:
+            continue
+        if verified and verified[0]['iou_before'] is not None and verified[0]['iou_after'] is not None:
+            change = {**evidence, **verified[0]}
+            if reading.legible:
+                change['status'] = 'source_supported'
+        elif reading_model:
+            change = {**evidence,'after':reading.text.strip()}
+        else:
             evidence['reason'] = 'source_glyphs_unconfirmed'
             continue
-        change = {**evidence, **verified[0]}
         changes.append(change)
         obj.text = change['after']
         rec = scene.selected[obj.id]
+        rec['reading_status'] = change.get('status','source_supported')
+        rec['source_reading'] = {k:change.get(k) for k in ('ocr_id','before','after','crop_sha256','context_sha256','reason','status')}
         for field in ('payload', 'source_text_definition'):
             if field in rec:
                 rec[field]['text'] = obj.text
     proof = {'source_sha256':scene.source_sha256, 'observations':observ, 'changes':changes}
     write(directory/'readings.json', proof)
+    if reading_model:
+        current.setdefault('reading_reports',{}).setdefault(str(page),[]).append(str(directory/'readings.json'))
     if not changes:
         return {'page':page, 'status':'NO_VERIFIED_READING','checked':len(observ)}
     bundle = directory/'staged'

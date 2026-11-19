@@ -338,19 +338,31 @@ class RuntimeService(ExplorationTools):
                     staged_ids = [*staged_ids, *cont_ids]
             except Exception as exc:
                 full_report.append({'id': 'post_crop_containers', 'state': 'SKIPPED', 'reason': str(exc)})
-        crop_dir = crop_ir.parent
-        cid = 'c-' + key(str(directory.relative_to(state.job)) + ':crop')[:24]
-        cand = {
-            'id': cid, 'page': page, 'object_id': staged_ids[0], 'object_ids': staged_ids,
-            'kind': 'batch', 'status': 'STAGED_LOCAL', 'ir': str(crop_ir),
+        return self._stage_asset_candidate(state, current, directory, page, crop_ir, staged_ids,
+                                           'region_crop', full_report)
+
+    def stage_photo_frame(self, state, current, directory, page, frame):
+        from ..recovery.marked_surfaces import stage_marked_surfaces
+        row = self.page(current, page)
+        ir, ids = stage_marked_surfaces(Path(row['ir']).parent, directory/'staged', [frame], set())
+        if not ids:
+            return {'status': 'NO_FRAME_STAGED', 'page': page}
+        return self._stage_asset_candidate(state, current, directory, page, ir, ids, 'photo_frame', [])
+
+    def _stage_asset_candidate(self, state, current, directory, page, ir, ids, strategy, report):
+        row = self.page(current, page)
+        cid = 'c-' + key([str(directory.relative_to(state.job)), strategy])[:24]
+        current['candidates'][cid] = {
+            'id': cid, 'page': page, 'object_id': ids[0], 'object_ids': ids,
+            'kind': 'batch', 'status': 'STAGED_LOCAL', 'ir': str(ir),
             'parent_ir_sha256': digest(row['ir']), 'parent_scene_sha256': digest(row['scene']),
-            'strategy': 'region_crop', 'code': self.code_binding(),
-            'fingerprint': key({'crop': staged_ids, 'ir': digest(crop_ir)}),
-            'files': {str(p): digest(p) for p in crop_dir.rglob('*') if p.is_file()},
+            'strategy': strategy, 'code': self.code_binding(),
+            'isolation_attempted': strategy == 'photo_frame',
+            'fingerprint': key({'objects': ids, 'ir': digest(ir)}),
+            'files': {str(p): digest(p) for p in ir.parent.rglob('*') if p.is_file()},
         }
-        current['candidates'][cid] = cand
         return {'status': 'STAGED_LOCAL', 'candidate_id': cid, 'page': page,
-                'staged_object_ids': staged_ids, 'report': full_report,
+                'staged_object_ids': ids, 'report': report,
                 'next_step': f'Call commit_candidate(candidate_id="{cid}", expected_version={current["version"] + 1}) to validate and commit.'}
 
     def run_perception(self, state, current, directory):
@@ -660,7 +672,9 @@ class RuntimeService(ExplorationTools):
                 line = lines[change['ocr_id']]
                 if line['text'] != change['before']:
                     raise RuntimeConflict('source OCR changed before commit')
-                line.update(ocr_raw_text=change['before'], text=change['after'], proofread_verified=True)
+                pending = change.get('status')=='pending_confirmation'
+                line.update(ocr_raw_text=change['before'], text=change['after'], proofread_verified=not pending,
+                            reading_status='pending_confirmation' if pending else 'source_supported')
             write(directory/'verified-ocr.json', ocr)
             current['ocr'][k] = str(directory/'verified-ocr.json')
         row.update(ir=str(ir), scene=str(ir.parent/'scene.json'))

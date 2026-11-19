@@ -129,7 +129,8 @@ def detect(source, profile, directory, window=None, *, detectors=None):
 
 
 def mark_page(source, layout, objects, directory):
-    rows=list(layout['regions'])
+    from .recovery.layered_card import geometry_marks
+    rows=list(layout['regions']) + geometry_marks(source, objects)
     for obj in objects:
         rows.append({'id':obj['id'],'label':obj.get('kind','text'),'bbox':list(obj['bbox']),
                      'text':obj.get('text',''),'ocr_ids':obj.get('ocr_line_ids',[])})
@@ -195,4 +196,3 @@ def mark_blocks(source, rows, directory):
         tile.save(pic)
         write(info,[{k:row[k] for k in ('id','mark','label','bbox','parent','text') if k in row} for row in part])
         yield {'bbox':[l,t,r-l,b-t],'count':len(part)},pic,info
-

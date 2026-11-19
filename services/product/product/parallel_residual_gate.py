@@ -86,7 +86,16 @@ def inspect_residuals(irfile,office_dir,page,output):
                 tx1,ty1=min(source.shape[1],tx+tw+2),min(source.shape[0],ty+th+2)
                 if tx1>tx0 and ty1>ty0 and mask[ty0:ty1,tx0:tx1].any():
                     # Higher-z sibling objects remain rendered above this object in PowerPoint when it is deleted.
-                    mask[ty0:ty1,tx0:tx1]=False
+                    if other_rec.get('retained_card_artwork'):
+                        ref = other_rec['asset_reference']
+                        png = (irfile.parent / ref['path']).resolve()
+                        if not png.is_relative_to(irfile.parent.resolve()) or digest(png) != ref['sha256']:
+                            raise ValueError('card artwork binding mismatch')
+                        with Image.open(png) as image:
+                            visible = np.asarray(image.convert('RGBA'))[...,3] != 0
+                        mask[ty:ty+th,tx:tx+tw] &= ~visible
+                    else:
+                        mask[ty0:ty1,tx0:tx1]=False
         local=mask[y:y+h,x:x+w];after=np.array(Image.open(deleted).convert('RGB'))
         if after.shape!=source.shape or not local.any():results.append({**base,'reason':'unverifiable size or occluded owner'});continue
         tol_cfg=load_tolerance_config().get('residual_gate',{})

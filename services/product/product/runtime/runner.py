@@ -221,6 +221,12 @@ def run(job, client=None):
         return previous
     if read(job/'request.json').get('baseline_only'):
         return publish(job, {'reason':'Deterministic comparison requested'}, ['BASELINE_ONLY'])
+    if os.environ.get('IMAGE2PPT_MOMA_READING_MODEL'):
+        from .host_baseline import prepare_reading_draft
+        try:
+            prepare_reading_draft(job)
+        except Exception as exc:
+            RuntimeState(job).event({'source_reading':'UNAVAILABLE','error_type':type(exc).__name__})
     try:
         result = _agent_run(job,client)
     except Exception as exc:

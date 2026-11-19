@@ -110,11 +110,14 @@ def _stateless_vlm_audit(
     request = json.loads((state.job / 'request.json').read_text('utf8'))
     budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'))
     from .provider import GO_MODEL_ALIASES
-    requested = os.environ.get('IMAGE2PPT_REVIEW_MODEL') or 'hy4'
+    provider = os.environ.get('IMAGE2PPT_REVIEW_PROVIDER','opencode_go')
+    requested = os.environ.get('IMAGE2PPT_REVIEW_MODEL') or ('qwen/qwen3.8-max' if provider=='moma' else 'hy4')
     review_model = GO_MODEL_ALIASES.get(requested, requested)
     from . import review_control
     audit_key = key({
-        'schema': 'StatelessVisualAudit/2', 'model': review_model, 'policy': key(load_tolerance_config()),
+        'schema': 'StatelessVisualAudit/3', 'provider':provider, 'model': review_model,
+        'builder':[request.get('agent_inference_provider'),request.get('agent_model')],
+        'policy': key(load_tolerance_config()),
         'review_code': digest(__file__), 'controls':digest(review_control.__file__), 'scorecard': key(sc_summary), 'deck': digest(deck_path),
         'edit_panels': [digest(p) for p in edit_panels],
         'source_sha256': digest(source_path),
@@ -128,9 +131,21 @@ def _stateless_vlm_audit(
         return {**json.loads(cache_file.read_text('utf8')), 'status': 'CACHED'}
 
     try:
-        selected_provider, cfg = configure_model(state.job)
-        if selected_provider != 'opencode_go' or review_model == cfg.model:
-            raise ValueError('independent OpenCode Go reviewer required')
+        selected_provider = request.get('agent_inference_provider') or os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma')
+        builder_model = request.get('agent_model') or os.environ.get('IMAGE2PPT_AGENT_MODEL')
+        if provider == 'moma' and selected_provider == 'opencode_go':
+            from .moma_review import MomaReviewer
+            reviewer = MomaReviewer(review_model)
+        elif provider == 'opencode_go' and selected_provider == 'opencode_go':
+            _, cfg = configure_model(state.job)
+            builder_model = cfg.model
+            reviewer = GoProvider(session=f'independent-audit-{uuid.uuid4().hex}')
+            reviewer.key = cfg.api_key
+            reviewer.model = review_model
+        else:
+            raise ValueError('independent reviewer not configured')
+        if review_model == builder_model:
+            raise ValueError('independent model required')
         system_prompt = (
             'You are an independent PowerPoint reconstruction QA auditor (separate from the builder agent). '
             'The first three images are: (1) original source slide, (2) actual PowerPoint rendered slide, '
@@ -143,10 +158,7 @@ def _stateless_vlm_audit(
             'are `severity="minor"` (`font_or_shade_deviation`) and MUST NOT fail the audit (`passed=true`). '
             'Set `passed=false` ONLY when a `severity="critical"` defect exists.'
         )
-        reviewer = GoProvider(session=f'independent-audit-{uuid.uuid4().hex}')
-        reviewer.key = cfg.api_key
-        reviewer.model = review_model
-        control = review_control.verify_reviewer(reviewer,cache_dir/'controls',budget)
+        control = review_control.verify_reviewer(reviewer,cache_dir/'controls'/provider,budget)
         if not control['passed']:
             return {'status':'CONTROL_UNVERIFIED','passed':False,'control':control,'model':review_model,
                     'critical_defects':[],'minor_deviations':[]}
@@ -158,7 +170,7 @@ def _stateless_vlm_audit(
         critical = [d.model_dump() for d in parsed.defects if d.severity == 'critical']
         minor = [d.model_dump() for d in parsed.defects if d.severity != 'critical']
         verdict = {
-            'status': 'READY', 'model': review_model, 'reported_model':reviewer.reported_model, 'usage':reviewer.last_usage, 'session': reviewer.session, 'receipt': audit_key, 'control':control,
+            'status': 'READY', 'provider':provider, 'model': review_model, 'reported_model':reviewer.reported_model, 'usage':reviewer.last_usage, 'session': reviewer.session, 'receipt': audit_key, 'control':control,
             'passed': len(critical) == 0 and bool(parsed.passed),
             'critical_defects': critical,
             'minor_deviations': minor,
@@ -169,7 +181,7 @@ def _stateless_vlm_audit(
     except Exception as exc:
         # Keep only a normalized provider status, never the arbitrary response body.
         import re
-        status = re.fullmatch(r'opencode_http_(\d{3})', str(exc))
+        status = re.fullmatch(r'(?:opencode|moma)_http_(\d{3})', str(exc))
         return {
             'model': review_model, 'provider_http_status': int(status.group(1)) if status else None,
             'status': f'UNAVAILABLE:{type(exc).__name__}',

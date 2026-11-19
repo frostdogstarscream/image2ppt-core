@@ -56,6 +56,9 @@ def assess(job, current):
             _norm(line['text']) == _norm(obj['text']) and _overlap(line['bbox'],obj['bbox']) >
             .5*line['bbox'][2]*line['bbox'][3] for obj in fields)]
         selected = read(row['scene'])['selected']
+        readings = {i:r['source_reading'] for i,r in selected.items() if r.get('source_reading')}
+        updated = {v['ocr_id'] for v in readings.values()}
+        pending = {v['ocr_id'] for v in readings.values() if v['status']=='pending_confirmation'}
         actions = {}
         for action in office.get('office',{}).get('records',[]):
             if action.get('page')==page and action.get('saved_reopened') and action.get('outside_pixels')==0:
@@ -70,7 +73,9 @@ def assess(job, current):
         pages.append({'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
                       'passed_edits':sorted(f'{oid}/{action}' for oid in editables for action in actions[oid]),
                       'editable_count':len(editables) if verified else None, 'selected_editables':editables,
-                      'ocr_native_hits':sorted(hits), 'native_field_count':len(fields), 'local_fidelity':local, 'minor_deviations':minor,
+                      'ocr_native_hits':sorted(set(hits)-pending), 'revised_ocr_lines':sorted(updated),
+                      'pending_readings':{i:v for i,v in readings.items() if v['status']=='pending_confirmation'},
+                      'native_field_count':len(fields), 'local_fidelity':local, 'minor_deviations':minor,
                       'max_local_mae':max((v['mae_rgb'] for v in local.values()), default=None), 'scorecard':measures})
     return {'pptx_sha256':sha,'office_status':office.get('status','UNKNOWN'),'verified':verified,
             'fidelity_limits':load_tolerance_config()['fidelity'],'pages':pages}
@@ -88,7 +93,7 @@ def regressions(base, candidate):
             reasons.append(prefix+'SOURCE_CHANGED')
         if (b['editable_count'] or 0)<(a['editable_count'] or 0):
             reasons.append(prefix+'EDITABLE_COUNT_DECLINED')
-        if set(a['ocr_native_hits'])-set(b['ocr_native_hits']) or b['native_field_count']<a['native_field_count']:
+        if set(a['ocr_native_hits'])-set(b['ocr_native_hits'])-set(b.get('revised_ocr_lines',[])) or b['native_field_count']<a['native_field_count']:
             reasons.append(prefix+'NATIVE_FIELDS_LOST')
         if set(a.get('passed_edits', [])) - set(b.get('passed_edits', [])):
             reasons.append(prefix+'OFFICE_EDITS_LOST')
@@ -157,6 +162,24 @@ def ensure_baseline(job):
                     svc.commit_region(state,c,d/'commit',candidate_id=candidate['candidate_id'])
             return {'page':page,'status':candidate['status']}
         step(f'finish-assets-{page}',finish_photos)
+        inventory_path = state.read().get('experiment_marks', {}).get(str(page))
+        if inventory_path and request.get('native_variant') != 'joint-only':
+            inventory = read(inventory_path)
+            if inventory['source_sha256'] != sources[page-1]:
+                raise RuntimeConflict('card inventory source changed')
+            frames = sorted((r for r in inventory['rows'] if r['label'] == 'card_frame'),
+                            key=lambda r: -r['bbox'][2] * r['bbox'][3])
+            for frame in frames:
+                def finish_frame(current, directory):
+                    staged = svc.stage_photo_frame(state, current, directory, page, frame)
+                    cid = staged.get('candidate_id')
+                    if cid:
+                        checked = svc.validate_candidate(state, current, directory/'validate', candidate_id=cid)
+                        if checked['status'] == 'PASS':
+                            return svc.commit_region(state, current, directory/'commit', candidate_id=cid)
+                        return {'status': checked['status'], 'frame': frame['id']}
+                    return staged
+                step(f"photo-frame-{page}-{frame['id']}", finish_frame)
     step('compose',lambda c,d:svc.compose_delivery(state,c,d))
     step('office',lambda c,d:svc.validate_office(state,c,d))
     current = state.read()
@@ -187,6 +210,31 @@ def install_file(source,destination):
     temp = destination.with_name('.'+uuid4().hex+'.tmp')
     shutil.copyfile(source,temp)
     temp.replace(destination)
+
+
+def prepare_reading_draft(job):
+    """Start the Agent from Office-checked source readings; keep the control immutable."""
+    state = RuntimeState(job)
+    service = RuntimeService(job.parent)
+    for page in range(1, len(state.read()['pages']) + 1):
+        def read_page(current, directory):
+            graph = service.graph(current['pages'][page-1])
+            ids = [oid for oid,rec in graph.selected.items() if rec['kind']=='text']
+            out = service.review_numbered_text(state,current,directory,page=page,object_ids=ids)
+            cid = out.get('candidate_id')
+            if not cid:
+                return out
+            checked = service.validate_candidate(state,current,directory/'validation',candidate_id=cid)
+            if checked.get('status') != 'PASS':
+                return {'status':'REVIEW_REQUIRED','candidate_id':cid}
+            committed = service.commit_region(state,current,directory/'commit',candidate_id=cid)
+            if len(current['pages'])==1:
+                bundle = current['last_verified_bundle']
+                write(job/'reading-draft.json',{'pptx':bundle['pptx'],'sha256':bundle['pptx_sha256'],
+                      'origin':'moma-reading-draft','candidate_id':cid,'office_status':'PASS',
+                      'report':current['candidates'][cid]['reading_receipt']})
+            return committed
+        state.mutate('host-review-numbered-text',{'page':page},None,'host-reading-draft-'+str(page),read_page)
 
 
 def selected_result(job):
@@ -252,15 +300,29 @@ def _publish(job, agent, reasons, candidate):
                   agent={'participated':(bool(usage.get('tool_calls')) or bool(usage.get('tokens',{}).get('output')))
                         if usage else 'UNKNOWN' if (state.root/'session.json').exists() else False,
                          'delivered_changes':changed, 'fallback_reasons':reasons or [],'usage':{k:v for k,v in usage.items() if k!='tool_calls'}},
-                  independent_go_review=('PASS' if not fallback and agent.get('independent_audit',{}).get('passed') is True else 'UNKNOWN'),wps_acceptance='UNKNOWN', baseline_pages=summary(base))
+                  independent_go_review=('PASS' if not fallback and agent.get('independent_audit',{}).get('passed') is True
+                                         and all(p.get('vlm_audit',{}).get('provider','opencode_go')=='opencode_go'
+                                                 for p in agent['independent_audit'].get('pages',[])) else 'UNKNOWN'),
+                  wps_acceptance='UNKNOWN', baseline_pages=summary(base))
     shutil.copyfile(root/'baseline.pptx',delivery/'deterministic-baseline.pptx')
     shutil.copyfile(root/'scorecard.json',delivery/'baseline-scorecard.json')
     if candidate:
         write(delivery/'agent-scorecard.json',candidate)
+    reading_reports = {page:[read(path) for path in paths] for page,paths in current.get('reading_reports',{}).items()}
+    if reading_reports:
+        write(delivery/'reading-decisions.json', {'candidate_only':fallback, 'pages':reading_reports})
     result.pop('artifacts',None)
     write(delivery/'summary.json',result)
     names = {'result.pptx','deterministic-baseline.pptx','baseline-scorecard.json','summary.json'}
     names.update(f"page-{p['page']:02d}.png" for p in base['pages'])
+    if reading_reports:
+        names.add('reading-decisions.json')
+    draft_path = job/'reading-draft.json'
+    if draft_path.is_file():
+        draft = read(draft_path)
+        if draft.get('office_status')=='PASS' and digest(draft['pptx']) == draft['sha256']:
+            install_file(draft['pptx'],delivery/'reading-draft.pptx')
+            names.add('reading-draft.pptx')
     if not fallback:
         names.update(files)
     if candidate:
