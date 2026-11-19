@@ -48,6 +48,7 @@ DESCRIPTION.update({
     'validate_office':'With candidate_id, return actual preview edit diagnostics without approval. With no candidate_id, validate final composition.',
     'record_observation':'Record Agent findings, uncertainty and next action on arbitrary task evidence, including failed experiments.',
     'commit_candidate':'Submit a candidate through source-owner, content and actual-edit safety checks. Exploratory preview approval never bypasses these checks.',
+    'review_numbered_text':'Re-read doubtful numbered text directly from original crops. Supply only listed issue IDs, never replacement wording. Commit a returned candidate to run real Office validation.',
     'prepare_page_evidence':'Run deterministic local OCR, optional LayerD decomposition, PP-DocLayout detection, VLM OCR typo proofreading & object inventory, pixel-measured color/size extraction, decorative affix splitting, and style clustering in one step. Initializes the RESOLVED draft scene by default.',
     'batch_reconstruct_page':'Reconstruct all (or selected) uncommitted RESOLVED scene objects in parallel, stage source-safe textboxes, transparent PNG assets, native charts, and solid/gradient/preset native shapes (`roundRect`, `pentagon`, `chevron`, `ellipse`, `rect`), run batch PowerPoint verification with per-object defect isolation, and return a VALIDATED batch candidate_id (requiring commit_candidate with expected_version) plus a failed_regions digest.',
     'crop_region':'Stage post-repair movable fallback crops (auto mode when object_ids and bbox are omitted, protecting repairable texts) and upgrade newly cleaned enclosing cards into native shapes. Eligible transparent crops upgrade to RGBA assets; MOVE_UNSAFE in-place crops require allow_move_unsafe=true. Returns a STAGED_LOCAL candidate for commit_candidate.',
@@ -106,6 +107,7 @@ def schemas():
                         'allow_movable': {'type': 'boolean'},
                         'allow_move_unsafe': {'type': 'boolean'},
                         'upgrade_containers': {'type': 'boolean'}},
+        'review_numbered_text':{'page':page, 'object_ids':{'type':'array','items':string,'minItems':1,'maxItems':30}},
         'parse_page_structure': {'page': page, 'use_vlm': {'type': 'boolean'}},
         'audit_delivery': {'use_vlm': {'type': 'boolean'}}})
     fields['fit_background'].update(evidence_id=string,bbox={'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},protected_id=string)

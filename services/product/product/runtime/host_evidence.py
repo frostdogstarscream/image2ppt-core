@@ -71,6 +71,7 @@ def questions(state, current, page, failures, directory):
     inventory = read(current['experiment_marks'][k])
     rows = inventory['rows']
     by_id = {r['id']: r for r in rows}
+    uncertain = {r['id'] for r in read(current['ocr'][k])['lines'] if r.get('score', 1) < .94 and not r.get('proofread_verified')}
     choices = {r['id']:r['route'] for r in current['marked_plans'][k]}
     graph = read(current['pages'][page-1]['scene'])
     selected = graph['selected']
@@ -91,7 +92,7 @@ def questions(state, current, page, failures, directory):
             reasons = []
             if oid in failed and oid not in owners:
                 reasons.append(failed[oid])
-            if r['label'] == 'uncertain_ocr':
+            if r['label'] == 'uncertain_ocr' or (r['label']=='text' and uncertain.intersection(r.get('ocr_ids', []))):
                 reasons.append('low_confidence_ocr')
             elif oid not in choices and oid not in owners:
                 reasons.append('undecided_route')
@@ -116,7 +117,7 @@ def questions(state, current, page, failures, directory):
     return blocks
 
 
-AGENT_TOOLS = {'get_job_context','get_progress','get_evidence','prepare_page_evidence',
+AGENT_TOOLS = {'review_numbered_text','get_job_context','get_progress','get_evidence','prepare_page_evidence',
                'plan_marked_page','batch_reconstruct_page','commit_candidate','compile_pptx',
                'validate_office','record_visual_review','finalize_job'}
 
@@ -140,6 +141,9 @@ ROLES = ['field','title','label','caption','body','number','project','industry',
 
 def normalize_arguments(state,current,tool,arguments):
     args = dict(arguments)
+    if tool=='review_numbered_text':
+        ids = scoped_ids(state, current, args['page'], None, args['object_ids'])
+        return {'page':args['page'], 'object_ids':ids}
     if tool=='batch_reconstruct_page':
         page = str(args['page'])
         rounds = current.setdefault('repair_rounds', {}).get(page, [])

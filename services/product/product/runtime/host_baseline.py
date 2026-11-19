@@ -8,30 +8,31 @@ import numpy as np
 from PIL import Image
 
 from ..materialize import digest, write
-from ..scorecard import score_page, _native_fields, _norm, _overlap
+from ..tolerance_config import load_tolerance_config
+from ..scorecard import fidelity, score_page, _native_fields, _norm, _overlap
 from .host_evidence import prepare_all, questions, read
 from .state import RuntimeState, RuntimeConflict
 from .service import RuntimeService
 
 ORIGIN = 'deterministic-baseline'
-LOCAL_MAE_TOLERANCE = 2.0  # RGB levels (0..255), on every fixed tile and mark
 
 
-def local_errors(source, preview, marks):
-    with Image.open(source) as im:
-        original = np.asarray(im.convert('RGB'), dtype=np.int16)
+def local_fidelity(source, preview, marks):
+    with Image.open(source) as image:
+        original = np.asarray(image.convert('RGB'))
     height, width = original.shape[:2]
-    with Image.open(preview) as im:
-        rendered = np.asarray(im.convert('RGB').resize((width,height), Image.Resampling.LANCZOS), dtype=np.int16)
-    error = np.abs(original-rendered).mean(axis=2)
-    regions = {f'tile-{x}-{y}':[x,y,64,64] for y in range(0,height,64) for x in range(0,width,64)}
-    regions.update({r['id']:r['bbox'] for r in marks})
-    values = {}
-    for name,(x,y,w,h) in regions.items():
-        tile = error[max(0,int(y)):min(height,int(np.ceil(y+h))), max(0,int(x)):min(width,int(np.ceil(x+w)))]
-        if tile.size:
-            values[name] = round(float(tile.mean()),4)
-    return values
+    with Image.open(preview) as image:
+        rendered = np.asarray(image.convert('RGB').resize((width, height), Image.Resampling.LANCZOS))
+    regions = {row['id']: row['bbox'] for row in marks}
+    regions['whole-page'] = (0, 0, width, height)
+    metrics = {}
+    for name, (x, y, w, h) in regions.items():
+        region = np.s_[max(0, int(y)):min(height, int(np.ceil(y+h))),
+                       max(0, int(x)):min(width, int(np.ceil(x+w)))]
+        if original[region].size:
+            measured = fidelity(original[region], rendered[region], max_pixels=6000)
+            metrics[name] = {key: measured[key] for key in ('mae_rgb', 'ssim', 'delta_e2000_p95')}
+    return metrics
 
 
 def assess(job, current):
@@ -62,14 +63,17 @@ def assess(job, current):
         editables = sorted(i for i,r in selected.items() if r.get('move_safety')!='MOVE_UNSAFE'
                            and {'move-scale','delete'} <= actions.get(i,set()))
         marks = read(current['experiment_marks'][k])['rows']
-        local = local_errors(source,preview,marks) if preview.is_file() else {}
+        local = local_fidelity(source, preview, marks) if preview.is_file() else {}
+        limits = load_tolerance_config()['fidelity']
+        minor = [key for key, val in local.items()
+                 if val['ssim'] < limits['min_ssim'] or val['delta_e2000_p95'] > limits['max_delta_e2000_p95']]
         pages.append({'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
                       'passed_edits':sorted(f'{oid}/{action}' for oid in editables for action in actions[oid]),
                       'editable_count':len(editables) if verified else None, 'selected_editables':editables,
-                      'ocr_native_hits':sorted(hits), 'native_field_count':len(fields), 'local_mae':local,
-                      'max_local_mae':max(local.values(),default=None), 'scorecard':measures})
+                      'ocr_native_hits':sorted(hits), 'native_field_count':len(fields), 'local_fidelity':local, 'minor_deviations':minor,
+                      'max_local_mae':max((v['mae_rgb'] for v in local.values()), default=None), 'scorecard':measures})
     return {'pptx_sha256':sha,'office_status':office.get('status','UNKNOWN'),'verified':verified,
-            'local_mae_tolerance':LOCAL_MAE_TOLERANCE,'pages':pages}
+            'fidelity_limits':load_tolerance_config()['fidelity'],'pages':pages}
 
 
 def regressions(base, candidate):
@@ -88,8 +92,23 @@ def regressions(base, candidate):
             reasons.append(prefix+'NATIVE_FIELDS_LOST')
         if set(a.get('passed_edits', [])) - set(b.get('passed_edits', [])):
             reasons.append(prefix+'OFFICE_EDITS_LOST')
-        lost = [k for k,v in a['local_mae'].items() if k not in b['local_mae'] or b['local_mae'][k]>v+LOCAL_MAE_TOLERANCE]
-        if not a['local_mae'] or lost:
+        reference = a.get('local_fidelity', {})
+        compared = b.get('local_fidelity', {})
+        if not reference or not compared:
+            reasons.append(prefix+'LOCAL_VISUAL_EVIDENCE_MISSING')
+            continue
+        limits = base.get('fidelity_limits') or load_tolerance_config()['fidelity']
+        lost = []
+        for region, old in reference.items():
+            new = compared.get(region)
+            if new is None:
+                lost.append(region)
+                continue
+            de, similarity = new['delta_e2000_p95'], new['ssim']
+            if (de > max(old['delta_e2000_p95'], limits['hard_max_delta_e2000_p95'])
+                    or similarity < min(old['ssim'], limits['hard_min_ssim'])):
+                lost.append(region)
+        if lost:
             reasons.append(prefix+'LOCAL_VISUAL_REGRESSION:'+','.join(lost[:12]))
     return reasons
 

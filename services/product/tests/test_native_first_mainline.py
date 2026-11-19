@@ -304,3 +304,34 @@ def test_review_controls_reject_flat_output_and_respect_unknown_response(tmp_pat
     assert verify_reviewer(reviewer,tmp_path/'failed-control',budget)['passed'] is False
     unknown=SimpleNamespace(reserve=lambda *args:False)
     assert verify_reviewer(reviewer,tmp_path/'unknown-control',unknown)['status']=='UNKNOWN'
+
+
+def test_diagram_groups_only_all_native_detected_bars():
+    from product.recovery.container_stage import attach_bar_groups
+    boxes = [(0, 8, 6, 2), (10, 6, 6, 4), (20, 3, 6, 7)]
+    objects = {str(i):{'kind':'surface', 'bbox':list(box), 'payload':{'geometry':'rect'}}
+               for i, box in enumerate(boxes)}
+    objects['2']['kind'] = 'asset'
+    attach_bar_groups(objects, [boxes])
+    assert 'move_members' not in objects['0']
+    objects['2']['kind'] = 'surface'
+    attach_bar_groups(objects, [boxes])
+    assert objects['0']['move_members'] == ['0', '1', '2']
+
+
+def test_only_verified_source_readings_can_change_native_text():
+    from types import SimpleNamespace
+    import pytest
+    from product.runtime.text_reading import authorize_readings
+    def scene(value):
+        return SimpleNamespace(source_sha256='src', text=SimpleNamespace(texts=[SimpleNamespace(id='t1',text=value)]))
+    original, revised = scene('abx'), scene('abc')
+    proof = {'source_sha256':'src', 'changes':[dict(object_id='t1',before='abx',after='abc',
+             crop_sha256='crop',iou_before=.6,iou_after=.65)]}
+    authorize_readings(original, revised, proof)
+    with pytest.raises(ValueError):
+        authorize_readings(original, revised, {**proof, 'source_sha256':'other'})
+    with pytest.raises(ValueError):
+        authorize_readings(original, scene('abd'), proof)
+    with pytest.raises(ValueError):
+        authorize_readings(original, revised, None)

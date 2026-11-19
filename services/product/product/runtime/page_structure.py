@@ -158,11 +158,11 @@ def verify_and_apply_ocr_corrections(
         iou_raw = _render_glyph_iou(crop, raw_t, font_file, font_index)
         iou_new = _render_glyph_iou(crop, new_t, font_file, font_index)
         score_orig = float(ln.get('score', 1.0))
-        if iou_raw is not None and iou_new is not None:
-            # Allow slight tolerance for font weight differences, tighter when OCR confidence was already very high
-            slack = 0.06 if score_orig < 0.97 else 0.015
-            if iou_new + slack < iou_raw:
-                continue
+        if iou_raw is None or iou_new is None:
+            continue
+        slack = 0.06 if score_orig < 0.97 else 0.015
+        if iou_new + slack < iou_raw:
+            continue
 
         ln['ocr_raw_text'] = ln['text']
         ln['text'] = corr.corrected_text.strip()
@@ -327,7 +327,8 @@ def parse_page_structure(
         else:
             try:
                 actor = planning_actor(state.job)
-                budget.reserve('model_calls', {'tool': 'parse_page_structure', 'key': cache_key})
+                if not budget.reserve('model_calls', {'tool': 'parse_page_structure', 'key': cache_key}):
+                    raise RuntimeError('previous page-structure response unknown')
                 compact_ocr = [
                     {
                         'ocr_id': ln['id'],

@@ -13,6 +13,8 @@ Set `IMAGE2PPT_EXPERIMENT_CONFIG` on the experiment product host to a JSON objec
 }
 ```
 
+For a runtime that is itself deployed on the GPU host over OpenSSH, set the service-local JSON entry for each installed detector to `"colocated-4090"`. Set `model_root` to the absolute directory containing `weights` and `deps`, and `layout_python` to the layout interpreter when enabling PP-DocLayout. The runtime executes the worker from its verified checkout and records the input hash and actual model result for every call. The normal upload connection still uses the SSH loopback tunnel.
+
 Use the same command for doclayout, vitmatte, local-layerd and vtracer. For v3 and pp-l use the existing layout-venv interpreter with `--device cpu` and the remote PaddleX cache. Configure the SSH host alias with the correct wired interface and existing identity. Layout-L was tested with oneDNN disabled. Weight file size and upstream SHA for LFS files are verified on acquisition; per-file SHA-256 and source revision are persisted.
 
 Submit `experiment_profile` through `POST /api/v1/jobs` or `python services/product/opencode_client.py ... submit --experiment-profile <name>`. The comparison defaults to OpenCode Go `hy4`. To test the free planner, pass `--agent-model hy4-flash-free` to the client or comparison runner, or send `agent_model=hy4-flash-free` to the upload API. Use a new output directory for a different planner.

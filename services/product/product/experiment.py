@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 import uuid
 
@@ -20,6 +21,20 @@ ALIASES = {'figure':'image','picture':'image','plain_text':'text','figure_captio
            'table_caption':'table_caption', 'abandon':'other'}
 
 
+def worker_command(config, op):
+    target = config[op]
+    if isinstance(target, list) and target and Path(target[0]).name.lower() in ('ssh', 'ssh.exe'):
+        return target
+    if target == 'colocated-4090':
+        # The upload host runs on the GPU machine behind its OpenSSH tunnel.
+        root = Path(config['model_root']).resolve(strict=True)
+        entry = Path(__file__).resolve().parents[2] / 'experiments/worker.py'
+        paddle = op in ('v3', 'pp-l')
+        interpreter = config['layout_python'] if paddle else sys.executable
+        return [str(interpreter), str(entry), str(root), '--device', 'cpu' if paddle else 'cuda:0']
+    raise ValueError('configure OpenSSH transport or an explicitly colocated 4090 model')
+
+
 def invoke(op, image, directory, **fields):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -32,9 +47,7 @@ def invoke(op, image, directory, **fields):
     try:
         cfg = json.loads(Path(os.environ['IMAGE2PPT_EXPERIMENT_CONFIG']).read_text(encoding='utf-8-sig'))
         request = json.dumps({'op':op, 'png':base64.b64encode(raw).decode(), **fields}).encode()
-        command = cfg[op]
-        if not isinstance(command,list) or Path(command[0]).name.lower() not in ('ssh','ssh.exe'):
-            raise ValueError('research model workers require OpenSSH transport')
+        command = worker_command(cfg, op)
         proc = subprocess.run(command,input=request,capture_output=True,timeout=cfg.get('timeout',300),check=True)
         line = next(line for line in reversed(proc.stdout.splitlines()) if line.startswith(b'IMAGE2PPT_EXPERIMENT='))
         out = json.loads(line.split(b'=',1)[1])

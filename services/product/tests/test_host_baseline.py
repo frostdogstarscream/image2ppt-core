@@ -111,6 +111,19 @@ def test_locally_worse_agent_result_rolls_back_file_and_state(job,monkeypatch):
     assert {'p1:NATIVE_FIELDS_LOST','p1:EDITABLE_COUNT_DECLINED'}<=set(host.regressions(base,degraded))
 
 
+def test_small_visual_differences_are_allowed_in_editable_regions(tmp_path):
+    src, preview = tmp_path/'source.png', tmp_path/'preview.png'
+    Image.new('RGB', (96, 50), '#fcfcfc').save(src)
+    Image.new('RGB', (96, 50), '#f6f6f6').save(preview)
+    marks = [{'id':'card', 'bbox':[8, 9, 82, 28]}]
+    row = dict(page=1, source_sha256='fixed', editable_count=1, native_field_count=1, ocr_native_hits=['t1'])
+    base = dict(verified=True, pages=[dict(row, local_fidelity=host.local_fidelity(src, src, marks))])
+    candidate = dict(verified=True, pages=[dict(row, local_fidelity=host.local_fidelity(src, preview, marks))])
+    assert set(candidate['pages'][0]['local_fidelity']) == {'whole-page', 'card'}
+    assert candidate['pages'][0]['local_fidelity']['card']['mae_rgb'] > 2
+    assert host.regressions(base, candidate) == []
+
+
 def test_reviewed_unchanged_candidate_and_retries_use_one_selected_deck(job,monkeypatch):
     calls = []
     def finalize(directory,client):

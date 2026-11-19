@@ -21,6 +21,15 @@ def test_local_command_cannot_replace_ssh(tmp_path, monkeypatch):
     assert 'OpenSSH' in result['reason']
 
 
+def test_gpu_host_uses_its_checked_out_worker(tmp_path):
+    import sys
+    config = {'omni':'colocated-4090', 'model_root':str(tmp_path)}
+    command = experiment.worker_command(config, 'omni')
+    assert command[0] == sys.executable
+    assert Path(command[1]).is_file() and Path(command[1]).name == 'worker.py'
+    assert command[2:] == [str(tmp_path.resolve()), '--device', 'cuda:0']
+
+
 def test_marks_keep_caption_separate_from_parent(tmp_path):
     f=tmp_path/'source.png'
     Image.new('RGB',(100,100)).save(f)

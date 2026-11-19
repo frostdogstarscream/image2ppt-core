@@ -713,7 +713,7 @@ def try_fit_native_shape_v2(
             if (aw_c >= 3 and ah_c >= 3 and a_area >= 10) or a_area >= 14:
                 return None
 
-    erase_mask_local = (direct_children_mask_local | proven_fill | proven_border | (unexplained & ~ext_corner_mask)) & (~ext_corner_mask)
+    erase_mask_local = (direct_children_mask_local | proven_fill | proven_border) & ~ext_corner_mask
     return {
         'geometry': geometry,
         'fill': hex_rgb(best_rgb),

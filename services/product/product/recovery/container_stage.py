@@ -112,6 +112,7 @@ def _discover_candidates(
     scenery_guard: np.ndarray,
     *,
     is_flat_canvas: bool = True,
+    bar_series: list | None = None,
 ) -> list[tuple[str, list[int]]]:
     h_img, w_img = work_plate.shape[:2]
     diff = np.abs(work_plate.astype(np.float32) - canvas_field.astype(np.float32)).max(2)
@@ -139,6 +140,12 @@ def _discover_candidates(
         seen_boxes.append(b)
         found.append((kind, b))
 
+    def add_series(parts):
+        for kind, bbox in parts:
+            _add(kind, bbox)
+        if bar_series is not None:
+            bar_series.append([tuple(bbox) for kind, bbox in parts if kind == 'box'])
+
     def _scan_nested_children(parent_box: list[int]):
         sx, sy, sw, sh = parent_box
         if sw < 140 or sh < 80:
@@ -164,8 +171,7 @@ def _discover_candidates(
             full_inner_field = np.broadcast_to(inner_med.astype(np.float32), work_plate.shape)
             bar_split = _split_bar_series_on_baseline(work_plate, full_inner_field, cbox)
             if bar_split is not None:
-                for b_kind, b_box in bar_split:
-                    _add(b_kind, b_box)
+                add_series(bar_split)
                 continue
             if min(iw, ih) <= 8 and max(iw, ih) >= 36:
                 _add('line', cbox)
@@ -225,8 +231,7 @@ def _discover_candidates(
             continue
         bar_split = _split_bar_series_on_baseline(work_plate, canvas_field, [bx, by, bw, bh])
         if bar_split is not None:
-            for b_kind, b_box in bar_split:
-                _add(b_kind, b_box)
+            add_series(bar_split)
             continue
         for kind, split_box in _split_protruding_ticks(comp_mask, [bx, by, bw, bh], (w_img, h_img)):
             if kind == 'box':
@@ -315,6 +320,16 @@ def _clamped_rect_mask(bbox, size: tuple[int, int], pad: int = 0) -> np.ndarray:
     if x1 > x0 and y1 > y0:
         mask[y0:y1, x0:x1] = True
     return mask
+
+
+def attach_bar_groups(selected, series):
+    """Only group complete, detected series whose individual native bars were staged."""
+    by_box = {tuple(obj['bbox']): oid for oid, obj in selected.items() if obj.get('kind') == 'surface'
+              and obj.get('payload', {}).get('geometry') == 'rect'}
+    for boxes in series:
+        if len(boxes) >= 3 and all(b in by_box for b in boxes):
+            members = [by_box[b] for b in boxes]
+            selected[members[0]]['move_members'] = members
 
 
 def stage_containers_and_surfaces(
@@ -424,8 +439,9 @@ def stage_containers_and_surfaces(
     )
     unresolved_guard |= scenery_guard
 
+    bar_series = []
     candidates = _discover_candidates(
-        work_plate, canvas_field, scenery_guard, is_flat_canvas=is_flat_canvas
+        work_plate, canvas_field, scenery_guard, is_flat_canvas=is_flat_canvas, bar_series=bar_series
     )
     if not candidates:
         return baseline / 'slideir.json', []
@@ -763,6 +779,8 @@ def stage_containers_and_surfaces(
     if not staged_new_ids:
         shutil.rmtree(output, ignore_errors=True)
         return baseline / 'slideir.json', []
+
+    attach_bar_groups(graph.selected, bar_series)
 
     # Assign explicit outer-to-inner z values on surface shapes
     sorted_shapes = sorted(graph.surface.shapes, key=lambda s: -(s.bbox[2] * s.bbox[3]))

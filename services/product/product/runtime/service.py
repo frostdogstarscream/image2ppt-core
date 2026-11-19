@@ -30,7 +30,7 @@ TOOLS += ('record_observation', 'list_evidence', 'get_progress',
           'parse_page_structure', 'audit_delivery')
 
 
-TOOLS += ('plan_marked_page','inspect_marked_region')
+TOOLS += ('plan_marked_page','inspect_marked_region','review_numbered_text')
 
 
 class VisualReview(BaseModel):
@@ -108,7 +108,7 @@ class RuntimeService(ExplorationTools):
             shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region',
                        'prepare_page_evidence','batch_reconstruct_page'} if request.get('tool_profile')=='basic' else set()
             if request.get('experiment_profile') in (None,'baseline'):
-                shortcuts.update(('plan_marked_page','inspect_marked_region'))
+                shortcuts.update(('plan_marked_page','inspect_marked_region','review_numbered_text'))
             result['tool_catalog'] = [name for name in TOOLS if name not in shortcuts]
             result['goal'] = json.loads((state.job/'request.json').read_text('utf8')).get('goal', 'Faithful editable PPTX')
             result['budget']={'remaining_seconds':state.remaining_seconds(),
@@ -200,6 +200,12 @@ class RuntimeService(ExplorationTools):
         write(out_file, info)
         current.setdefault('page_structure', {})[str(page)] = str(out_file)
         return info
+
+    def review_numbered_text(self, state, current, directory, *, page, object_ids):
+        from .text_reading import stage_readings
+        if not (state.job/'host-baseline/manifest.json').is_file():
+            raise ValueError('source reading requires a frozen baseline')
+        return stage_readings(self, state, current, directory, page=page, object_ids=object_ids)
 
     def audit_delivery(self, state, current, directory, *, use_vlm=True):
         from .independent_review import run_delivery_audit
@@ -521,8 +527,14 @@ class RuntimeService(ExplorationTools):
         graph = SceneGraph.model_validate_json((ir.parent / 'scene.json').read_text('utf8'))
         row = self.page(current, candidate['page'])
         original = self.graph(row)
-        if {t.id: t.text for t in graph.text.texts} != {t.id: t.text for t in original.text.texts}:
-            raise ValueError('confirmed text changed')
+        from .text_reading import authorize_readings
+        reading = None
+        if candidate.get('kind') == 'text_reading':
+            ref = candidate['reading_receipt']
+            if candidate['files'].get(ref) != digest(ref):
+                raise RuntimeConflict('reading receipt changed')
+            reading = json.loads(Path(ref).read_text('utf8'))
+        authorize_readings(original, graph, reading)
         if graph.source_sha256 != original.source_sha256:
             raise ValueError('source changed')
         if not set(original.selected) <= set(graph.selected):
@@ -639,6 +651,18 @@ class RuntimeService(ExplorationTools):
         for path, sha in candidate['validation'].get('files', {}).items():
             if digest(path) != sha:
                 raise RuntimeConflict('candidate Office evidence changed')
+        if candidate.get('kind') == 'text_reading':
+            k = str(candidate['page'])
+            ocr = json.loads(Path(current['ocr'][k]).read_text('utf8'))
+            lines = {ln['id']:ln for ln in ocr['lines']}
+            receipt = json.loads(Path(candidate['reading_receipt']).read_text('utf8'))
+            for change in receipt['changes']:
+                line = lines[change['ocr_id']]
+                if line['text'] != change['before']:
+                    raise RuntimeConflict('source OCR changed before commit')
+                line.update(ocr_raw_text=change['before'], text=change['after'], proofread_verified=True)
+            write(directory/'verified-ocr.json', ocr)
+            current['ocr'][k] = str(directory/'verified-ocr.json')
         row.update(ir=str(ir), scene=str(ir.parent/'scene.json'))
         candidate['status'] = 'COMMITTED'
         if candidate.get('validated_bundle'):
