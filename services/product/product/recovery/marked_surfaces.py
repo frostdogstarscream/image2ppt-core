@@ -57,9 +57,23 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
     canvas, _, scenery, flat = estimate_canvas_field(plate[..., :3])
     boxes = [b for k, b in _discover_candidates(plate[..., :3], canvas, scenery, is_flat_canvas=flat)
              if k == 'box']
+    original_frames = {}
+    if any(field.get('label') == 'card_frame' for field in routes):
+        # The verified photo holes change the connected components of the working plate.
+        # Recover the measured frame from the same source pixels that produced its mark.
+        source_rgb = np.asarray(Image.open(src).convert('RGB'))
+        source_canvas, _, source_scenery, source_flat = estimate_canvas_field(source_rgb)
+        original_frames = {
+            'm-' + key([graph.source_sha256, 'card-frame', b])[:16]: b
+            for kind, b in _discover_candidates(source_rgb, source_canvas, source_scenery,
+                                               is_flat_canvas=source_flat) if kind == 'box'
+        }
     staged = []
     for field in routes:
-        box = max(boxes, key=lambda b: iou(b, field['bbox']), default=None)
+        if field.get('label') == 'card_frame':
+            box = original_frames.get(field['id'])
+        else:
+            box = max(boxes, key=lambda b: iou(b, field['bbox']), default=None)
         if not box or iou(box, field['bbox']) < 0.80:
             continue
         x, y, w, h = box
