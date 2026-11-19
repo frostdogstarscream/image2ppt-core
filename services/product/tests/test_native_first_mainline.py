@@ -280,3 +280,27 @@ def test_inventory_recall_and_form_metrics():
     assert changed['matched_items'] == 0
     assert not changed['main_title_editable']
     assert compute_inventory_and_form_metrics(sc, None)['recall'] is None
+
+
+def test_marked_picture_routes_use_the_crop_api():
+    # Both photo routes must compile their keyword arguments against the real crop API.
+    import ast
+    import inspect
+    from product.recovery.region_crop import stage_region_crops
+    from product.runtime.batch_backbone import _chain_stage_from_spec
+    signature = inspect.signature(stage_region_crops)
+    calls = [n for n in ast.walk(ast.parse(inspect.getsource(_chain_stage_from_spec)))
+             if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='stage_region_crops']
+    assert len(calls) >= 2
+    for call in calls:
+        signature.bind(*[None for _ in call.args], **{kw.arg:None for kw in call.keywords})
+
+
+def test_review_controls_reject_flat_output_and_respect_unknown_response(tmp_path):
+    from types import SimpleNamespace
+    from product.runtime.review_control import verify_reviewer
+    reviewer=SimpleNamespace(model='review-fixture',session='fixture',ask=lambda *args:{'defects':{}})
+    budget=SimpleNamespace(reserve=lambda *args:True)
+    assert verify_reviewer(reviewer,tmp_path/'failed-control',budget)['passed'] is False
+    unknown=SimpleNamespace(reserve=lambda *args:False)
+    assert verify_reviewer(reviewer,tmp_path/'unknown-control',unknown)['status']=='UNKNOWN'

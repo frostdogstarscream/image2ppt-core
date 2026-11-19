@@ -48,6 +48,8 @@ class GoProvider:
                     'Authorization':'Bearer '+self.key,'User-Agent':'image2ppt-product/1.0','x-opencode-session':self.session})
             if response.status_code!=200:raise PipelineError('opencode_http_'+str(response.status_code))
             data=response.json();choice=data['choices'][0];content=choice['message']['content']
+            self.last_usage = data.get('usage')
+            self.reported_model = data.get('model')
             if self.key in content:raise PipelineError('credential_echo_rejected')
             if choice.get('finish_reason') not in ('stop',None):raise ValueError('OpenCode Go response truncated')
             from image2ppt_planner.client import strip_code_fence

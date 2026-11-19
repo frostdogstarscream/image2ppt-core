@@ -172,7 +172,11 @@ def compact(tool,result):
         return {**{k:result[k] for k in ('page','status','candidate_id','failed_count','staged_count') if k in result},
                 'failures':dict(Counter(r.get('diagnostic_category','UNKNOWN') for r in result.get('failed_regions',[])))}
     if tool=='validate_office':
-        return {k:result[k] for k in ('status','required_evidence','failure','pptx_sha256') if k in result}
+        audit = result.get('scorecard_audit', {})
+        return {**{k:result[k] for k in ('status','required_evidence','failure','pptx_sha256') if k in result},
+                'audit_passed': audit.get('passed'), 'defects': audit.get('critical_defects',[])[:30],
+                'missing_objects': [{'page':p['page'],'items':p['summary'].get('missing_inventory_items',[])[:30]}
+                                    for p in audit.get('pages',[])]}
     if tool in ('finalize_job','commit_candidate'):
         return {k:result[k] for k in ('status','reason','candidate_id','committed_count','office_pass','completion') if k in result}
     return result

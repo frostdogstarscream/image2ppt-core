@@ -251,8 +251,10 @@ def create_app(root=None, token=None, run_worker=True):
     @app.post('/api/v1/jobs',status_code=202,dependencies=[Depends(auth)])
     def submit(request:Request,files:list[UploadFile]=File(...),object_extraction:str='default',pipeline_mode:str='parallel_review',
                orchestrator:str='pipeline',goal:str='Restore these images as an editable PPTX.',fresh_perception:bool=True,
-               baseline_only:bool=False,experiment_profile:str|None=None,agent_steps:int|None=None,runtime_seconds:int|None=None,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=False,agent_model:str|None=None):
+               native_variant:str='combined',baseline_only:bool=False,experiment_profile:str|None=None,agent_steps:int|None=None,runtime_seconds:int|None=None,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=False,agent_model:str|None=None):
         from .experiment import PROFILES
+        if native_variant not in ('combined','shape-only','joint-only'):
+            raise HTTPException(422,'unknown native ablation')
         if experiment_profile is not None:
             if experiment_profile not in PROFILES or tool_profile!='all':
                 raise HTTPException(422,'unsupported experiment profile or tool catalog')
@@ -311,7 +313,7 @@ def create_app(root=None, token=None, run_worker=True):
                                      'agent_inference_provider':os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma'),
                                      'agent_model':agent_model or os.environ.get('IMAGE2PPT_AGENT_MODEL'),
                                      'object_extraction':object_route,'pipeline_mode':selected_mode,'original_inputs':original_refs,
-                                     'orchestrator':orchestrator,'host_stage0':orchestrator=='opencode','baseline_only':baseline_only,
+                                     'orchestrator':orchestrator,'host_stage0':orchestrator=='opencode','baseline_only':baseline_only,'native_variant':native_variant,
                                      'visual_review_backend':'opencode' if orchestrator=='opencode' else 'go',
                                      'goal':goal,'fresh_perception':fresh_perception,'candidate_engine':'r12-regional' if orchestrator=='opencode' else 'off',
                                      'agent_steps':agent_steps,'runtime_seconds':runtime_seconds,

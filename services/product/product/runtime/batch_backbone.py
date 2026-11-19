@@ -1178,7 +1178,7 @@ def _chain_stage_from_spec(
             seed = {'id': field['id'], 'bbox': frame, 'kind': 'asset',
                     'picture_frame': frame if field.get('intrinsic_ui') else None}
             pic_ir, pic_ids, evidence = stage_region_crops(
-                cur_base, directory/tag/('picture-'+key(field['id'])[:12]), seeds=[seed], skip_ids=skip_ids)
+                cur_base, directory/tag/('picture-'+key(field['id'])[:12]), seeds=[seed], skip_seed_ids=skip_ids)
             if pic_ids:
                 cur_base = pic_ir.parent
                 staged_ids.extend(pic_ids)
@@ -1356,7 +1356,7 @@ def _chain_stage_from_spec(
             graph=SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
             if route['id'] not in graph.selected:
                 ir,ids,_ = stage_region_crops(cur_base,directory/tag/('marked-asset-'+key(route['id'])[:12]),
-                    seeds=[{'id':route['id'],'bbox':route['bbox'],'kind':'asset'}],skip_ids=skip_ids)
+                    seeds=[{'id':route['id'],'bbox':route['bbox'],'kind':'asset'}],skip_seed_ids=skip_ids)
                 if ids:
                     cur_base=ir.parent
                     staged_ids.extend(ids)
@@ -1579,6 +1579,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         missing=[i for i in range(1,len(request['sources'])+1) if not current.get('marked_plans',{}).get(str(i))]
         if missing:
             return {'status':'PAGE_PLANS_REQUIRED','pages':missing}
+    variant = request.get('native_variant','combined')
+    include_containers = include_containers and variant != 'joint-only'
     row = service.page(current, page)
     initial_graph = service.graph(row)
     if 'fonts' not in current:
@@ -1675,7 +1677,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             def capture(image, mask):
                 masks[obj.id] = mask.copy()
                 raise ValueError('deferred to local group repair')
-            return _probe_text(obj, inpaint=capture if safe_inpaint else None)
+            return _probe_text(obj, inpaint=(safe_inpaint if variant == 'shape-only' else capture) if safe_inpaint else None)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             outcomes = list(pool.map(local_probe, text_targets))
         containers = [el for el in inventory.get('elements', []) if el['category'] in ('card_shape','photo','ribbon_shape','table')]

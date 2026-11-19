@@ -129,6 +129,15 @@ def ensure_baseline(job):
             write(d/'regional-failures.json',failures)
             return {'page':page,'status':outcome['status'],'failed_count':len(failures)}
         step(f'reconstruct-{page}',reconstruct)
+        def finish_photos(c,d):
+            # Text repairs and their exclusions are settled before cropping or upgrading enclosing cards.
+            candidate = svc.crop_region(state,c,d,page=page,upgrade_containers=request.get('native_variant')!='joint-only')
+            if candidate['status']=='STAGED_LOCAL':
+                checked = svc.validate_candidate(state,c,d/'validate',candidate_id=candidate['candidate_id'])
+                if c['candidates'][candidate['candidate_id']]['status']=='VALIDATED':
+                    svc.commit_region(state,c,d/'commit',candidate_id=candidate['candidate_id'])
+            return {'page':page,'status':candidate['status']}
+        step(f'finish-assets-{page}',finish_photos)
     step('compose',lambda c,d:svc.compose_delivery(state,c,d))
     step('office',lambda c,d:svc.validate_office(state,c,d))
     current = state.read()
@@ -144,7 +153,7 @@ def ensure_baseline(job):
         if preview.is_file():
             shutil.copyfile(preview,root/name)
             files.append(name)
-    info = {'origin':ORIGIN,'sources':sources,'uploaded_sha256':originals,'finished':time.time(),
+    info = {'origin':ORIGIN,'native_variant':request.get('native_variant','combined'),'sources':sources,'uploaded_sha256':originals,'finished':time.time(),
             'files':{n:digest(root/n) for n in files}}
     write(manifest,info)
     return info

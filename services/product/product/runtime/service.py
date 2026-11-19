@@ -820,7 +820,8 @@ class RuntimeService(ExplorationTools):
         current.pop('visual_review', None)
         current.pop('independent_audit', None)
         from .independent_review import run_delivery_audit
-        det_audit = run_delivery_audit(self, state, current, directory/'scorecard-audit', use_vlm=False)
+        incremental = (state.job/'host-baseline/manifest.json').is_file()
+        det_audit = run_delivery_audit(self, state, current, directory/'scorecard-audit', use_vlm=incremental)
         return {**result, 'required_evidence': required, 'scorecard_audit': det_audit}
 
     @staticmethod

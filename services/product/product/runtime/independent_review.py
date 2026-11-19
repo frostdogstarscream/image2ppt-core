@@ -112,9 +112,10 @@ def _stateless_vlm_audit(
     from .provider import GO_MODEL_ALIASES
     requested = os.environ.get('IMAGE2PPT_REVIEW_MODEL') or 'hy4'
     review_model = GO_MODEL_ALIASES.get(requested, requested)
+    from . import review_control
     audit_key = key({
         'schema': 'StatelessVisualAudit/2', 'model': review_model, 'policy': key(load_tolerance_config()),
-        'review_code': digest(__file__), 'scorecard': key(sc_summary), 'deck': digest(deck_path),
+        'review_code': digest(__file__), 'controls':digest(review_control.__file__), 'scorecard': key(sc_summary), 'deck': digest(deck_path),
         'edit_panels': [digest(p) for p in edit_panels],
         'source_sha256': digest(source_path),
         'render_sha256': digest(render_path),
@@ -130,7 +131,6 @@ def _stateless_vlm_audit(
         selected_provider, cfg = configure_model(state.job)
         if selected_provider != 'opencode_go' or review_model == cfg.model:
             raise ValueError('independent OpenCode Go reviewer required')
-        budget.reserve('model_calls', {'tool': 'audit_delivery', 'key': audit_key})
         system_prompt = (
             'You are an independent PowerPoint reconstruction QA auditor (separate from the builder agent). '
             'The first three images are: (1) original source slide, (2) actual PowerPoint rendered slide, '
@@ -146,13 +146,19 @@ def _stateless_vlm_audit(
         reviewer = GoProvider(session=f'independent-audit-{uuid.uuid4().hex}')
         reviewer.key = cfg.api_key
         reviewer.model = review_model
+        control = review_control.verify_reviewer(reviewer,cache_dir/'controls',budget)
+        if not control['passed']:
+            return {'status':'CONTROL_UNVERIFIED','passed':False,'control':control,'model':review_model,
+                    'critical_defects':[],'minor_deviations':[]}
+        if not budget.reserve('model_calls', {'tool':'audit_delivery','key':audit_key}):
+            raise RuntimeError('previous independent audit response unknown')
         raw = reviewer.ask(system_prompt, {'scorecard': sc_summary},
                            [source_path, render_path, owner_preview_path, *edit_panels], VLMIndependentAuditReply)
         parsed = VLMIndependentAuditReply.model_validate(raw)
         critical = [d.model_dump() for d in parsed.defects if d.severity == 'critical']
         minor = [d.model_dump() for d in parsed.defects if d.severity != 'critical']
         verdict = {
-            'status': 'READY', 'model': review_model, 'session': reviewer.session, 'receipt': audit_key,
+            'status': 'READY', 'model': review_model, 'reported_model':reviewer.reported_model, 'usage':reviewer.last_usage, 'session': reviewer.session, 'receipt': audit_key, 'control':control,
             'passed': len(critical) == 0 and bool(parsed.passed),
             'critical_defects': critical,
             'minor_deviations': minor,
@@ -166,7 +172,7 @@ def _stateless_vlm_audit(
             'passed': False,
             'critical_defects': [],
             'minor_deviations': [],
-            'summary': f'VLM audit skipped/unavailable ({type(exc).__name__}); relying on deterministic Office + scorecard gates.',
+            'summary': f'Independent audit unavailable ({type(exc).__name__}).',
         }
 
 
