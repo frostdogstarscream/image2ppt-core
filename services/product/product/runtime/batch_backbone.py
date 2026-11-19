@@ -1377,7 +1377,10 @@ def _chain_stage_from_spec(
                 'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
             })
 
+    # A photo-bearing frame has its own host transaction after the child photos pass
+    # Office validation. An incremental request may still explicitly select that frame.
     surface_routes = [r for r in marked_routes if r['route']=='surface'
+                      and (wanted_filter is not None or r.get('label') != 'card_frame')
                       and (wanted_filter is None or r['id'] in wanted_filter)]
     if include_containers and surface_routes:
         try:
