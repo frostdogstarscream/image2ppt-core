@@ -213,6 +213,15 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         if not staged:
             shutil.copytree(baseline, output)
         graph = fused
+        if layered:
+            from .layered_card import bind_photo_backing
+            for child in peers:
+                if child['kind'] == 'asset':
+                    record = graph.selected[child['id']]
+                    bind_photo_backing(output, record, sid, box, backing_field)
+                    for transaction in graph.transactions:
+                        if transaction.get('id') == child['id']:
+                            transaction.update(owner_evidence=record['owner_evidence'], payload=record['payload'])
         footprint = np.ones_like(ink)
         if layered:
             yy, xx = np.ogrid[:h, :w]

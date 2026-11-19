@@ -54,6 +54,22 @@ def test_conflicting_quantities_are_never_written_as_guesses(old, new):
     assert quantity_changed(old, new)
 
 
+def test_native_frame_updates_photo_deletion_backing_without_changing_its_owner(tmp_path):
+    from product.recovery.layered_card import bind_photo_backing
+
+    old = tmp_path / 'original.npz'
+    mask = np.ones((8, 9), dtype=bool)
+    np.savez_compressed(old, mask=mask, restore_bbox=[10, 11, 3, 2], backing_patch=np.zeros((2, 3, 3)))
+    ref = {'file': old.name, 'sha256': digest(old)}
+    record = {'id': 'photo', 'owner_evidence': ref, 'payload': {}}
+    field = np.arange(6 * 8 * 3).reshape(6, 8, 3)
+    bind_photo_backing(tmp_path, record, 's-frame', [9, 9, 8, 6], field)
+    assert ref['sha256'] == digest(old) and record['owner_evidence']['prior'] == ref
+    with np.load(tmp_path / record['owner_evidence']['file']) as proof:
+        assert np.array_equal(proof['mask'], mask)
+        assert np.array_equal(proof['backing_patch'], field[2:4, 1:4])
+
+
 def test_recolor_preserves_pale_picture_details_and_blends_the_paper_tint(tmp_path):
     patch = np.full((130, 210, 3), 243, dtype=np.uint8)
     patch[16:29, 32:100] = [225, 238, 245]

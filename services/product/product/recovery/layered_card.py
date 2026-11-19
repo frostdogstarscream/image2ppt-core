@@ -47,6 +47,30 @@ def contained_peers(box, peers):
     )
 
 
+def bind_photo_backing(directory, record, frame_id, frame_box, field):
+    """Retain the photo's source ownership, with the measured native face underneath it."""
+    old = record['owner_evidence']
+    path = directory / old['file']
+    if digest(path) != old['sha256']:
+        raise ValueError('photo ownership evidence changed')
+    with np.load(path, allow_pickle=False) as data:
+        contents = {name: data[name] for name in data.files}
+    x, y, w, h = map(int, contents['restore_bbox'])
+    left, top, width, height = frame_box
+    if not (left <= x and top <= y and x + w <= left + width and y + h <= top + height):
+        raise ValueError('photo backing crosses native frame')
+    contents['backing_patch'] = field[y - top : y - top + h, x - left : x - left + w].copy()
+    new_path = directory / f"{record['id']}-{frame_id}-owner.npz"
+    np.savez_compressed(new_path, **contents)
+    record['owner_evidence'] = {
+        'file': new_path.name,
+        'sha256': digest(new_path),
+        'method': 'native-card-under-verified-photo/1',
+        'prior': dict(old),
+    }
+    record['payload'] = {**record.get('payload', {}), 'background_parent_id': frame_id}
+
+
 def frame_layers(patch, parent, box, peers, baseline, ignore_boxes):
     """Fit exposed card paper; retain unexplained interior art and leave photo holes transparent."""
     x, y, w, h = box
