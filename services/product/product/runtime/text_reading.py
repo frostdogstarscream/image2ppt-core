@@ -43,6 +43,32 @@ def quantity_changed(before, after):
     return quantities(before) != quantities(after)
 
 
+def reading_frame(obj, before, after, scene, fonts, canvas_width):
+    """Keep the original origin and erase mask; resize a longer single-line editable label."""
+    from math import ceil
+    from PIL import ImageFont
+    from ..contracts import intersection
+    x, y, w, h = obj.bbox
+    if after == before or obj.align != 'left' or '\n' in before or '\n' in after:
+        return list(obj.bbox)
+    style = next(s for s in scene.text.styles if s.id == obj.style)
+    family = style.ea if any(ord(c)>255 for c in before+after) else style.latin
+    font = next((v for v in fonts.get('fonts', []) if v['family']==family and v['bold']==style.bold), None)
+    if not font:
+        return list(obj.bbox)
+    face = ImageFont.truetype(font['file'], max(1, round(style.size_px)), index=font.get('index', 0))
+    old_advance, new_advance = face.getlength(before), face.getlength(after)
+    if old_advance <= 0 or new_advance <= old_advance:
+        return list(obj.bbox)
+    # The current frame has already passed Office. Carry its measured clearance to
+    # the new string, including Office's spacing when it differs from Pillow's.
+    need = ceil(max(new_advance + 1, w * new_advance / old_advance))
+    extension = [x+w, y, max(0, need-w), h]
+    if x+need > canvas_width or any(t.id!=obj.id and intersection(extension, t.bbox)>0 for t in scene.text.texts):
+        return None
+    return [x,y,max(w,need),h]
+
+
 def authorize_readings(original, revised, receipt):
     before = {t.id:t.text for t in original.text.texts}
     after = {t.id:t.text for t in revised.text.texts}
@@ -160,9 +186,19 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
         else:
             evidence['reason'] = 'source_glyphs_unconfirmed'
             continue
+        fitted = reading_frame(obj, obj.text, change['after'], scene, fonts, image.width)
+        if fitted is None:
+            evidence.update(status='pending_confirmation', reason='insufficient_space_for_reading')
+            continue
         changes.append(change)
-        obj.text = change['after']
         rec = scene.selected[obj.id]
+        if list(obj.bbox) != fitted:
+            change['frame_before'] = list(obj.bbox)
+            change['frame_after'] = fitted
+            obj.bbox = fitted
+            rec['payload']['bbox'] = fitted
+            rec.setdefault('native_layout', {})['proposed_bbox'] = fitted
+        obj.text = change['after']
         rec['reading_status'] = change.get('status','source_supported')
         rec['source_reading'] = {k:change.get(k) for k in ('ocr_id','before','after','crop_sha256','context_sha256','reason','status')}
         for field in ('payload', 'source_text_definition'):

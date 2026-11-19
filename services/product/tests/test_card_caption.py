@@ -83,6 +83,19 @@ def test_recolor_preserves_pale_picture_details_and_blends_the_paper_tint(tmp_pa
     assert rgba[22, 50, 3] < 64
 
 
+def test_longer_reading_keeps_its_origin_and_protects_next_label(monkeypatch):
+    from product.runtime.text_reading import reading_frame
+    obj = SimpleNamespace(id='t1', bbox=[20,30,135,36], style='s', align='left')
+    style = SimpleNamespace(id='s', ea='face', bold=False, size_px=26)
+    graph = SimpleNamespace(text=SimpleNamespace(texts=[obj], styles=[style]))
+    fonts = {'fonts':[{'family':'face','bold':False,'file':'mock.ttc'}]}
+    monkeypatch.setattr('PIL.ImageFont.truetype', lambda *a,**kw:SimpleNamespace(getlength=lambda s:26*len(s)))
+    bbox = reading_frame(obj,'京南会议室','京南综合会议',graph,fonts,1100)
+    assert bbox == [20,30,162,36] and obj.bbox == [20,30,135,36]
+    graph.text.texts.append(SimpleNamespace(id='t2',bbox=[165,35,50,25]))
+    assert reading_frame(obj,'京南会议室','京南综合会议',graph,fonts,1100) is None
+
+
 def test_detected_caption_edge_stays_on_slide_when_photo_is_removed():
     from product.recovery.region_crop import _separate_photo_caption
 
