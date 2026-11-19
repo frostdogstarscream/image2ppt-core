@@ -11,7 +11,8 @@ from pydantic import BaseModel, Field
 
 from ..materialize import digest, write
 from ..parallel_rebuild import adapt
-from ..parallel_store import Store, key
+from ..parallel_store import BudgetExceeded, Store, key
+from ..pipeline import PipelineError
 from ..recovery.adaptive_policy import AdaptiveBudget
 from .page_structure import OCRCorrection, verify_and_apply_ocr_corrections
 from .provider import planning_actor
@@ -35,7 +36,11 @@ _QUANTITIES = re.compile(
 
 def quantity_changed(before, after):
     from unicodedata import normalize
-    return _QUANTITIES.findall(normalize('NFKC',before)) != _QUANTITIES.findall(normalize('NFKC',after))
+    def quantities(text):
+        text = normalize('NFKC', text)
+        declared_units = re.findall(r'(?:单位\s*[:：]?\s*|[（(])((?:万|亿)?元|千?米|公斤|吨|人次|小时|分钟|个|项|名)(?=[）)\s，,。]|$)', text)
+        return _QUANTITIES.findall(text), declared_units
+    return quantities(before) != quantities(after)
 
 
 def authorize_readings(original, revised, receipt):
@@ -81,6 +86,19 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
     flagged_boxes = [defect['bbox'] for audit in current.get('independent_audit', {}).get('pages', [])
                      if audit['page'] == page for defect in audit.get('vlm_audit', {}).get('critical_defects', [])
                      if defect.get('category') == 'text_corruption' and len(defect.get('bbox') or []) == 4]
+    def call(identity, prompt, context, images, contract, evidence):
+        try:
+            if not budget.reserve('model_calls', identity):
+                evidence.update(status='pending_confirmation', reason='previous_request_reserved')
+                return None
+            response = contract.model_validate(actor.ask(prompt, context, images, contract))
+        except (BudgetExceeded, PipelineError, ValueError) as exc:
+            evidence.update(status='pending_confirmation', reason=type(exc).__name__)
+            return None
+        evidence.setdefault('calls', []).append({'tool': identity['tool'], 'model': getattr(actor,'reported_model',actor.model),
+                                                 'usage':getattr(actor,'last_usage',None)})
+        return response
+
     for obj in scene.text.texts:
         members = scene.text.members.get(obj.id, [])
         if (obj.id not in object_ids or obj.id not in scene.selected or len(members) != 1
@@ -103,12 +121,12 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
         evidence['ocr_id'] = line['id']
         observ.append(evidence)
         identity = {**evidence,'model':actor.model,'source':scene.source_sha256,'tool':'proofread-text/1'}
-        if not budget.reserve('model_calls', identity):
-            evidence['reason'] = 'reserved_or_unknown'
+        prompt = ('Transcribe the most likely printed wording from these source crops. Where the exact strokes '
+                  'are unclear, include your best reading and set legible=false. Do not invent missing quantities.'
+                  if reading_model else 'Transcribe only the exact visible glyphs and mark unclear glyphs legible=false.')
+        reading = call(identity, prompt, {}, [crop_path,context_path], CropReading, evidence)
+        if reading is None:
             continue
-        reading = CropReading.model_validate(actor.ask(
-            'Transcribe only the exact visible glyphs. If a character is malformed or unreadable, return legible=false. Do not infer words from context.',
-            {},[crop_path,context_path],CropReading))
         evidence.update(reading=reading.text,legible=reading.legible,model=actor.model)
         if not reading.text.strip() or reading.text == obj.text:
             evidence['status'] = 'agreed' if reading.legible else 'pending_confirmation'
@@ -123,12 +141,11 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
             choices = [obj.text, reading.text.strip()]
             decision = {'tool':'choose-source-reading/1','model':actor.model,'source':scene.source_sha256,
                         'crops':[evidence['crop_sha256'],evidence['context_sha256']], 'alternatives':choices}
-            if not budget.reserve('model_calls', decision):
-                evidence.update(status='pending_confirmation',reason='choice_reserved_or_unknown')
+            picked = call(decision, 'Select the most likely reading of the printed label from the numbered '
+                          'candidates using the two source crops. Return only the index.',
+                          {'candidates':dict(enumerate(choices,1))}, [crop_path,context_path], ReadingChoice, evidence)
+            if picked is None:
                 continue
-            picked = ReadingChoice.model_validate(actor.ask(
-                'Select the most likely reading of the printed label from the numbered candidates. Compare the visible glyphs in the tight and context images. Return only the index.',
-                {'candidates':dict(enumerate(choices,1))},[crop_path,context_path],ReadingChoice))
             evidence.update(alternatives=choices, choice_receipt=key([decision,picked.index]),status='pending_confirmation')
             if picked.index == 1:
                 continue

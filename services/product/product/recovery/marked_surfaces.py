@@ -199,8 +199,14 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         if not staged:
             shutil.copytree(baseline, output)
         graph = fused
+        footprint = np.ones_like(ink)
+        if layered:
+            yy, xx = np.ogrid[:h, :w]
+            dx = np.maximum(radius-xx-.5, np.maximum(xx+.5-(w-radius), 0))
+            dy = np.maximum(radius-yy-.5, np.maximum(yy+.5-(h-radius), 0))
+            footprint = dx*dx+dy*dy <= radius*radius
         for identifier, kind, bbox, local_mask, backing in [
-            (sid, 'surface', box, ~(ink | owned), parent_patch)
+            (sid, 'surface', box, footprint & ~(ink | owned), parent_patch)
         ] + ([(aid, 'asset', ibox, (ink & ~owned)[iy:iy+ih, ix:ix+iw], backing_field[iy:iy+ih, ix:ix+iw] if layered else fill)] if assets else []):
             ax, ay, aw, ah = bbox
             mask = np.zeros(plate.shape[:2], bool)
@@ -253,11 +259,6 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
             staged.append(identifier)
         if layered:
             # Only replace material accounted for by the shape, retained artwork or proven children.
-            # The outer corners of a roundRect belong to the page outside the card.
-            yy, xx = np.ogrid[:h, :w]
-            dx = np.maximum(radius-xx-.5, np.maximum(xx+.5-(w-radius), 0))
-            dy = np.maximum(radius-yy-.5, np.maximum(yy+.5-(h-radius), 0))
-            footprint = dx*dx+dy*dy <= radius*radius
             replace = footprint | ink | owned
             plate[y:y+h,x:x+w,:3][replace] = parent_patch[replace]
         else:

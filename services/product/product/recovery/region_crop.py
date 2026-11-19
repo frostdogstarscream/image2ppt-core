@@ -692,6 +692,39 @@ def _try_transparent_upgrade(
     return None
 
 
+def _separate_photo_caption(source, crop, texts):
+    """Leave a detected label band on the slide when its leading edge spans the photograph."""
+    if len(crop.get('kinds', [])) != 1 or crop['kinds'][0] not in ('layout:image', 'layout:header_image'):
+        return crop
+    x, y, w, h = crop['box']
+    seed = crop['seed_boxes'][0]
+    if w < 24 or h < 20:
+        return crop
+    for text in texts:
+        tx, ty, tw, th = text.bbox
+        if not (x <= tx and tx + tw <= x + w and y + .55*h <= ty <= y + h + .45*th
+                and ty < seed[1] + seed[3] and tw > .18*w):
+            continue
+        # Find a full-width change of colour just above the label. A localized building
+        # edge or text stroke cannot qualify on its own.
+        first = max(y + round(.52*h), round(ty - 1.15*th))
+        last = min(y + h, round(ty))
+        margin = max(2, round(.05*w))
+        strip = source[first-1:last+1, x+margin:x+w-margin].astype(float)
+        if len(strip) < 3:
+            continue
+        jumps = np.diff(strip, axis=0)
+        strength = np.median(abs(jumps).max(2), axis=1)
+        support = (abs(jumps).max(2) > 16).mean(1)
+        coherent = abs(np.median(jumps, axis=1)).max(1)
+        usable = (support > .69) & (coherent > 10) & (strength >= 16)
+        if usable.any():
+            i = int(np.argmax(np.where(usable, strength, -1)))
+            if first+i < y+h:
+                return {**crop, 'box':[x,y,w,first+i-y], 'caption_boundary':first+i}
+    return crop
+
+
 def stage_region_crops(
     baseline: str | Path,
     output: str | Path,
@@ -767,6 +800,7 @@ def stage_region_crops(
         rid = f'r-{seq:03d}'
         seq += 1
         used.add(rid)
+        crop = _separate_photo_caption(source, crop, graph.text.texts)
         x, y, w, h = crop['box']
         intrinsic = ' / '.join(t.strip() for t in crop['texts'] if t and t.strip())[:200]
         crop_obj = ClosedObject(

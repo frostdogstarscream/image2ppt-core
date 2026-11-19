@@ -1175,7 +1175,7 @@ def _chain_stage_from_spec(
             frame = field.get('picture_frame')
             if not frame or field['id'] in skip_ids or (wanted_filter is not None and field['id'] not in wanted_filter):
                 continue
-            seed = {'id': field['id'], 'bbox': frame, 'kind': 'asset',
+            seed = {'id': field['id'], 'bbox': frame, 'kind': 'asset' if field.get('intrinsic_ui') else 'layout:image',
                     'picture_frame': frame if field.get('intrinsic_ui') else None}
             pic_ir, pic_ids, evidence = stage_region_crops(
                 cur_base, directory/tag/('picture-'+key(field['id'])[:12]), seeds=[seed], skip_seed_ids=skip_ids)
