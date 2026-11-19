@@ -41,7 +41,9 @@ NS = {
     'rel': 'http://schemas.openxmlformats.org/package/2006/relationships',
 }
 CLASSES = ('background', 'plate', 'duplicate_picture', 'opaque_picture', 'asset', 'shape', 'table', 'chart', 'text')
-EDITABLE = ('opaque_picture', 'asset', 'shape', 'table', 'chart', 'text')
+EDITABLE = ('shape', 'table', 'chart', 'text')
+NATIVE_EDITABLE = EDITABLE
+MOVABLE_RASTER = ('asset', 'opaque_picture')
 PLATE_AREA_FRACTION = 0.90
 TRANSPARENT_FRACTION = 0.02
 
@@ -322,18 +324,37 @@ def _overlap(a, b) -> float:
     return max(0.0, w) * max(0.0, h)
 
 
-def text_metrics(objects: list[dict], ocr_lines: list[dict], min_score: float = 0.5) -> dict:
+def _is_logo_ocr_line(ln: dict, lb: list[float], image_size: tuple[int, int] | None) -> bool:
+    if ln.get('is_logo'):
+        return True
+    if image_size is not None and len(lb) == 4:
+        w_img, h_img = image_size
+        if w_img > 0 and h_img > 0 and lb[0] >= 0.80 * w_img and lb[1] <= 0.16 * h_img and lb[2] <= 0.18 * w_img:
+            return True
+    return False
+
+
+def text_metrics(objects: list[dict], ocr_lines: list[dict], min_score: float = 0.5, *,
+                 image_size: tuple[int, int] | None = None) -> dict:
     """Match independent OCR lines to native text frames by spatial overlap and wording."""
     natives = [o for o in objects if o['class'] == 'text']
     lines = [ln for ln in ocr_lines if _norm(ln.get('text')) and ln.get('score', 1.0) >= min_score]
     total_chars = sum(len(_norm(ln['text'])) for ln in lines)
     matched_chars = 0.0
     matched_lines = 0
+    non_logo_total = 0
+    non_logo_matched = 0
+    non_logo_chars = 0
+    non_logo_matched_chars = 0.0
     ious = []
     rows = []
     for ln in lines:
         ref = _norm(ln['text'])
         lb = [float(v) for v in ln['bbox']]
+        is_logo = _is_logo_ocr_line(ln, lb, image_size)
+        if not is_logo:
+            non_logo_total += 1
+            non_logo_chars += len(ref)
         best, best_ratio, best_iou = None, 0.0, 0.0
         for nat in natives:
             ov = _overlap(lb, nat['bbox'])
@@ -350,8 +371,11 @@ def text_metrics(objects: list[dict], ocr_lines: list[dict], min_score: float = 
             matched_lines += 1
             matched_chars += best_ratio * len(ref)
             ious.append(best_iou)
+            if not is_logo:
+                non_logo_matched += 1
+                non_logo_matched_chars += best_ratio * len(ref)
         rows.append({'ocr_text': ln['text'], 'bbox': lb, 'matched_object': best['name'] if best else None,
-                     'char_ratio': round(best_ratio, 3)})
+                     'char_ratio': round(best_ratio, 3), 'is_logo': is_logo})
     return {
         'reference': 'independent OCR lines (not a human inventory)',
         'ocr_lines': len(lines),
@@ -360,6 +384,10 @@ def text_metrics(objects: list[dict], ocr_lines: list[dict], min_score: float = 
         'matched_lines': matched_lines,
         'line_recall': round(matched_lines / len(lines), 4) if lines else None,
         'char_recall': round(matched_chars / total_chars, 4) if total_chars else None,
+        'non_logo_ocr_lines': non_logo_total,
+        'non_logo_matched_lines': non_logo_matched,
+        'non_logo_line_recall': round(non_logo_matched / non_logo_total, 4) if non_logo_total else None,
+        'non_logo_char_recall': round(non_logo_matched_chars / non_logo_chars, 4) if non_logo_chars else None,
         'mean_frame_iou': round(float(np.mean(ious)), 4) if ious else None,
         'unmatched': [r for r in rows if r['matched_object'] is None][:50],
     }
@@ -380,6 +408,8 @@ def score_page(source_path: str | Path, pptx_path: str | Path, *, render_path: s
     counts: dict[str, int] = {}
     for obj in inspected['objects']:
         counts[obj['class']] = counts.get(obj['class'], 0) + 1
+    native_editable = round(sum(content_share[c] for c in NATIVE_EDITABLE), 4)
+    movable_raster = round(sum(content_share[c] for c in MOVABLE_RASTER), 4)
     result = {
         'schema': SCHEMA,
         'source': str(source_path),
@@ -389,11 +419,15 @@ def score_page(source_path: str | Path, pptx_path: str | Path, *, render_path: s
         'object_counts': counts,
         'visible_area_fraction': area,
         'content_fraction': content_share,
-        'editable_content_fraction': round(sum(content_share[c] for c in EDITABLE), 4),
-        'native_content_fraction': round(sum(content_share[c] for c in ('shape', 'table', 'chart', 'text')), 4),
+        'native_editable_content_fraction': native_editable,
+        'editable_content_fraction': native_editable,
+        'native_content_fraction': native_editable,
+        'movable_raster_content_fraction': movable_raster,
+        'duplicate_raster_content_fraction': content_share['duplicate_picture'],
         'raster_plate_content_fraction': content_share['plate'],
         'notes': [
             'content_fraction is measured on source pixels with local structure; text is frame area, not ink.',
+            'editable_content_fraction includes native editable primitives only (shape/table/chart/text); movable raster graphics and duplicate crops are reported separately.',
             'Measurements only: not human, WPS or publication acceptance.',
         ],
     }
@@ -402,7 +436,7 @@ def score_page(source_path: str | Path, pptx_path: str | Path, *, render_path: s
         result['fidelity'] = fidelity(source, render)
         result['render'] = str(render_path)
     if ocr is not None:
-        result['text'] = text_metrics(inspected['objects'], ocr.get('lines', []))
+        result['text'] = text_metrics(inspected['objects'], ocr.get('lines', []), image_size=(width, height))
     result['objects'] = inspected['objects']
     return result
 

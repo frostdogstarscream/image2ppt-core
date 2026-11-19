@@ -138,36 +138,75 @@ class RuntimeService(ExplorationTools):
                                      auto_create_scene=auto_create_scene, run_layers=run_layers, run_layout=run_layout)
 
     def batch_reconstruct_page(self, state, current, directory, *, page, object_ids=None,
-                               include_assets=True, include_containers=True, include_region_crops=None,
-                               use_inpaint=True, verify_office=True):
+                               include_assets=True, include_containers=True, include_region_crops=False,
+                               allow_move_unsafe=False, use_inpaint=True, verify_office=True):
         from .batch_backbone import batch_reconstruct_page
         return batch_reconstruct_page(self, state, current, directory, page=page, object_ids=object_ids,
                                       include_assets=include_assets, include_containers=include_containers,
                                       include_region_crops=include_region_crops,
+                                      allow_move_unsafe=allow_move_unsafe,
                                       use_inpaint=use_inpaint, verify_office=verify_office)
 
-    def crop_region(self, state, current, directory, *, page, object_ids=None, bbox=None, allow_movable=True):
-        from ..recovery.region_crop import stage_region_crops
-        if not object_ids and not bbox:
-            raise ValueError('crop_region requires object_ids or bbox')
+    def crop_region(self, state, current, directory, *, page, object_ids=None, bbox=None,
+                    allow_movable=True, allow_move_unsafe=False):
+        from .. import layout_evidence
+        from ..recovery.region_crop import collect_crop_seeds, stage_region_crops
         row = self.page(current, page)
         graph = self.graph(row)
-        seeds = []
-        if bbox is not None:
-            seeds.append({'id': 'manual-crop', 'kind': 'manual', 'bbox': [float(v) for v in bbox], 'text': ''})
-        wanted = set(object_ids or [])
-        for t in graph.text.texts:
-            if t.id in wanted and t.id not in graph.selected:
-                seeds.append({'id': t.id, 'kind': 'text', 'bbox': list(t.bbox), 'text': t.text})
-        for a in graph.asset.objects:
-            if a.id in wanted and a.id not in graph.selected:
-                seeds.append({'id': a.id, 'kind': 'asset', 'bbox': list(a.bbox), 'text': a.intrinsic_text})
-        if not seeds:
-            raise ValueError('no uncommitted matching objects or bbox for region crop')
+        logo_ids = {
+            x['id'] for x in current.get('scene_relations', {}).get(str(page), {}).get('logo_lockup_candidates', [])
+            if x.get('id')
+        }
+        raw_unrec = current.get('batch_unrecoverable_texts', {}).get(str(page))
+        unrec_set = set(raw_unrec) if raw_unrec is not None else None
+        protected_text_ids: set[str] | None = None
+        layout_report: list[dict] = []
+
+        if object_ids is None and bbox is None:
+            layout_data = None
+            layout_file = current.get('layout', {}).get(str(page))
+            if layout_file and Path(layout_file).is_file():
+                layout_data = json.loads(Path(layout_file).read_text('utf8'))
+            elif layout_evidence.available():
+                try:
+                    layout_data = layout_evidence.detect(
+                        {'path': row['snapshot']['path'], 'source_sha256': graph.source_sha256},
+                        directory / 'layout-cache',
+                    )
+                except Exception as exc:
+                    layout_report.append({'id': 'layout_evidence', 'state': 'ERROR', 'reason': f'{type(exc).__name__}: {exc}'})
+            seeds, protected_text_ids = collect_crop_seeds(
+                graph,
+                unrecoverable_text_ids=unrec_set,
+                layout=layout_data,
+                logo_ids=logo_ids,
+            )
+            if not seeds:
+                return {'status': 'NO_CROPS_STAGED', 'page': page, 'report': layout_report}
+        else:
+            seeds = []
+            if bbox is not None:
+                seeds.append({'id': 'manual-crop', 'kind': 'manual', 'bbox': [float(v) for v in bbox], 'text': ''})
+            wanted = set(object_ids or [])
+            for t in graph.text.texts:
+                if t.id in wanted and t.id not in graph.selected:
+                    seeds.append({'id': t.id, 'kind': 'text', 'bbox': list(t.bbox), 'text': t.text})
+            for a in graph.asset.objects:
+                if a.id in wanted and a.id not in graph.selected:
+                    seeds.append({'id': a.id, 'kind': 'asset', 'bbox': list(a.bbox), 'text': a.intrinsic_text})
+            if not seeds:
+                raise ValueError('no uncommitted matching objects or bbox for region crop')
+            _, base_protected = collect_crop_seeds(graph, unrecoverable_text_ids=unrec_set, logo_ids=logo_ids)
+            protected_text_ids = base_protected - wanted
+
         crop_ir, staged_ids, report = stage_region_crops(
-            Path(row['ir']).parent, directory / 'staged', seeds=seeds, allow_movable=allow_movable)
+            Path(row['ir']).parent, directory / 'staged',
+            seeds=seeds, allow_movable=allow_movable, allow_move_unsafe=allow_move_unsafe,
+            protected_text_ids=protected_text_ids,
+        )
+        full_report = [*layout_report, *report]
         if not staged_ids:
-            return {'status': 'NO_CROPS_STAGED', 'page': page, 'report': report}
+            return {'status': 'NO_CROPS_STAGED', 'page': page, 'report': full_report}
         crop_dir = crop_ir.parent
         cid = 'c-' + key(str(directory.relative_to(state.job)) + ':crop')[:24]
         cand = {
@@ -180,7 +219,7 @@ class RuntimeService(ExplorationTools):
         }
         current['candidates'][cid] = cand
         return {'status': 'STAGED_LOCAL', 'candidate_id': cid, 'page': page,
-                'staged_object_ids': staged_ids, 'report': report,
+                'staged_object_ids': staged_ids, 'report': full_report,
                 'next_step': f'Call commit_candidate(candidate_id="{cid}", expected_version={current["version"] + 1}) to validate and commit.'}
 
     def run_perception(self, state, current, directory):
@@ -679,9 +718,19 @@ class RuntimeService(ExplorationTools):
             return {'status': 'REVIEW_REQUIRED', 'reason': 'current Office and OpenCode evidence required'}
         for reference in composition['required_evidence']:
             state.evidence(reference['id'])
-        selected = [self.graph(page).selected for page in current['pages']]
+        raw_selected = [self.graph(page).selected for page in current['pages']]
+        editable = [
+            {oid: rec for oid, rec in sel.items()
+             if not (rec.get('region_crop') and rec.get('move_safety') == 'MOVE_UNSAFE')}
+            for sel in raw_selected
+        ]
+        in_place_crops = [
+            sorted(oid for oid, rec in sel.items()
+                   if rec.get('region_crop') and rec.get('move_safety') == 'MOVE_UNSAFE')
+            for sel in raw_selected
+        ]
         # Completeness has no independent denominator in this first integration.
-        status = 'PARTIAL_EDITABLE' if any(selected) else 'RASTER_ONLY'
+        status = 'PARTIAL_EDITABLE' if any(editable) else 'RASTER_ONLY'
         delivery = state.job/'delivery'
         delivery.mkdir(exist_ok=True)
         shutil.copyfile(composition['artifacts']['pptx'], delivery/'result.pptx')
@@ -701,13 +750,14 @@ class RuntimeService(ExplorationTools):
         office_dir = Path(composition['office']['office_directory'])
         for index in range(1, len(current['pages'])+1):
             shutil.copyfile(office_dir/f'page-{index:02d}-before.png', delivery/f'page-{index:02d}.png')
-        delivery_state='SUCCEEDED' if any(selected) else 'REVIEW_REQUIRED'
-        result = {'status': delivery_state, 'completion': status, 'reconstruction_succeeded':any(selected), 'visual_review_backend': 'opencode',
-                  'office_pass': True, 'visual_review': visual, 'pages': len(selected),
-                  'editable_objects': [sorted(page) for page in selected],
+        delivery_state = 'SUCCEEDED' if any(editable) else 'REVIEW_REQUIRED'
+        result = {'status': delivery_state, 'completion': status, 'reconstruction_succeeded': any(editable), 'visual_review_backend': 'opencode',
+                  'office_pass': True, 'visual_review': visual, 'pages': len(editable),
+                  'editable_objects': [sorted(page) for page in editable],
+                  'in_place_region_crops': in_place_crops,
                   'unresolved_objects': [[identifier for identifier in self.graph(page).ownership
                                           if identifier not in chosen]
-                                         for page, chosen in zip(current['pages'], selected)],
+                                         for page, chosen in zip(current['pages'], raw_selected)],
                   'recall': None, 'human_acceptance': False, 'automatic_publication': False,
                   'workflow_states': {'candidate_generation': 'COMPLETED', 'regional_commit': 'COMPLETED',
                                       'final_qa': 'PASS', 'automatic_publication': 'GATED'}}

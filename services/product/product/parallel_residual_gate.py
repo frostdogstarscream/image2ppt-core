@@ -13,7 +13,9 @@ from .materialize import digest,write
 def residual_accepted(row):
     """PASS, or an explicitly MOVE_UNSAFE region crop that erased nothing."""
     return row['residual_check_status']=='PASS' or (
-        row['residual_check_status']=='NOT_APPLICABLE' and row.get('move_safety')=='MOVE_UNSAFE')
+        row['residual_check_status']=='NOT_APPLICABLE'
+        and row.get('region_crop') is True
+        and row.get('move_safety')=='MOVE_UNSAFE')
 
 
 def inspect_residuals(irfile,office_dir,page,output):
@@ -22,6 +24,13 @@ def inspect_residuals(irfile,office_dir,page,output):
     node_z={n['id']:int(n.get('z',0)) for n in ir.get('nodes',[]) if isinstance(n,dict) and 'id' in n}
     node_bbox={n['id']:n.get('bbox') for n in ir.get('nodes',[]) if isinstance(n,dict) and 'id' in n}
     records=list(scene['selected'].values());source=np.array(Image.open(irfile.parent/'source.png').convert('RGB'));proofs={};results=[]
+    rb=scene.get('raster_backing') or {}
+    plate=None
+    if rb.get('path'):
+        plate_file=(irfile.parent/rb['path']).resolve()
+        if plate_file.is_relative_to(irfile.parent.resolve()) and plate_file.is_file():
+            if not rb.get('sha256') or digest(plate_file)==rb['sha256']:
+                plate=np.array(Image.open(plate_file).convert('RGB'))
     for record in records:
         ref=record.get('owner_evidence')
         if not ref:continue
@@ -33,8 +42,28 @@ def inspect_residuals(irfile,office_dir,page,output):
         identifier=record['id'];deleted=Path(office_dir)/f'{page:02d}-{identifier}-delete.png'
         base={'id':identifier,'residual_check_status':'UNKNOWN','residual_pixels_confirmed':None,'reference_sha256':record.get('owner_evidence',{}).get('sha256')}
         if record.get('region_crop') and record.get('move_safety')=='MOVE_UNSAFE' and not record.get('owner_evidence'):
+            bbox=record.get('bbox') or node_bbox.get(identifier)
+            plate_ok=plate is not None and plate.shape==source.shape and bbox and len(bbox)==4
+            if plate_ok:
+                bx,by,bw,bh=[round(v) for v in bbox]
+                bx0,by0=max(0,bx),max(0,by)
+                bx1,by1=min(source.shape[1],bx+bw),min(source.shape[0],by+bh)
+                check_mask=np.zeros(source.shape[:2],bool)
+                if bx1>bx0 and by1>by0:
+                    check_mask[by0:by1,bx0:bx1]=True
+                z_self=node_z.get(identifier,0)
+                for other_rec in records:
+                    oid=other_rec['id']
+                    if oid==identifier or oid not in proofs:continue
+                    z_other=node_z.get(oid,10**9 if other_rec.get('kind')=='text' else 0)
+                    if z_other>z_self:
+                        check_mask&=~proofs[oid]['mask'].astype(bool)
+                plate_ok=(not check_mask.any()) or np.array_equal(plate[check_mask],source[check_mask])
+            if not plate_ok:
+                results.append({**base,'residual_check_status':'FAIL','region_crop':True,'move_safety':'MOVE_UNSAFE',
+                    'reason':'MOVE_UNSAFE crop underlying source-plate pixels were modified'});continue
             # Nothing was erased: the plate keeps identical pixels beneath this copy.
-            results.append({**base,'residual_check_status':'NOT_APPLICABLE','move_safety':'MOVE_UNSAFE',
+            results.append({**base,'residual_check_status':'NOT_APPLICABLE','region_crop':True,'move_safety':'MOVE_UNSAFE',
                 'reason':'opaque region crop over unchanged source plate; deletion reveals identical source pixels by design'});continue
         if identifier not in proofs or not deleted.exists():results.append({**base,'reason':'missing source-owner or actual-delete evidence'});continue
         data=proofs[identifier];mask=data['mask'].astype(bool).copy();x,y,w,h=map(int,data['restore_bbox'])

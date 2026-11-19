@@ -92,6 +92,10 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
         sam,error=load_sam(evidence['directory'],obj,scene.source_sha256,digest(evidence['plan']),tuple(scene.image_size),'sam3',individual=True)
         if error:raise ValueError(error)
     seeds=asset_candidates(obj,work_source,layers,protected,(),'auto',sam=sam,surface=surface)
+    if strategy=='rmbg2':
+        from ..matting import matte_candidate
+        try:seeds.append(matte_candidate(obj,work_source,protected,surface))
+        except (ValueError,OSError):pass
     if strategy=='sam':
         from .asset_retry import sam_source_candidates
         source_seeds=list(seeds)

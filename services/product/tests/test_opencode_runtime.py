@@ -1730,24 +1730,33 @@ def test_batch_reconstruct_stages_region_crops_with_layout_and_commits_cleanly(j
     assert len(prep['layout_pictorial_regions']) == 1
 
     batch = call(service, identifier, 'batch_reconstruct_page', page=1,
-                 include_assets=True, include_region_crops=True, use_inpaint=False, verify_office=False)
+                 include_assets=True, include_region_crops=True, allow_move_unsafe=True,
+                 use_inpaint=False, verify_office=False)
     assert batch['status'] == 'STAGED_LOCAL'
     assert 't-001' in batch['staged_object_ids']
     crop_ids = [oid for oid in batch['staged_object_ids'] if oid.startswith('r-')]
-    assert len(crop_ids) >= 2
+    # Stage 3 crops layout pictorial regions (r-001) without pre-emptively stealing cap>=1 texts (t-002).
+    assert len(crop_ids) == 1
     assert batch['failed_regions']
     noisy_fail = next(f for f in batch['failed_regions'] if f['object_id'] == 't-002')
-    assert noisy_fail['covered_by_region_crop'].startswith('r-')
-    assert noisy_fail['recommended_action'] == 'already_cropped_as_region_image'
-    assert noisy_fail['max_repair_attempts'] == 0
+    assert 'covered_by_region_crop' not in noisy_fail
+    assert noisy_fail['max_repair_attempts'] >= 1
 
     committed = call(service, identifier, 'commit_candidate',
                      candidate_id=batch['candidate_id'], expected_version=batch['version'])
     assert committed['status'] == 'COMMITTED'
+
+    # Post-Stage-4 explicit crop fallback on t-002 stages & commits r-002 cleanly.
+    post_crop = call(service, identifier, 'crop_region', page=1, object_ids=['t-002'], allow_move_unsafe=True)
+    assert post_crop['status'] == 'STAGED_LOCAL'
+    committed_post = call(service, identifier, 'commit_candidate',
+                          candidate_id=post_crop['candidate_id'], expected_version=post_crop['version'])
+    assert committed_post['status'] == 'COMMITTED'
+
     page_prog = service.call('get_progress', identifier)['pages'][0]
     assert page_prog['region_crops'] >= 2
     assert page_prog['movable_region_crops'] >= 1
-    assert page_prog['committed_objects'] == len(batch['staged_object_ids'])
+    assert page_prog['committed_objects'] == len(batch['staged_object_ids']) + len(post_crop['staged_object_ids'])
 
 
 def test_crop_region_tool_uses_host_fusion_and_commits_through_unified_gate(job, monkeypatch):
@@ -1820,8 +1829,8 @@ def test_crop_region_tool_uses_host_fusion_and_commits_through_unified_gate(job,
                       candidate_id=crop_mov['candidate_id'], expected_version=crop_mov['version'])
     assert commit_mov['status'] == 'COMMITTED'
 
-    # 2) Textured/striped large zone via explicit bbox -> MOVE_UNSAFE stays in place on plate & still commits!
-    crop_unsafe = call(service, identifier, 'crop_region', page=1, bbox=[310.0, 145.0, 70.0, 50.0])
+    # 2) Textured/striped large zone via explicit bbox with allow_move_unsafe=True -> MOVE_UNSAFE stays in place & commits, excluded from editable_objects.
+    crop_unsafe = call(service, identifier, 'crop_region', page=1, bbox=[310.0, 145.0, 70.0, 50.0], allow_move_unsafe=True)
     assert crop_unsafe['status'] == 'STAGED_LOCAL'
     cand_ir = Path(service.state(identifier).read()['candidates'][crop_unsafe['candidate_id']]['ir'])
     cand_graph = SceneGraph.model_validate_json((cand_ir.parent / 'scene.json').read_text('utf8'))
@@ -1839,6 +1848,107 @@ def test_crop_region_tool_uses_host_fusion_and_commits_through_unified_gate(job,
     page_prog = service.call('get_progress', identifier)['pages'][0]
     assert page_prog['region_crops'] == 2
     assert page_prog['movable_region_crops'] == 1
+
+    comp = call(service, identifier, 'compose_delivery')
+    val = call(service, identifier, 'validate_office')
+    assert val['status'] == 'PASS'
+    eids = [r['id'] for r in val['required_evidence']]
+    service.call('get_evidence', identifier, evidence_ids=eids)
+    st_fin = service.state(identifier)
+    for eid in eids:
+        st_fin.evidence(eid, delivered=True)
+    call(service, identifier, 'record_visual_review', review={
+        'passed': True,
+        'checked': ['content', 'completeness', 'layout', 'residual', 'background', 'editing'],
+        'findings': [],
+        'observations': [{'summary': '1 MOVABLE crop + 1 opt-in MOVE_UNSAFE crop'}],
+        'minor_deviations': [],
+        'evidence_ids': eids,
+        'reason': 'Visual integrity preserved; opt-in in-place crop excluded from editable objects.',
+    })
+    fin = call(service, identifier, 'finalize_job')
+    assert rid_mov in fin['editable_objects'][0]
+    assert rid_unsafe not in fin['editable_objects'][0]
+    assert rid_unsafe in fin['in_place_region_crops'][0]
+
+
+def test_default_batch_defers_crops_and_auto_crop_region_protects_repairable_text(job, monkeypatch):
+    from PIL import ImageDraw, ImageFont
+    from product import fonts, layout_evidence
+    from product.parallel_contracts import SceneGraph
+
+    service, identifier, directory = job
+    manifest = fonts.font_manifest([])
+    record = next(r for r in manifest['fonts'] if r['family'] == 'Arial' and not r['bold'])
+    monkeypatch.setattr(fonts, 'font_manifest', lambda texts: {'fonts': [record]})
+
+    w, h = 480, 300
+    bg = (245, 248, 252)
+    img = Image.new('RGB', (w, h), bg)
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.truetype(record['file'], 18, index=record['index'])
+
+    draw.text((36, 26), 'Normal Title', font=font, fill=(20, 45, 95))
+    b1 = draw.textbbox((36, 26), 'Normal Title', font=font)
+    # Repairable text positioned close to chart so chart crop must not steal/swallow it.
+    draw.text((162, 136), 'RepairMe', font=font, fill=(35, 45, 75))
+    b_rep = draw.textbbox((162, 136), 'RepairMe', font=font)
+
+    # Framed chart region (isolated on canvas).
+    draw.rectangle((42, 122, 152, 208), fill=(252, 253, 255), outline=(185, 200, 220), width=1)
+    draw.rectangle((56, 156, 76, 198), fill=(30, 115, 215))
+    draw.rectangle((86, 136, 106, 198), fill=(235, 125, 40))
+
+    src = directory / 'inputs/01.png'
+    img.save(src)
+    ocr_data = {'lines': [
+        {'id': 'l-title', 'text': 'Normal Title', 'score': 0.99,
+         'bbox': [float(b1[0]), float(b1[1]), float(b1[2] - b1[0]), float(b1[3] - b1[1])]},
+        {'id': 'l-rep', 'text': 'RepairMe', 'score': 0.99,
+         'bbox': [float(b_rep[0]), float(b_rep[1]), float(b_rep[2] - b_rep[0]), float(b_rep[3] - b_rep[1])]},
+    ]}
+    monkeypatch.setattr(service, 'run_ocr', lambda state, current, d, *, page: (
+        write(d / 'ocr.json', ocr_data),
+        current.setdefault('ocr', {}).update({str(page): str(d / 'ocr.json')}),
+        {'result': ocr_data})[2])
+    monkeypatch.setattr(layout_evidence, 'available', lambda: True)
+    monkeypatch.setattr(layout_evidence, 'detect', lambda snap, cache: {
+        'schema': 'LayoutRegions/1', 'source_sha256': snap['source_sha256'], 'model': 'PP-DocLayoutV3',
+        'regions': [{'id': 'l-001', 'label': 'chart', 'bbox': [40.0, 120.0, 118.0, 90.0], 'score': 0.94}],
+    })
+
+    prep = call(service, identifier, 'prepare_page_evidence', page=1, run_layers=False, run_layout=True)
+    assert prep['status'] == 'PREPARED'
+
+    # Default batch_reconstruct_page omits include_region_crops -> does NOT stage r-* pre-emptively.
+    batch = call(service, identifier, 'batch_reconstruct_page', page=1,
+                 include_assets=True, use_inpaint=False, verify_office=False)
+    assert batch['status'] == 'STAGED_LOCAL'
+    assert not any(oid.startswith('r-') for oid in batch['staged_object_ids'])
+    call(service, identifier, 'commit_candidate', candidate_id=batch['candidate_id'], expected_version=batch['version'])
+
+    # Simulate uncommitted repairable text via rollback (or verify cap>=1 if batch failed it with INSUFFICIENT_CONTEXT).
+    st = service.state(identifier)
+    cur = st.read()
+    row = service.page(cur, 1)
+    g = SceneGraph.model_validate_json(Path(row['scene']).read_text('utf8'))
+    t_rep = next(t for t in g.text.texts if t.text == 'RepairMe')
+    if t_rep.id in g.selected:
+        rb = call(service, identifier, 'rollback_region', page=1, object_ids=[t_rep.id], reason='simulate repairable cap>=1 text')
+        assert rb['status'] == 'ROLLED_BACK'
+    else:
+        rep_fail = next(f for f in batch['failed_regions'] if f['object_id'] == t_rep.id)
+        assert rep_fail['max_repair_attempts'] >= 1
+
+    # Auto crop_region(page=1) with no object_ids and no bbox protects repairable t_rep while staging chart crop.
+    auto_crop = call(service, identifier, 'crop_region', page=1)
+    assert auto_crop['status'] == 'STAGED_LOCAL'
+    cand_ir = Path(service.state(identifier).read()['candidates'][auto_crop['candidate_id']]['ir'])
+    cand_g = SceneGraph.model_validate_json((cand_ir.parent / 'scene.json').read_text('utf8'))
+    rid = auto_crop['staged_object_ids'][0]
+    assert t_rep.id not in cand_g.selected[rid].get('seed_ids', [])
+    cx, cy, cw, ch = cand_g.selected[rid]['bbox']
+    assert cx + cw <= t_rep.bbox[0] + 1e-6
 
 
 

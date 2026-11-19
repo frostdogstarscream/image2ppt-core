@@ -79,19 +79,30 @@ def test_ownership_classes_and_content_fractions(tmp_path):
 
     result = scorecard.score_page(src_path, pptx, render_path=src_path,
                                   ocr={'lines': [{'text': '\u6807 \u9898', 'bbox': [12, 11, 70, 18], 'score': 0.99},
-                                                 {'text': '\u7f3a\u5931', 'bbox': [120, 92, 40, 6], 'score': 0.99}]})
+                                                 {'text': '\u7f3a\u5931', 'bbox': [120, 92, 40, 6], 'score': 0.99},
+                                                 {'text': 'BRAND', 'bbox': [170, 4, 24, 10], 'score': 0.99}]})
     assert result['object_counts'] == {'plate': 1, 'opaque_picture': 1, 'asset': 1, 'shape': 1, 'text': 1}
     area = result['visible_area_fraction']
     assert area['text'] == round(80 * 20 / 20000, 4)
     assert area['opaque_picture'] == round(50 * 40 / 20000, 4)
     # Transparent icon border falls through to the plate.
     assert area['asset'] == round(50 * 30 / 20000, 4)
+    # Strict 4-way split: opaque_picture & asset sit in movable_raster, NOT editable_content_fraction.
+    assert result['editable_content_fraction'] == result['native_editable_content_fraction']
+    assert result['native_editable_content_fraction'] == round(
+        result['content_fraction']['shape'] + result['content_fraction']['text'], 4,
+    )
+    assert result['movable_raster_content_fraction'] == round(
+        result['content_fraction']['asset'] + result['content_fraction']['opaque_picture'], 4,
+    )
+    assert result['duplicate_raster_content_fraction'] == 0.0
     assert result['raster_plate_content_fraction'] < 1.0
     assert result['fidelity']['mae_rgb'] == 0.0 and result['fidelity']['ssim'] > 0.999
     assert result['fidelity']['delta_e2000_p95'] < 1e-6
     text = result['text']
-    assert text['ocr_lines'] == 2 and text['matched_lines'] == 1
-    assert text['line_recall'] == 0.5 and text['unmatched'][0]['ocr_text'] == '\u7f3a\u5931'
+    assert text['ocr_lines'] == 3 and text['matched_lines'] == 1
+    assert text['non_logo_ocr_lines'] == 2 and text['non_logo_line_recall'] == 0.5
+    assert round(text['line_recall'], 4) == round(1 / 3, 4) and text['unmatched'][0]['ocr_text'] == '\u7f3a\u5931'
     scorecard.save_owner_preview(src_path, pptx, tmp_path / 'owner.png')
     assert (tmp_path / 'owner.png').is_file()
 

@@ -23,7 +23,7 @@ try:
     import win32com.client
     sch = win32com.client.Dispatch('Schedule.Service'); sch.Connect()
     fld = sch.GetFolder('\\')
-    for tname in ('Image2PPT-Parallel-R10-LayerD-R2-20261110', 'Image2PPT-Parallel-R10-SAM-R2-20261110'):
+    for tname in ('Image2PPT-Parallel-R10-LayerD-R2-20261110', 'Image2PPT-Parallel-R10-SAM-R2-20261110', 'Image2PPT-Layout-18849'):
         try:
             tsk = fld.GetTask(tname)
             if tsk.State != 4:
@@ -33,7 +33,7 @@ try:
             pass
 except Exception:
     pass
-for name, url in [('api', 'http://127.0.0.1:8772/'), ('opencode', 'http://127.0.0.1:14100/global/health'), ('layerd', 'http://127.0.0.1:18847/health'), ('sam', 'http://127.0.0.1:18848/v1/capabilities')]:
+for name, url in [('api', 'http://127.0.0.1:8772/'), ('opencode', 'http://127.0.0.1:14100/global/health'), ('layerd', 'http://127.0.0.1:18847/health'), ('sam', 'http://127.0.0.1:18848/v1/capabilities'), ('layout', 'http://127.0.0.1:18849/health')]:
     try:
         code = urllib.request.urlopen(url, timeout=2).status
     except Exception:

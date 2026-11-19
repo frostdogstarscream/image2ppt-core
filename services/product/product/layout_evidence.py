@@ -1,10 +1,11 @@
 """Layout region evidence (PP-DocLayout) for crop boundaries and intrinsic-text hints.
 
-The detector runs out of process in a dedicated environment configured by
-``layout.python`` in ``.runtime/parallel-services.json`` (or
-``IMAGE2PPT_LAYOUT_PYTHON``). Results are cached by source and model-file
-hashes. Regions are localization hints: they never authorize erasing pixels and
-never change text wording.
+The detector runs either via a persistent loopback HTTP worker configured by
+``layout.url`` in ``.runtime/parallel-services.json`` (or ``IMAGE2PPT_LAYOUT_URL``)
+or out of process in ``layout.python`` (``IMAGE2PPT_LAYOUT_PYTHON``), falling back
+from HTTP to CLI subprocess on transport errors. Results are cached by source
+and worker hashes. Regions are localization hints: they never authorize erasing
+pixels and never change text wording.
 """
 from __future__ import annotations
 
@@ -12,6 +13,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+
+import httpx
 
 from .materialize import digest, write
 from .parallel_config import ROOT
@@ -29,14 +32,51 @@ def _config() -> dict:
     if file.is_file():
         cfg = json.loads(file.read_text(encoding='utf-8')).get('layout', {}) or {}
     python = os.environ.get('IMAGE2PPT_LAYOUT_PYTHON') or cfg.get('python')
-    return {'python': python, 'model': cfg.get('model', 'PP-DocLayoutV3'), 'device': cfg.get('device', 'cpu'),
+    url = os.environ.get('IMAGE2PPT_LAYOUT_URL') or cfg.get('url') or ''
+    return {'python': python, 'url': str(url).strip().rstrip('/'),
+            'model': cfg.get('model', 'PP-DocLayoutV3'), 'device': cfg.get('device', 'cpu'),
             'cache_home': cfg.get('cache_home') or os.environ.get('PADDLE_PDX_CACHE_HOME'),
             'timeout': int(cfg.get('timeout_seconds', 300))}
 
 
+def _cli_available(cfg: dict) -> bool:
+    return bool(cfg['python']) and Path(cfg['python']).is_file() and WORKER.is_file()
+
+
+def _http_healthy(url: str) -> bool:
+    try:
+        r = httpx.get(f'{url}/health', timeout=2.0)
+        return r.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
 def available() -> bool:
     cfg = _config()
-    return bool(cfg['python']) and Path(cfg['python']).is_file() and WORKER.is_file()
+    if _cli_available(cfg):
+        return True
+    return bool(cfg['url']) and _http_healthy(cfg['url'])
+
+
+def _detect_http(snap: dict, cfg: dict) -> dict:
+    resp = httpx.post(
+        f"{cfg['url']}/detect",
+        json={'image_path': snap['path'], 'model': cfg['model'], 'device': cfg['device']},
+        timeout=float(cfg['timeout']),
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _detect_cli(snap: dict, temporary: Path, cfg: dict) -> dict:
+    env = {**os.environ, 'PADDLE_PDX_MODEL_SOURCE': os.environ.get('PADDLE_PDX_MODEL_SOURCE', 'modelscope')}
+    if cfg['cache_home']:
+        env['PADDLE_PDX_CACHE_HOME'] = cfg['cache_home']
+    run_kwargs = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt' else {}
+    subprocess.run([cfg['python'], str(WORKER), snap['path'], str(temporary), '--model', cfg['model'],
+                    '--device', cfg['device']], check=True, timeout=cfg['timeout'], env=env,
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **run_kwargs)
+    return json.loads(temporary.read_text(encoding='utf-8'))
 
 
 def detect(snap: dict, cache: str | Path) -> dict:
@@ -53,15 +93,16 @@ def detect(snap: dict, cache: str | Path) -> dict:
             raise ValueError('layout cache binding mismatch')
         return result
     file.parent.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, 'PADDLE_PDX_MODEL_SOURCE': os.environ.get('PADDLE_PDX_MODEL_SOURCE', 'modelscope')}
-    if cfg['cache_home']:
-        env['PADDLE_PDX_CACHE_HOME'] = cfg['cache_home']
     temporary = file.with_suffix('.tmp.json')
-    run_kwargs = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt' else {}
-    subprocess.run([cfg['python'], str(WORKER), snap['path'], str(temporary), '--model', cfg['model'],
-                    '--device', cfg['device']], check=True, timeout=cfg['timeout'], env=env,
-                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **run_kwargs)
-    result = json.loads(temporary.read_text(encoding='utf-8'))
+    result = None
+    if cfg['url']:
+        try:
+            result = _detect_http(snap, cfg)
+        except httpx.TransportError:
+            if not _cli_available(cfg):
+                raise
+    if result is None:
+        result = _detect_cli(snap, temporary, cfg)
     if result.get('source_sha256') != snap['source_sha256']:
         raise ValueError('layout result source mismatch')
     result['identity'] = identity
@@ -90,5 +131,7 @@ def crop_seeds(layout: dict, graph, *, min_score: float = 0.5, max_committed_ove
             covered += ix * iy
         if covered / area > max_committed_overlap:
             continue
-        rows.append({'id': region['id'], 'kind': 'layout:' + region['label'], 'bbox': [x, y, w, h], 'text': ''})
+        rid = str(region['id'])
+        seed_id = rid if rid.startswith('layout:') else f'layout:{rid}'
+        rows.append({'id': seed_id, 'kind': 'layout:' + region['label'], 'bbox': [x, y, w, h], 'text': ''})
     return rows

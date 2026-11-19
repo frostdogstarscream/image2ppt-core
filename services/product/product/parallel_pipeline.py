@@ -229,26 +229,37 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
                 except Exception as exc:
                     write(folder/'local-repair-failure.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
             if region_fallback=='crop':
-                # Remaining source content becomes small opaque region crops; MOVE_UNSAFE
-                # crops erase nothing, MOVABLE crops carry their own owner receipt.
-                from .recovery.region_crop import stage_region_crops
+                # Remaining unrecoverable source content becomes movable crops/transparent upgrades
+                # via the same seed/protection rules as the runtime flow.
+                from .recovery.region_crop import collect_crop_seeds, stage_region_crops, unrecoverable_text_ids_from_report
+                from . import layout_evidence
                 from uuid import uuid4
                 try:
-                    from .recovery.region_crop import default_seeds
-                    from . import layout_evidence
-                    crop_seeds=default_seeds(graph)
+                    layout=None
                     if layout_evidence.available():
                         try:
                             layout=layout_evidence.detect(snap,cache)
                             write(folder/'layout-regions.json',layout)
-                            crop_seeds+=layout_evidence.crop_seeds(layout,graph)
                         except Exception as exc:
-                            write(folder/'layout-failure.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
-                    crop_ir,crop_ids,_=stage_region_crops(ir.parent,folder/('region-crops-'+uuid4().hex[:8]),seeds=crop_seeds)
+                            reason=type(exc).__name__+':'+str(exc)[:300]
+                            write(folder/'layout-failure.json',{'reason':reason})
+                            failures['layout']=reason
+                    unrec=unrecoverable_text_ids_from_report(graph,report)
+                    crop_seeds,protected_text_ids=collect_crop_seeds(graph,unrecoverable_text_ids=unrec,layout=layout)
+                    crop_ir,crop_ids,crop_report=stage_region_crops(
+                        ir.parent,
+                        folder/('region-crops-'+uuid4().hex[:8]),
+                        seeds=crop_seeds,
+                        allow_move_unsafe=False,
+                        protected_text_ids=protected_text_ids,
+                    )
+                    write(folder/'region-crops-report.json',{'schema':'RegionCropReport/1','records':crop_report})
                     if crop_ids:
                         ir=crop_ir;graph=SceneGraph.model_validate_json((ir.parent/'scene.json').read_text(encoding='utf-8'))
                 except Exception as exc:
-                    write(folder/'region-crop-failure.json',{'reason':type(exc).__name__+':'+str(exc)[:300]})
+                    reason=type(exc).__name__+':'+str(exc)[:300]
+                    write(folder/'region-crop-failure.json',{'reason':reason})
+                    failures['region_crop']=reason
             store.task('scene-'+snap['source_sha256'],'scene','STAGED',{'ir':str(ir),'failures':failures},
                        [key({'source':snap['source_sha256'],'branch':b,'version':'r10/1','repair':None}) for b in ('text','asset','surface')])
             return graph,ir,report,failures
@@ -397,12 +408,14 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
         nodes=json.loads(Path(ir).read_text(encoding='utf-8'))['nodes']
         if i not in failed and any(n['id']!='source-plate' for n in nodes):reconstructed.append(i+1)
     accepted=len(reconstructed)
+    page_failures={str(i+1):p[3] for i,p in enumerate(pages) if p[3]}
     write(job/'qa.json',{'reviews':reviews,'history':review_history,'reverted_pages':[i+1 for i in sorted(failed)],'office':office_receipt,
-        'status':'REVIEW_REQUIRED','human_acceptance':False})
+        'page_failures':page_failures,'status':'REVIEW_REQUIRED','human_acceptance':False})
     (delivery/'结果说明.txt').write_text(f'三分支独立重建 r10；共 {len(snaps)} 页，自动门禁保留重建 {accepted} 页，其余保持完整原图安全表示。\n人工验收未确认；尚未开放 parallel_auto。详细证据保存在后台。\n',encoding='utf-8-sig')
     result={'status':'REVIEW_REQUIRED','pages':len(snaps),'pipeline_mode':pipeline_mode,'human_acceptance':False,'generation':expected+1,
         'reconstructed_pages':accepted,'reconstructed_page_numbers':reconstructed,
         'raster_fallback_pages':[i+1 for i in range(len(snaps)) if i+1 not in reconstructed],
+        'page_failures':page_failures,
         'artifacts':{p.name:digest(p) for p in delivery.iterdir() if p.is_file()},'slide_irs':[str(p) for p in irs]}
     # All pages, exact assets, QA and delivery enter one immutable manifest.
     files={str(p.resolve()):digest(p) for p in [*irs,job/'qa.json',*delivery.iterdir()] if p.is_file()}
@@ -410,13 +423,14 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
         ir=json.loads(Path(irfile).read_text(encoding='utf-8'))
         for a in ir['assets']:
             p=(Path(irfile).parent/a['path']).resolve();files[str(p)]=digest(p)
-        for name in ('scene.json','transactions.json','ownership.json','ownership.npz','build-binding.json','source.png','region-transactions.json','editable-mask.npz'):
+        for name in ('scene.json','transactions.json','ownership.json','ownership.npz','build-binding.json','source.png','region-transactions.json','editable-mask.npz','region-crops.json'):
             p=Path(irfile).parent/name
             if p.is_file():files[str(p.resolve())]=digest(p)
     for irfile in irs:
         for p in Path(irfile).parent.glob('*-owner.npz'):files[str(p.resolve())]=digest(p)
     for p in [job/'request.json',job/'provenance.json',job/'fonts.json',*job.glob('quality-round-*.json'),
-              *job.glob('office*/report.json'),*job.glob('snapshots/*.png')]:
+              *job.glob('office*/report.json'),*job.glob('snapshots/*.png'),
+              *job.glob('page-*/*failure.json'),*job.glob('page-*/region-crops-report.json'),*job.glob('page-*/layout-regions.json')]:
         if p.is_file():files[str(p.resolve())]=digest(p)
     for g in graphs:
         for evidence in (g.text,g.asset,g.surface):

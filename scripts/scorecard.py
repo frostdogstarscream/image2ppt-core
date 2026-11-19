@@ -53,8 +53,9 @@ def main() -> int:
     if args.out:
         scorecard.write_json(args.out, result)
     summary = {k: result[k] for k in ('object_counts', 'visible_area_fraction', 'content_fraction',
-                                      'editable_content_fraction', 'native_content_fraction',
-                                      'raster_plate_content_fraction')}
+                                      'native_editable_content_fraction', 'editable_content_fraction',
+                                      'movable_raster_content_fraction', 'duplicate_raster_content_fraction',
+                                      'raster_plate_content_fraction', 'native_content_fraction')}
     for k in ('fidelity', 'text'):
         if k in result:
             summary[k] = {kk: vv for kk, vv in result[k].items() if kk != 'unmatched'}

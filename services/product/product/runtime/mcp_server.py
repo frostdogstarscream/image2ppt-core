@@ -49,8 +49,8 @@ DESCRIPTION.update({
     'record_observation':'Record Agent findings, uncertainty and next action on arbitrary task evidence, including failed experiments.',
     'commit_candidate':'Submit a candidate through source-owner, content and actual-edit safety checks. Exploratory preview approval never bypasses these checks.',
     'prepare_page_evidence':'Run deterministic local OCR, optional LayerD decomposition and PP-DocLayout detection, pixel-measured foreground color/size extraction, decorative affix splitting, and page-level style clustering in one step. Initializes the RESOLVED draft scene by default.',
-    'batch_reconstruct_page':'Reconstruct all (or selected) uncommitted RESOLVED scene objects in parallel, stage source-safe candidates (plus optional small-first opaque region crops for remaining complex content), run a single batch PowerPoint verification with per-object failure isolation and transparent-frame overflow repair, and return a VALIDATED batch candidate_id (requiring commit_candidate with expected_version to formally commit) plus a compact failed_regions digest.',
-    'crop_region':'Stage opaque source region crop(s) for specified object_ids or bbox when native/transparent reconstruction is not possible. Returns a STAGED_LOCAL candidate for commit_candidate.'})
+    'batch_reconstruct_page':'Reconstruct all (or selected) uncommitted RESOLVED scene objects in parallel, stage source-safe textboxes, transparent PNG assets, and container cards without pre-empting repairable texts with region crops (optional include_region_crops=true), run a single batch PowerPoint verification with per-object defect isolation and transparent-frame overflow repair, and return a VALIDATED batch candidate_id (requiring commit_candidate with expected_version to formally commit) plus a compact failed_regions digest.',
+    'crop_region':'Stage post-repair movable fallback crops (auto mode when object_ids and bbox are omitted, protecting repairable texts) or targeted crops for specified object_ids/bbox. Eligible transparent crops upgrade to RGBA assets; MOVE_UNSAFE in-place crops require allow_move_unsafe=true. Returns a STAGED_LOCAL candidate for commit_candidate.'})
 
 
 def schemas():
@@ -91,10 +91,12 @@ def schemas():
         'batch_reconstruct_page': {'page': page, 'object_ids': strings, 'include_assets': {'type': 'boolean'},
                                    'include_containers': {'type': 'boolean'},
                                    'include_region_crops': {'type': 'boolean'},
+                                   'allow_move_unsafe': {'type': 'boolean'},
                                    'use_inpaint': {'type': 'boolean'}, 'verify_office': {'type': 'boolean'}},
         'crop_region': {'page': page, 'object_ids': strings,
                         'bbox': {'type': 'array', 'items': {'type': 'number'}, 'minItems': 4, 'maxItems': 4},
-                        'allow_movable': {'type': 'boolean'}}})
+                        'allow_movable': {'type': 'boolean'},
+                        'allow_move_unsafe': {'type': 'boolean'}}})
     fields['fit_background'].update(evidence_id=string,bbox={'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4},protected_id=string)
     fields['fit_background']['context_width']={'type':'integer','minimum':8,'maximum':128,
         'description':'Unprotected source-strip sampling width in pixels. A changed width supplies different background evidence. All original ownership and fit validation thresholds still apply.'}
@@ -163,8 +165,6 @@ def schemas():
         if name == 'crop_region':
             required = ['job_id', 'page']
         alternatives={}
-        if name == 'crop_region':
-            alternatives = {'anyOf': [{'required': ['object_ids']}, {'required': ['bbox']}]}
         if name=='fit_background':alternatives={'anyOf':[{'required':['page','object_id']},{'required':['evidence_id','bbox']}]}
         if name=='complete_text_mask':alternatives={'anyOf':[{'required':['page','object_id','background_id']},{'required':['evidence_id','original_mask_id','background_id','bbox','glyph_height']}]}
         if name not in READ_ONLY:

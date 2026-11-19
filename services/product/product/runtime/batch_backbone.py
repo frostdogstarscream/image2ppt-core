@@ -1002,9 +1002,11 @@ def _chain_stage_from_spec(
     skip_ids: set[str],
     include_assets: bool,
     include_containers: bool,
-    include_region_crops: bool = True,
+    include_region_crops: bool = False,
+    allow_move_unsafe: bool = False,
     layout_path: str | None = None,
     unrecoverable_text_ids: set[str] | None = None,
+    logo_ids: set[str] | None = None,
     wanted_filter: set[str] | None,
     sam_enabled: bool,
 ) -> tuple[Path, list[str], list[dict]]:
@@ -1171,18 +1173,8 @@ def _chain_stage_from_spec(
             })
 
     if include_region_crops and wanted_filter is None:
-        from ..recovery.region_crop import stage_region_crops
+        from ..recovery.region_crop import collect_crop_seeds, stage_region_crops
         cur_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
-        unrec_texts = set(unrecoverable_text_ids or ())
-        crop_seeds = [
-            {'id': a.id, 'kind': 'asset', 'bbox': list(a.bbox), 'text': a.intrinsic_text}
-            for a in cur_graph.asset.objects
-            if a.id not in cur_graph.selected and a.id not in skip_ids
-        ] + [
-            {'id': t.id, 'kind': 'text', 'bbox': list(t.bbox), 'text': t.text}
-            for t in cur_graph.text.texts
-            if t.id not in cur_graph.selected and t.id in unrec_texts
-        ]
         layout_data = None
         if layout_path and Path(layout_path).is_file():
             layout_data = json.loads(Path(layout_path).read_text('utf8'))
@@ -1192,15 +1184,28 @@ def _chain_stage_from_spec(
                     {'path': source_path, 'source_sha256': cur_graph.source_sha256},
                     page_cache_dir / 'layout-cache',
                 )
-            except Exception:
+            except Exception as exc:
+                stage_errors.append({
+                    'object_id': 'layout_evidence', 'kind': 'asset', 'bbox': [],
+                    'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
+                })
                 layout_data = None
-        if layout_data:
-            crop_seeds.extend(s for s in layout_evidence.crop_seeds(layout_data, cur_graph) if s['id'] not in skip_ids)
+        crop_seeds, protected_text_ids = collect_crop_seeds(
+            cur_graph,
+            unrecoverable_text_ids=set(unrecoverable_text_ids or ()),
+            layout=layout_data,
+            logo_ids=logo_ids,
+            skip_seed_ids=skip_ids,
+        )
         if crop_seeds:
             crop_dir = directory / tag / 'region-crops-staged'
             try:
                 crop_ir, crop_ids, _ = stage_region_crops(
-                    cur_base, crop_dir, seeds=crop_seeds, skip_ids=skip_ids,
+                    cur_base, crop_dir,
+                    seeds=crop_seeds,
+                    allow_move_unsafe=bool(allow_move_unsafe),
+                    protected_text_ids=protected_text_ids,
+                    skip_seed_ids=skip_ids,
                 )
                 if crop_ids:
                     cur_base = crop_ir.parent
@@ -1262,8 +1267,10 @@ def restage_batch_candidate_subset(
         include_assets=bool(spec.get('include_assets', True)),
         include_containers=bool(spec.get('include_containers', True)),
         include_region_crops=bool(spec.get('include_region_crops', False)),
+        allow_move_unsafe=bool(spec.get('allow_move_unsafe', False)),
         layout_path=spec.get('layout_path'),
         unrecoverable_text_ids=unrec_pass2,
+        logo_ids=set(spec.get('logo_ids', [])),
         wanted_filter=wanted_filter,
         sam_enabled=bool(spec.get('sam_enabled', False)),
     )
@@ -1304,8 +1311,9 @@ def restage_batch_candidate_subset(
 
 def batch_reconstruct_page(service, state, current, directory: Path, *, page: int,
                            object_ids: list[str] | None = None, include_assets: bool = True,
-                           include_containers: bool = True, include_region_crops: bool | None = None,
-                           use_inpaint: bool = True, verify_office: bool = True) -> dict:
+                           include_containers: bool = True, include_region_crops: bool = False,
+                           allow_move_unsafe: bool = False, use_inpaint: bool = True,
+                           verify_office: bool = True) -> dict:
     """Parallel local text trials + sequential staging + batch validation candidate (requires commit_candidate)."""
     from ..recovery.adaptive_policy import AdaptiveBudget
     from ..recovery.product_pipeline import failure as classify_exc
@@ -1403,15 +1411,16 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         x['id'] for x in current.get('scene_relations', {}).get(str(page), {}).get('logo_lockup_candidates', [])
         if x.get('id')
     }
-    crop_flag = bool(include_assets) if include_region_crops is None else bool(include_region_crops)
+    crop_flag = bool(include_region_crops)
     layout_path = current.get('layout', {}).get(str(page))
     unrecoverable_text_ids = (
         {fr['object_id'] for fr in failed_regions
-         if fr.get('kind') == 'text' and fr.get('failure') in (
-             'MASK_INCOMPLETE', 'BACKGROUND_REPAIR_FAILED', 'OWNER_CONFLICT', 'INSUFFICIENT_CONTEXT')}
+         if fr.get('kind') == 'text'
+         and _classify_failed_region(fr, initial_graph, logo_ids, [])['max_repair_attempts'] == 0}
         | {t.id for t in initial_graph.text.texts
            if t.id not in initial_graph.selected and (t.id in logo_ids or initial_graph.ownership.get(t.id) != 'RESOLVED')}
     )
+    current.setdefault('batch_unrecoverable_texts', {})[str(page)] = sorted(unrecoverable_text_ids)
 
     cand_ir_ref: list[Path] = []
 
@@ -1441,8 +1450,10 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         include_assets=include_assets,
         include_containers=include_containers,
         include_region_crops=crop_flag,
+        allow_move_unsafe=bool(allow_move_unsafe),
         layout_path=layout_path,
         unrecoverable_text_ids=unrecoverable_text_ids,
+        logo_ids=logo_ids,
         wanted_filter=wanted_filter,
         sam_enabled=sam_enabled,
     )
@@ -1481,8 +1492,10 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'include_assets': bool(include_assets),
             'include_containers': bool(include_containers),
             'include_region_crops': bool(crop_flag),
+            'allow_move_unsafe': bool(allow_move_unsafe),
             'layout_path': layout_path,
             'unrecoverable_text_ids': sorted(unrecoverable_text_ids),
+            'logo_ids': sorted(logo_ids),
             'wanted_filter': sorted(wanted_filter) if wanted_filter is not None else None,
             'sam_enabled': bool(sam_enabled),
         },
