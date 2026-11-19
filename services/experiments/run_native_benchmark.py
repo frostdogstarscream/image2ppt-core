@@ -15,7 +15,7 @@ from product.materialize import digest, write
 from product.runtime.client import load_profile
 
 
-def run_group(client, group, output, *, baseline_only, steps, seconds, probe, variant):
+def run_group(client, group, output, *, baseline_only, steps, seconds, probe, variant, probe_selected=False):
     output.mkdir(parents=True, exist_ok=True)
     sources = [row['sha256'] for row, _ in group]
     for row, path in group:
@@ -77,7 +77,7 @@ def run_group(client, group, output, *, baseline_only, steps, seconds, probe, va
             results[version] = {'status':'UNKNOWN'}
             continue
         rec = {'sha256':digest(deck),'actions':'UNKNOWN'}
-        if cases and probe:
+        if cases and (probe or (probe_selected and version == 'selected')):
             from probe_fields import run
             folder = output/('office-'+version)
             run(deck,folder,cases)
@@ -111,6 +111,8 @@ def main():
     parser.add_argument('--variant',choices=['combined','shape-only','joint-only'],default='combined')
     parser.add_argument('--baseline-only',action='store_true')
     parser.add_argument('--probe-office',action='store_true')
+    parser.add_argument('--probe-selected',action='store_true',
+                        help='Run frozen Office edits on the final downloaded deck only')
     parser.add_argument('--steps',type=int,default=192)
     parser.add_argument('--seconds',type=int,default=10800)
     args=parser.parse_args()
@@ -146,7 +148,8 @@ def main():
             part=group[i:i+2]
             name='-'.join(r['id'] for r,_ in part)
             records.append(run_group(client,part,args.output/name,baseline_only=args.baseline_only,
-                                     steps=args.steps,seconds=args.seconds,probe=args.probe_office,variant=args.variant))
+                                     steps=args.steps,seconds=args.seconds,probe=args.probe_office,variant=args.variant,
+                                     probe_selected=args.probe_selected))
     write(args.output/'benchmark-summary.json',records)
     from native_results import write_table
     write_table(args.output.glob('*/comparison.json'), args.output/'page-comparison.csv')

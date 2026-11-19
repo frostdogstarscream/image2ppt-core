@@ -49,25 +49,42 @@ def stage(candidate_dir, graph, baseline_dir, output):
     if mask.dtype!=bool or mask.shape!=tuple(reversed(graph.image_size)):
         raise ValueError('invalid owner mask')
     if any(i in baseline.selected for i in candidate.object_ids):raise ValueError('trial would replace existing stable object')
+    payload=load(candidate_dir/'payload.json')
+    artwork_id=payload.get('source_artwork')
+    if artwork_id and (payload.get('owner_method')!='region-surface-text' or artwork_id not in baseline.selected):
+        raise ValueError('invalid text source artwork')
     for record in baseline.selected.values():
         proof=record.get('owner_evidence')
         if not proof:raise ValueError('baseline owner evidence missing')
         file=(baseline_dir/proof['file']).resolve()
         if not file.is_relative_to(baseline_dir.resolve()) or digest(file)!=proof['sha256']:raise ValueError('baseline owner binding mismatch')
         with np.load(file,allow_pickle=False) as data:
-            if (mask & data['mask'].astype(bool)).any():raise ValueError('candidate conflicts with stable owner')
+            stable_mask = data['mask'].astype(bool)
+            if record['id']==artwork_id:
+                if not record.get('retained_card_artwork') or (mask & ~stable_mask).any():
+                    raise ValueError('retained artwork does not own the full text mask')
+            elif (mask & stable_mask).any():
+                raise ValueError('candidate conflicts with stable owner')
     shutil.copytree(baseline_dir,output)  # fails if destination exists
     plate=np.array(Image.open(output/'source-plate.png').convert('RGBA'))
     before=plate.copy();x,y,w,h=box;local=mask[y:y+h,x:x+w]
-    plate[y:y+h,x:x+w,:3][local]=patch[local]
-    if ((plate!=before).any(2)&~mask).any():raise ValueError('unauthorized plate mutation')
-    Image.fromarray(plate).save(output/'source-plate.png')
-    record=load(candidate_dir/'payload.json');identifier=record['id']
+    if artwork_id:
+        from .recovery.region_artwork import transfer_text_ink
+        artwork = baseline.selected[artwork_id]
+        transfer_text_ink(output, artwork, mask, box, patch, graph.source_sha256)
+        for transaction in baseline.transactions:
+            if transaction.get('id') == artwork_id:
+                transaction.update(artwork)
+    else:
+        plate[y:y+h,x:x+w,:3][local]=patch[local]
+        if ((plate!=before).any(2)&~mask).any():raise ValueError('unauthorized plate mutation')
+        Image.fromarray(plate).save(output/'source-plate.png')
+    record=payload;identifier=record['id']
     if candidate.object_ids!=[identifier]:raise ValueError('region identity mismatch')
     proof=output/(identifier+'-owner.npz')
     np.savez_compressed(proof,mask=mask,restore_bbox=box,backing_patch=patch)
     record.update(state='STAGED',quality='REVIEW_REQUIRED',candidate_id=candidate.candidate_id,
-        region_id=candidate.region_id,source_sha256=candidate.source_sha256,original_owner='source-plate',
+        region_id=candidate.region_id,source_sha256=candidate.source_sha256,original_owner=artwork_id or 'source-plate',
         complete_owner_scope=True,human_acceptance=False,mask_sha256=array_sha(mask.astype('uint8')),
         owner_evidence={'file':proof.name,'sha256':digest(proof),
                         'method':record.get('owner_method','source-derived-four-sided-backing-and-ink/1')})
@@ -87,6 +104,8 @@ def stage(candidate_dir, graph, baseline_dir, output):
     baseline.raster_backing['sha256']=digest(output/'source-plate.png')
     write(output/'scene.json',baseline.model_dump())
     reports=[r for r in load(output/'transactions.json') if r['id']!=identifier]+[record]
+    if artwork_id:
+        reports = [baseline.selected[artwork_id] if item['id']==artwork_id else item for item in reports]
     write(output/'transactions.json',reports)
     write(output/'slideir.json',adapt(baseline,output))
     # Old build bindings and derived ownership maps cannot describe this trial.

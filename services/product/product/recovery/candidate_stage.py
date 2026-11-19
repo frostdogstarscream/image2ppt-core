@@ -211,6 +211,19 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
         raise ValueError('background recheck failed')
     if not np.array_equal(written, np.array(Image.open(trial_directory/'written_back.png').convert('RGB'))):
         raise ValueError('trial writeback mismatch')
+    return stage_text_pixels(graph, baseline_directory, fonts, output, text=text, region=region,
+                             source=source, box=box, wanted=wanted, written=written, protected=protected,
+                             method=saved['method'], report=report, completion_report=completion.report,
+                             trial_directory=trial_directory, hashes=hashes, typography=typography,
+                             frame_minimum=frame_minimum, fit_origin=fit_origin)
+
+
+def stage_text_pixels(graph, baseline_directory, fonts, output, *, text, region, source, box, wanted,
+                      written, protected, method, report, completion_report, trial_directory, hashes,
+                      typography=None, frame_minimum=None, fit_origin=False, source_artwork=None):
+    """Stage a checked source-owner mask and corresponding editable field as one transaction."""
+    styles = {s.id: s for s in graph.text.styles}
+    bx, by, bw, bh = box
     output.parent.mkdir(parents=True, exist_ok=True)
     identity = {'source': graph.source_sha256, 'scene': key(graph.model_dump()), 'text': text.id,
                 'typography':typography,'frame_minimum':frame_minimum,'fit_origin':fit_origin,
@@ -219,7 +232,7 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
     cid = 'c-'+key(identity)
     candidate = ReconstructionCandidate(candidate_id=cid, source_sha256=graph.source_sha256,
         scene_sha256=key(graph.model_dump()), region_id=region['region_id'], object_ids=[text.id],
-        representation='NATIVE_TEXT', strategy='R12-background-'+saved['method'],
+        representation='NATIVE_TEXT', strategy='R12-background-'+method,
         provenance={'version': 'r12-regional-background/1', 'input_binding': key(identity)})
     # The existing stage reads relative assets and writes private SceneGraph/IR.
     # It runs inside an owned temporary tree, so an exception cannot expose a
@@ -264,8 +277,10 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
                    'office_frame_feedback':frame_minimum,
                    'native_layout': {'original_bbox': text.bbox, 'proposed_bbox': text_payload['bbox'],
                                      'reason': 'installed EA/Latin font bearings and leading; source origin and line pitch retained'},
-                   'method': 'r12-'+saved['method'], 'owner_method': 'source-connected-strokes+lateral-context/r12-1',
+                   'method': 'r12-'+method, 'owner_method': method if method.startswith('region-') else 'source-connected-strokes+lateral-context/r12-1',
                    'recovery_evidence': {'trial_path': str(trial_directory.resolve()), 'hashes': hashes}}
+        if source_artwork:
+            payload['source_artwork'] = source_artwork
         write(folder/'payload.json', payload)
         refs = {name: digest(folder/name) for name in ('pixels.npz', 'payload.json')}
         candidate = transition(candidate.model_copy(update={'references': refs, 'hard_gate': 'PASS'}), 'PRECHECK_PASS')
@@ -277,6 +292,6 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
         stage(folder, graph, baseline_directory, staged)
         write(staged/'r12-background-preflight.json', {'candidate': candidate.model_dump(by_alias=True),
               'preflight': preflight.model_dump(by_alias=True), 'residual_recheck': report,
-              'completion': completion.report, 'trial_hashes': hashes, 'published': False})
+              'completion': completion_report, 'trial_hashes': hashes, 'published': False})
         staged.rename(output)
     return output/'slideir.json'

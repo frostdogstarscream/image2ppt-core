@@ -2,6 +2,30 @@
 
 The runtime uses OpenCode 2.1.4, MCP 1.3.0 and Pydantic 2.10.x. MCP 1.3 imports an internal Pydantic helper, so the product dependency range is constrained to the compatible minor version. Its job-scoped MCP server exposes basic image/evidence tools together with optional reconstruction shortcuts. Original pipeline defaults remain available.
 
+## Region-based text and context-assisted reading
+
+The admission host freezes two experiment settings in each new OpenCode job. Set
+`IMAGE2PPT_REGION_TEXT=1` to reconstruct text on a common title, band or card
+surface before falling back to individual lines. Add `IMAGE2PPT_PAGE_READING=1`
+to use the configured MoMA reading model after the deterministic Office baseline.
+The upload API is unchanged. Existing jobs keep their recorded settings. Both
+switches are opt-in pending the page 08 and frozen-set acceptance gates.
+
+The page reader sees a numbered source image. An independent local reader sees
+only crops. They use fresh calls to the same model. Matching ordinary wording
+is recorded as model-confirmed, separately from human confirmation. Disputed
+readings and fields retained in raster content are recorded in the delivery
+report. Changes to quantities, units and names require additional source evidence.
+
+For the frozen comparison, run `services/experiments/run_native_benchmark.py`
+against three pinned hosts (control, region, combined) with the same input roots,
+`--manifest services/experiments/holdout/manifest.json --probe-selected`, and a
+separate output directory for each. `services/experiments/compare_region_reading.py
+CONTROL REGION COMBINED REPORT --project-root PROJECT --input-root INPUTS`
+checks the inputs, downloaded PPTX hashes and actual edit receipts before comparing
+the three sets. Page 08 uses `services/experiments/probe_region_text.py SOURCE PPTX OUTPUT`
+to check its two new editable labels and three previously working actions.
+
 ## Host-precomputed uploads
 
 New OpenCode uploads run deterministic perception on up to two pages concurrently, then batch reconstruction, candidate validation, commit, compilation and actual Office checks. `host-baseline/manifest.json` identifies the immutable control PPTX, scorecard and state. The host records source bindings before opening an Agent session. The 4090 detector configuration uses `IMAGE2PPT_EXPERIMENT_CONFIG`. The runtime records unavailable detectors in page evidence.

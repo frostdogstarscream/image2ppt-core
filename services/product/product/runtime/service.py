@@ -674,7 +674,7 @@ class RuntimeService(ExplorationTools):
                     raise RuntimeConflict('source OCR changed before commit')
                 pending = change.get('status')=='pending_confirmation'
                 line.update(ocr_raw_text=change['before'], text=change['after'], proofread_verified=not pending,
-                            reading_status='pending_confirmation' if pending else 'source_supported')
+                            reading_status=change.get('status','source_supported'))
             write(directory/'verified-ocr.json', ocr)
             current['ocr'][k] = str(directory/'verified-ocr.json')
         row.update(ir=str(ir), scene=str(ir.parent/'scene.json'))

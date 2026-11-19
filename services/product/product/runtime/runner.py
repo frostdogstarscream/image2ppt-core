@@ -219,14 +219,22 @@ def run(job, client=None):
     previous = selected_result(job)
     if previous:
         return previous
-    if read(job/'request.json').get('baseline_only'):
+    request = read(job/'request.json')
+    if request.get('baseline_only'):
         return publish(job, {'reason':'Deterministic comparison requested'}, ['BASELINE_ONLY'])
+    full_page = request.get('page_reading', False)
+    if full_page and not (os.environ.get('IMAGE2PPT_MOMA_READING_MODEL') and os.environ.get('MOMA_API_KEY')):
+        return publish(job, {'reason':'MoMA page reading is unavailable'}, ['READING_MODEL_UNAVAILABLE'])
     if os.environ.get('IMAGE2PPT_MOMA_READING_MODEL'):
         from .host_baseline import prepare_reading_draft
         try:
-            prepare_reading_draft(job)
+            results = prepare_reading_draft(job)
+            if full_page and results and all(r.get('status')=='READING_MODEL_UNAVAILABLE' for r in results):
+                return publish(job, {'reason':'MoMA returned no page readings'}, ['READING_MODEL_UNAVAILABLE'])
         except Exception as exc:
             RuntimeState(job).event({'source_reading':'UNAVAILABLE','error_type':type(exc).__name__})
+            if full_page:
+                return publish(job, {'reason':'MoMA page reading failed: '+type(exc).__name__}, ['PAGE_READING_FAILED'])
     try:
         result = _agent_run(job,client)
     except Exception as exc:

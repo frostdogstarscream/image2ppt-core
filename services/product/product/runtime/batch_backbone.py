@@ -1136,8 +1136,29 @@ def _chain_stage_from_spec(
             chart_scene = json.loads((cur_base/'scene.json').read_text(encoding='utf8'))
             for cid in chart_ids:
                 covered_texts.update(chart_scene['selected'][cid]['covered_text_ids'])
+    grouped_ids=set()
+    group_specs=[tr['region'] for tr in trials_spec if 'region' in tr]
+    if group_specs:
+        from ..recovery.region_text import stage_region
+        source_pixels = np.array(Image.open(source_path).convert('RGB'))
+        ocr_file = initial_baseline/'runtime-ocr-protection.json'
+        lines = json.loads(ocr_file.read_text('utf8'))['lines'] if ocr_file.is_file() else []
+        for group in group_specs:
+            members=set(group['members'])
+            grouped_ids.update(members)
+            if members & (skip_ids|covered_texts):
+                continue
+            try:
+                cur_base = stage_region(group,initial_graph,cur_base,directory/tag/('text-region-'+group['id']),
+                                        fonts,frame_overrides,source_pixels,lines)
+                staged_ids.extend(group['members'])
+            except (ValueError, OSError, RuntimeError) as exc:
+                for oid in group['members']:
+                    stage_errors.append({'object_id':oid,'kind':'text','failure':'REGION_TEXT_REJECTED','reason':str(exc)})
     for idx, tr in enumerate(trials_spec):
-        oid = tr['object_id']
+        oid = tr.get('object_id')
+        if not oid or oid in grouped_ids:
+            continue
         if oid in skip_ids or oid in covered_texts:
             continue
         step_out = directory / tag / f'step-{idx:03d}-{oid}'
@@ -1502,6 +1523,10 @@ def restage_batch_candidate_subset(
     initial_graph = SceneGraph.model_validate_json((initial_baseline / 'scene.json').read_text('utf8'))
     fonts = json.loads(Path(current['fonts']).read_text('utf8'))
     overrides = {oid: fb['measured_frame_minimum_px'] for oid, fb in frame_repairs.items()}
+    for trial in spec['trials']:
+        members=set(trial.get('region',{}).get('members',[]))
+        if members & bad_ids:
+            bad_ids.update(members)
     bad_crop_ids = {oid for oid in bad_ids if staged_graph.selected.get(oid, {}).get('region_crop')}
     bad_crop_seeds = {sid for oid in bad_crop_ids for sid in staged_graph.selected[oid].get('seed_ids', [])}
     skip = (bad_ids - bad_crop_ids) | bad_crop_seeds | set(spec.get('pass1_failed_ids', []))
@@ -1675,6 +1700,26 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         finally:
             stream.close()
 
+    region_specs=[]
+    if request.get('region_text') and text_targets:
+        from ..recovery.region_text import choose_region_background, measure_group, plan_regions
+        image = np.array(Image.open(source_path).convert('RGB'))
+        ocr_file = initial_baseline/'runtime-ocr-protection.json'
+        lines = json.loads(ocr_file.read_text('utf8'))['lines'] if ocr_file.is_file() else []
+        rejected = []
+        for group in plan_regions(initial_graph, text_targets, inventory, image):
+            try:
+                measured, fitted, guard = measure_group(initial_graph, group, image, initial_baseline, lines)
+                choose_region_background(group, initial_graph, image, measured, fitted, guard,
+                                         row.get('layers'), safe_inpaint, directory)
+            except (ValueError, OSError) as exc:
+                rejected.append({'group':group,'reason':str(exc)})
+                continue
+            region_specs.append({'region':group})
+        # Region trials are prepared before any lateral sampling on single lines.
+        write(directory/'region-text-plan.json',{'selected':region_specs,'unavailable':rejected})
+        members = {oid for spec in region_specs for oid in spec['region']['members']}
+        text_targets = [t for t in text_targets if t.id not in members]
     passed_trials = []
     if text_targets:
         workers = min(6, max(1, len(text_targets)))
@@ -1750,7 +1795,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'trial_dir': str(tr['trial_dir']),
         }
         for tr in passed_trials
-    ]
+    ] + region_specs
 
     logo_ids = {
         x['id'] for x in current.get('scene_relations', {}).get(str(page), {}).get('logo_lockup_candidates', [])

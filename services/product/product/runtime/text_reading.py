@@ -76,7 +76,10 @@ def authorize_readings(original, revised, receipt):
         for row in receipt['changes']:
             oid = row['object_id']
             tentative = row.get('status') == 'pending_confirmation'
-            if tentative:
+            if row.get('protocol') == 'two-blind-views/1':
+                from .page_reading import authorized
+                valid = authorized(row, original.source_sha256)
+            elif tentative:
                 valid = (row.get('after') in row.get('alternatives', []) and row.get('context_sha256')
                          and row.get('choice_receipt') and not quantity_changed(row['before'],row['after']))
             else:
@@ -95,7 +98,9 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
     lines = {line['id']:line for line in ocr['lines']}
     fonts = json.loads(Path(current['fonts']).read_text('utf8'))
     request = json.loads((state.job/'request.json').read_text('utf8'))
-    budget = AdaptiveBudget(Store(state.job/'state'), request.get('adaptive_budget'))
+    full_page = request.get('page_reading', False)
+    budget = AdaptiveBudget(Store(state.job/'state'), request.get('adaptive_budget'),
+                            model_page=(page,len(request['sources'])) if full_page else None)
     source = Path(row['snapshot']['path'])
     if digest(source) != scene.source_sha256:
         raise ValueError('source reading image changed')
@@ -103,6 +108,14 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
     pixels = np.asarray(image)
     changes, observ = [], []
     reading_model = os.environ.get('IMAGE2PPT_MOMA_READING_MODEL')
+    if full_page:
+        if not reading_model:
+            return {'page':page,'status':'READING_MODEL_UNAVAILABLE','checked':0}
+        from .page_reading import observe_page
+        observ, changes, calls = observe_page(reading_model,state,current,directory,page,scene,lines,
+                                               object_ids,source,image,budget)
+        return stage_changes(service, current, directory, page, row, scene, fonts, image.width,
+                             observ, changes, save_report=True, calls=calls)
     if reading_model:
         from .moma_review import MomaReviewer
         actor = MomaReviewer(reading_model)
@@ -186,10 +199,26 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
         else:
             evidence['reason'] = 'source_glyphs_unconfirmed'
             continue
-        fitted = reading_frame(obj, obj.text, change['after'], scene, fonts, image.width)
+        changes.append(change)
+    return stage_changes(service, current, directory, page, row, scene, fonts, image.width,
+                         observ, changes, save_report=bool(reading_model))
+
+
+def stage_changes(service, current, directory, page, row, scene, fonts, canvas_width,
+                  observ, proposals, *, save_report, calls=None):
+    """Publish only source-bound, native text changes; retain the previously verified background."""
+    by_id = {t.id:t for t in scene.text.texts}
+    observations = {r['object_id']:r for r in observ}
+    changes = []
+    for change in proposals:
+        obj = by_id[change['object_id']]
+        evidence = observations[obj.id]
+        fitted = reading_frame(obj, obj.text, change['after'], scene, fonts, canvas_width)
         if fitted is None:
-            evidence.update(status='pending_confirmation', reason='insufficient_space_for_reading')
+            evidence.update(delivery='insufficient_space_for_reading', proposed=change['after'],
+                            status='pending_confirmation', reason='insufficient_space_for_reading', after=obj.text)
             continue
+        evidence['delivery'] = 'staged_for_office'
         changes.append(change)
         rec = scene.selected[obj.id]
         if list(obj.bbox) != fitted:
@@ -205,11 +234,15 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
             if field in rec:
                 rec[field]['text'] = obj.text
     proof = {'source_sha256':scene.source_sha256, 'observations':observ, 'changes':changes}
+    if calls is not None:
+        proof.update(protocol='two-blind-views/1', calls=calls)
     write(directory/'readings.json', proof)
-    if reading_model:
+    if save_report:
         current.setdefault('reading_reports',{}).setdefault(str(page),[]).append(str(directory/'readings.json'))
     if not changes:
-        return {'page':page, 'status':'NO_VERIFIED_READING','checked':len(observ)}
+        unavailable = calls and all(call['status']!='ok' for call in calls)
+        return {'page':page, 'status':'READING_MODEL_UNAVAILABLE' if unavailable else 'NO_VERIFIED_READING',
+                'checked':len(observ)}
     bundle = directory/'staged'
     shutil.copytree(Path(row['ir']).parent, bundle)
     write(bundle/'scene.json', scene.model_dump())
@@ -217,11 +250,15 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
     write(ir, adapt(scene,bundle))
     ids = [change['object_id'] for change in changes]
     cid = 'c-'+key([digest(ir),digest(directory/'readings.json'),current['version']])[:24]
+    evidence = [directory/'readings.json', *bundle.rglob('*')]
+    if calls is not None:
+        evidence.extend((directory/'source-readings').glob('*.png'))
+        evidence.extend(Path(v['receipt_file']) for v in calls)
     current['candidates'][cid] = {'id':cid,'kind':'text_reading','status':'STAGED_LOCAL',
         'strategy':'numbered-source-reading','page':page,'object_id':ids[0],'object_ids':ids,
         'parent_ir_sha256':digest(row['ir']),'parent_scene_sha256':digest(row['scene']),
         'code':service.code_binding(),'fingerprint':key([ids,digest(ir)]),'ir':str(ir),
         'reading_receipt':str(directory/'readings.json'),
-        'files':{str(p):digest(p) for p in [directory/'readings.json', *bundle.rglob('*')] if p.is_file()}}
+        'files':{str(p):digest(p) for p in evidence if p.is_file()}}
     return {'page':page,'status':'STAGED_LOCAL','candidate_id':cid,'object_ids':ids}
 

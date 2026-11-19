@@ -89,6 +89,7 @@ def assess(job, current):
                       'editable_count':len(editables) if verified else None, 'selected_editables':editables,
                       'ocr_native_hits':sorted(set(hits)-pending), 'revised_ocr_lines':sorted(updated),
                       'pending_readings':{i:v for i,v in readings.items() if v['status']=='pending_confirmation'},
+                      'model_confirmed_readings':{i:v for i,v in readings.items() if v['status']=='model_confirmed'},
                       'native_field_count':len(fields), 'local_fidelity':local, 'minor_deviations':minor,
                       'max_local_mae':max((v['mae_rgb'] for v in local.values()), default=None), 'scorecard':measures})
     return {'pptx_sha256':sha,'office_status':office.get('status','UNKNOWN'),'verified':verified,
@@ -126,7 +127,7 @@ def regressions(base, candidate, *, reviewed_reading_draft=False):
             de, similarity = new['delta_e2000_p95'], new['ssim']
             max_de = max(old['delta_e2000_p95'], limits['hard_max_delta_e2000_p95'])
             min_ssim = min(old['ssim'], limits['hard_min_ssim'])
-            reading = b.get('pending_readings', {}).get(region, {})
+            reading = b.get('pending_readings', {}).get(region) or b.get('model_confirmed_readings', {}).get(region, {})
             if reviewed_reading_draft and reading.get('after') and reading['after'] != reading.get('before'):
                 # A different transcription necessarily changes the ink inside its own label.
                 # Bound the additional change relative to the control, even in a poor-fit label.
@@ -217,7 +218,9 @@ def ensure_baseline(job):
         if preview.is_file():
             shutil.copyfile(preview,root/name)
             files.append(name)
-    info = {'origin':ORIGIN,'native_variant':request.get('native_variant','combined'),'sources':sources,'uploaded_sha256':originals,'finished':time.time(),
+    info = {'origin':ORIGIN,'native_variant':request.get('native_variant','combined'),
+            'text_profile':{name:bool(request.get(name,False)) for name in ('region_text','page_reading')},
+            'sources':sources,'uploaded_sha256':originals,'finished':time.time(),
             'files':{n:digest(root/n) for n in files}}
     write(manifest,info)
     return info
@@ -238,15 +241,34 @@ def prepare_reading_draft(job):
     """Start the Agent from Office-checked source readings; keep the control immutable."""
     state = RuntimeState(job)
     service = RuntimeService(job.parent)
+    full_page = read(job/'request.json').get('page_reading', False)
+    results = []
     for page in range(1, len(state.read()['pages']) + 1):
         def read_page(current, directory):
             graph = service.graph(current['pages'][page-1])
-            ids = [oid for oid,rec in graph.selected.items() if rec['kind']=='text']
+            ids = None if full_page else [
+                oid for oid,rec in graph.selected.items() if rec['kind']=='text']
             out = service.review_numbered_text(state,current,directory,page=page,object_ids=ids)
             cid = out.get('candidate_id')
             if not cid:
                 return out
             checked = service.validate_candidate(state,current,directory/'validation',candidate_id=cid)
+            if full_page and checked.get('status')=='REVIEW_REQUIRED':
+                from .batch_backbone import _collect_office_defects
+                staged = current['candidates'][cid]
+                ids = staged['object_ids']
+                frame,failed = _collect_office_defects(checked,graph,ids)
+                blocked = set(frame) | failed
+                if blocked:
+                    reasons = current.setdefault('reading_office_failures',{}).setdefault(str(page),{})
+                    reasons.update({oid:'PowerPoint replacement or residual check failed' for oid in blocked})
+                keep = [oid for oid in ids if oid not in blocked]
+                if blocked and keep:
+                    # Reuse the blind calls; only independently safe native edits are restaged.
+                    trial = service.review_numbered_text(state,current,directory/'unaffected',page=page,object_ids=keep)
+                    if trial.get('candidate_id'):
+                        cid = trial['candidate_id']
+                        checked = service.validate_candidate(state,current,directory/'validation-unaffected',candidate_id=cid)
             if checked.get('status') != 'PASS':
                 return {'status':'REVIEW_REQUIRED','candidate_id':cid}
             committed = service.commit_region(state,current,directory/'commit',candidate_id=cid)
@@ -256,7 +278,22 @@ def prepare_reading_draft(job):
                       'origin':'moma-reading-draft','candidate_id':cid,'office_status':'PASS',
                       'report':current['candidates'][cid]['reading_receipt']})
             return committed
-        state.mutate('host-review-numbered-text',{'page':page},None,'host-reading-draft-'+str(page),read_page)
+        results.append(state.mutate('host-review-numbered-text',{'page':page},None,'host-reading-draft-'+str(page),read_page))
+    if full_page and len(results)>1 and any(r.get('status')=='COMMITTED' for r in results):
+        def check_full_draft(current, directory):
+            # Per-page candidate receipts certify just one slide. Export a multi-slide
+            # draft only after every page is present in the same Office-checked file.
+            service.compose_delivery(state,current,directory/'compose')
+            composition = service.composition(current)
+            pptx = composition['artifacts']['pptx']
+            irs = [Path(row['ir']) for row in current['pages']]
+            checked = service.office_check(state,pptx,irs,directory/'office')
+            if checked.get('status')=='PASS':
+                write(job/'reading-draft.json',{'pptx':pptx,'sha256':digest(pptx),'pages':len(irs),
+                      'origin':'moma-reading-draft','office_status':'PASS','reports':current['reading_reports']})
+            return {'status':checked.get('status','UNKNOWN')}
+        state.mutate('host-check-full-reading-draft',{},None,'host-reading-draft-full',check_full_draft)
+    return results
 
 
 def selected_result(job):
@@ -334,10 +371,22 @@ def _publish(job, agent, reasons, candidate):
                   wps_acceptance='UNKNOWN', baseline_pages=summary(base))
     shutil.copyfile(root/'baseline.pptx',delivery/'deterministic-baseline.pptx')
     shutil.copyfile(root/'scorecard.json',delivery/'baseline-scorecard.json')
+    result['text_profile'] = manifest.get('text_profile', {'region_text':False, 'page_reading':False})
     if candidate:
         write(delivery/'agent-scorecard.json',candidate)
     reading_reports = {page:[read(path) for path in paths] for page,paths in current.get('reading_reports',{}).items()}
     if reading_reports:
+        for page, reports in reading_reports.items():
+            dual = [report for report in reports if report.get('protocol')=='two-blind-views/1']
+            if dual:
+                from .page_reading import bind_delivered_text
+                graph = read((frozen if fallback else current)['pages'][int(page)-1]['scene'])
+                for report in dual:
+                    bind_delivered_text(report,graph,fallback)
+                    failures = current.get('reading_office_failures',{}).get(page,{})
+                    for row in report.get('observations',[]):
+                        if row['object_id'] in failures and row['written_text']!=row['proposed']:
+                            row['reconstruction_reason'] = failures[row['object_id']]
         write(delivery/'reading-decisions.json', {'candidate_only':fallback, 'pages':reading_reports})
     result.pop('artifacts',None)
     write(delivery/'summary.json',result)
