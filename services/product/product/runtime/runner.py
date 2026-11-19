@@ -50,6 +50,18 @@ def prepare_workspace(job):
             'command': [sys.executable, '-m', 'product.runtime.mcp_server', '--root', str(job.parent), '--job', job.name],
             'cwd': str(ROOT), 'environment': {'PYTHONPATH': str(ROOT/'services/product')},
             'timeout': 3600000}}}}
+    profile=request.get('experiment_profile')
+    if request.get('host_stage0'):
+        instructions = skill.read_text('utf8').split('<!-- legacy-runtime -->')[0]
+        target.write_text(instructions,encoding='utf8')
+        configuration['agents']['image2ppt-runtime']['system'] = instructions
+    elif profile and profile!='baseline':
+        configuration['agents']['image2ppt-runtime']['system'] += (
+            '\nFirst prepare every page sequentially. Read the original and use get_evidence on one numbered block image '
+            'and its compact inventory at a time. Keep page-wide mark numbers. Choose fields on EVERY page before '
+            'bulk processing. Record each block with plan_marked_page(append=true), including independent field roles and movement groups. '
+            'When a region is missing use inspect_marked_region. Use update_scene to split mixed labels, associate table '
+            'row/column and stage the returned priority scene IDs across pages first. Keep intrinsic screenshot UI intact.')
     write(workspace/'opencode.json', configuration)
     return workspace
 
@@ -110,6 +122,11 @@ def wait_for_mcp(client,workspace,state,timeout=60):
     return status=='connected'
 
 
+def agent_result_file(job):
+    file = Path(job)/'runtime/agent-result.json'
+    return file if file.is_file() else Path(job)/'result.json'
+
+
 def _run(job, client):
     job = Path(job).resolve()
     state = RuntimeState(job)
@@ -125,7 +142,8 @@ def _run(job, client):
                    'admission': 'NOT_SENT', 'location': str(workspace)}
         write(session_file, session)
     if 'deadline' not in session:
-        session['deadline']=time.time()+request.get('runtime_seconds',7200)
+        started = job/'host-baseline/started.json'
+        session['deadline']=(json.loads(started.read_text('utf8'))['time'] if started.exists() else time.time())+request.get('runtime_seconds',7200)
         write(session_file,session)
     if session['admission'] == 'NOT_SENT':
         # A deterministic Session ID permits lookup after a lost create response.
@@ -144,7 +162,7 @@ def _run(job, client):
         if state.remaining_seconds()==0:
             return pending(job,'Task time budget exhausted before Agent admission',failure='TIME_BUDGET_EXHAUSTED')
         files = []
-        for name in request['sources']:
+        for name in ([] if request.get('host_stage0') else request['sources']):
             path = job/'inputs'/name
             files.append({'uri': 'data:image/png;base64,'+base64.b64encode(path.read_bytes()).decode('ascii'), 'name': name})
         session['admission'] = 'UNKNOWN'
@@ -175,7 +193,7 @@ def _run(job, client):
             client.request('POST', '/api/session/'+session['id']+'/interrupt')
             return pending(job, 'cancelled', status='CANCELLED')
         if state.read()['status'] in ('SUCCEEDED','REVIEW_REQUIRED'):
-            return json.loads((job/'result.json').read_text('utf8'))
+            return json.loads(agent_result_file(job).read_text('utf8'))
         try:
             # Bounded wait keeps cancellation and job-status handling responsive.
             client.request('POST', '/api/experimental/session/'+session['id']+'/wait', timeout=10)
@@ -183,7 +201,7 @@ def _run(job, client):
         except httpx.ReadTimeout:
             continue
     if state.read()['status'] in ('SUCCEEDED','REVIEW_REQUIRED'):
-        return json.loads((job/'result.json').read_text('utf8'))
+        return json.loads(agent_result_file(job).read_text('utf8'))
     exhausted=time.monotonic()>=deadline
     client.request('POST', '/api/session/'+session['id']+'/interrupt')
     return pending(job, 'Agent time budget exhausted before verified finalization' if exhausted else
@@ -192,6 +210,39 @@ def _run(job, client):
 
 
 def run(job, client=None):
+    job = Path(job).resolve()
+    if not json.loads((job/'request.json').read_text('utf8')).get('host_stage0'):
+        return _agent_run(job,client)
+    from .host_baseline import ensure_baseline, assess, regressions, publish, selected_result
+    from .host_evidence import read
+    ensure_baseline(job)
+    previous = selected_result(job)
+    if previous:
+        return previous
+    if read(job/'request.json').get('baseline_only'):
+        return publish(job, {'reason':'Deterministic comparison requested'}, ['BASELINE_ONLY'])
+    try:
+        result = _agent_run(job,client)
+    except Exception as exc:
+        status = getattr(getattr(exc,'response',None),'status_code',None)
+        reason = type(exc).__name__ + (f' HTTP {status}' if status else '')
+        return publish(job,{'reason':reason},['AGENT_FAILED:'+reason])
+    if result.get('status')=='CANCELLED':
+        return result
+    current = RuntimeState(job).read()
+    if current.get('visual_review',{}).get('status')!='PASS' or current['status']=='RUNNING':
+        return publish(job,result,[result.get('failure') or 'AGENT_DID_NOT_FINALIZE'])
+    try:
+        candidate = assess(job,current)
+        reasons = regressions(read(job/'host-baseline/scorecard.json'),candidate)
+        if result.get('status') != 'SUCCEEDED' or current.get('independent_audit', {}).get('passed') is not True:
+            reasons.append('INDEPENDENT_AUDIT_UNVERIFIED')
+    except Exception as exc:
+        return publish(job,result,['AGENT_COMPARISON_UNKNOWN:'+type(exc).__name__])
+    return publish(job,result,reasons,candidate)
+
+
+def _agent_run(job, client=None):
     client=client or OpenCodeClient()
     try:
         result=_run(job,client)
@@ -238,7 +289,7 @@ def run(job, client=None):
                     'go_tool_calls':sum('go_review' in row['tool'] for row in calls)})
             except Exception as exc:
                 RuntimeState(job).event({'audit':'UNKNOWN','error_type':type(exc).__name__})
-    result_file=Path(job)/'result.json'
+    result_file=agent_result_file(job)
     return json.loads(result_file.read_text('utf8')) if result_file.exists() else result
 
 

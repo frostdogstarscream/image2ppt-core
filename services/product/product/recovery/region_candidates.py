@@ -86,7 +86,7 @@ def _fallback_nonplanar_reference(source, box, backing, original, layer_director
     }, 14
 
 
-def adaptive_candidates(graph, identifier, source_file, layer_directory, directory, *, inpaint=None, budget=None, baseline_directory=None):
+def adaptive_candidates(graph, identifier, source_file, layer_directory, directory, *, inpaint=None, budget=None, baseline_directory=None, marked_fields=False):
     """Lazy tool routing. The consumer advances only after a concrete defect.
 
     Incomplete masks are discarded before expensive background generation.
@@ -122,6 +122,12 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
             reference,fit,ctx_w = _fallback_nonplanar_reference(source,box,backing,original,layer_directory)
         else:
             raise
+    shared = graph.text.members.get(identifier)
+    if marked_fields and shared and any(k!=identifier and ids==shared for k,ids in graph.text.members.items()):
+        from .marked_fields import striped_backing
+        stripe = striped_backing(source, box, context_protected)
+        if stripe and stripe[1]['validation_p95_rgb'] < fit['validation_p95_rgb']:
+            reference,fit = stripe
     completion = TextMaskCompletion.analyze(source,original,protected,box,reference,glyph_height=style.size_px)
     write(directory/'mask-completion.json',completion.report)
     np.savez_compressed(directory/'mask-evidence.npz',**completion.evidence,**completion.masks)
@@ -131,7 +137,7 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
     unassigned_mask = completion.evidence['unknown'] & (delta_ref > 6)
     unassigned_px = int(unassigned_mask.sum())
     unassigned_peak = float(delta_ref[unassigned_mask].max()) if unassigned_px else 0.0
-    mild_interior_nonplanar = (
+    mild_interior_nonplanar = (fit.get('method')!='scanline-lateral' and
         unassigned_px > 0
         and bool(layer_directory or inpaint)
         and (unassigned_peak <= 22.0 or (unassigned_px <= 4 and unassigned_peak <= 16.0))

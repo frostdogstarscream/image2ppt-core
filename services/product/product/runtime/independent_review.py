@@ -47,100 +47,50 @@ def compute_inventory_and_form_metrics(
     sc: dict,
     inventory: dict | None,
 ) -> dict:
-    """Evaluate `inventory_recall`, `main_title_editable`, and `proper_form_content_fraction`."""
-    objs = sc.get('objects', [])
-    native_texts = [o for o in objs if o.get('class') == 'text']
-    native_shapes = [o for o in objs if o.get('class') == 'shape']
-    native_charts = [o for o in objs if o.get('class') in ('chart', 'table')]
-    movable_imgs = [o for o in objs if o.get('class') in ('asset', 'opaque_picture')]
-
-    elements = (inventory or {}).get('elements', [])
-    if not elements:
-        text_info = sc.get('text') or {}
-        unmatched = [u for u in text_info.get('unmatched', []) if not u.get('is_logo')]
-        w_img, h_img = sc.get('image_size', [1672, 941])
-        top_unmatched = [u for u in unmatched if u['bbox'][1] <= 0.11 * h_img and u['bbox'][3] >= 28]
-        return {
-            'inventory_available': False,
-            'total_items': None,
-            'matched_items': None,
-            'recall': text_info.get('non_logo_line_recall'),
-            'main_title_editable': len(top_unmatched) == 0 if text_info else None,
-            'proper_form_content_fraction': round(
-                float(sc.get('native_editable_content_fraction', 0.0))
-                + float(sc.get('movable_raster_content_fraction', 0.0)),
-                4,
-            ),
-            'missing_items': [],
-        }
-
-    matched_count = 0
-    by_cat: dict[str, list[int]] = {}
-    missing_items: list[dict] = []
-    title_items = [e for e in elements if e.get('category') == 'title']
-    titles_matched = 0
-
-    for el in elements:
-        cat = el.get('category', 'other')
-        if cat == 'background_scenery':
-            continue
-        eb = el.get('bbox', [0, 0, 0, 0])
-        e_area = max(1.0, float(eb[2]) * float(eb[3]))
-        stat = by_cat.setdefault(cat, [0, 0])
-        stat[1] += 1
-
-        ok = False
-        if cat in ('title', 'section_header', 'body_text'):
-            ok = any(intersection(eb, o['bbox']) >= 0.30 * e_area for o in native_texts)
-            if cat == 'title' and ok:
-                titles_matched += 1
-        elif cat in ('card_shape', 'ribbon_shape', 'badge_shape', 'divider'):
-            ok = any(
-                intersection(eb, o['bbox']) >= 0.35 * min(e_area, max(1.0, o['bbox'][2] * o['bbox'][3]))
-                for o in [*native_shapes, *movable_imgs]
-            )
-        elif cat in ('chart', 'table'):
-            # Either a native chart/table OR >=3 native bar shapes covering the chart region
-            ok = any(intersection(eb, o['bbox']) >= 0.35 * e_area for o in native_charts) or (
-                sum(1 for o in native_shapes if intersection(eb, o['bbox']) >= 0.5 * max(1.0, o['bbox'][2] * o['bbox'][3])) >= 3
-            )
-        elif cat in ('photo', 'icon', 'logo'):
-            # Logos intentionally preserved crisp in plate OR extracted as transparent/movable image both preserve brand integrity;
-            # photos and icons require movable image/asset representation.
-            if cat == 'logo':
-                ok = True
-            else:
-                ok = any(
-                    intersection(eb, o['bbox']) >= 0.35 * min(e_area, max(1.0, o['bbox'][2] * o['bbox'][3]))
-                    for o in [*movable_imgs, *native_shapes]
-                )
-
-        if ok:
-            matched_count += 1
-            stat[0] += 1
-        else:
-            missing_items.append({
-                'id': el.get('id'),
-                'category': cat,
-                'bbox': eb,
-                'label': el.get('label', ''),
-            })
-
-    denom = sum(v[1] for v in by_cat.values())
-    # Estimate photo/icon movable content share vs fallback crop share
-    native_frac = float(sc.get('native_editable_content_fraction', 0.0))
-    movable_frac = float(sc.get('movable_raster_content_fraction', 0.0))
-    return {
-        'inventory_available': True,
-        'total_items': denom,
-        'matched_items': matched_count,
-        'recall': round(matched_count / denom, 4) if denom > 0 else None,
-        'by_category': {k: {'matched': v[0], 'total': v[1], 'recall': round(v[0] / v[1], 4) if v[1] else None}
-                        for k, v in by_cat.items()},
-        'main_title_editable': (titles_matched == len(title_items)) if title_items else True,
-        'proper_form_content_fraction': round(native_frac + movable_frac, 4),
-        'missing_items': missing_items[:25],
+    """Measure production inventory coverage separately from frozen reference recall."""
+    elements = [e for e in (inventory or {}).get('elements', []) if e.get('category') != 'background_scenery']
+    objects = list(sc.get('objects', []))
+    objects.extend({**cell, 'class': 'text'} for obj in sc.get('objects', []) for cell in obj.get('cells', []))
+    kinds = {
+        'title': ('text',), 'section_header': ('text',), 'body_text': ('text',),
+        'card_shape': ('shape',), 'ribbon_shape': ('shape',), 'badge_shape': ('shape',),
+        'divider': ('shape',), 'chart': ('chart',), 'table': ('table',),
+        'photo': ('asset', 'opaque_picture'), 'logo': ('asset', 'opaque_picture'),
+        'icon': ('asset', 'shape'),
     }
+    pairs = []
+    detected = set()
+    for i, el in enumerate(elements):
+        for j, obj in enumerate(objects):
+            if obj.get('class') in ('plate', 'background', 'duplicate_picture'):
+                continue
+            eb, ob = el['bbox'], obj['bbox']
+            overlap = intersection(eb, ob)
+            union = eb[2]*eb[3] + ob[2]*ob[3] - overlap
+            if union <= 0 or overlap / union < 0.5:
+                continue
+            detected.add(i)
+            if obj.get('class') not in kinds.get(el.get('category'), ()):
+                continue
+            if obj['class'] == 'text':
+                expected = ''.join((el.get('text') or el.get('label') or '').split())
+                if not expected or expected != ''.join(obj.get('text', '').split()):
+                    continue
+            pairs.append((overlap / union, i, j))
+    assigned, used = {}, set()
+    for _, i, j in sorted(pairs, reverse=True):
+        if i not in assigned and j not in used:
+            assigned[i] = objects[j]['name']
+            used.add(j)
+    rows = [{**el, 'detected': i in detected, 'correct_form': i in assigned,
+             'office_object': assigned.get(i), 'specified_edit': 'UNKNOWN'} for i, el in enumerate(elements)]
+    titles = [r for r in rows if r['category'] == 'title']
+    fraction = len(assigned)/len(rows) if rows else None
+    return {'inventory_available': bool(rows), 'total_items': len(rows) if rows else None,
+            'matched_items': len(assigned) if rows else None, 'inventory_coverage': fraction,
+            'recall': None, 'proper_form_object_fraction': fraction,
+            'main_title_editable': all(r['correct_form'] for r in titles) if titles else None,
+            'objects': rows, 'missing_items': [r for r in rows if not r['correct_form']][:25]}
 
 
 def _stateless_vlm_audit(
@@ -149,6 +99,7 @@ def _stateless_vlm_audit(
     render_path: Path,
     owner_preview_path: Path,
     sc_summary: dict,
+    *, deck_path: Path, edit_panels: list[Path],
 ) -> dict:
     """Call VLM in a fresh stateless session (separate from Agent conversation) to audit visual fidelity."""
     from ..go_provider import GoProvider
@@ -158,8 +109,13 @@ def _stateless_vlm_audit(
 
     request = json.loads((state.job / 'request.json').read_text('utf8'))
     budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'))
+    from .provider import GO_MODEL_ALIASES
+    requested = os.environ.get('IMAGE2PPT_REVIEW_MODEL') or 'hy4'
+    review_model = GO_MODEL_ALIASES.get(requested, requested)
     audit_key = key({
-        'schema': 'StatelessVisualAudit/1',
+        'schema': 'StatelessVisualAudit/2', 'model': review_model, 'policy': key(load_tolerance_config()),
+        'review_code': digest(__file__), 'scorecard': key(sc_summary), 'deck': digest(deck_path),
+        'edit_panels': [digest(p) for p in edit_panels],
         'source_sha256': digest(source_path),
         'render_sha256': digest(render_path),
         'owner_sha256': digest(owner_preview_path),
@@ -172,42 +128,31 @@ def _stateless_vlm_audit(
 
     try:
         selected_provider, cfg = configure_model(state.job)
+        if selected_provider != 'opencode_go' or review_model == cfg.model:
+            raise ValueError('independent OpenCode Go reviewer required')
         budget.reserve('model_calls', {'tool': 'audit_delivery', 'key': audit_key})
         system_prompt = (
             'You are an independent PowerPoint reconstruction QA auditor (separate from the builder agent). '
-            'You are given 3 images in order: (1) original source slide, (2) actual PowerPoint rendered slide, '
+            'The first three images are: (1) original source slide, (2) actual PowerPoint rendered slide, '
             'and (3) pixel-ownership map (red=unrecovered source-plate, blue=native shape, dark=native text, '
             'green=transparent asset, yellow=movable picture crop), plus objective scorecard metrics. '
+            'Additional panels show actual Office edits. Check original positions for old text and neighbors for damage. '
             'Check strictly for CRITICAL defects (`severity="critical"`): '
             'missing/deleted text or graphics in image (2) vs (1), corrupted/wrong text wording, or severe '
             'double-rendered ghosting. Subtle font-weight, shadow omission, or minor gradient shade differences '
             'are `severity="minor"` (`font_or_shade_deviation`) and MUST NOT fail the audit (`passed=true`). '
             'Set `passed=false` ONLY when a `severity="critical"` defect exists.'
         )
-        if selected_provider == 'opencode_go':
-            reviewer = GoProvider(session=f'independent-audit-{uuid.uuid4().hex[:12]}')
-            reviewer.key = cfg.api_key
-            reviewer.model = os.environ.get('IMAGE2PPT_REVIEW_MODEL') or cfg.model
-            raw = reviewer.ask(
-                system_prompt,
-                {'scorecard': sc_summary},
-                [source_path, render_path, owner_preview_path],
-                VLMIndependentAuditReply,
-            )
-        else:
-            from ..parallel_provider import Planner
-            planner = Planner(cfg)
-            raw = planner.ask(
-                system_prompt,
-                {'scorecard': sc_summary},
-                [source_path, render_path, owner_preview_path],
-                VLMIndependentAuditReply,
-            )
+        reviewer = GoProvider(session=f'independent-audit-{uuid.uuid4().hex}')
+        reviewer.key = cfg.api_key
+        reviewer.model = review_model
+        raw = reviewer.ask(system_prompt, {'scorecard': sc_summary},
+                           [source_path, render_path, owner_preview_path, *edit_panels], VLMIndependentAuditReply)
         parsed = VLMIndependentAuditReply.model_validate(raw)
         critical = [d.model_dump() for d in parsed.defects if d.severity == 'critical']
         minor = [d.model_dump() for d in parsed.defects if d.severity != 'critical']
         verdict = {
-            'status': 'READY',
+            'status': 'READY', 'model': review_model, 'session': reviewer.session, 'receipt': audit_key,
             'passed': len(critical) == 0 and bool(parsed.passed),
             'critical_defects': critical,
             'minor_deviations': minor,
@@ -218,7 +163,7 @@ def _stateless_vlm_audit(
     except Exception as exc:
         return {
             'status': f'UNAVAILABLE:{type(exc).__name__}',
-            'passed': True,
+            'passed': False,
             'critical_defects': [],
             'minor_deviations': [],
             'summary': f'VLM audit skipped/unavailable ({type(exc).__name__}); relying on deterministic Office + scorecard gates.',
@@ -314,10 +259,12 @@ def run_delivery_audit(
             'missing_inventory_items': inv_metrics.get('missing_items', [])[:10],
         }
 
+        edit_panels = [state.evidence(r['id'])[0] for r in composition.get('required_evidence', [])
+                       if r['role'] == 'edit_panel' and Path(state.evidence(r['id'])[0]).parent.name == f'panels-{idx:02d}']
         vlm_verdict = (
-            _stateless_vlm_audit(state, src_path, render_path, owner_png, compact_sc)
+            _stateless_vlm_audit(state, src_path, render_path, owner_png, compact_sc, deck_path=pptx_path, edit_panels=edit_panels)
             if (use_vlm and render_path is not None) else {
-                'status': 'SKIPPED', 'passed': True, 'critical_defects': [], 'minor_deviations': [], 'summary': '',
+                'status': 'SKIPPED', 'passed': False, 'critical_defects': [], 'minor_deviations': [], 'summary': '',
             }
         )
         for cd in vlm_verdict.get('critical_defects', []):
@@ -336,7 +283,7 @@ def run_delivery_audit(
             'vlm_audit': vlm_verdict,
         })
 
-    audit_passed = len(all_critical) == 0
+    audit_passed = bool(page_audits) and not all_critical and all(p['vlm_audit']['passed'] for p in page_audits)
     report = {
         'schema': 'IndependentDeliveryAudit/1',
         'tolerance_profile': tol.get('profile'),

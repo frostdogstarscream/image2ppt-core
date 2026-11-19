@@ -30,10 +30,12 @@ def main():
     commands=parser.add_subparsers(dest='command',required=True)
     submit=commands.add_parser('submit')
     submit.add_argument('images',nargs='+')
+    from ..experiment import PROFILES
+    submit.add_argument('--experiment-profile',choices=PROFILES)
     submit.add_argument('--goal',default='Restore these images as an editable PPTX.')
     submit.add_argument('--tool-profile',choices=('all','basic'),default='all')
-    submit.add_argument('--agent-steps',type=int,default=64)
-    submit.add_argument('--seconds',type=int,default=7200)
+    submit.add_argument('--agent-steps',type=int,default=None)
+    submit.add_argument('--seconds',type=int,default=None)
     submit.add_argument('--agent-thinking',action=argparse.BooleanOptionalAction,default=False)
     submit.add_argument('--agent-model',default=None)
     for name in ('status','cancel','artifacts'):
@@ -51,6 +53,8 @@ def main():
                 params={'goal':options.goal,'tool_profile':options.tool_profile,
                     'agent_steps':options.agent_steps,'runtime_seconds':options.seconds,
                     'agent_thinking':options.agent_thinking}
+                params={k:v for k,v in params.items() if v is not None}
+                if options.experiment_profile:params['experiment_profile']=options.experiment_profile
                 if options.agent_model:params['agent_model']=options.agent_model
                 response=client.post('/api/v1/jobs',params=params,files=files)
         else:

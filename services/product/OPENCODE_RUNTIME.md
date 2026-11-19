@@ -2,6 +2,16 @@
 
 The runtime uses OpenCode 2.1.4, MCP 1.3.0 and Pydantic 2.10.x. MCP 1.3 imports an internal Pydantic helper, so the product dependency range is constrained to the compatible minor version. Its job-scoped MCP server exposes basic image/evidence tools together with optional reconstruction shortcuts. Original pipeline defaults remain available.
 
+## Host-precomputed uploads
+
+New OpenCode uploads run deterministic perception on up to two pages concurrently, then batch reconstruction, candidate validation, commit, compilation and actual Office checks. `host-baseline/manifest.json` identifies the immutable control PPTX, scorecard and state. The host records source bindings before opening an Agent session. The 4090 detector configuration uses `IMAGE2PPT_EXPERIMENT_CONFIG`. The runtime records unavailable detectors in page evidence.
+
+`get_job_context` gives a small issue index for each page. Each spatial block holds up to 30 stable numbers. The Agent can assign routes and movement partners and request an incremental rebuild by block or object IDs. It can also request new evidence. Source text and placement come from the job inventory. Private evaluation references are read only by the offline evaluator.
+
+Both arms use the same immutable source. The delivery gate checks actual Office evidence, per-page edit counts, source OCR lines matched by native fields, native field counts and RGB mean absolute error on each 64 px tile and marked region. A local increase above 2 levels on the 0–255 scale rejects the candidate. The delivered `result.json` identifies the selected origin, provider usage and fallback reason. A provider failure after baseline creation delivers the baseline with `REVIEW_REQUIRED`.
+
+Run `services/experiments/evaluate_two_pages.py` twice with the same `--job`, private `--references` and `--cases`. Use separate output directories and `--arm baseline` and `--arm final`. Each invocation performs the six actual PowerPoint edits on copies and compares the exported slide to the original. Keep these artifacts outside Git.
+
 ## Launch
 
 Install `services/product/requirements.txt` in a dedicated environment. Provide the existing OCR manifest and GPU client configuration through `.runtime/parallel-services.json`. The fixed compiler needs its verified Node/artifact-tool runtime. Use a short jobs root on Windows.

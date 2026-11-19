@@ -35,6 +35,9 @@ class RuntimeState:
         with sqlite3.connect(self.root/'runtime.sqlite', timeout=60) as db:
             yield db
 
+    def publication_lock(self):
+        return lease('runtime-publication-'+key(str(self.job)),capacity=1)
+
     def read(self):
         file = self.root/'state.json'
         return json.loads(file.read_text('utf8')) if file.exists() else {
@@ -126,8 +129,11 @@ class RuntimeState:
                 # A recovery receipt is written before publishing the mutable head.
                 files = {str(p.relative_to(self.job)): digest(p) for p in directory.rglob('*') if p.is_file()}
                 receipt = {'state': current, 'response': result, 'files': files}
-                write(directory/'completed.json', receipt)
-                write(self.root/'state.json', current)
+                with self.publication_lock():
+                    if (self.root/'delivery-selection.json').exists():
+                        raise RuntimeConflict('delivery already selected')
+                    write(directory/'completed.json', receipt)
+                    write(self.root/'state.json', current)
                 with self.db() as db:
                     db.execute('UPDATE operations SET state=?,result=? WHERE id=?',
                                ('COMPLETED', json.dumps(receipt, ensure_ascii=False), token))

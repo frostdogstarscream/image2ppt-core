@@ -61,9 +61,15 @@ def schemas():
     page = {'type': 'integer', 'minimum': 1}
     strings = {'type': 'array', 'items': string}
     region = {'page': page, 'object_id': string}
+    plan_field={'type':'object','additionalProperties':False,'required':['mark','role','move_with','route'],
+                'properties':{'mark':{'type':'integer','minimum':1},'role':string,
+                              'move_with':{'type':'array','items':{'type':'integer','minimum':1}},
+                              'route':{'enum':['text','surface','asset','table','preserve']}}}
     fields = {
+        'plan_marked_page':{'page':page,'fields':{'type':'array','items':plan_field,'maxItems':150},'append':{'type':'boolean'}},
+        'inspect_marked_region':{'page':page,'bbox':{'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4}},
         'list_evidence': {'role':string,'limit':{'type':'integer','minimum':1,'maximum':100}},
-        'inspect_scene': {'page': {'type': 'integer', 'minimum': 1}},
+        'inspect_scene': {'page': {'type': 'integer', 'minimum': 1}, 'full':{'type':'boolean'}},
         'rebuild_region': {'page': {'type': 'integer', 'minimum': 1}, 'object_id': string,
                            'strategy': {'type': 'string', 'enum': ['auto', 'next_background', 'verified-backing', 'source-halo', 'sam', 'rmbg2']}},
         'repair_region': {'candidate_id': string, 'strategy': string},
@@ -144,6 +150,7 @@ def schemas():
         if 'candidate_id' in properties:properties['candidate_id']={'type':'string','pattern':'^c-[a-f0-9]{24}$','description':'Candidate ID returned by create_candidate/rebuild_region. Never a region- ID or object ID.'}
         required = list(properties)
         if name=='list_evidence':required=['job_id']
+        if name=='plan_marked_page':required.remove('append')
         if name=='update_scene':required.remove('remove_object_ids')
         if name in ('rebuild_region', 'unmix_foreground'):
             required.remove('strategy')
@@ -165,7 +172,7 @@ def schemas():
             required.remove('layout_id')
         if name == 'crop_image':
             required.remove('scale')
-        if name in ('prepare_page_evidence', 'batch_reconstruct_page', 'parse_page_structure', 'crop_region'):
+        if name in ('prepare_page_evidence', 'batch_reconstruct_page', 'parse_page_structure', 'crop_region', 'inspect_scene'):
             required = ['job_id', 'page']
         if name == 'audit_delivery':
             required = ['job_id']
@@ -194,7 +201,32 @@ def create_server(root, bound_job=None):
             profile=request.get('tool_profile','all')
         shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region',
                    'prepare_page_evidence','batch_reconstruct_page'} if profile=='basic' else set()
-        return [tool for tool in schemas() if tool.name not in shortcuts]
+        if bound_job and request.get('experiment_profile') in (None,'baseline'):
+            shortcuts.update(('plan_marked_page','inspect_marked_region'))
+        tools = [tool for tool in schemas() if tool.name not in shortcuts]
+        if bound_job and request.get('host_stage0'):
+            from .host_evidence import AGENT_TOOLS, ROLES
+            tools = [t for t in schemas() if t.name in AGENT_TOOLS]
+            for t in tools:
+                props = t.inputSchema['properties']
+                if t.name=='plan_marked_page':
+                    props['fields']['maxItems']=30
+                    props['fields']['items']['properties']['role']={'enum':ROLES}
+                if t.name=='batch_reconstruct_page':
+                    for n in ('include_assets','include_containers','include_region_crops','use_inpaint','verify_office'):
+                        props.pop(n,None)
+                    props['block']={'type':'integer','minimum':1}
+                    t.inputSchema['anyOf']=[{'required':['block']},{'required':['object_ids']}]
+                if t.name=='prepare_page_evidence':
+                    for n in ('auto_create_scene','run_layers','run_layout'):
+                        props.pop(n,None)
+        if bound_job:
+            for tool in tools:
+                schema = tool.inputSchema
+                schema['properties']['job_id'] = {'type': 'string', 'enum': [bound_job],
+                                                 'description': 'Optional in this job-bound session.'}
+                schema['required'].remove('job_id')
+        return tools
 
     @server.list_tools()
     async def list_tools():
@@ -203,6 +235,8 @@ def create_server(root, bound_job=None):
     @server.call_tool()
     async def call_tool(name, arguments):
         arguments = dict(arguments or {})
+        if bound_job:
+            arguments.setdefault('job_id', bound_job)
         if bound_job and arguments.get('job_id') != bound_job:
             raise ValueError('tool is bound to another job')
         from jsonschema import validate
@@ -218,7 +252,15 @@ def create_server(root, bound_job=None):
                 content.append(ImageContent(type='image', mimeType='image/png',
                                             data=base64.b64encode(path.read_bytes()).decode('ascii')))
             else:
-                content.append(TextContent(type='text', text=json.dumps(reference)+'\n'+path.read_text('utf8')))
+                data = path.read_text('utf8')
+                if reference['role']=='hard_checks' and len(data)>12000 and bound_job and json.loads(
+                        (service.state(bound_job).job/'request.json').read_text('utf8')).get('host_stage0'):
+                    checks = json.loads(data)
+                    data = json.dumps({'status':checks.get('status'),'pptx_sha256':checks.get('pptx_sha256'),
+                        'office':checks.get('office',{}).get('status'),'action_count':len(checks.get('office',{}).get('records',[])),
+                        'residuals':[[{'id':r.get('id'),'status':r.get('residual_check_status')} for r in page
+                                      if r.get('residual_check_status')!='PASS'] for page in checks.get('residuals',[])]})
+                content.append(TextContent(type='text', text=json.dumps(reference)+'\n'+data))
         # A supplied-image receipt records transport provision, not proof of model cognition.
         state = service.state(arguments['job_id'])
         for identifier in arguments['evidence_ids']:

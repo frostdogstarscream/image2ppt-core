@@ -134,6 +134,9 @@ def compile_pages(irs, output, pages):
     if result.returncode:
         raise PipelineError('fixed_compiler_failed')
     artifacts=_compiled_artifacts(_final_json((output/'compiler.stdout').read_bytes()),output,len(pages))
+    if any((Path(ir).parent/'vector-assets.json').is_file() for ir in irs):
+        from .experiment_svg import attach
+        attach(artifacts['pptx'],irs)
     verify_package(artifacts['pptx'],pages)
     return artifacts
 

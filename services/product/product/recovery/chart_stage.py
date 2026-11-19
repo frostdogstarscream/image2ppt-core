@@ -32,7 +32,7 @@ def _parse_num(text: str) -> float | None:
     if not _NUM_RE.match(s):
         return None
     if s.endswith('%'):
-        return float(s[:-1])
+        return None  # The current chart payload cannot preserve a percent display format.
     return float(s)
 
 
@@ -127,7 +127,7 @@ def stage_native_charts(
 
         # Detect vertical bars aligned with category centers
         fg = np.abs(crop - bg_med).max(2) > 12.0
-        n_c, _, stats_c, _ = cv2.connectedComponentsWithStats(fg.astype('uint8'), 8)
+        n_c, component_labels, stats_c, _ = cv2.connectedComponentsWithStats(fg.astype('uint8'), 8)
         bars = []
         for cid in range(1, n_c):
             bx, by, bw, bh, area = [int(v) for v in stats_c[cid]]
@@ -139,10 +139,8 @@ def stage_native_charts(
         categories: list[str] = []
         values: list[float] = []
         matched_bars: list[list[int]] = []
-        max_bar_h = float(max(b[3] for b in bars))
-        # Determine numeric scale if Y-axis / bar-top numbers exist
-        parsed_nums = [v for t in num_texts if (v := _parse_num(t.text)) is not None]
-        scale_max = max(parsed_nums) if parsed_nums and max(parsed_nums) > 0 else 100.0
+        label_ids = set()
+        chart_mask = np.zeros(fg.shape, bool)
 
         for ct in cat_texts:
             cx_mid = ct.bbox[0] + 0.5 * ct.bbox[2]
@@ -150,17 +148,24 @@ def stage_native_charts(
             if abs((best_b[0] + 0.5 * best_b[2]) - cx_mid) > max(32.0, ct.bbox[2]):
                 continue
             # Check if a numeric data label sits directly above this bar
-            top_nums = [
-                _parse_num(nt.text) for nt in num_texts
-                if abs((nt.bbox[0] + 0.5 * nt.bbox[2]) - (best_b[0] + 0.5 * best_b[2])) <= max(24.0, best_b[2])
-                and nt.bbox[1] <= best_b[1] + 8
-            ]
-            val = float(top_nums[0]) if top_nums and top_nums[0] is not None else round((best_b[3] / max_bar_h) * scale_max, 1)
+            top_labels = [nt for nt in num_texts
+                          if abs((nt.bbox[0] + nt.bbox[2]/2) - (best_b[0] + best_b[2]/2)) <= best_b[2]/2
+                          and -nt.bbox[3] <= best_b[1] - (nt.bbox[1]+nt.bbox[3]) <= nt.bbox[3]]
+            if len(top_labels) != 1 or best_b in matched_bars or top_labels[0].id in label_ids:
+                break
+            value_label = top_labels[0]
+            label_ids.update((ct.id, value_label.id))
+            val = _parse_num(value_label.text)
+            bx, by, bw, bh = best_b
+            component = component_labels[by-ry+bh//2, bx-rx+bw//2]
+            if component == 0:
+                break
+            chart_mask |= component_labels == component
             categories.append(ct.text.replace('\n', ' ').strip())
             values.append(val)
             matched_bars.append(best_b)
 
-        if len(categories) < 2:
+        if len(categories) != len(cat_texts) or len(matched_bars) != len(bars):
             continue
 
         while f'ch-{ch_seq:02d}' in used_ids:
@@ -171,7 +176,31 @@ def stage_native_charts(
             continue
 
         full_mask = np.zeros((h_img, w_img), bool)
-        full_mask[ry:ry + rh, rx:rx + rw] = fg & (~already_claimed[ry:ry + rh, rx:rx + rw])
+        from ..parallel_fusion import glyph_evidence
+        styles = {style.id:style for style in graph.text.styles}
+        if {t.id for t in inside_texts} != label_ids:
+            continue
+        pending_labels = set(label_ids)
+        for t in inside_texts:
+            if t.id not in label_ids or graph.ownership.get(t.id) != 'RESOLVED':
+                break
+            x, y, w, h = map(round, t.bbox)
+            if x < rx or y < ry or x+w > rx+rw or y+h > ry+rh:
+                break
+            backing = np.broadcast_to(bg_med, (h,w,3))
+            ink, uncertain = glyph_evidence(work_plate, [x,y,w,h], styles[t.style].color, backing)
+            if uncertain.any():
+                break
+            chart_mask[y-ry:y-ry+h, x-rx:x-rx+w] |= ink
+            pending_labels.remove(t.id)
+        if pending_labels:
+            continue
+        # Only connected bar pixels and source-authorized label strokes are replaced. Preserve legends, arrows and other unowned ink.
+        if already_claimed[ry:ry+rh, rx:rx+rw].any() or (fg & ~chart_mask).any():
+            continue
+        if any(t.id in graph.selected for t in inside_texts):
+            continue
+        full_mask[ry:ry + rh, rx:rx + rw] = chart_mask
         if int(full_mask.sum()) < 60:
             continue
 
@@ -181,6 +210,7 @@ def stage_native_charts(
             'restore_bbox': [rx, ry, rw, rh],
             'bg_uint8': np.clip(np.rint(bg_med), 0, 255).astype(np.uint8),
             'mask': full_mask,
+            'covered_text_ids': [t.id for t in inside_texts],
             'payload': {
                 'chart_type': 'bar',
                 'font': {'ea': ea_font, 'latin': latin_font, 'size_pt': 9.0},
@@ -189,6 +219,7 @@ def stage_native_charts(
                 'has_legend': False,
             },
         })
+        already_claimed |= full_mask
         used_ids.add(cid_str)
 
     if not staged_charts:
@@ -210,7 +241,7 @@ def stage_native_charts(
             'bbox': ch['bbox'],
             'restore_bbox': [rx, ry, rw, rh],
             'payload': ch['payload'],
-            'method': 'layout-bar-chart-v1',
+            'method': 'layout-bar-chart-v2', 'covered_text_ids': ch['covered_text_ids'],
             'state': 'STAGED',
             'quality': 'REVIEW_REQUIRED',
             'human_acceptance': False,

@@ -37,6 +37,7 @@ def main() -> int:
     parser.add_argument('--source', required=True)
     parser.add_argument('--pptx', required=True)
     parser.add_argument('--render')
+    parser.add_argument('--checks', help='PowerPoint checks.json bound to this PPTX')
     parser.add_argument('--ocr')
     parser.add_argument('--ocr-manifest')
     parser.add_argument('--ocr-python-path')
@@ -46,7 +47,8 @@ def main() -> int:
     parser.add_argument('--cache', default=str(ROOT / 'outputs/scorecard-cache'))
     args = parser.parse_args()
     ocr = _ocr(args, Path(args.cache))
-    result = scorecard.score_page(args.source, args.pptx, render_path=args.render, ocr=ocr, slide=args.slide)
+    result = scorecard.score_page(args.source, args.pptx, render_path=args.render, ocr=ocr, slide=args.slide,
+                                  checks=json.loads(Path(args.checks).read_text(encoding='utf-8')) if args.checks else None)
     if args.owner_preview:
         scorecard.save_owner_preview(args.source, args.pptx, args.owner_preview, args.slide)
         result['owner_preview'] = args.owner_preview

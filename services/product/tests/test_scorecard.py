@@ -82,6 +82,17 @@ def test_ownership_classes_and_content_fractions(tmp_path):
                                                  {'text': '\u7f3a\u5931', 'bbox': [120, 92, 40, 6], 'score': 0.99},
                                                  {'text': 'BRAND', 'bbox': [170, 4, 24, 10], 'score': 0.99}]})
     assert result['object_counts'] == {'plate': 1, 'opaque_picture': 1, 'asset': 1, 'shape': 1, 'text': 1}
+    assert result['movable_asset_fraction'] is None
+    assert result['native_editable_fraction'] == result['editable_content_fraction']
+    import hashlib
+    digest = hashlib.sha256(pptx.read_bytes()).hexdigest()
+    checks = {'pptx_sha256': digest, 'residuals': [[{'id': 'crop-1', 'residual_check_status': 'PASS',
+                                                    'residual_pixels_confirmed': 0}]],
+              'office': {'pptx_sha256': digest, 'status': 'PASS_APP_AUTOMATED', 'records': [
+                  {'page': 1, 'id': 'crop-1', 'action': action, 'saved_reopened': True, 'outside_pixels': 0}
+                  for action in ('move-scale', 'delete')]}}
+    verified = scorecard.score_page(src_path, pptx, checks=checks)
+    assert verified['movable_asset_fraction'] == result['content_fraction']['opaque_picture']
     area = result['visible_area_fraction']
     assert area['text'] == round(80 * 20 / 20000, 4)
     assert area['opaque_picture'] == round(50 * 40 / 20000, 4)

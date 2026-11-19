@@ -7,6 +7,7 @@ hundreds of Agent tool turns to a single batch backbone pass plus targeted repai
 from __future__ import annotations
 
 from collections import Counter
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
@@ -60,7 +61,6 @@ def _merge_structural_ocr_items(
     logo_assets = [
         a for a in asset_records
         if a.get('kind') == 'logo'
-        or (a['bbox'][0] >= 0.78 * w_img and a['bbox'][1] <= 0.14 * h_img)
     ]
     for it in items:
         x, y, w, h = it['bbox']
@@ -68,14 +68,18 @@ def _merge_structural_ocr_items(
         hits_logo = any(intersection(it['bbox'], la['bbox']) > 0 for la in logo_assets) or any(
             intersection(it['bbox'], lb) > 0 for lb in (extra_logo_boxes or ())
         )
-        if in_top_right or hits_logo:
+        paired_wordmark = in_top_right and any(
+            peer['id'] != it['id'] and not any(c.isdigit() for c in it['text']+peer['text'])
+            and abs(peer['bbox'][0]-x) <= 3 and max(abs(a-b) for a,b in zip(peer['rgb'],it['rgb'])) <= 30
+            and intersection([x-2,y-6,w+4,h+12],peer['bbox']) > 0 for peer in items)
+        if paired_wordmark or hits_logo:
             logo_ids.add(it['id'])
     # Propagate logo lockup flag to immediate vertical partner lines in top-right quadrant.
     changed = True
     while changed:
         changed = False
         for it in items:
-            if it['id'] in logo_ids:
+            if it['id'] in logo_ids or any(c.isdigit() for c in it['text']):
                 continue
             x, y, w, h = it['bbox']
             if x < 0.78 * w_img or y > 0.18 * h_img or w > 0.20 * w_img:
@@ -347,7 +351,6 @@ def _classify_failed_region(
     kind = entry.get('kind', '')
     failure = entry.get('failure', '')
     bbox = entry.get('bbox') or []
-    w_img, h_img = graph.image_size if graph.image_size else (1920, 1080)
     logo_ids = logo_candidate_ids or set()
 
     peers: list[str] = []
@@ -374,8 +377,9 @@ def _classify_failed_region(
 
     in_top_right_logo = (
         oid in logo_ids
-        or (kind == 'text' and len(bbox) == 4 and bbox[0] >= 0.80 * w_img and bbox[1] <= 0.16 * h_img and bbox[2] <= 0.18 * w_img)
-        or (kind == 'text' and any(a.kind == 'logo' and a.id in peers for a in graph.asset.objects))
+        or (kind == 'text' and len(bbox) == 4 and any(
+            a.kind == 'logo' and intersection(bbox, a.bbox) >= 0.8 * max(1.0, bbox[2] * bbox[3])
+            for a in graph.asset.objects))
     )
 
     if kind == 'asset' or kind == 'surface':
@@ -394,7 +398,7 @@ def _classify_failed_region(
         else:
             category, action, cap = 'PROTECTED_NEIGHBOR_CONFLICT', 'shrink_text_bbox_2px', 1
     elif failure in ('MASK_INCOMPLETE', 'BACKGROUND_REPAIR_FAILED', 'OWNER_CONFLICT'):
-        category, action, cap = 'COMPLEX_OR_DUAL_COLOR_BACKING', 'retain_in_source_plate', 0
+        category, action, cap = 'COMPLEX_OR_DUAL_COLOR_BACKING', 'inspect_local_backing_and_retry', 1
     else:
         category, action, cap = 'OTHER_REPAIR_FAILURE', 'retain_in_source_plate', 0
 
@@ -404,13 +408,16 @@ def _classify_failed_region(
         for rid, cbox in staged_crop_boxes:
             if intersection(bbox, cbox) >= 0.8 * area:
                 covered_by = rid
-                action = 'already_cropped_as_region_image'
-                cap = 0
+                if oid in graph.selected.get(rid, {}).get('seed_ids', []) and (kind != 'text' or in_top_right_logo):
+                    action = 'already_cropped_as_region_image'
+                    cap = 0
                 break
 
     out = {
         **entry,
         'diagnostic_category': category,
+        'text_edit_intent': ('intrinsic' if in_top_right_logo else 'native_field' if cap else 'unresolved')
+                            if kind == 'text' else None,
         'conflicting_peer_ids': peers,
         'recommended_action': action,
         'max_repair_attempts': cap,
@@ -690,7 +697,15 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     if str(page) not in current.get('ocr', {}):
         ocr_dir = directory / 'ocr'
         ocr_dir.mkdir(parents=True, exist_ok=True)
-        service.run_ocr(state, current, ocr_dir, page=page)
+        try:
+            service.run_ocr(state, current, ocr_dir, page=page)
+        except (OSError, RuntimeError, KeyError, ValueError, subprocess.SubprocessError) as exc:
+            if not json.loads((state.job/'request.json').read_text('utf8')).get('host_stage0'):
+                raise
+            file = ocr_dir/'ocr-unavailable.json'
+            write(file,{'source_sha256':digest(source_path),'status':'UNAVAILABLE',
+                        'error_type':type(exc).__name__,'lines':[]})
+            current.setdefault('ocr',{})[str(page)]=str(file)
     ocr = json.loads(Path(current['ocr'][str(page)]).read_text('utf8'))
     if 'fonts' not in current:
         font_dir = directory / 'fonts'
@@ -728,7 +743,38 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     layout_data: dict | None = None
     layout_status = 'SKIPPED'
     do_layout = bool(run_layers) if run_layout is None else bool(run_layout)
-    if str(page) in current.get('layout', {}) and Path(current['layout'][str(page)]).is_file():
+    request = json.loads((state.job/'request.json').read_text(encoding='utf8'))
+    profile = request.get('experiment_profile')
+    preflight = request.get('host_stage0')
+    if preflight and do_layout and str(page) not in current.get('layout', {}):
+        from ..experiment import detect
+        config = os.environ.get('IMAGE2PPT_EXPERIMENT_CONFIG')
+        configured = json.loads(Path(config).read_text(encoding='utf-8-sig')) if config else {}
+        detectors = [name for name in ('v3','pp-l','doclayout','omni') if name in configured]
+        layout_data = detect(source_path, profile, directory/'model-runs', detectors=detectors)
+        if 'v3' not in detectors and layout_evidence.available():
+            try:
+                native = layout_evidence.detect({'path':str(source_path),'source_sha256':digest(source_path)}, state.job/'cache')
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+                layout_data['models'].append({'model':'v3','status':'unavailable','error_type':type(exc).__name__})
+            else:
+                layout_data['regions'].extend(native['regions'])
+                layout_data['models'].append({'model':'v3','status':'candidate' if native['regions'] else 'no_candidates'})
+        for name in ('v3','omni'):
+            if not any(m['model']==name for m in layout_data['models']):
+                layout_data['models'].append({'model':name,'status':'unavailable'})
+        layout_file = directory/'layout-regions.json'
+        write(layout_file, layout_data)
+        current.setdefault('layout', {})[str(page)] = str(layout_file)
+        layout_status = 'READY' if any(m['status'] in ('candidate','no_candidates') for m in layout_data['models']) else 'UNAVAILABLE'
+    elif profile and do_layout and str(page) not in current.get('layout', {}):
+        from ..experiment import detect
+        layout_data = detect(source_path, profile, directory/'model-runs')
+        layout_file = directory/'layout-regions.json'
+        write(layout_file, layout_data)
+        current.setdefault('layout', {})[str(page)] = str(layout_file)
+        layout_status = 'READY' if any(r['status'] in ('candidate','no_candidates') for r in layout_data['models']) else 'UNAVAILABLE'
+    elif str(page) in current.get('layout', {}) and Path(current['layout'][str(page)]).is_file():
         layout_data = json.loads(Path(current['layout'][str(page)]).read_text('utf8'))
         layout_status = 'CACHED'
     elif do_layout and layout_evidence.available():
@@ -749,7 +795,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         or os.environ.get('MOMA_API_KEY')
         or os.environ.get('PLANNER_API_KEY')
     )
-    do_vlm_structure = (bool(run_layers) and has_vlm_creds) if run_structure is None else bool(run_structure)
+    do_vlm_structure = not preflight and ((bool(run_layers) and has_vlm_creds) if run_structure is None else bool(run_structure))
     structure_info = parse_page_structure(
         state, source_path, ocr, layout=layout_data, assets=[], fonts=fonts, use_vlm=do_vlm_structure
     )
@@ -816,6 +862,10 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
 
     measured_items, scene_relations = _merge_structural_ocr_items(
         source, raw_items, [*immediate_assets, *deferred_assets], extra_logo_boxes=extra_logo_boxes)
+    if preflight or (profile and profile != 'baseline'):
+        from ..recovery.marked_fields import split_items
+        retained_fields = scene_relations.setdefault('source_retained_fields', [])
+        measured_items = split_items(source, measured_items, retained_fields)
     for item in measured_items:
         est_px = item['est_size_px']
         item['role'] = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
@@ -939,7 +989,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         'scene_already_existed': bool(existing),
         'layerd_status': layerd_status,
         'layer_images': layer_images,
-        'layout_available': layout_evidence.available(),
+        'layout_available': bool(layout_data) if profile else layout_evidence.available(),
         'layout_status': layout_status,
         'layout_region_count': len((layout_data or {}).get('regions', [])),
         'layout_pictorial_regions': [
@@ -963,9 +1013,25 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         'styles': final_styles,
         'items': measured_items,
     }
+    if preflight or (profile and profile!='baseline'):
+        from ..experiment import mark_page,mark_blocks
+        layout = layout_data or {'regions':[]}
+        low_confidence = [{'id':'ocr-review-'+str(line['id']), 'kind':'uncertain_ocr',
+                           'text':line['text'], 'bbox':line['bbox'], 'ocr_line_ids':[line['id']]}
+                          for line in ocr.get('lines', []) if preflight and line.get('text') and line.get('score',0)<0.85]
+        marks = mark_page(source_path, layout, [*measured_items,*asset_summaries,*low_confidence], directory)
+        current.setdefault('experiment_marks',{})[str(page)] = str(directory/'marks.json')
+        payload['marked_image']=state.register(directory/'marks.png','numbered_layout')
+        payload['mark_inventory']=state.register(directory/'marks.json','numbered_inventory')
+        payload['mark_count']=len(marks)
+        payload['blocks']=[{**block,'image':state.register(pic,'numbered_block_image'),
+                            'inventory':state.register(info,'numbered_block_inventory')}
+                           for block,pic,info in mark_blocks(source_path,marks,directory)]
     write(directory / 'page-evidence.json', payload)
     evidence_ref = state.register(directory / 'page-evidence.json', 'page_evidence_summary')
-    return {**payload, 'evidence': evidence_ref}
+    compact = {k:v for k,v in payload.items() if k not in
+               ('items','assets','styles','scene_relations','layout_pictorial_regions')} if payload.get('blocks') else payload
+    return {**compact, 'evidence': evidence_ref}
 
 
 def _threadsafe_inpaint(raw_inpaint):
@@ -1037,6 +1103,9 @@ def _chain_stage_from_spec(
     logo_ids: set[str] | None = None,
     wanted_filter: set[str] | None,
     sam_enabled: bool,
+    experiment_profile: str | None = None,
+    marked_routes: tuple | list = (),
+    prepared_tables=None,
 ) -> tuple[Path, list[str], list[dict]]:
     from .. import layout_evidence, matting
     from ..object_stage import infer_sam
@@ -1048,10 +1117,28 @@ def _chain_stage_from_spec(
     cur_base = initial_baseline
     staged_ids: list[str] = []
     stage_errors: list[dict] = []
-
+    table_fields = [r for r in marked_routes if r['route']=='table'
+                    and (wanted_filter is None or r['id'] in wanted_filter)]
+    covered_texts = {tid for record in initial_graph.selected.values() for tid in record.get('covered_text_ids', [])}
+    if table_fields:
+        from ..recovery.marked_tables import stage_tables
+        cur_base, tables, covered = prepared_tables or stage_tables(cur_base, directory/tag/'marked-tables', table_fields, skip_ids)
+        covered_texts.update(covered)
+        staged_ids.extend(tables)
+    if include_containers and wanted_filter is None and layout_path:
+        from ..recovery.chart_stage import stage_native_charts
+        layout = json.loads(Path(layout_path).read_text(encoding='utf8'))
+        chart_ir, chart_ids = stage_native_charts(cur_base, directory/tag/'charts-staged', layout=layout,
+                                                  fonts=fonts, skip_ids=skip_ids)
+        if chart_ids:
+            cur_base = chart_ir.parent
+            staged_ids.extend(chart_ids)
+            chart_scene = json.loads((cur_base/'scene.json').read_text(encoding='utf8'))
+            for cid in chart_ids:
+                covered_texts.update(chart_scene['selected'][cid]['covered_text_ids'])
     for idx, tr in enumerate(trials_spec):
         oid = tr['object_id']
-        if oid in skip_ids:
+        if oid in skip_ids or oid in covered_texts:
             continue
         step_out = directory / tag / f'step-{idx:03d}-{oid}'
         frame_opt = (
@@ -1066,6 +1153,7 @@ def _chain_stage_from_spec(
                 fonts,
                 step_out,
                 frame_minimum=frame_opt,
+                fit_origin=experiment_profile not in (None, 'baseline'),
             )
             cur_base = ir.parent
             staged_ids.append(oid)
@@ -1081,10 +1169,31 @@ def _chain_stage_from_spec(
                 'reason': msg,
             })
 
+    if include_assets:
+        from ..recovery.region_crop import stage_region_crops
+        for field in marked_routes:
+            frame = field.get('picture_frame')
+            if not frame or field['id'] in skip_ids or (wanted_filter is not None and field['id'] not in wanted_filter):
+                continue
+            seed = {'id': field['id'], 'bbox': frame, 'kind': 'asset',
+                    'picture_frame': frame if field.get('intrinsic_ui') else None}
+            pic_ir, pic_ids, evidence = stage_region_crops(
+                cur_base, directory/tag/('picture-'+key(field['id'])[:12]), seeds=[seed], skip_ids=skip_ids)
+            if pic_ids:
+                cur_base = pic_ir.parent
+                staged_ids.extend(pic_ids)
+            elif not any(field['id'] in rec.get('seed_ids', []) for rec in initial_graph.selected.values()):
+                stage_errors.append({'object_id': field['id'], 'kind': 'asset', 'bbox': frame,
+                                     'failure': 'PICTURE_NOT_ISOLATED', 'reason': str(evidence)[:500]})
+
     if include_assets and layers_dir:
         cur_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
+        from .marked_routes import bind_asset_layers
+        deferred_list = bind_asset_layers([r['new_asset'] for r in marked_routes if r.get('new_asset')],
+                                          layers_dir,cur_graph.source_sha256)
         if deferred_path and Path(deferred_path).is_file():
-            deferred_list = json.loads(Path(deferred_path).read_text('utf8'))
+            deferred_list.extend(json.loads(Path(deferred_path).read_text('utf8')))
+        if deferred_list:
             existing_ids = {a.id for a in cur_graph.asset.objects}
             to_add: list[ClosedObject] = []
             for raw_obj in deferred_list:
@@ -1099,6 +1208,7 @@ def _chain_stage_from_spec(
                        for a in cur_graph.asset.objects):
                     continue
                 to_add.append(ClosedObject.model_validate(raw_obj))
+                existing_ids.add(oid)
             if to_add:
                 prep_base = directory / tag / 'deferred-scene-prep'
                 shutil.copytree(cur_base, prep_base)
@@ -1133,7 +1243,9 @@ def _chain_stage_from_spec(
                     active_graph, asset.id, source_path, layers_dir,
                     cur_base, step_dir / 'extract', strategy='verified-backing',
                 )
-                if res.get('status') != 'CANDIDATE_READY' and sam_enabled:
+                choices = [('verified-backing', res)]
+                compare = asset.kind in ('icon', 'logo', 'decoration')
+                if (compare or res.get('status') != 'CANDIDATE_READY') and sam_enabled:
                     sam_root = page_cache_dir / 'sam-cache' / key(asset.id)[:12]
                     plan_file = sam_root / 'sam-plan.json'
                     sam_out = sam_root / 'sam'
@@ -1151,23 +1263,67 @@ def _chain_stage_from_spec(
                         except Exception:
                             pass
                     if plan_file.is_file() and sam_out.is_dir():
-                        res_sam = retry_asset_extraction(
-                            active_graph, asset.id, source_path, layers_dir,
-                            cur_base, step_dir / 'extract-sam', strategy='sam',
-                            sam_plan=plan_file, sam_directory=sam_out,
-                        )
-                        if res_sam.get('status') == 'CANDIDATE_READY':
-                            res = res_sam
-                if res.get('status') != 'CANDIDATE_READY' and matting.available():
+                        try:
+                            res_sam = retry_asset_extraction(
+                                active_graph, asset.id, source_path, layers_dir,
+                                cur_base, step_dir / 'extract-sam', strategy='sam',
+                                sam_plan=plan_file, sam_directory=sam_out,
+                            )
+                            choices.append(('sam',res_sam))
+                            if res_sam.get('status') == 'CANDIDATE_READY':
+                                res = res_sam
+                        except (ValueError,OSError,RuntimeError) as exc:
+                            choices.append(('sam',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
+                if compare and matting.available():
                     try:
                         res_matte = retry_asset_extraction(
                             active_graph, asset.id, source_path, layers_dir,
                             cur_base, step_dir / 'extract-rmbg2', strategy='rmbg2',
                         )
-                        if res_matte.get('status') == 'CANDIDATE_READY':
-                            res = res_matte
-                    except Exception:
-                        pass
+                        choices.append(('rmbg2',res_matte))
+                    except Exception as exc:
+                        choices.append(('rmbg2',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
+                for op in ('vitmatte','local-layerd'):
+                    if experiment_profile not in (op,'combined'):
+                        continue
+                    if op=='vitmatte' and not compare:
+                        continue
+                    if op=='local-layerd' and any(c.get('status')=='CANDIDATE_READY' for _,c in choices):
+                        continue
+                    try:
+                        candidate=retry_asset_extraction(active_graph,asset.id,source_path,layers_dir,
+                            cur_base,step_dir/op,strategy=op)
+                        choices.append((op,candidate))
+                    except (ValueError, OSError, RuntimeError) as exc:
+                        choices.append((op,{'status':'UNAVAILABLE','reason':str(exc)[:300]}))
+                scored = []
+                for strategy, candidate in choices:
+                    if candidate.get('status') != 'CANDIDATE_READY':
+                        continue
+                    attempt = next(a for a in candidate['attempts'] if a['status']=='CANDIDATE_READY')
+                    folder = Path(candidate['candidate_directory'])
+                    with Image.open(folder/'asset.png') as im:
+                        graphic = im.convert('RGBA')
+                        contrast = Image.new('RGBA',graphic.size,'#70368C')
+                        contrast.alpha_composite(graphic)
+                        contrast.convert('RGB').save(step_dir/(strategy+'-contrast.png'))
+                    from ..experiment_assets import contrast_edge_score
+                    edge = contrast_edge_score(graphic) if compare and experiment_profile not in (None,'baseline') else None
+                    scored.append({'strategy':strategy,'recomposition_p95':attempt['source_recomposition_p95'],
+                                   'background_error':attempt['background_error'],'contrast_edge_proxy':edge,
+                                   'candidate':candidate})
+                edges = [r['contrast_edge_proxy'] for r in scored]
+                comparable = bool(edges and all(edges)) and all(
+                    min(e[k] for e in edges) >= .80*max(e[k] for e in edges) for k in ('samples','visible'))
+                for r in scored:
+                    r['rank_score'] = r['recomposition_p95'] + (r['contrast_edge_proxy']['p90'] if comparable else 0)
+                scored.sort(key=lambda r:(r['rank_score'],r['background_error'],r['strategy']))
+                write(step_dir/'strategy-comparison.json',{
+                    'attempts':[{'strategy':name,'status':c.get('status'),'reason':c.get('reason')} for name,c in choices],
+                    'comparable_edge_support':comparable,
+                    'ranked':[{k:v for k,v in r.items() if k!='candidate'} for r in scored]})
+                if scored:
+                    res = scored[0]['candidate']
                 if res.get('status') == 'CANDIDATE_READY':
                     ir = stage_asset_candidate(
                         res['candidate_directory'], active_graph, cur_base,
@@ -1175,6 +1331,12 @@ def _chain_stage_from_spec(
                     )
                     cur_base = ir.parent
                     staged_ids.append(asset.id)
+                    if compare and experiment_profile in ('vtracer','combined'):
+                        from ..experiment_assets import trace_asset
+                        try:
+                            trace_asset(Path(res['candidate_directory'])/'asset.png',cur_base,asset.id,step_dir/'trace')
+                        except (ValueError, RuntimeError, OSError, ImportError) as exc:
+                            write(step_dir/'trace-failure.json',{'reason':str(exc)[:300]})
                 else:
                     stage_errors.append({
                         'object_id': asset.id, 'kind': 'asset', 'bbox': list(asset.bbox),
@@ -1186,26 +1348,25 @@ def _chain_stage_from_spec(
                     'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
                 })
 
-    if include_assets and include_containers and staged_ids and wanted_filter is None:
-        from ..recovery.chart_stage import stage_native_charts
+    if include_assets:
+        for route in marked_routes:
+            if not route.get('new_asset') or route['id'] in skip_ids or (wanted_filter is not None and route['id'] not in wanted_filter):
+                continue
+            from ..recovery.region_crop import stage_region_crops
+            graph=SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
+            if route['id'] not in graph.selected:
+                ir,ids,_ = stage_region_crops(cur_base,directory/tag/('marked-asset-'+key(route['id'])[:12]),
+                    seeds=[{'id':route['id'],'bbox':route['bbox'],'kind':'asset'}],skip_ids=skip_ids)
+                if ids:
+                    cur_base=ir.parent
+                    staged_ids.extend(ids)
+
+    if include_containers and (wanted_filter is None or any(i.startswith(('s-', 'a-c')) for i in wanted_filter)):
         from ..recovery.container_stage import stage_containers_and_surfaces
-        chart_layout = json.loads(Path(layout_path).read_text('utf8')) if (layout_path and Path(layout_path).is_file()) else None
-        if chart_layout:
-            chart_dir = directory / tag / 'charts-staged'
-            try:
-                ch_ir, ch_ids = stage_native_charts(cur_base, chart_dir, layout=chart_layout, fonts=fonts, skip_ids=skip_ids)
-                if ch_ids:
-                    cur_base = ch_ir.parent
-                    staged_ids.extend(ch_ids)
-            except Exception as exc:
-                stage_errors.append({
-                    'object_id': 'charts', 'kind': 'chart', 'bbox': [],
-                    'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
-                })
         cont_dir = directory / tag / 'containers-staged'
         try:
             cont_ir, cont_ids = stage_containers_and_surfaces(
-                cur_base, cont_dir, skip_ids=skip_ids, logo_ids=logo_ids
+                cur_base, cont_dir, skip_ids=skip_ids, logo_ids=logo_ids, wanted_ids=wanted_filter
             )
             if cont_ids:
                 cur_base = cont_ir.parent
@@ -1215,6 +1376,16 @@ def _chain_stage_from_spec(
                 'object_id': 'containers', 'kind': 'surface', 'bbox': [],
                 'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
             })
+
+    surface_routes = [r for r in marked_routes if r['route']=='surface'
+                      and (wanted_filter is None or r['id'] in wanted_filter)]
+    if include_containers and surface_routes:
+        from ..recovery.marked_surfaces import stage_marked_surfaces
+        card_ir, card_ids = stage_marked_surfaces(cur_base, directory/tag/'marked-cards',
+                                                  surface_routes, skip_ids)
+        if card_ids:
+            cur_base = card_ir.parent
+            staged_ids.extend(card_ids)
 
     if include_region_crops and wanted_filter is None:
         from ..recovery.region_crop import collect_crop_seeds, stage_region_crops
@@ -1269,6 +1440,33 @@ def _chain_stage_from_spec(
                     'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
                 })
 
+    if marked_routes:
+        from .marked_routes import route_trace,plan_move_groups
+        graph=SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
+        movement_routes = [r if wanted_filter is None or r['id'] in wanted_filter
+                           else {**r,'move_with':[]} for r in marked_routes]
+        groups = [g for g in plan_move_groups(movement_routes,graph)
+                  if not graph.selected[g[0]].get('move_members') and not set(g).intersection(skip_ids)]
+        if groups:
+            from ..parallel_rebuild import adapt
+            for group in groups:
+                graph.selected[group[0]]['move_members']=group
+            ir = adapt(graph,cur_base)
+            written = {frozenset(g['member_ids']) for g in ir.get('groups',[])}
+            accepted = [g for g in groups if frozenset(g) in written]
+            if accepted:
+                for group in groups:
+                    if group not in accepted:
+                        graph.selected[group[0]].pop('move_members',None)
+                if cur_base == initial_baseline:
+                    grouped = directory/tag/'movement'
+                    shutil.copytree(cur_base,grouped)
+                    cur_base = grouped
+                write(cur_base/'scene.json',graph.model_dump())
+                write(cur_base/'slideir.json',ir)
+                # A group-only change must go through the same compile and Office commit.
+                staged_ids.extend(i for g in accepted for i in g if i not in staged_ids)
+        write(directory/tag/'route-trace.json',route_trace(marked_routes,graph))
     return cur_base, staged_ids, stage_errors
 
 
@@ -1297,9 +1495,10 @@ def restage_batch_candidate_subset(
     overrides = {oid: fb['measured_frame_minimum_px'] for oid, fb in frame_repairs.items()}
     bad_crop_ids = {oid for oid in bad_ids if staged_graph.selected.get(oid, {}).get('region_crop')}
     bad_crop_seeds = {sid for oid in bad_crop_ids for sid in staged_graph.selected[oid].get('seed_ids', [])}
-    bad_text_ids = {oid for oid in bad_ids if any(t.id == oid for t in staged_graph.text.texts)}
     skip = (bad_ids - bad_crop_ids) | bad_crop_seeds | set(spec.get('pass1_failed_ids', []))
-    unrec_pass2 = (set(spec.get('unrecoverable_text_ids', [])) | bad_text_ids) - bad_crop_seeds
+    skip.update(i for r in spec.get('marked_routes', []) if r['route']=='preserve'
+                for i in [r['id'],*r['target_ids']])
+    unrec_pass2 = set(spec.get('unrecoverable_text_ids', [])) - bad_crop_seeds
     wanted_list = spec.get('wanted_filter')
     wanted_filter = set(wanted_list) if wanted_list is not None else None
 
@@ -1314,6 +1513,8 @@ def restage_batch_candidate_subset(
         page_cache_dir=Path(spec['cache_dir']),
         directory=directory,
         tag='stage-pass2',
+        experiment_profile=spec.get('experiment_profile'),
+        marked_routes=spec.get('marked_routes', ()),
         trials_spec=spec['trials'],
         frame_overrides=overrides,
         skip_ids=skip,
@@ -1373,6 +1574,11 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     from ..recovery.region_candidates import adaptive_candidates
     from .background import inpaint_service
 
+    request=json.loads((state.job/'request.json').read_text(encoding='utf8'))
+    if not request.get('host_stage0') and request.get('experiment_profile') not in (None,'baseline'):
+        missing=[i for i in range(1,len(request['sources'])+1) if not current.get('marked_plans',{}).get(str(i))]
+        if missing:
+            return {'status':'PAGE_PLANS_REQUIRED','pages':missing}
     row = service.page(current, page)
     initial_graph = service.graph(row)
     if 'fonts' not in current:
@@ -1381,6 +1587,16 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     source_path = row['snapshot']['path']
     initial_baseline = Path(row['ir']).parent
     wanted_filter = set(object_ids) if object_ids is not None else None
+    fields = current.get('marked_plans', {}).get(str(page), [])
+    routes = []
+    if fields and (request.get('host_stage0') or request.get('experiment_profile') not in (None, 'baseline')):
+        from .marked_routes import bind_plan
+        routes = bind_plan(fields, current['experiment_marks'][str(page)], initial_graph, source_path)
+        if wanted_filter is not None:
+            for field in routes:
+                if field['id'] in wanted_filter:
+                    wanted_filter.update(field['target_ids'])
+        write(directory/'plan-bindings.json', routes)
     sam_enabled = bool(os.environ.get('IMAGE2PPT_SAM_URL') or os.environ.get('SAM_URL'))
 
     failed_regions: list[dict] = []
@@ -1392,20 +1608,39 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         and initial_graph.ownership.get(t.id) == 'RESOLVED'
         and (wanted_filter is None or t.id in wanted_filter)
     ]
+    priority_ids = {tid for r in routes if r['route'] in ('text', 'table') for tid in r['target_ids']}
+    preserved_ids = {i for r in routes if r['route']=='preserve' for i in [r['id'],*r['target_ids']]}
+    prepared_tables=None
+    table_fields=[r for r in routes if r['route']=='table' and (wanted_filter is None or r['id'] in wanted_filter)]
+    covered=set()
+    if table_fields:
+        from ..recovery.marked_tables import stage_tables
+        prepared_tables=stage_tables(initial_baseline,directory/'stage-pass1'/'marked-tables',table_fields,preserved_ids)
+        covered=prepared_tables[2]
+    inventory_file = current.get('page_structure', {}).get(str(page))
+    inventory = json.loads(Path(inventory_file).read_text('utf8')) if inventory_file else {}
+    title_boxes = [(el['bbox'], rank) for el in inventory.get('elements', [])
+                   for rank, role in enumerate(('title', 'section_header')) if el['category'] == role]
+    def priority(t):
+        rank = min((rank for box,rank in title_boxes if intersection(t.bbox, box) >= .7*t.bbox[2]*t.bbox[3]), default=2)
+        return (rank, t.id not in priority_ids, t.bbox[1], t.bbox[0])
+    text_targets = sorted((t for t in text_targets if t.id not in preserved_ids and t.id not in covered), key=priority)
 
     request = json.loads((state.job / 'request.json').read_text('utf8'))
-    budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'))
+    model_page = (page,len(request['sources'])) if routes else None
+    budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'), model_page=model_page)
     from ..parallel_config import ROOT
     config_file = ROOT / '.runtime/parallel-services.json'
     lama_cfg = json.loads(config_file.read_text('utf8')).get('lama') if (use_inpaint and config_file.exists()) else None
     raw_inpaint = inpaint_service(lama_cfg, state.job / 'cache/lama', budget) if lama_cfg else None
     safe_inpaint = _threadsafe_inpaint(raw_inpaint)
 
-    def _probe_text(text_obj):
-        t_dir = directory / 'trials' / f'{text_obj.id}-{key(text_obj.id)[:8]}'
+    def _probe_text(text_obj, *, folder="trials", inpaint=None):
+        t_dir = directory / folder / f'{text_obj.id}-{key(text_obj.id)[:8]}'
         stream = adaptive_candidates(
             initial_graph, text_obj.id, source_path, row.get('layers'),
-            t_dir, baseline_directory=initial_baseline, inpaint=safe_inpaint,
+            t_dir, baseline_directory=initial_baseline, inpaint=inpaint,
+            marked_fields=bool(routes),
         )
         attempts = []
         try:
@@ -1432,8 +1667,54 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     passed_trials = []
     if text_targets:
         workers = min(6, max(1, len(text_targets)))
+        # Capture only masks that survived ownership and text-mask completion.
+        # Sharing a model call does not share pixel ownership or commit decisions.
+        from ..parallel_rebuild import array_sha
+        masks = {}
+        def local_probe(obj):
+            def capture(image, mask):
+                masks[obj.id] = mask.copy()
+                raise ValueError('deferred to local group repair')
+            return _probe_text(obj, inpaint=capture if safe_inpaint else None)
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            outcomes = list(pool.map(_probe_text, text_targets))
+            outcomes = list(pool.map(local_probe, text_targets))
+        containers = [el for el in inventory.get('elements', []) if el['category'] in ('card_shape','photo','ribbon_shape','table')]
+        groups = {}
+        for idx, outcome in enumerate(outcomes):
+            obj = outcome['object']
+            if outcome['status'] != 'PRECHECK_PASS' and obj.id in masks:
+                parents = [e for e in containers if intersection(e['bbox'],obj.bbox) >= .95*obj.bbox[2]*obj.bbox[3]]
+                parent = min(parents, key=lambda e:e['bbox'][2]*e['bbox'][3])['id'] if parents else obj.id
+                groups.setdefault(parent, []).append((idx,obj))
+        if groups:
+            with Image.open(source_path) as im:
+                source_pixels = np.array(im.convert('RGB'))
+        for members in groups.values():
+            union = np.zeros(source_pixels.shape[:2], dtype=bool)
+            safe_members = []
+            for idx,obj in members:
+                if not (union & masks[obj.id]).any():
+                    union |= masks[obj.id]
+                    safe_members.append((idx,obj))
+            try:
+                from ..recovery.region_candidates import lower_backgrounds
+                candidates = lower_backgrounds(source_pixels, row['layers'], union) if row.get('layers') else ()
+                background = next(iter(candidates), None)
+            except (OSError,KeyError,ValueError,ImportError):
+                background = None
+            try:
+                repaired = background.image if background is not None else safe_inpaint(source_pixels, union)
+            except (OSError,TimeoutError,ValueError,RuntimeError):
+                continue
+            for idx, obj in safe_members:
+                def authorized_patch(image, mask):
+                    if not np.array_equal(mask, masks[obj.id]):
+                        raise ValueError('local ownership changed before repair')
+                    return repaired
+                authorized_patch.receipt = {'group': [member.id for _,member in safe_members],
+                                            'union_sha256': array_sha(union.astype('uint8')),
+                                            'provider': 'layerd' if background is not None else 'lama'}
+                outcomes[idx] = _probe_text(obj, folder='joint-trials', inpaint=authorized_patch)
         for item in outcomes:
             t_obj = item['object']
             if item['status'] == 'PRECHECK_PASS':
@@ -1485,7 +1766,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                 (rid, list(rec['bbox'])) for rid, rec in cg.selected.items()
                 if rec.get('region_crop') and len(rec.get('bbox', [])) == 4
             ]
-        return [_classify_failed_region(err, initial_graph, logo_ids, staged_crop_boxes) for err in failed_regions]
+        return [_classify_failed_region(err, cg if staged_crop_boxes else initial_graph, logo_ids, staged_crop_boxes) for err in failed_regions]
 
     final_base, staged_ids, stage_errors = _chain_stage_from_spec(
         initial_graph=initial_graph,
@@ -1497,9 +1778,12 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         page_cache_dir=directory,
         directory=directory,
         tag='stage-pass1',
+        prepared_tables=prepared_tables,
+        experiment_profile=request.get('experiment_profile'),
+        marked_routes=routes,
         trials_spec=trials_spec,
         frame_overrides={},
-        skip_ids=set(),
+        skip_ids=preserved_ids,
         include_assets=include_assets,
         include_containers=include_containers,
         include_region_crops=crop_flag,
@@ -1539,6 +1823,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         'files': {str(p): digest(p) for p in final_base.rglob('*') if p.is_file()},
         'batch_spec': {
             'initial_baseline': str(initial_baseline),
+            'experiment_profile':request.get('experiment_profile'),
+            'marked_routes':routes,
             'cache_dir': str(directory),
             'trials': trials_spec,
             'pass1_failed_ids': pass1_failed_ids,

@@ -21,6 +21,7 @@ picture pixels fall through):
 from __future__ import annotations
 
 from difflib import SequenceMatcher
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -33,7 +34,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-SCHEMA = 'PageScorecard/1'
+SCHEMA = 'PageScorecard/2'
 NS = {
     'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
     'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
@@ -109,6 +110,38 @@ def _text_of(element) -> str:
     for para in body.findall('a:p', NS):
         paragraphs.append(''.join(t.text or '' for t in para.iter(_q('a:t'))))
     return '\n'.join(paragraphs).strip()
+
+
+def _table_fields(element, record):
+    table = element.find('.//a:tbl', NS)
+    if table is None:
+        return []
+    widths = [int(c.get('w',0)) for c in table.findall('a:tblGrid/a:gridCol',NS)]
+    rows = table.findall('a:tr',NS)
+    heights = [int(r.get('h',0)) for r in rows]
+    if not widths or not rows or min(widths+heights)<=0:
+        return []
+    x,y,w,h = record['bbox']
+    xs = x+np.cumsum([0]+widths)*w/sum(widths)
+    ys = y+np.cumsum([0]+heights)*h/sum(heights)
+    cells=[]
+    for r,row in enumerate(rows):
+        for c,cell in enumerate(row.findall('a:tc',NS)):
+            if c>=len(widths) or any(cell.get(k) in ('1','true') for k in ('vMerge','hMerge')):
+                continue
+            right=min(c+int(cell.get('gridSpan',1)),len(widths))
+            bottom=min(r+int(cell.get('rowSpan',1)),len(heights))
+            value='\n'.join(''.join(t.text or '' for t in p.iter(_q('a:t')))
+                            for p in cell.findall('a:txBody/a:p',NS))
+            if value:
+                cells.append({'name':f"{record['name']}[{r+1},{c+1}]",'text':value,
+                              'bbox':[xs[c],ys[r],xs[right]-xs[c],ys[bottom]-ys[r]]})
+    return cells
+
+
+def _native_fields(objects):
+    return [o for o in objects if o['class']=='text'] + [
+        cell for o in objects if o['class']=='table' for cell in o.get('cells',())]
 
 
 def _walk(tree, transform):
@@ -189,6 +222,7 @@ def inspect_pptx(pptx: str | Path, canvas: tuple[int, int], slide: int = 1) -> d
         root = ET.fromstring(archive.read(part))
         tree = root.find('p:cSld/p:spTree', NS)
         owner = np.zeros((height, width), np.uint8)  # index into CLASSES; 0 background
+        owner_z = np.full((height, width), -1, np.int32)
         objects = []
         plate_rgb = None
         for z, (element, kind, emu) in enumerate(_walk(tree, (1.0, 1.0, 0.0, 0.0))):
@@ -230,6 +264,8 @@ def inspect_pptx(pptx: str | Path, canvas: tuple[int, int], slide: int = 1) -> d
                 record['transparent_fraction'] = round(transparent, 4)
             elif kind == 'text':
                 record['text'] = _text_of(element)
+            elif kind == 'table':
+                record['cells'] = _table_fields(element,record)
             record['class'] = cls
             objects.append(record)
             cx0, cy0 = max(0, x0), max(0, y0)
@@ -240,7 +276,8 @@ def inspect_pptx(pptx: str | Path, canvas: tuple[int, int], slide: int = 1) -> d
             if alpha is not None:
                 region = alpha[cy0 - y0:cy1 - y0, cx0 - x0:cx1 - x0]
             owner[cy0:cy1, cx0:cx1][region] = CLASSES.index(cls)
-    return {'slide_count': len(parts), 'objects': objects, 'owner': owner}
+            owner_z[cy0:cy1, cx0:cx1][region] = z
+    return {'slide_count': len(parts), 'objects': objects, 'owner': owner, 'owner_z': owner_z}
 
 
 def content_mask(source: np.ndarray, std_threshold: float = 6.0) -> np.ndarray:
@@ -337,7 +374,7 @@ def _is_logo_ocr_line(ln: dict, lb: list[float], image_size: tuple[int, int] | N
 def text_metrics(objects: list[dict], ocr_lines: list[dict], min_score: float = 0.5, *,
                  image_size: tuple[int, int] | None = None) -> dict:
     """Match independent OCR lines to native text frames by spatial overlap and wording."""
-    natives = [o for o in objects if o['class'] == 'text']
+    natives = _native_fields(objects)
     lines = [ln for ln in ocr_lines if _norm(ln.get('text')) and ln.get('score', 1.0) >= min_score]
     total_chars = sum(len(_norm(ln['text'])) for ln in lines)
     matched_chars = 0.0
@@ -380,7 +417,8 @@ def text_metrics(objects: list[dict], ocr_lines: list[dict], min_score: float = 
         'reference': 'independent OCR lines (not a human inventory)',
         'ocr_lines': len(lines),
         'ocr_chars': total_chars,
-        'native_text_objects': len(natives),
+        'native_text_objects': sum(o['class']=='text' for o in objects),
+        'native_table_cells_with_text': sum(len(o.get('cells',())) for o in objects),
         'matched_lines': matched_lines,
         'line_recall': round(matched_lines / len(lines), 4) if lines else None,
         'char_recall': round(matched_chars / total_chars, 4) if total_chars else None,
@@ -394,7 +432,7 @@ def text_metrics(objects: list[dict], ocr_lines: list[dict], min_score: float = 
 
 
 def score_page(source_path: str | Path, pptx_path: str | Path, *, render_path: str | Path | None = None,
-               ocr: dict | None = None, slide: int = 1) -> dict:
+               ocr: dict | None = None, slide: int = 1, checks: dict | None = None) -> dict:
     source = np.asarray(Image.open(source_path).convert('RGB'))
     height, width = source.shape[:2]
     inspected = inspect_pptx(pptx_path, (width, height), slide)
@@ -424,6 +462,9 @@ def score_page(source_path: str | Path, pptx_path: str | Path, *, render_path: s
         'native_content_fraction': native_editable,
         'movable_raster_content_fraction': movable_raster,
         'duplicate_raster_content_fraction': content_share['duplicate_picture'],
+        'picture_content_fraction': round(content_share['opaque_picture'] + content_share['asset'], 4),
+        'duplicate_picture_fraction': content_share['duplicate_picture'],
+        'native_editable_fraction': round(sum(content_share[c] for c in ('shape','table','chart','text')), 4),
         'raster_plate_content_fraction': content_share['plate'],
         'notes': [
             'content_fraction is measured on source pixels with local structure; text is frame area, not ink.',
@@ -431,10 +472,38 @@ def score_page(source_path: str | Path, pptx_path: str | Path, *, render_path: s
             'Measurements only: not human, WPS or publication acceptance.',
         ],
     }
+    result['movable_asset_fraction'] = None
+    if checks is not None:
+        digest = hashlib.sha256(Path(pptx_path).read_bytes()).hexdigest()
+        office = checks.get('office', {})
+        if checks.get('pptx_sha256') != digest or office.get('pptx_sha256') != digest:
+            raise ValueError('Office checks refer to another PPTX')
+        pages = checks.get('residuals', [])
+        if office.get('status') == 'PASS_APP_AUTOMATED' and len(pages) >= slide:
+            passed = {r['id'] for r in pages[slide - 1] if r.get('residual_check_status') == 'PASS'
+                      and r.get('residual_pixels_confirmed') == 0}
+            actions = {}
+            for row in office.get('records', []):
+                if row.get('page') == slide and row.get('saved_reopened') and row.get('outside_pixels') == 0:
+                    actions.setdefault(row['id'], set()).add(row['action'])
+            verified = [obj['z'] for obj in inspected['objects'] if obj['class'] in ('opaque_picture', 'asset')
+                        and obj['name'] in passed and {'move-scale', 'delete'} <= actions.get(obj['name'], set())]
+            pixels = np.isin(inspected['owner_z'], verified) & content
+            result['movable_asset_fraction'] = round(float(pixels.sum()) / content_total, 4)
     if render_path is not None:
         render = np.asarray(Image.open(render_path).convert('RGB'))
         result['fidelity'] = fidelity(source, render)
         result['render'] = str(render_path)
+    result['non_logo_native_line_recall'] = None
+    if ocr is not None and ocr.get('scope')=='independent_non_logo_editable_lines':
+        lines = ocr.get('lines', [])
+        native = _native_fields(inspected['objects'])
+        hits = sum(any(_norm(line['text']) in _norm(obj['text'])
+                       and _overlap(line['bbox'],obj['bbox']) > 0.5*line['bbox'][2]*line['bbox'][3]
+                       for obj in native) for line in lines if _norm(line['text']))
+        count = sum(bool(_norm(line['text'])) for line in lines)
+        result.update(non_logo_reference_lines=count, non_logo_matched_lines=hits,
+                      non_logo_native_line_recall=round(hits/count,4) if count else None)
     if ocr is not None:
         result['text'] = text_metrics(inspected['objects'], ocr.get('lines', []), image_size=(width, height))
     result['objects'] = inspected['objects']

@@ -1,5 +1,6 @@
 """Business tools reuse production perception, recovery and private adapters."""
 import json
+from collections import Counter
 import os
 from pathlib import Path
 import shutil
@@ -27,6 +28,9 @@ TOOLS += ('inspect_image', 'crop_image', 'compare_images', 'run_ocr', 'analyze_t
 TOOLS += ('record_observation', 'list_evidence', 'get_progress',
           'prepare_page_evidence', 'batch_reconstruct_page', 'crop_region',
           'parse_page_structure', 'audit_delivery')
+
+
+TOOLS += ('plan_marked_page','inspect_marked_region')
 
 
 class VisualReview(BaseModel):
@@ -60,6 +64,14 @@ class RuntimeService(ExplorationTools):
         if tool not in TOOLS:
             raise ValueError('unknown runtime tool')
         state = self.state(job_id)
+        request = json.loads((state.job/'request.json').read_text('utf8'))
+        host = request.get('host_stage0')
+        if host:
+            from .host_evidence import AGENT_TOOLS, context, normalize_arguments
+            if tool not in AGENT_TOOLS:
+                raise ValueError('tool unavailable in the host-precomputed workflow')
+            if tool in ('get_job_context','get_progress'):
+                return context(state,request)
         if tool == 'list_evidence':
             limit=max(1,min(int(arguments.get('limit',30)),100))
             with state.db() as db:
@@ -95,6 +107,8 @@ class RuntimeService(ExplorationTools):
             request=json.loads((state.job/'request.json').read_text('utf8'))
             shortcuts={'run_perception','run_parallel_pipeline','rebuild_region','repair_region',
                        'prepare_page_evidence','batch_reconstruct_page'} if request.get('tool_profile')=='basic' else set()
+            if request.get('experiment_profile') in (None,'baseline'):
+                shortcuts.update(('plan_marked_page','inspect_marked_region'))
             result['tool_catalog'] = [name for name in TOOLS if name not in shortcuts]
             result['goal'] = json.loads((state.job/'request.json').read_text('utf8')).get('goal', 'Faithful editable PPTX')
             result['budget']={'remaining_seconds':state.remaining_seconds(),
@@ -105,6 +119,10 @@ class RuntimeService(ExplorationTools):
             page = self.page(state.read(), arguments['page'])
             graph = SceneGraph.model_validate_json(Path(page['scene']).read_text('utf8'))
             from ..parallel_regions import regions
+            marked = str(arguments['page']) in state.read().get('experiment_marks',{})
+            if marked and not arguments.get('full'):
+                return {'version':state.read()['version'],'ownership_counts':dict(Counter(graph.ownership.values())),
+                        'selected_ids':list(graph.selected),'perception_failures':page['failures']}
             diagnostics=[{'object_id':text.id,'owner':graph.ownership[text.id],
                           'ocr_members':graph.text.members.get(text.id,[]),
                           'missing_ocr_members':not graph.text.members.get(text.id)} for text in graph.text.texts
@@ -120,8 +138,30 @@ class RuntimeService(ExplorationTools):
         if tool=='fit_background' and not (all(arguments.get(k) is not None for k in ('page','object_id')) or all(arguments.get(k) is not None for k in ('evidence_id','bbox'))):
             raise ValueError('fit_background requires page+object_id OR evidence_id+bbox; no operation was reserved')
         method = getattr(self, tool)
-        return state.mutate(tool, arguments, expected_version, idempotency_key,
-                            lambda current, directory: method(state, current, directory, **arguments))
+        def execute(current,directory):
+            if not host:
+                return method(state,current,directory,**arguments)
+            from .host_evidence import compact, refresh
+            if tool=='prepare_page_evidence':
+                return refresh(self,state,current,directory,arguments['page'])
+            args = normalize_arguments(state,current,tool,arguments)
+            outcome = method(state,current,directory,**args)
+            if tool=='batch_reconstruct_page':
+                k = str(args['page'])
+                old = current.setdefault('regional_failures',{}).get(k,[])
+                current.setdefault('repair_rounds', {}).setdefault(k, []).append({'progress': False, 'candidate_id': outcome.get('candidate_id')})
+                touched = set(args['object_ids'])
+                current['regional_failures'][k] = [r for r in old if r['object_id'] not in touched]+outcome.get('failed_regions',[])
+            if tool=='commit_candidate' and outcome.get('status')=='COMMITTED':
+                from .host_evidence import questions
+                page = current['candidates'][args['candidate_id']]['page']
+                for attempt in current.get('repair_rounds',{}).get(str(page),[]):
+                    if attempt['candidate_id'] == args['candidate_id']:
+                        attempt['progress'] = bool(outcome.get('object_ids') or outcome.get('committed_count'))
+                failures = current.get('regional_failures',{}).get(str(page),[])
+                current['questions'][str(page)] = questions(state,current,page,failures,directory)
+            return compact(tool,outcome)
+        return state.mutate(tool, arguments, expected_version, idempotency_key,execute)
 
     @staticmethod
     def page(current, page):
@@ -174,6 +214,52 @@ class RuntimeService(ExplorationTools):
                                       include_region_crops=include_region_crops,
                                       allow_move_unsafe=allow_move_unsafe,
                                       use_inpaint=use_inpaint, verify_office=verify_office)
+
+    def plan_marked_page(self, state, current, directory, *, page, fields, append=False):
+        from ..materialize import write
+        path=current.get('experiment_marks',{}).get(str(page))
+        if not path:
+            raise ValueError('prepare numbered evidence for this page first')
+        rows=json.loads(Path(path).read_text(encoding='utf8'))['rows']
+        by_mark={r['mark']:r for r in rows}
+        plans=[]
+        for field in fields:
+            row=by_mark[field['mark']]
+            parents=[by_mark[n]['id'] for n in field['move_with']]
+            plans.append({'id':row['id'],'bbox':row['bbox'],'role':field['role'],
+                          'move_with':parents,'route':field['route'],'source_text':row.get('text','')})
+        previous=current.get('marked_plans',{}).get(str(page),[]) if append else []
+        merged={r['id']:r for r in [*previous,*plans]}
+        write(directory/'plan.json',list(merged.values()))
+        current.setdefault('marked_plans',{})[str(page)]=list(merged.values())
+        return {'page':page,'fields':plans,'planned_count':len(merged)}
+
+    def inspect_marked_region(self, state, current, directory, *, page, bbox):
+        from ..experiment import detect
+        source=self.source(state,page)
+        request=json.loads((state.job/'request.json').read_text(encoding='utf8'))
+        profile=request.get('experiment_profile')
+        if profile in (None,'baseline'):
+            raise ValueError('local numbered inspection requires a marked profile')
+        from PIL import Image
+        with Image.open(source) as im:
+            x,y,w,h=bbox
+            if min(x,y)<0 or min(w,h)<=0 or x+w>im.width or y+h>im.height:
+                raise ValueError('invalid local inspection window')
+        data=detect(source,profile,directory/'models',bbox)
+        inventory=Path(current['experiment_marks'][str(page)])
+        old=json.loads(inventory.read_text(encoding='utf8'))
+        previous={r['id']:r for r in old['rows']}
+        next_mark=max((r['mark'] for r in previous.values()),default=0)+1
+        for row in data['regions']:
+            if row['id'] not in previous:
+                row['mark']=next_mark
+                next_mark+=1
+                previous[row['id']]=row
+        old['rows']=list(previous.values())
+        write(directory/'marks.json',old)
+        current['experiment_marks'][str(page)]=str(directory/'marks.json')
+        return {'detected':[previous[r['id']] for r in data['regions']], 'models':data['models']}
 
     def crop_region(self, state, current, directory, *, page, object_ids=None, bbox=None,
                     allow_movable=True, allow_move_unsafe=False, upgrade_containers=True):
@@ -595,6 +681,25 @@ class RuntimeService(ExplorationTools):
                 artifacts = compile_pages(irs, directory/'compiled',
                                           [effective_texts(self.graph(p), ir) for p, ir in zip(current['pages'], irs)])
         binding = {str(p): digest(p) for p in [Path(artifacts['pptx']), *irs]}
+        if current.get('marked_plans'):
+            from xml.etree import ElementTree
+            from zipfile import ZipFile
+            from .marked_routes import bind_plan,route_trace
+            traces=[]
+            with ZipFile(artifacts['pptx']) as deck:
+                for i,page in enumerate(current['pages'],1):
+                    if str(i) not in current['marked_plans']:
+                        continue
+                    graph=self.graph(page)
+                    plans=bind_plan(current['marked_plans'][str(i)],current['experiment_marks'][str(i)],graph,page['snapshot']['path'])
+                    slide=ElementTree.fromstring(deck.read(f'ppt/slides/slide{i}.xml'))
+                    names={n.get('name') for n in slide.iter('{http://schemas.openxmlformats.org/presentationml/2006/main}cNvPr')}
+                    fields=route_trace(plans,graph)
+                    for f in fields:
+                        f['pptx_ids']=sorted(names.intersection(f['selected_ids']))
+                    traces.append({'page':i,'fields':fields})
+            write(directory/'delivery-route-trace.json',{'pptx_sha256':digest(artifacts['pptx']),'pages':traces})
+            binding[str(directory/'delivery-route-trace.json')]=digest(directory/'delivery-route-trace.json')
         current['composition'] = {'artifacts': artifacts, 'files': binding, 'office': {'status': 'NOT_RUN'}}
         current.pop('visual_review', None)
         return {'status': 'COMPOSED', 'pptx_sha256': digest(artifacts['pptx'])}
@@ -773,7 +878,8 @@ class RuntimeService(ExplorationTools):
         ]
         # Completeness has no independent denominator in this first integration.
         status = 'PARTIAL_EDITABLE' if any(editable) else 'RASTER_ONLY'
-        delivery = state.job/'delivery'
+        host = (state.job/'host-baseline/manifest.json').is_file()
+        delivery = state.root/'agent-delivery' if host else state.job/'delivery'
         delivery.mkdir(exist_ok=True)
         shutil.copyfile(composition['artifacts']['pptx'], delivery/'result.pptx')
         from ..parallel_rebuild import build
@@ -825,7 +931,7 @@ class RuntimeService(ExplorationTools):
             float(p.get('summary', {}).get('raster_plate_content_fraction', 0.0)) > max_plate
             for p in audit.get('pages', [])
         )
-        audit_ok = bool(audit.get('passed', True)) and not plate_exceeded
+        audit_ok = audit.get('passed') is True and not plate_exceeded
         delivery_state = 'SUCCEEDED' if (any(editable) and audit_ok) else 'REVIEW_REQUIRED'
         avg_recall = round(sum(recalls) / len(recalls), 4) if recalls else None
         result = {'status': delivery_state, 'completion': status, 'reconstruction_succeeded': any(editable), 'visual_review_backend': 'opencode',
@@ -834,6 +940,8 @@ class RuntimeService(ExplorationTools):
                   'pages': len(editable),
                   'editable_objects': [sorted(page) for page in editable],
                   'in_place_region_crops': in_place_crops,
+                  'native_objects': [sorted(k for k,v in sel.items() if v.get('kind') in ('text','surface','shape','table','chart')) for sel in editable],
+                  'movable_assets': [sorted(k for k,v in sel.items() if v.get('kind')=='asset') for sel in editable],
                   'unresolved_objects': [[identifier for identifier in self.graph(page).ownership
                                           if identifier not in chosen]
                                          for page, chosen in zip(current['pages'], raw_selected)],
@@ -843,6 +951,6 @@ class RuntimeService(ExplorationTools):
                                       'automatic_publication': 'GATED'}}
         write(delivery/'summary.json', result)
         result['artifacts'] = {p.name: digest(p) for p in delivery.iterdir() if p.is_file()}
-        write(state.job/'result.json', result)
+        write(state.root/'agent-result.json' if host else state.job/'result.json', result)
         current['status'] = delivery_state
         return result

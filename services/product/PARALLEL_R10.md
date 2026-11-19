@@ -8,7 +8,7 @@
 
 Runtime Skill 的维护源为 `skills/image2ppt-runtime/SKILL.md`。启动器将其安装到每个任务的 OpenCode 工作目录。`tool_profile=basic` 是自主组合验收目录，省略四个高级快捷工具；默认目录保留全部工具。两种目录均由模型自主选择目标和调用顺序。
 
-最终视觉结论由同一 OpenCode Session 读取原图、Office 渲染及编辑图后记录。提供图像的收据只记录图片已传给模型。Go 在该路径中没有必需收据或调用。内容、Owner、邻居、残影、编辑检查及最终文件哈希继续独立校验。尚未通过真实闭环的部署应以实际验收记录为准。
+OpenCode uses the Office-checked host baseline first. A distinct Go model reviews the final render and edited panels. A missing independent review keeps the delivery in REVIEW_REQUIRED.
 
 ## R12 区域候选入口
 

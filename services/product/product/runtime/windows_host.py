@@ -47,6 +47,7 @@ def receive(pipe_name, root):
             OPENCODE_GO_API_KEY=configuration['agent_api_key'],
             IMAGE2PPT_AGENT_MODEL=configuration.get('agent_model','hy4-flash-free'))
     else:
+        os.environ['IMAGE2PPT_AGENT_PROVIDER']='moma'
         os.environ['MOMA_API_KEY']=configuration['moma']
         if configuration.get('agent_model'):
             os.environ['IMAGE2PPT_AGENT_MODEL']=configuration['agent_model']

@@ -323,6 +323,7 @@ def stage_containers_and_surfaces(
     *,
     skip_ids: set[str] | None = None,
     logo_ids: set[str] | None = None,
+    wanted_ids: set[str] | None = None,
 ) -> tuple[Path, list[str]]:
     """Discover and stage native shapes (`s-*`) and structural frame/curve/line assets (`a-c*`)."""
     from reconstruction import extract_rgba
@@ -490,7 +491,7 @@ def stage_containers_and_surfaces(
                 s_seq += 1
             sid = f's-{s_seq:03d}'
             s_seq += 1
-            if sid in skip:
+            if sid in skip or (wanted_ids is not None and sid not in wanted_ids):
                 continue
             full_erase = np.zeros((h_img, w_img), bool)
             full_erase[y:y + h, x:x + w] = shape_fit['erase_mask_local']
@@ -586,7 +587,7 @@ def stage_containers_and_surfaces(
                 c_seq += 1
             aid = f'a-c{c_seq:02d}'
             c_seq += 1
-            if aid in skip:
+            if aid in skip or (wanted_ids is not None and aid not in wanted_ids):
                 continue
 
             hpad = 4 if cand_kind == 'box' else (0 if cand_kind == 'tick' else 2)

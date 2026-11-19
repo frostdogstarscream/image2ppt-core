@@ -13,8 +13,7 @@ Preserve source wording, numbers, hierarchy, layout, colors and proportions. Pre
 
 1. Identify the actual Git worktree, branch, dirty changes and task directory. Read that worktree's `AGENTS.md` and `services/product/PARALLEL_R10.md`. If `services/product/product/parallel_pipeline.py` is absent, locate the established product worktree; do not bootstrap from the legacy manual workflow or invent a replacement implementation.
 2. Read [automatic product development and acceptance](references/parallel-product.md). For compiler diagnostics only, read [core tooling](references/core.md) and [SlideIR](references/slideir.md); those documents describe downstream capabilities, not the automatic planning entrypoint.
-3. Use `services/product/launch.py` for the upload service, `services/product/run_local.py` for the same pipeline locally, or `services/product/run_parallel_baseline.py` for a frozen regression. Inspect their current arguments and environment requirements. `prepare_parallel_rebuild.py` is an explicitly labeled cached-evidence reconstruction replay, not proof of fresh-upload planning.
-4. Default to `parallel_review`. `parallel_shadow` is diagnostic. `parallel_auto` remains gated; changing instructions, passing unit tests or receiving one Go PASS never opens it. Do not invoke legacy serial `run()` or a whole-page VisualPage plan as an automatic fallback.
+3. Submit fresh images through OpenCode runtime at `POST /api/v1/jobs`. Read the host-prepared evidence and Office baseline before incremental work. Use `run_local.py` and the r10/R12 pipeline only for frozen comparisons.
 
 ## Engineering invariants
 

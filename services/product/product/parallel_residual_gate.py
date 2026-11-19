@@ -69,7 +69,8 @@ def inspect_residuals(irfile,office_dir,page,output):
         if identifier not in proofs or not deleted.exists():results.append({**base,'reason':'missing source-owner or actual-delete evidence'});continue
         data=proofs[identifier];mask=data['mask'].astype(bool).copy();x,y,w,h=map(int,data['restore_bbox'])
         for other,proof in proofs.items():
-            if other!=identifier:mask&=~proof['mask'].astype(bool)
+            if other!=identifier and other != record.get('payload', {}).get('background_parent_id'):
+                mask&=~proof['mask'].astype(bool)
         if record.get('kind') in ('asset','surface'):
             z_self=node_z.get(identifier,0)
             for other_rec in records:

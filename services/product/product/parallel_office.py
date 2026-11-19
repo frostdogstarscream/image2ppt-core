@@ -51,6 +51,14 @@ def verify_pictures(pptx,irs,deleted=None):
                     raise ValueError('embedded Alpha or visible RGB changed')
 
 
+def leaf_shapes(shapes):
+    for shape in shapes:
+        if shape.Type==6:
+            yield from leaf_shapes(shape.GroupItems)
+        else:
+            yield shape
+
+
 def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
     import pythoncom
     import win32com.client
@@ -64,7 +72,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
             float(tr.Runs(j).Font.Size),int(tr.Runs(j).Font.Bold),int(tr.Runs(j).Font.Color.RGB)) for j in range(1,tr.Runs().Count+1))
     def signature(slide):
         return {str(s.Name):(float(s.Left),float(s.Top),float(s.Width),float(s.Height),float(s.Rotation),
-            str(s.TextFrame.TextRange.Text) if s.HasTextFrame and s.TextFrame.HasText else '',text_styles(s)) for s in slide.Shapes}
+            str(s.TextFrame.TextRange.Text) if s.HasTextFrame and s.TextFrame.HasText else '',text_styles(s)) for s in leaf_shapes(slide.Shapes)}
     try:
         verify_pictures(pptx,irs)
         deck=app.Presentations.Open(str(pptx),ReadOnly=True,Untitled=False,WithWindow=False)
@@ -84,7 +92,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
                 for action in ('move-scale','delete'):
                     file=output/f'{i:02d}-{name}-{action}.pptx';shutil.copyfile(pptx,file)
                     deck=app.Presentations.Open(str(file),ReadOnly=False,Untitled=False,WithWindow=False)
-                    slide=deck.Slides(i);s=next(s for s in slide.Shapes if str(s.Name)==name);old=sig[name];wanted=None
+                    slide=deck.Slides(i);s=next(s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name);old=sig[name];wanted=None
                     if action=='delete':s.Delete()
                     else:
                         s.Left+=12;s.Top+=8;s.Width*=.9;s.Height*=.9

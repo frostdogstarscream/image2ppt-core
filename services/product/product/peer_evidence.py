@@ -65,7 +65,7 @@ def verified_owner(identifier,graph,source,baseline):
         raise ValueError('peer owner source binding mismatch')
     record=scene['selected'].get(identifier)
     if not record:return None
-    if record.get('kind')!='asset' or not record.get('complete_owner_scope') or record.get('source_sha256')!=graph.source_sha256:
+    if record.get('kind') not in ('asset','table') or not record.get('complete_owner_scope') or record.get('source_sha256')!=graph.source_sha256:
         raise ValueError('peer source owner closure unproved')
     proof=record.get('owner_evidence',{});file=(baseline/proof.get('file','')).resolve()
     if not file.is_relative_to(baseline) or not file.is_file() or digest(file)!=proof.get('sha256'):

@@ -59,7 +59,7 @@ class Queue:
                     try:
                         request=json.loads((self.root/id/'request.json').read_text(encoding='utf-8'))
                         resume=request.get('pipeline_mode') in ('parallel_review','parallel_shadow') and (self.root/id/'state/parallel.sqlite').is_file()
-                        resume=resume or (request.get('orchestrator')=='opencode' and (self.root/id/'runtime/session.json').is_file())
+                        resume=resume or (request.get('orchestrator')=='opencode' and ((self.root/id/'runtime/session.json').is_file() or (self.root/id/'host-baseline/started.json').is_file()))
                     except (OSError,ValueError):pass
                 db.execute('UPDATE jobs SET state=? WHERE id=?',('QUEUED' if resume else 'INTERRUPTED',id))
         count=int(os.environ.get('IMAGE2PPT_JOB_WORKERS','1'))
@@ -96,10 +96,20 @@ class Queue:
                     pass
                 if process.poll() is None:
                     self.kill(process)
-                    self.set(id,'INTERRUPTED' if self.stop_event.is_set() else 'FAILED')
+                    if not self.stop_event.is_set() and (job/'host-baseline/manifest.json').is_file():
+                        from .runtime.host_baseline import publish
+                        outcome=publish(job,{'reason':'Job watchdog deadline expired'},['TIME_BUDGET_EXHAUSTED'])
+                        self.set(id,outcome['status'])
+                    else:
+                        self.set(id,'INTERRUPTED' if self.stop_event.is_set() else 'FAILED')
                 else:
                     try:result=json.loads((job/'result.json').read_text(encoding='utf-8'))
                     except (OSError,ValueError):result={'status':'FAILED'}
+                    if (job/'host-baseline/manifest.json').is_file() and result.get('status')!='CANCELLED':
+                        selection=job/'runtime/delivery-selection.json'
+                        if not selection.is_file() or json.loads(selection.read_text('utf8')).get('result_sha256')!=digest(job/'result.json'):
+                            from .runtime.host_baseline import publish
+                            result=publish(job,{'reason':'Worker exited before selecting a verified delivery'},['WORKER_INTERRUPTED'])
                     self.set(id,result['status'] if result.get('status') in TERMINAL else 'FAILED')
                 with self.lock:self.processes.pop(id,None)
 
@@ -143,6 +153,10 @@ class Queue:
                                     for name in sorted({c['status'] for c in state['candidates'].values()})},
                 'committed_objects':committed,'recall':None,
                 'visual_qa':state.get('visual_review',{}).get('status','UNKNOWN')}
+            if state.get('host_evidence'):
+                result['runtime']['host_evidence']={k:{name:v for name,v in rec.items() if name!='blocks'}
+                                                    for k,rec in state['host_evidence'].items()}
+                result['runtime']['baseline_frozen']=(self.root/id/'host-baseline/manifest.json').is_file()
         return result
 
 
@@ -237,7 +251,17 @@ def create_app(root=None, token=None, run_worker=True):
     @app.post('/api/v1/jobs',status_code=202,dependencies=[Depends(auth)])
     def submit(request:Request,files:list[UploadFile]=File(...),object_extraction:str='default',pipeline_mode:str='parallel_review',
                orchestrator:str='pipeline',goal:str='Restore these images as an editable PPTX.',fresh_perception:bool=True,
-               agent_steps:int=64,runtime_seconds:int=7200,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=False,agent_model:str|None=None):
+               baseline_only:bool=False,experiment_profile:str|None=None,agent_steps:int|None=None,runtime_seconds:int|None=None,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=False,agent_model:str|None=None):
+        from .experiment import PROFILES
+        if experiment_profile is not None:
+            if experiment_profile not in PROFILES or tool_profile!='all':
+                raise HTTPException(422,'unsupported experiment profile or tool catalog')
+            agent_model = 'hy4' if agent_model is None else agent_model
+            if agent_model not in ('hy4', 'hy4-flash-free') or os.environ.get('IMAGE2PPT_AGENT_PROVIDER')!='opencode_go':
+                raise HTTPException(422,'comparison requires OpenCode Go hy4 or hy4-flash-free')
+            orchestrator = 'opencode'
+        agent_steps = agent_steps if agent_steps is not None else (192 if experiment_profile else 64)
+        runtime_seconds = runtime_seconds if runtime_seconds is not None else (10800 if experiment_profile else 7200)
         if agent_model is not None and ('..' in agent_model or not re.fullmatch(r'[A-Za-z0-9._:-]{1,40}(?:/[A-Za-z0-9._:-]{1,60})?',agent_model)):raise HTTPException(422,'模型标识格式无效')
         if request.url.path=='/api/v1/jobs' and orchestrator=='pipeline':orchestrator='opencode'
         if os.environ.get('IMAGE2PPT_DEFAULT_ORCHESTRATOR')=='opencode' and orchestrator=='pipeline':orchestrator='opencode'
@@ -248,11 +272,12 @@ def create_app(root=None, token=None, run_worker=True):
         except ValueError:raise HTTPException(422,'未知对象提取模式') from None
         max_pages=32 if orchestrator=='opencode' else 12
         if not 1<=len(files)<=max_pages:raise HTTPException(422,f'请上传 1–{max_pages} 张图片')
-        if not (1<=agent_steps<=128 and 60<=runtime_seconds<=21600 and 1<=candidate_limit<=12
+        if not (1<=agent_steps<=(192 if orchestrator=='opencode' else 128) and 60<=runtime_seconds<=21600 and 1<=candidate_limit<=12
                 and 0<=model_calls<=200 and 1<=office_validations<=200):raise HTTPException(422,'执行预算超出支持范围')
         from .pipeline import settings
-        try:settings()
-        except (RuntimeError,OSError):raise HTTPException(503,'未配置 MoMA 密钥，请使用启动器配置') from None
+        if orchestrator!='opencode':
+            try:settings()
+            except (RuntimeError,OSError):raise HTTPException(503,'未配置 MoMA 密钥，请使用启动器配置') from None
         if orchestrator!='opencode' and not os.environ.get('OPENCODE_GO_API_KEY'):raise HTTPException(503,'未配置 OpenCode Go 复核密钥')
         if not 1<=len(goal)<=4000:raise HTTPException(422,'交付目标长度无效')
         # Serialize admission, bounded decode and queue insertion.
@@ -286,10 +311,11 @@ def create_app(root=None, token=None, run_worker=True):
                                      'agent_inference_provider':os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma'),
                                      'agent_model':agent_model or os.environ.get('IMAGE2PPT_AGENT_MODEL'),
                                      'object_extraction':object_route,'pipeline_mode':selected_mode,'original_inputs':original_refs,
-                                     'orchestrator':orchestrator,'visual_review_backend':'opencode' if orchestrator=='opencode' else 'go',
+                                     'orchestrator':orchestrator,'host_stage0':orchestrator=='opencode','baseline_only':baseline_only,
+                                     'visual_review_backend':'opencode' if orchestrator=='opencode' else 'go',
                                      'goal':goal,'fresh_perception':fresh_perception,'candidate_engine':'r12-regional' if orchestrator=='opencode' else 'off',
                                      'agent_steps':agent_steps,'runtime_seconds':runtime_seconds,
-                                     'tool_profile':tool_profile,
+                                     'tool_profile':tool_profile, **({'experiment_profile':experiment_profile} if experiment_profile else {}),
                                      'agent_thinking':agent_thinking,
                                      **({'adaptive_budget':{'region_candidates':min(2,candidate_limit),'complex_region_candidates':candidate_limit,
                                          'model_calls':model_calls,'office_validations':office_validations,'max_seconds':runtime_seconds}} if orchestrator=='opencode' else {})})

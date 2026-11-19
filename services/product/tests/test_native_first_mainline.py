@@ -256,7 +256,7 @@ def test_inventory_recall_and_form_metrics():
         'native_editable_content_fraction': 0.62,
         'movable_raster_content_fraction': 0.24,
         'objects': [
-            {'class': 'text', 'name': 't-001', 'bbox': [155, 24, 400, 44]},
+            {'class': 'text', 'name': 't-001', 'text': '\u5e94\u7528\u6210\u6548\u4e0e\u672a\u6765\u5c55\u671b', 'bbox': [155, 24, 400, 44]},
             {'class': 'shape', 'name': 's-001', 'bbox': [52, 170, 500, 430]},
             {'class': 'opaque_picture', 'name': 'r-001', 'bbox': [587, 248, 250, 160]},
         ],
@@ -271,5 +271,12 @@ def test_inventory_recall_and_form_metrics():
     }
     m = compute_inventory_and_form_metrics(sc, inv)
     assert m['main_title_editable'] is True
-    assert m['recall'] == 1.0
-    assert m['proper_form_content_fraction'] == 0.86
+    assert m['recall'] is None
+    assert m['proper_form_object_fraction'] == 0.75
+    sc['objects'][0]['text'] += '1'
+    sc['objects'][1]['class'] = 'opaque_picture'
+    inv['elements'][2]['category'] = 'table'
+    changed = compute_inventory_and_form_metrics(sc, inv)
+    assert changed['matched_items'] == 0
+    assert not changed['main_title_editable']
+    assert compute_inventory_and_form_metrics(sc, None)['recall'] is None

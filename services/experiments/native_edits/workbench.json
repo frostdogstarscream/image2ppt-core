@@ -1,0 +1,99 @@
+{
+  "schema": "NativeEditBenchmark/1",
+  "pages": [
+    {
+      "id": "workbench-01",
+      "family": "workbench",
+      "file": "01_封面.png",
+      "sha256": "e4422f974785edef14bc87fd880bb8c974897929d6bbfaebfdb2cdc30e80cfd8",
+      "split": "development"
+    },
+    {
+      "id": "workbench-02",
+      "family": "workbench",
+      "file": "02_模型能力底座.png",
+      "sha256": "288f66235ffbe27e0b0270984b9d2b1430c347ed8338cb36d168a84f7beb5318",
+      "split": "development"
+    },
+    {
+      "id": "workbench-03",
+      "family": "workbench",
+      "file": "03_统一入口.png",
+      "sha256": "4edce8a94f6c0665b015346b964a0f03aab1c9e13bc12aa250819fb4857ddbb0",
+      "split": "development"
+    },
+    {
+      "id": "workbench-04",
+      "family": "workbench",
+      "file": "04_快速上手.png",
+      "sha256": "7b20d9b9fdd6e20e0437daa6d200475640ed18c35f636a14bc9742d315c9ebec",
+      "split": "development"
+    },
+    {
+      "id": "workbench-05",
+      "family": "workbench",
+      "file": "05_多端协同.png",
+      "sha256": "6dd842bc28249fe2f0021e7b1defe36f14c4ed44b00cf71efe3e6b205aff8088",
+      "split": "development"
+    },
+    {
+      "id": "workbench-06",
+      "family": "workbench",
+      "file": "06_政务场景落地.png",
+      "sha256": "819b289fed81576e587cfabf325375f71ba3503fc2ca403fba963500ee948efd",
+      "split": "development"
+    },
+    {
+      "id": "workbench-07",
+      "family": "workbench",
+      "file": "07_后续服务方案.png",
+      "sha256": "7eb253667f654d9de95e81629dc3dbdbb7aecf37989cc300295bdcdc90ecd225",
+      "split": "development"
+    },
+    {
+      "id": "workbench-08",
+      "family": "workbench",
+      "file": "08_应用成效与展望.png",
+      "sha256": "3ed7ccbde6a908d2200290556b116005459f1b0324ca4df7dcb9cbb31382d48e",
+      "split": "development",
+      "cases": [
+        [
+          1,
+          "中间大卡片",
+          [
+            577,
+            171,
+            530,
+            433
+          ],
+          "fill",
+          null
+        ],
+        [
+          1,
+          "会议材料整理",
+          [
+            863,
+            374,
+            140,
+            29
+          ],
+          "text",
+          "会议材料归档"
+        ],
+        [
+          1,
+          "左上方的建筑照片",
+          [
+            588,
+            249,
+            247,
+            117
+          ],
+          "delete",
+          null
+        ]
+      ]
+    }
+  ]
+}

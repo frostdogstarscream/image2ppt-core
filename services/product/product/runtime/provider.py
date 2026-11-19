@@ -2,6 +2,7 @@
 import os
 
 
+DEFAULT_GO_MODEL='hy4'
 GO_BASE_URL='https://opencode.ai/inference/go/openai/v1'
 DEFAULT_GO_MODEL='hy4-flash-free'
 GO_MODEL_ALIASES={
