@@ -38,17 +38,35 @@ def geometry_marks(source, text_rows):
     return rows
 
 
-def contained_peers(box, peers):
-    return all(
-        intersection(box, r['bbox']) >= r['bbox'][2] * r['bbox'][3]
-        and (r['kind'] == 'text' or r['kind'] == 'asset' and r.get('move_safety') == 'MOVABLE')
-        and r.get('owner_evidence')
-        for r in peers
-    )
+def contained_peers(box, peers, *, layered=False):
+    surfaces = []
+    for row in peers:
+        bounds = row['bbox']
+        if not row.get('owner_evidence') or intersection(box, bounds) < bounds[2]*bounds[3]:
+            return False
+        if row['kind'] == 'text' or row['kind'] == 'asset' and row.get('move_safety') == 'MOVABLE':
+            continue
+        if not (layered and row['kind'] == 'surface' and row.get('payload', {}).get('geometry') in ('rect', 'roundRect')):
+            return False
+        # A halo can extend outside a native shape's visible frame. The entire
+        # proven restore area must belong to this parent before rebinding it.
+        restore = row.get('restore_bbox', bounds)
+        if intersection(box, restore) < restore[2]*restore[3]:
+            return False
+        surfaces.append(row)
+    for surface in surfaces:
+        for neighbor in peers:
+            if neighbor is surface or not intersection(surface['bbox'], neighbor['bbox']):
+                continue
+            # Transparent text above a child shape keeps its existing delete proof.
+            # Other overlapping shapes/photos need a separate occlusion proof.
+            if neighbor['kind'] != 'text' or intersection(surface['bbox'], neighbor['bbox']) < neighbor['bbox'][2]*neighbor['bbox'][3]:
+                return False
+    return True
 
 
 def bind_photo_backing(directory, record, frame_id, frame_box, field):
-    """Retain the photo's source ownership, with the measured native face underneath it."""
+    """Bind a photo or native child to its measured parent fill without changing its ownership."""
     old = record['owner_evidence']
     path = directory / old['file']
     if digest(path) != old['sha256']:
@@ -58,14 +76,15 @@ def bind_photo_backing(directory, record, frame_id, frame_box, field):
     x, y, w, h = map(int, contents['restore_bbox'])
     left, top, width, height = frame_box
     if not (left <= x and top <= y and x + w <= left + width and y + h <= top + height):
-        raise ValueError('photo backing crosses native frame')
+        raise ValueError('child backing crosses native frame')
     contents['backing_patch'] = field[y - top : y - top + h, x - left : x - left + w].copy()
     new_path = directory / f"{record['id']}-{frame_id}-owner.npz"
     np.savez_compressed(new_path, **contents)
     record['owner_evidence'] = {
         'file': new_path.name,
         'sha256': digest(new_path),
-        'method': 'native-card-under-verified-photo/1',
+        'method': ('native-card-under-verified-surface/1' if record.get('kind') == 'surface'
+                   else 'native-card-under-verified-photo/1'),
         'prior': dict(old),
     }
     record['payload'] = {**record.get('payload', {}), 'background_parent_id': frame_id}
@@ -77,6 +96,9 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes):
     sample = np.ones((h, w), bool)
     owned = np.zeros_like(sample)
     photos = np.zeros_like(sample)
+    native_children = np.zeros_like(sample)
+    child_faces = np.zeros_like(sample)
+    text_claims = np.zeros_like(sample)
     for r in peers:
         ref = r['owner_evidence']
         f = baseline / ref['file']
@@ -85,6 +107,20 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes):
         with np.load(f, allow_pickle=False) as proof:
             mask = proof['mask'][y : y + h, x : x + w].astype(bool)
         owned |= mask
+        if r['kind'] == 'surface':
+            native_children |= mask
+            # A child title can legitimately have a different backing from the
+            # enclosing card. Its own opaque shape already paints that area.
+            ax, ay, aw, ah = map(round, r['bbox'])
+            gx, gy = ax-x, ay-y
+            radius = min(aw/2, ah/2, r['payload'].get('corner_radius_px') or 0)
+            yy, xx = np.ogrid[:ah, :aw]
+            dx = np.maximum(radius-xx-.5, np.maximum(xx+.5-(aw-radius), 0))
+            dy = np.maximum(radius-yy-.5, np.maximum(yy+.5-(ah-radius), 0))
+            interior = dx*dx + dy*dy <= radius*radius
+            child_faces[gy:gy+ah,gx:gx+aw] |= interior
+        if r['kind'] == 'text':
+            text_claims |= mask
         if r['kind'] == 'asset':
             ax, ay, aw, ah = map(round, r['bbox'])
             occupied = mask[ay - y : ay - y + ah, ax - x : ax - x + aw]
@@ -154,7 +190,10 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes):
     border = np.ones_like(ink)
     border[margin:-margin, margin:-margin] = False
     edge_blend = border & (exterior_error <= 20) & (delta <= 26)
-    ink &= ~(photos | edge_blend)
+    # New retained artwork is above native shapes in the fixed compiler.
+    # Preserve unknown foreground, while keeping verified child paint and
+    # text-backed child pixels out of that movable picture.
+    ink &= ~(photos | native_children | (child_faces & text_claims) | edge_blend)
     # Paper tint must follow a new card colour. Preserve full-opacity photo and label
     # interiors; express the low-contrast shading elsewhere as a translucent tint.
     opacity = np.where(solid, 1.0, np.minimum(delta / 170.0, 0.24))

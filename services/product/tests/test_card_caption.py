@@ -54,17 +54,48 @@ def test_conflicting_quantities_are_never_written_as_guesses(old, new):
     assert quantity_changed(old, new)
 
 
-def test_native_frame_updates_photo_deletion_backing_without_changing_its_owner(tmp_path):
+def test_layered_parent_retains_child_shape_and_text_without_opaque_artwork(tmp_path):
+    box = [0, 0, 160, 110]
+    surface_box = [22, 32, 105, 30]
+    surface = {'id':'s-label', 'kind':'surface', 'bbox':surface_box, 'restore_bbox':surface_box,
+               'payload':{'geometry':'roundRect', 'corner_radius_px':4}}
+    title_box = [35,38,60,16]
+    title = {'id':'t-label','kind':'text','bbox':title_box}
+    paper = np.full((110,160,3),244,np.uint8)
+    patch = paper.copy()
+    patch[32:62,22:127] = [23,68,135]
+    title_mask = np.zeros(patch.shape[:2],bool)
+    title_mask[40:52,45:47] = True
+    face_mask = np.zeros_like(title_mask)
+    face_mask[32:62,22:127] = True
+    for record,mask in [(surface,face_mask & ~title_mask),(title,title_mask)]:
+        path = tmp_path/(record['id']+'.npz')
+        np.savez_compressed(path, mask=mask)
+        record['owner_evidence']={'file':path.name,'sha256':digest(path)}
+    assert contained_peers(box,[surface,title],layered=True)
+    assert not contained_peers(box,[surface,title])
+    assert not contained_peers(box,[surface,{**title,'bbox':[115,38,32,16]}],layered=True)
+    assert not contained_peers(box,[{**surface,'restore_bbox':[-2,0,40,10]}],layered=True)
+    result=frame_layers(patch,paper,box,[surface,title],tmp_path,[])
+    assert result is not None
+    assert not result[-1][32:62,22:127,3].any()
+
+
+@pytest.mark.parametrize('kind', ['asset', 'surface'])
+def test_native_frame_updates_child_deletion_backing_without_changing_its_owner(tmp_path, kind):
     from product.recovery.layered_card import bind_photo_backing
 
     old = tmp_path / 'original.npz'
     mask = np.ones((8, 9), dtype=bool)
     np.savez_compressed(old, mask=mask, restore_bbox=[10, 11, 3, 2], backing_patch=np.zeros((2, 3, 3)))
     ref = {'file': old.name, 'sha256': digest(old)}
-    record = {'id': 'photo', 'owner_evidence': ref, 'payload': {}}
+    record = {'id': 'child', 'kind': kind, 'owner_evidence': ref, 'payload': {}}
     field = np.arange(6 * 8 * 3).reshape(6, 8, 3)
     bind_photo_backing(tmp_path, record, 's-frame', [9, 9, 8, 6], field)
     assert ref['sha256'] == digest(old) and record['owner_evidence']['prior'] == ref
+    assert record['payload']['background_parent_id'] == 's-frame'
+    expected_type = 'surface' if kind == 'surface' else 'photo'
+    assert record['owner_evidence']['method'] == 'native-card-under-verified-'+expected_type+'/1'
     with np.load(tmp_path / record['owner_evidence']['file']) as proof:
         assert np.array_equal(proof['mask'], mask)
         assert np.array_equal(proof['backing_patch'], field[2:4, 1:4])

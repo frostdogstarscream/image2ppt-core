@@ -84,7 +84,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         peers = [r for r in graph.selected.values() if intersection(box, r['bbox'])]
         from .layered_card import contained_peers, frame_layers
         layered = field.get('label') == 'card_frame'
-        if not contained_peers(box, peers):
+        if not contained_peers(box, peers, layered=layered):
             continue
         if layered != any(r['kind']=='asset' for r in peers):
             continue
@@ -174,10 +174,14 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
             alpha = rgba[..., 3:4].astype(float) / 255
             if ink.any() and abs((rgba[..., :3] * alpha + fill * (1 - alpha) - patch)[ink]).max() > 2:
                 continue
+        child_shapes = [r for r in peers if r['kind']=='surface']
+        # The adapter sorts equal-z surfaces by decreasing area, putting this
+        # enclosing frame below its verified children without moving other shapes.
+        shape_z = min((r['payload']['z'] for r in child_shapes), default=len(graph.surface.shapes)+1)
         shape = Shape(
             id=sid,
             bbox=box,
-            z=len(graph.surface.shapes) + 1,
+            z=shape_z,
             geometry='roundRect',
             fill=_hex(fill),
             line_color=_hex(stroke),
@@ -216,7 +220,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         if layered:
             from .layered_card import bind_photo_backing
             for child in peers:
-                if child['kind'] == 'asset':
+                if child['kind'] in ('asset','surface'):
                     record = graph.selected[child['id']]
                     bind_photo_backing(output, record, sid, box, backing_field)
                     for transaction in graph.transactions:
