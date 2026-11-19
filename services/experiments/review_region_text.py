@@ -38,6 +38,8 @@ TRIALS = {
                          'building-caption/without-building.png'),
 }
 PANEL_SPEC = {
+    'whole-slide': ((0,0,1672,941), 1, (('Whole slide: before edit','before.png'),
+                                       ('Whole slide: after edit','recolored.png'))),
     'middle': ((568,161,1112,606), 2, (('source',None), ('exported','before.png'),
                 ('card recolored','recolored.png'), ('then upper-left photo removed','recolored-deleted.png'),
                 ('upper-right title edited','title-edited.png'), ('upper-right title erased','title-removed.png'))),
@@ -49,6 +51,10 @@ PANEL_SPEC = {
                 ('photo removed with edited caption retained','building-caption/without-building.png'))),
 }
 PROMPT = """Inspect these source and reopened PowerPoint images. Report each visible trial independently.
+The first image shows the full reopened slides before and after the card edit at the same scale.
+For effects outside the middle card, compare only these two full-slide views. Cropped panels provide
+local detail only. If the full views are missing or unclear, report insufficient evidence for a
+claim about other parts of the slide.
 card: recolor the middle card mint; all photos and labels should remain in place.
 title: replace the upper-right photo caption with 会议材料归档; the erased copy should show a clean strip.
 delete_on_new_fill: remove the building after recolor; the photo area must show the new fill while its blue strip and neighboring photos survive.

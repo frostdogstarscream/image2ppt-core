@@ -55,12 +55,34 @@ def test_review_refuses_foreign_or_unsealed_edit_images(tmp_path, monkeypatch):
     binding['office_artifacts_sha256'] = {p.name:digest(p) for p in office.iterdir()}
     (office/'region-report.json').write_text(json.dumps(binding),'utf8')
     evidence, panels = prepare(source,deck,office,tmp_path/'fresh')
-    assert len(panels) == 3 and evidence['missing_frames']['main_title']
+    assert len(panels) == 4 and evidence['missing_frames']['main_title']
+    assert evidence['missing_frames']['card'] == ['recolored.png']
     foreign = office/'recolored.png'
     foreign.write_bytes(source.read_bytes())
     with pytest.raises(ValueError, match='unsealed PowerPoint artifact'):
         prepare(source,deck,office,tmp_path/'unsealed')
-    foreign.unlink()
+    with Image.open(before) as original:
+        edited = original.copy()
+    edited.putpixel((1671,940),(60,125,200))
+    edited.putpixel((0,0),(180,80,35))
+    edited.save(foreign)
+    binding['office_artifacts_sha256']['recolored.png'] = digest(foreign)
+    (office/'region-report.json').write_text(json.dumps(binding),'utf8')
+    evidence, panels = prepare(source,deck,office,tmp_path/'full-pages')
+    whole_slide = panels[0]
+    assert whole_slide.name == 'whole-slide-panel.png'
+    assert evidence['panels'][whole_slide.name] == digest(whole_slide)
+    assert not evidence['missing_frames']['card']
+    with Image.open(whole_slide) as panel:
+        for index, name in enumerate(('before.png','recolored.png')):
+            assert evidence['office_images'][name] == digest(office/name)
+            with Image.open(office/name) as frame:
+                top = 19 + index*(frame.height+22)
+                view = panel.crop((0,top,frame.width,top+frame.height))
+                assert view.tobytes() == frame.convert('RGB').tobytes()
+    foreign.write_bytes(source.read_bytes())
+    with pytest.raises(ValueError, match='unsealed PowerPoint artifact'):
+        prepare(source,deck,office,tmp_path/'stale-full-page')
     deck.write_bytes(b'different deck')
     with pytest.raises(ValueError, match='Deck or before image differs'):
         prepare(source,deck,office,tmp_path/'different-deck')
