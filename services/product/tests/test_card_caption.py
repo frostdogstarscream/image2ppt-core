@@ -68,6 +68,9 @@ def test_layered_parent_retains_child_shape_and_text_without_opaque_artwork(tmp_
     title_mask[40:52,45:47] = True
     face_mask = np.zeros_like(title_mask)
     face_mask[32:62,22:127] = True
+    # The verified native face already hides this unclaimed coloured speck.
+    # It cannot be moved into a separate picture above the shape.
+    face_mask[48,120] = False
     for record,mask in [(surface,face_mask & ~title_mask),(title,title_mask)]:
         path = tmp_path/(record['id']+'.npz')
         np.savez_compressed(path, mask=mask)

@@ -90,15 +90,31 @@ def bind_photo_backing(directory, record, frame_id, frame_box, field):
     record['payload'] = {**record.get('payload', {}), 'background_parent_id': frame_id}
 
 
-def frame_layers(patch, parent, box, peers, baseline, ignore_boxes):
+def native_child_faces(box, peers):
+    """Raster footprint of opaque, already-verified rectangular child shapes."""
+    x, y, w, h = box
+    faces = np.zeros((h,w), bool)
+    for row in peers:
+        if row['kind'] != 'surface':
+            continue
+        ax, ay, aw, ah = map(round,row['bbox'])
+        radius = min(aw/2, ah/2, row['payload'].get('corner_radius_px') or 0)
+        yy, xx = np.ogrid[:ah, :aw]
+        dx = np.maximum(radius-xx-.5, np.maximum(xx+.5-(aw-radius), 0))
+        dy = np.maximum(radius-yy-.5, np.maximum(yy+.5-(ah-radius), 0))
+        faces[ay-y:ay-y+ah,ax-x:ax-x+aw] |= dx*dx+dy*dy <= radius*radius
+    return faces
+
+
+def frame_layers(patch, parent, box, peers, baseline, ignore_boxes, *, child_faces=None):
     """Fit exposed card paper; retain unexplained interior art and leave photo holes transparent."""
     x, y, w, h = box
     sample = np.ones((h, w), bool)
     owned = np.zeros_like(sample)
     photos = np.zeros_like(sample)
     native_children = np.zeros_like(sample)
-    child_faces = np.zeros_like(sample)
-    text_claims = np.zeros_like(sample)
+    if child_faces is None:
+        child_faces = native_child_faces(box, peers)
     for r in peers:
         ref = r['owner_evidence']
         f = baseline / ref['file']
@@ -109,18 +125,7 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes):
         owned |= mask
         if r['kind'] == 'surface':
             native_children |= mask
-            # A child title can legitimately have a different backing from the
-            # enclosing card. Its own opaque shape already paints that area.
-            ax, ay, aw, ah = map(round, r['bbox'])
-            gx, gy = ax-x, ay-y
-            radius = min(aw/2, ah/2, r['payload'].get('corner_radius_px') or 0)
-            yy, xx = np.ogrid[:ah, :aw]
-            dx = np.maximum(radius-xx-.5, np.maximum(xx+.5-(aw-radius), 0))
-            dy = np.maximum(radius-yy-.5, np.maximum(yy+.5-(ah-radius), 0))
-            interior = dx*dx + dy*dy <= radius*radius
-            child_faces[gy:gy+ah,gx:gx+aw] |= interior
-        if r['kind'] == 'text':
-            text_claims |= mask
+            # Source-owner halos may extend beyond the opaque native face.
         if r['kind'] == 'asset':
             ax, ay, aw, ah = map(round, r['bbox'])
             occupied = mask[ay - y : ay - y + ah, ax - x : ax - x + aw]
@@ -191,9 +196,9 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes):
     border[margin:-margin, margin:-margin] = False
     edge_blend = border & (exterior_error <= 20) & (delta <= 26)
     # New retained artwork is above native shapes in the fixed compiler.
-    # Preserve unknown foreground, while keeping verified child paint and
-    # text-backed child pixels out of that movable picture.
-    ink &= ~(photos | native_children | (child_faces & text_claims) | edge_blend)
+    # A previously hidden source pixel remains behind its opaque child. Moving
+    # it into an upper picture would give that picture the wrong delete backing.
+    ink &= ~(photos | native_children | child_faces | edge_blend)
     # Paper tint must follow a new card colour. Preserve full-opacity photo and label
     # interiors; express the low-contrast shading elsewhere as a translucent tint.
     opacity = np.where(solid, 1.0, np.minimum(delta / 170.0, 0.24))

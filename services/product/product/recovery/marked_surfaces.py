@@ -82,7 +82,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         if sid in graph.selected or {field['id'], sid} & skip_ids:
             continue
         peers = [r for r in graph.selected.values() if intersection(box, r['bbox'])]
-        from .layered_card import contained_peers, frame_layers
+        from .layered_card import contained_peers, frame_layers, native_child_faces
         layered = field.get('label') == 'card_frame'
         if not contained_peers(box, peers, layered=layered):
             continue
@@ -98,10 +98,15 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         if layered:
             ignored = [o.bbox for o in [*graph.text.texts,*graph.asset.objects]
                        if o.bbox[2]*o.bbox[3] < .65*w*h and intersection(box,o.bbox)]
-            result = frame_layers(patch, parent_patch, box, peers, baseline, ignored)
+            child_faces = native_child_faces(box, peers)
+            result = frame_layers(patch, parent_patch, box, peers, baseline, ignored, child_faces=child_faces)
             if result is None:
                 continue
             fill, gradient, backing_field, owned, ink, rgba = result
+            # Under opaque native child shapes, unowned material in the old lower
+            # plate is invisible. Keep it in the same physical layer, including
+            # previously hidden decoration that differs from measured card paper.
+            hidden_backing = child_faces & ~owned & (np.abs(patch.astype(float)-backing_field).max(2)>12)
             stroke = fill
             radius = min(12,h//4,w//4)
         else:
@@ -231,7 +236,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
             yy, xx = np.ogrid[:h, :w]
             dx = np.maximum(radius-xx-.5, np.maximum(xx+.5-(w-radius), 0))
             dy = np.maximum(radius-yy-.5, np.maximum(yy+.5-(h-radius), 0))
-            footprint = dx*dx+dy*dy <= radius*radius
+            footprint = (dx*dx+dy*dy <= radius*radius) & ~hidden_backing
         for identifier, kind, bbox, local_mask, backing in [
             (sid, 'surface', box, footprint & ~(ink | owned), parent_patch)
         ] + ([(aid, 'asset', ibox, (ink & ~owned)[iy:iy+ih, ix:ix+iw], backing_field[iy:iy+ih, ix:ix+iw] if layered else fill)] if assets else []):
@@ -286,7 +291,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
             staged.append(identifier)
         if layered:
             # Only replace material accounted for by the shape, retained artwork or proven children.
-            replace = footprint | ink | owned
+            replace = (footprint | ink | owned) & ~hidden_backing
             plate[y:y+h,x:x+w,:3][replace] = parent_patch[replace]
         else:
             plate[y:y+h,x:x+w,:3] = parent_patch
