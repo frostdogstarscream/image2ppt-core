@@ -140,6 +140,7 @@ def test_reviewed_unchanged_candidate_and_retries_use_one_selected_deck(job,monk
     first = runner.run(job)
     assert first['origin']==host.ORIGIN and not first['agent']['fallback_reasons']
     assert first['artifacts']['result.pptx']==digest(job/'host-baseline/baseline.pptx')
+    assert first['artifacts']['agent-candidate.pptx']==digest(job/'runtime/agent-delivery/result.pptx')
     assert runner.run(job)==first and calls==['agent']
 
 

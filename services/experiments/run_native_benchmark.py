@@ -71,7 +71,7 @@ def run_group(client, group, output, *, baseline_only, steps, seconds, probe, va
         (delivery/name).write_bytes(response.content)
     results = {}
     cases = [[i,*case[1:]] for i,(row,_) in enumerate(group,1) for case in row.get('cases',[])]
-    for version,filename in [('host','deterministic-baseline.pptx'),('selected','result.pptx')]:
+    for version,filename in [('host','deterministic-baseline.pptx'),('agent_candidate','agent-candidate.pptx'),('selected','result.pptx')]:
         deck = delivery/filename
         if not deck.exists():
             results[version] = {'status':'UNKNOWN'}
@@ -82,9 +82,18 @@ def run_group(client, group, output, *, baseline_only, steps, seconds, probe, va
             folder = output/('office-'+version)
             run(deck,folder,cases)
             rec['actions'] = json.loads((folder/'report.json').read_text(encoding='utf8'))
+            from native_region_metrics import measure
+            rec['region_fidelity'] = {}
+            for page, (_, source) in enumerate(group, 1):
+                page_cases = [case for case in cases if case[0]==page]
+                preview = next((folder/f'{i}-before.png' for i, case in enumerate(cases)
+                                if case[0]==page and (folder/f'{i}-before.png').is_file()), None)
+                if page_cases and preview:
+                    rec['region_fidelity'][str(page)] = measure(source, preview, page_cases)
         results[version] = rec
     result = {'job_id':job,'sources':sources,'state':state['status'],'versions':results,
               'origin':state.get('result',{}).get('origin'),'agent':state.get('result',{}).get('agent'),
+              'sample_catalog':[{k:r.get(k) for k in ('id','family','split','sha256')} for r,_ in group],
               'human_wps':'UNKNOWN'}
     write(output/'comparison.json',result)
     return result
@@ -116,6 +125,10 @@ def main():
             raise ValueError('Frozen case list changed')
         cases=json.loads(casefile.read_text(encoding='utf8'))
         rows=[{**r,'id':str(r['page']),'file':r['path'],'cases':[c for c in cases if c[0]==r['page']]} for r in rows]
+    development = json.loads((ROOT/'services/experiments/native_edits/workbench.json').read_text(encoding='utf8'))['pages']
+    known_development = {row['sha256'] for row in development}
+    for row in rows:
+        row['split'] = 'development' if row['sha256'] in known_development else row.get('split','frozen')
     if args.pages:
         chosen=set(args.pages)
         rows=[r for r in rows if r['id'] in chosen]
@@ -135,6 +148,8 @@ def main():
             records.append(run_group(client,part,args.output/name,baseline_only=args.baseline_only,
                                      steps=args.steps,seconds=args.seconds,probe=args.probe_office,variant=args.variant))
     write(args.output/'benchmark-summary.json',records)
+    from native_results import write_table
+    write_table(args.output.glob('*/comparison.json'), args.output/'page-comparison.csv')
 
 
 if __name__=='__main__':

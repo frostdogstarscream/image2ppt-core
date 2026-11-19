@@ -265,6 +265,10 @@ def _publish(job, agent, reasons, candidate):
         names.update(files)
     if candidate:
         names.add('agent-scorecard.json')
+        trial = state.root/'agent-delivery/result.pptx'
+        if candidate.get('verified') and trial.is_file() and digest(trial) == candidate['pptx_sha256']:
+            install_file(trial, delivery/'agent-candidate.pptx')
+            names.add('agent-candidate.pptx')
     result['artifacts'] = {name:digest(delivery/name) for name in sorted(names) if (delivery/name).is_file()}
     write(job/'result.json',result)
     write(state.root/'delivery-selection.json',{'result_sha256':digest(job/'result.json'),

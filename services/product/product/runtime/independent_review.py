@@ -167,7 +167,11 @@ def _stateless_vlm_audit(
         write(cache_file, verdict)
         return verdict
     except Exception as exc:
+        # Keep only a normalized provider status, never the arbitrary response body.
+        import re
+        status = re.fullmatch(r'opencode_http_(\d{3})', str(exc))
         return {
+            'model': review_model, 'provider_http_status': int(status.group(1)) if status else None,
             'status': f'UNAVAILABLE:{type(exc).__name__}',
             'passed': False,
             'critical_defects': [],
