@@ -58,7 +58,21 @@ def assess(job, current):
         selected = read(row['scene'])['selected']
         readings = {i:r['source_reading'] for i,r in selected.items() if r.get('source_reading')}
         updated = {v['ocr_id'] for v in readings.values()}
+        # A retained OCR value may also be uncertain (for example a disputed amount).
+        # Include the latest bound observation even when it did not change the text.
+        observed = {}
+        for path in current.get('reading_reports', {}).get(k, []):
+            report = read(path)
+            if report.get('source_sha256') != row['snapshot']['source_sha256']:
+                raise RuntimeConflict('source of reading decisions changed')
+            for obs in report.get('observations', []):
+                oid = obs['object_id']
+                observed[oid] = obs
+        for oid, obs in observed.items():
+            if oid in selected and oid not in readings and obs.get('status') == 'pending_confirmation':
+                readings[oid] = {**obs, 'after':obs['before']}
         pending = {v['ocr_id'] for v in readings.values() if v['status']=='pending_confirmation'}
+        updated.update(pending.intersection(hits))
         actions = {}
         for action in office.get('office',{}).get('records',[]):
             if action.get('page')==page and action.get('saved_reopened') and action.get('outside_pixels')==0:

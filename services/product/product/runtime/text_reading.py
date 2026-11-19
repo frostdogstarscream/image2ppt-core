@@ -129,7 +129,7 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
             continue
         evidence.update(reading=reading.text,legible=reading.legible,model=actor.model)
         if not reading.text.strip() or reading.text == obj.text:
-            evidence['status'] = 'agreed' if reading.legible else 'pending_confirmation'
+            evidence['status'] = 'agreed' if reading.text.strip() and reading.legible else 'pending_confirmation'
             continue
         if quantity_changed(obj.text,reading.text):
             evidence['status'] = 'pending_confirmation'
@@ -153,7 +153,7 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
             continue
         if verified and verified[0]['iou_before'] is not None and verified[0]['iou_after'] is not None:
             change = {**evidence, **verified[0]}
-            if reading.legible:
+            if not reading_model and reading.legible:
                 change['status'] = 'source_supported'
         elif reading_model:
             change = {**evidence,'after':reading.text.strip()}
