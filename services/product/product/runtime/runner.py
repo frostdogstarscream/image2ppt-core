@@ -240,7 +240,15 @@ def run(job, client=None):
         return publish(job,result,[result.get('failure') or 'AGENT_DID_NOT_FINALIZE'])
     try:
         candidate = assess(job,current)
-        reasons = regressions(read(job/'host-baseline/scorecard.json'),candidate)
+        draft_path = job/'reading-draft.json'
+        draft = read(draft_path) if draft_path.is_file() else {}
+        reviewed_reading_draft = (
+            candidate['verified'] and draft.get('office_status') == 'PASS'
+            and draft.get('sha256') == candidate['pptx_sha256']
+            and current.get('independent_audit', {}).get('passed') is True
+        )
+        reasons = regressions(read(job/'host-baseline/scorecard.json'), candidate,
+                              reviewed_reading_draft=reviewed_reading_draft)
         if result.get('status') != 'SUCCEEDED' or current.get('independent_audit', {}).get('passed') is not True:
             reasons.append('INDEPENDENT_AUDIT_UNVERIFIED')
     except Exception as exc:

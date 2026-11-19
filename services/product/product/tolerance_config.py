@@ -23,6 +23,8 @@ DEFAULT_TOLERANCE: dict = {
         'hard_max_delta_e2000_p95': 26.0,
         'min_ssim': 0.85,
         'hard_min_ssim': 0.72,
+        'reading_delta_e_margin': 1.0,
+        'reading_ssim_margin': 0.01,
         'max_mae_rgb': 12.0,
     },
     'residual_gate': {

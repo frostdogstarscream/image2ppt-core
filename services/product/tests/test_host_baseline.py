@@ -124,6 +124,24 @@ def test_small_visual_differences_are_allowed_in_editable_regions(tmp_path):
     assert host.regressions(base, candidate) == []
 
 
+def test_only_reviewed_transcription_gets_small_ink_tolerance():
+    marks = {'caption': {'ssim': .20, 'delta_e2000_p95': 40.0},
+             'neighbor': {'ssim': .20, 'delta_e2000_p95': 40.0}}
+    row = dict(page=1, source_sha256='fixed', editable_count=2, native_field_count=2,
+               ocr_native_hits=[], local_fidelity=marks)
+    base = dict(verified=True, pages=[row])
+    contender = json.loads(json.dumps(base))
+    page = contender['pages'][0]
+    page['pending_readings'] = {'caption': {'before':'旧读法', 'after':'新读法'}}
+    page['local_fidelity']['caption'] = {'ssim': .195, 'delta_e2000_p95': 40.5}
+    assert host.regressions(base,contender) == ['p1:LOCAL_VISUAL_REGRESSION:caption']
+    assert not host.regressions(base,contender,reviewed_reading_draft=True)
+    page['local_fidelity']['neighbor']['ssim'] = .195
+    assert host.regressions(base,contender,reviewed_reading_draft=True) == ['p1:LOCAL_VISUAL_REGRESSION:neighbor']
+    page['local_fidelity']['caption']['ssim'] = .15
+    assert 'caption' in host.regressions(base,contender,reviewed_reading_draft=True)[0]
+
+
 def test_reviewed_unchanged_candidate_and_retries_use_one_selected_deck(job,monkeypatch):
     calls = []
     def finalize(directory,client):
@@ -142,6 +160,26 @@ def test_reviewed_unchanged_candidate_and_retries_use_one_selected_deck(job,monk
     assert first['artifacts']['result.pptx']==digest(job/'host-baseline/baseline.pptx')
     assert first['artifacts']['agent-candidate.pptx']==digest(job/'runtime/agent-delivery/result.pptx')
     assert runner.run(job)==first and calls==['agent']
+
+
+def test_published_reading_remains_downloadable_and_requires_content_confirmation(job):
+    host.ensure_baseline(job)
+    control = job/'host-baseline/baseline.pptx'
+    runtime = RuntimeState(job)
+    selected = runtime.root/'agent-delivery/result.pptx'
+    selected.parent.mkdir()
+    shutil.copyfile(control, selected)
+    with ZipFile(selected,'a') as deck:
+        deck.comment = b'reviewed sample'
+    candidate = read(job/'host-baseline/scorecard.json')
+    candidate['pptx_sha256'] = digest(selected)
+    candidate['pages'][0]['pending_readings'] = {'caption': {'before':'旧读法','after':'新读法'}}
+    result = host.publish(job, {'status':'SUCCEEDED','artifacts':{'result.pptx':digest(selected)}},
+                          candidate=candidate)
+    assert result['status'] == runtime.read()['status'] == 'REVIEW_REQUIRED'
+    assert result['pending_text_objects'] == {'1':['caption']}
+    assert result['artifacts']['result.pptx'] == digest(selected) != digest(control)
+    assert result['workflow_states']['final_qa'] == 'REVIEW_REQUIRED'
 
 
 def test_numbered_actions_reject_whole_page_and_unowned_marks(tmp_path):

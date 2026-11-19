@@ -95,7 +95,7 @@ def assess(job, current):
             'fidelity_limits':load_tolerance_config()['fidelity'],'pages':pages}
 
 
-def regressions(base, candidate):
+def regressions(base, candidate, *, reviewed_reading_draft=False):
     reasons = []
     if not base['verified'] or not candidate['verified']:
         reasons.append('OFFICE_COMPARISON_UNVERIFIED')
@@ -124,8 +124,16 @@ def regressions(base, candidate):
                 lost.append(region)
                 continue
             de, similarity = new['delta_e2000_p95'], new['ssim']
-            if (de > max(old['delta_e2000_p95'], limits['hard_max_delta_e2000_p95'])
-                    or similarity < min(old['ssim'], limits['hard_min_ssim'])):
+            max_de = max(old['delta_e2000_p95'], limits['hard_max_delta_e2000_p95'])
+            min_ssim = min(old['ssim'], limits['hard_min_ssim'])
+            reading = b.get('pending_readings', {}).get(region, {})
+            if reviewed_reading_draft and reading.get('after') and reading['after'] != reading.get('before'):
+                # A different transcription necessarily changes the ink inside its own label.
+                # Bound the additional change relative to the control, even in a poor-fit label.
+                reading_limits = load_tolerance_config()['fidelity']
+                max_de = max(max_de, old['delta_e2000_p95'] + reading_limits['reading_delta_e_margin'])
+                min_ssim = min(min_ssim, old['ssim'] - reading_limits['reading_ssim_margin'])
+            if de > max_de or similarity < min_ssim:
                 lost.append(region)
         if lost:
             reasons.append(prefix+'LOCAL_VISUAL_REGRESSION:'+','.join(lost[:12]))
@@ -306,6 +314,12 @@ def _publish(job, agent, reasons, candidate):
         write(state.root/'state.json',frozen)
     else:
         result = dict(agent)
+        pending = {str(page['page']): sorted(page['pending_readings']) for page in candidate['pages']
+                   if page.get('pending_readings')}
+        if pending:
+            result.update(status='REVIEW_REQUIRED', reason='CONTENT_CONFIRMATION_PENDING',
+                          pending_text_objects=pending, automatic_publication=False)
+            result['workflow_states'] = {**result.get('workflow_states', {}), 'final_qa':'REVIEW_REQUIRED'}
         for name in files:
             if name!='summary.json':
                 install_file(staging/name,delivery/name)
@@ -347,6 +361,9 @@ def _publish(job, agent, reasons, candidate):
             names.add('agent-candidate.pptx')
     result['artifacts'] = {name:digest(delivery/name) for name in sorted(names) if (delivery/name).is_file()}
     write(job/'result.json',result)
+    if not fallback and result.get('pending_text_objects') and current['status'] != 'REVIEW_REQUIRED':
+        current.update(status='REVIEW_REQUIRED',version=current['version']+1)
+        write(state.root/'state.json',current)
     write(state.root/'delivery-selection.json',{'result_sha256':digest(job/'result.json'),
           'selected_sha256':result['artifacts']['result.pptx'],'origin':result['origin']})
     return result
