@@ -60,12 +60,13 @@ def plan_regions(graph, targets, inventory, source):
                 if not contains(box, text.bbox):
                     continue
             name = [parent["id"], kind, box]
-        elif any(e["category"] == "title" and contains(e["bbox"], text.bbox) for e in elements):
+        else:
+            # Unlabelled fields can also sit on measurable paper. The same
+            # surface and ownership proofs apply before staging any replacement.
+            title = any(e["category"] == "title" and contains(e["bbox"], text.bbox) for e in elements)
             x, y, w, h = text.bbox
             box = clipped([x - h, y - 0.45 * h, w + 2 * h, 1.9 * h], graph.image_size)
-            name = [text.id, "title", box]
-        else:
-            continue
+            name = [text.id, "title" if title else "field", box]
         gid = key([graph.source_sha256, name])[:20]
         row = groups.setdefault(
             gid, {"id": gid, "surface": name[0], "kind": name[1], "bbox": box, "members": []}
@@ -250,8 +251,11 @@ def measure_group(graph, group, source, baseline, lines):
     added = np.zeros_like(used)
     for t in members:
         edge = (cv2.dilate(measured[t.id].astype("uint8"), brush) > 0) & ~used
-        edge &= rectangle(t.bbox, graph.image_size)[y : y + h, x : x + w] & ~others
-        edge &= (discrepancy > 3) & (discrepancy <= 56)
+        # OCR boxes can end inside the last stroke. Only extend a fringe
+        # through connected colour evidence, never by claiming a rectangle.
+        edge &= ~others & (discrepancy > 3) & (discrepancy <= 56)
+        _, components = cv2.connectedComponents((edge | measured[t.id]).astype("uint8"), 8)
+        edge &= np.isin(components, np.unique(components[measured[t.id]]))
         if (edge & added).any():
             raise ValueError("shared antialiased glyph edge")
         measured[t.id] |= edge

@@ -1190,9 +1190,28 @@ def _chain_stage_from_spec(
                 'reason': msg,
             })
 
+    grouped_boxes = []
     if include_assets:
         from ..recovery.region_crop import stage_region_crops
         for field in marked_routes:
+            if field.get('diagram_members') and field['id'] not in skip_ids and (
+                wanted_filter is None or field['id'] in wanted_filter
+            ):
+                graph = SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
+                box = field['bbox']
+                if any(intersection(rec['bbox'], box) for rec in graph.selected.values()
+                       if rec.get('kind') in ('text','asset') and not rec.get('container_layer')):
+                    continue
+                seed = {'id':field['id'],'bbox':box,'kind':'asset'}
+                ir, ids, receipts = stage_region_crops(
+                    cur_base, directory/tag/('diagram-'+key(field['id'])[:12]),
+                    seeds=[seed], protected_text_ids={t.id for t in graph.text.texts}, skip_seed_ids=skip_ids)
+                if len(ids) == 1 and any(r.get('id') == ids[0] and r.get('upgraded_to_transparent_asset')
+                                        and intersection(r['bbox'],box) >= .90*box[2]*box[3] for r in receipts):
+                    cur_base = ir.parent
+                    staged_ids.extend(ids)
+                    grouped_boxes.append(box)
+                continue
             frame = field.get('picture_frame')
             if not frame or field['id'] in skip_ids or (wanted_filter is not None and field['id'] not in wanted_filter):
                 continue
@@ -1253,6 +1272,7 @@ def _chain_stage_from_spec(
             if a.id not in cur_graph.selected
             and cur_graph.ownership.get(a.id) == 'RESOLVED'
             and a.id not in skip_ids
+            and not any(intersection(a.bbox, box) for box in grouped_boxes)
             and (wanted_filter is None or a.id in wanted_filter)
         ]
         for idx, asset in enumerate(asset_targets):
@@ -1371,6 +1391,8 @@ def _chain_stage_from_spec(
 
     if include_assets:
         for route in marked_routes:
+            if any(intersection(route['bbox'], box) for box in grouped_boxes):
+                continue
             if not route.get('new_asset') or route['id'] in skip_ids or (wanted_filter is not None and route['id'] not in wanted_filter):
                 continue
             from ..recovery.region_crop import stage_region_crops

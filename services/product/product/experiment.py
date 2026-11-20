@@ -128,12 +128,51 @@ def detect(source, profile, directory, window=None, *, detectors=None):
     return {'schema':'LayoutRegions/1','source_sha256':sha,'regions':rows,'models':receipts}
 
 
+def diagram_marks(source, rows, objects):
+    """Propose a component only when a visible connector joins distinct icon anchors."""
+    import cv2
+    anchors = [r for r in rows if r['label'] in ('icon','decoration')]
+    if len(anchors) < 2:
+        return []
+    rgb = np.asarray(Image.open(source).convert('RGB'))
+    height, width = rgb.shape[:2]
+    scale = max(1, round(np.median([min(r['bbox'][2:]) for r in anchors]) * .09))
+    # Smooth local gradients disappear in the edge map; closing joins antialias gaps.
+    edges = cv2.Canny(rgb, 18, 55)
+    brush = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2*scale+1, 2*scale+1))
+    joined = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, brush)
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(joined, 8)
+    groups = []
+    for index, (x,y,w,h,count) in enumerate(stats[1:],1):
+        box = [int(v) for v in (x,y,w,h)]
+        if w*h > width*height*.25 or count < scale*scale or w < 2*h/3:
+            continue
+        if any(overlap(box, obj['bbox']) for obj in objects if obj.get('ocr_line_ids')):
+            continue
+        if any(overlap(box, r['bbox']) >= .95*w*h for r in rows if r['label'] in ('image','table')):
+            continue
+        members = []
+        for anchor in anchors:
+            ax,ay,aw,ah = map(round, anchor['bbox'])
+            if min(aw,ah)<=0 or overlap(box,anchor['bbox']) < .9*aw*ah:
+                continue
+            if any(overlap(anchor['bbox'], other['bbox']) for other in members):
+                continue
+            if np.count_nonzero(labels[max(0,ay):ay+ah,max(0,ax):ax+aw] == index) >= min(aw,ah):
+                members.append(anchor)
+        if len(members) >= 2:
+            groups.append({'id':'m-'+key([box, sorted(r['id'] for r in members)])[:16],
+                           'label':'connected_diagram','bbox':box,'member_ids':[r['id'] for r in members]})
+    return groups
+
+
 def mark_page(source, layout, objects, directory):
     from .recovery.layered_card import geometry_marks
     rows=list(layout['regions']) + geometry_marks(source, objects)
     for obj in objects:
         rows.append({'id':obj['id'],'label':obj.get('kind','text'),'bbox':list(obj['bbox']),
                      'text':obj.get('text',''),'ocr_ids':obj.get('ocr_line_ids',[])})
+    rows.extend(diagram_marks(source, rows, objects))
     rows.sort(key=lambda r:(r['bbox'][1],r['bbox'][0],r['id']))
     img=Image.open(source).convert('RGB')
     draw=ImageDraw.Draw(img)

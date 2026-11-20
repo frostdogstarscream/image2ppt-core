@@ -58,7 +58,7 @@ def deterministic_plan(rows, relations):
             route, role = 'surface', 'card'
         elif label == 'table':
             route, role = 'table', 'table'
-        elif label == 'image':
+        elif label in ('image','connected_diagram'):
             route, role = 'asset', 'image'
         else:
             continue
@@ -91,7 +91,8 @@ def questions(state, current, page, failures, directory):
         for entry in read(info):
             r = by_id[entry['id']]
             oid = r['id']
-            reasons = []
+            finding = current.get("plate_issues", {}).get(k, {}).get(oid)
+            reasons = ["plate_" + finding] if finding else []
             if oid in failed and oid not in owners:
                 reasons.append(failed[oid])
             if r['label'] == 'uncertain_ocr' or (r['label']=='text' and uncertain.intersection(r.get('ocr_ids', []))):
@@ -195,7 +196,12 @@ def context(state,request):
     pages = []
     for i,page in enumerate(c['pages'],1):
         blocks = c['questions'][str(i)]
-        pages.append({'page':i,'committed_objects':len(read(page['scene'])['selected']),
+        audit = base['pages'][i-1].get('plate_audit', {})
+        findings = [r for r in audit.get('rows', []) if r['status'] in ('retained','residual','plate_only')]
+        pages.append({'plate_audit_status':audit.get('status','UNKNOWN'),
+                      'plate_findings':len(findings),
+                      'plate_retry_ids':list(dict.fromkeys(oid for r in findings for oid in r['mark_ids']))[:30],
+                      'page':i,'committed_objects':len(read(page['scene'])['selected']),
                       'evidence':{k:v for k,v in c['host_evidence'][str(i)].items() if k.endswith('_status')},
                       'issue_blocks':[{k:v for k,v in b.items() if k!='marks'} for b in blocks],
                       'source':state.register(state.job/'inputs'/request['sources'][i-1],'source')['id']})

@@ -1,5 +1,6 @@
 """Host-owned preflight, immutable control deck and per-page non-regression gate."""
 from uuid import uuid4
+from copy import deepcopy
 from pathlib import Path
 import shutil
 import time
@@ -10,6 +11,7 @@ from PIL import Image
 from ..materialize import digest, write
 from ..tolerance_config import load_tolerance_config
 from ..scorecard import fidelity, score_page, _native_fields, _norm, _overlap
+from .plate_audit import audit as audit_plate
 from .host_evidence import prepare_all, questions, read
 from .state import RuntimeState, RuntimeConflict
 from .service import RuntimeService
@@ -84,7 +86,9 @@ def assess(job, current):
         limits = load_tolerance_config()['fidelity']
         minor = [key for key, val in local.items()
                  if val['ssim'] < limits['min_ssim'] or val['delta_e2000_p95'] > limits['max_delta_e2000_p95']]
-        pages.append({'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
+        plate = audit_plate(job, deck, sha, page, row['snapshot'], lines, fields, marks,
+                            {v['ocr_id']:v['after'] for v in readings.values() if v.get('after')})
+        pages.append({'plate_audit':plate,'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
                       'passed_edits':sorted(f'{oid}/{action}' for oid in editables for action in actions[oid]),
                       'editable_count':len(editables) if verified else None, 'selected_editables':editables,
                       'ocr_native_hits':sorted(set(hits)-pending), 'revised_ocr_lines':sorted(updated),
@@ -104,6 +108,14 @@ def regressions(base, candidate, *, reviewed_reading_draft=False):
         reasons.append('PAGE_COUNT_CHANGED')
     for a,b in zip(base['pages'], candidate['pages']):
         prefix = f"p{a['page']}:"
+        old_plate = a.get('plate_audit', {})
+        new_plate = b.get('plate_audit', {})
+        if old_plate.get('status') == 'MEASURED':
+            if new_plate.get('status') != 'MEASURED':
+                reasons.append(prefix+'PLATE_AUDIT_MISSING')
+            clean = {r['ocr_id'] for r in old_plate['rows'] if r['status'] == 'native'}
+            if any(r['ocr_id'] in clean and r['status'] in ('retained','residual') for r in new_plate.get('rows', ())):
+                reasons.append(prefix+'NEW_VISIBLE_TEXT_ON_PLATE')
         if a['source_sha256']!=b['source_sha256']:
             reasons.append(prefix+'SOURCE_CHANGED')
         if (b['editable_count'] or 0)<(a['editable_count'] or 0):
@@ -207,6 +219,53 @@ def ensure_baseline(job):
     step('office',lambda c,d:svc.validate_office(state,c,d))
     current = state.read()
     score = assess(job,current)
+    # Trial against an isolated state. Only adopt a new page after the real
+    # compiled candidate removes an observed finding and keeps prior edits.
+    for page_score in score['pages']:
+        page = page_score['page']
+        retained = [r for r in page_score['plate_audit']['rows'] if r['status'] == 'retained']
+        ids = sorted({oid for r in retained for oid in r['mark_ids']})
+        if not ids or not score['verified']:
+            continue
+        def retry_plate(c, d):
+            trial = deepcopy(c)
+            (d/'stage').mkdir(parents=True,exist_ok=True)
+            attempt = svc.batch_reconstruct_page(state, trial, d/'stage', page=page,
+                object_ids=ids[:30], include_assets=False, include_containers=False,
+                include_region_crops=False, verify_office=True)
+            if attempt['status'] != 'VALIDATED':
+                return {'status':attempt['status']}
+            svc.commit_region(state, trial, d/'commit', candidate_id=attempt['candidate_id'])
+            svc.compose_delivery(state, trial, d/'compose')
+            svc.validate_office(state, trial, d/'office')
+            measured = assess(job, trial)
+            audit = measured['pages'][page-1]['plate_audit']
+            recovered = {r['ocr_id'] for r in audit['rows'] if r['status'] == 'native'}
+            recovered.intersection_update(r['ocr_id'] for r in retained)
+            if not recovered or regressions(score, measured):
+                return {'status':'KEPT_BASELINE'}
+            c.update(trial)
+            return {'status':'ADOPTED','recovered':sorted(recovered)}
+        def safe_retry(c, d):
+            try:
+                return retry_plate(c, d)
+            except (ValueError, RuntimeError, OSError) as exc:
+                return {'status':'KEPT_BASELINE','error_type':type(exc).__name__}
+        outcome = step(f'plate-text-retry-{page}', safe_retry)
+        current = state.read()
+        if outcome['status'] == 'ADOPTED':
+            score = assess(job,current)
+    def expose_plate_findings(c, d):
+        for page_score in score['pages']:
+            page = page_score['page']
+            k = str(page)
+            issues = {oid:r['status'] for r in page_score['plate_audit']['rows']
+                      if r['status'] in ('residual','retained') for oid in r['mark_ids']}
+            c.setdefault('plate_issues', {})[k] = issues
+            c['questions'][k] = questions(state, c, page, c['regional_failures'][k], d)
+        return {'pages':len(score['pages'])}
+    step('background-questions', expose_plate_findings)
+    current = state.read()
     shutil.copyfile(current['composition']['artifacts']['pptx'],root/'baseline.pptx')
     write(root/'state.json',current)
     write(root/'scorecard.json',score)

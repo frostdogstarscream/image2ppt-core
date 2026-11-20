@@ -104,7 +104,9 @@ def bind_plan(fields, inventory_path, graph, source_path):
             if route == 'preserve':
                 row['target_ids'].extend(
                     obj.id for obj in graph.asset.objects if intersection(obj.bbox, box) > 0
-                )
+                 )
+        elif route == 'asset' and mark['label'] == 'connected_diagram':
+            row['diagram_members'] = mark['member_ids']
         elif route == 'asset':
             if mark['label'] == 'image':
                 row['picture_frame'] = picture_frame(source, box)
