@@ -17,6 +17,25 @@ from product.runtime.service import RuntimeService
 from product.runtime.state import RuntimeState
 
 
+def test_office_cache_uses_worker_that_actually_checked(job, monkeypatch):
+    state = RuntimeState(job)
+    deck, ir = job/'sample.pptx', job/'sample.json'
+    deck.write_bytes(b'test packet')
+    ir.write_text('{}')
+    monkeypatch.setenv('IMAGE2PPT_OFFICE_MODE','remote')
+    calls = []
+    def submit(*args):
+        calls.append(True)
+        return {'status':'PASS','worker_binding':'worker-b'}
+    monkeypatch.setattr('product.runtime.office_bridge.submit',submit)
+    binding = job.parent/'office-worker-binding.json'
+    write(binding, {'binding':'worker-a'})
+    RuntimeService.office_check(state,deck,[ir],job/'one')
+    write(binding, {'binding':'worker-b'})
+    assert RuntimeService.office_check(state,deck,[ir],job/'two')['cache_hit']
+    assert len(calls) == 1
+
+
 @pytest.fixture
 def job(tmp_path,monkeypatch):
     job = tmp_path/uuid4().hex
@@ -199,3 +218,8 @@ def test_numbered_actions_reject_whole_page_and_unowned_marks(tmp_path):
     for patch in ({'mark':2},{'text':'rewritten'},{'bbox':[0,0,1,1]}):
         with pytest.raises(ValueError):
             normalize_arguments(state,c,'plan_marked_page',{'page':1,'fields':[{**field,**patch}]})
+    c['repair_rounds'] = {'1':[{'object_ids':['b'],'progress':False}]}
+    assert batch(block=1)['object_ids'] == ['a']
+    c['repair_rounds']['1'].append({'object_ids':['a'],'progress':False})
+    with pytest.raises(ValueError, match='local repair limit'):
+        batch(block=1)

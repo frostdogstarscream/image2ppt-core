@@ -150,10 +150,15 @@ def normalize_arguments(state,current,tool,arguments):
     if tool=='batch_reconstruct_page':
         page = str(args['page'])
         rounds = current.setdefault('repair_rounds', {}).get(page, [])
-        if len(rounds) >= 2 or (rounds and not rounds[-1]['progress']):
-            raise ValueError('local repair limit reached; review the current delivery')
         ids = scoped_ids(state,current,args['page'],args.get('block'),args.get('object_ids'))
-        return {'page':args['page'],'object_ids':ids,'verify_office':True,'include_region_crops':False}
+        available = []
+        for identifier in ids:
+            attempts = [r for r in rounds if identifier in r.get('object_ids', ids)]
+            if len(attempts) < 2 and (not attempts or attempts[-1]['progress']):
+                available.append(identifier)
+        if not available:
+            raise ValueError('local repair limit reached for the selected objects')
+        return {'page':args['page'],'object_ids':available,'verify_office':True,'include_region_crops':False}
     if tool=='plan_marked_page':
         page = args['page']
         fields = args['fields']

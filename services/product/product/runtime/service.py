@@ -149,7 +149,8 @@ class RuntimeService(ExplorationTools):
             if tool=='batch_reconstruct_page':
                 k = str(args['page'])
                 old = current.setdefault('regional_failures',{}).get(k,[])
-                current.setdefault('repair_rounds', {}).setdefault(k, []).append({'progress': False, 'candidate_id': outcome.get('candidate_id')})
+                current.setdefault('repair_rounds', {}).setdefault(k, []).append({
+                    'progress': False, 'candidate_id': outcome.get('candidate_id'), 'object_ids':args['object_ids']})
                 touched = set(args['object_ids'])
                 current['regional_failures'][k] = [r for r in old if r['object_id'] not in touched]+outcome.get('failed_regions',[])
             if tool=='commit_candidate' and outcome.get('status')=='COMMITTED':
@@ -786,13 +787,22 @@ class RuntimeService(ExplorationTools):
         budget=AdaptiveBudget(Store(state.job/'state'),request.get('adaptive_budget'))
         budget.reserve('office_validations',identity)
         write(receipt,{'identity':identity,'status':'UNKNOWN','operation':str(directory)})
+        provisional = receipt
         if os.environ.get('IMAGE2PPT_OFFICE_MODE', 'local') == 'remote':
             from .office_bridge import submit
             result=submit(state.job, pptx, irs, directory)
+            actual = result.get('worker_binding')
+            if actual and identity['worker'].get('binding') != actual:
+                # A different worker may claim the ticket after the last poll.
+                # Bind the completed receipt to the worker that did the check.
+                identity = {**identity, 'worker':{'binding':actual}}
+                receipt = state.root/'office-cache'/(key(identity)+'.json')
         else:
             from .office import check_local
             result=check_local(pptx, irs, directory)
         write(receipt,{'identity':identity,'operation':str(directory),'result':result})
+        if receipt != provisional:
+            provisional.unlink(missing_ok=True)
         return result
 
     def run_parallel_pipeline(self, state, current, directory):

@@ -97,13 +97,17 @@ def measure(app, source, deck, out, key, case, neighbors):
     if key == 'diagram':
         dest = region(np.asarray(Image.open(out/'diagram-destination.png').convert('RGB')),case[2])
         footprint = (dest.min(axis=2) < 245).astype('uint8')
+        old &= blue(dest.astype('int16'))
+        retained = float((blue(patch)&old).sum()/max(1,old.sum()))
         edge = cv2.morphologyEx(footprint,cv2.MORPH_GRADIENT,np.ones((5,5),np.uint8)).astype(bool)
         # Compare normal-scale local contrast where the moved object's outline ran.
         gray = cv2.cvtColor(patch.astype('float32'),cv2.COLOR_RGB2GRAY)
         contrast = cv2.dilate(gray,None,iterations=2)-cv2.erode(gray,None,iterations=2)
         contour_residual = float((contrast[edge]>6).mean()) if edge.any() else 1.0
-        saved = saved and origin_clear and contour_residual < .10
+        saved = saved and origin_clear
     passed = saved and retained<.06 and adjacent<.02 and old.any()
+    if contour_residual is not None:
+        passed = passed and contour_residual < .10
     return {'status':'PASS_AUTOMATED' if passed else 'REVIEW_REQUIRED','saved_reopened':bool(saved),
             'remaining_blue_fraction':retained,'neighbor_change':adjacent,'object':name,
             'outline_residual_fraction':contour_residual,'normal_size_review':'UNKNOWN'}

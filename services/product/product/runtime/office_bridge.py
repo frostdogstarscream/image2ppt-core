@@ -134,13 +134,29 @@ def execute_ticket(client,ticket,run,binding):
     response.raise_for_status()
 
 
-def worker(url, token, root, once=False):
+def worker_binding():
     from ..fonts import font_manifest
     from ..parallel_store import key
+    import platform
+    import winreg
+    path_key = r'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\POWERPNT.EXE'
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path_key) as entry:
+            executable = winreg.QueryValueEx(entry, '')[0].strip('"')
+        engine = digest(Path(executable))
+    except OSError:
+        # Without a verifiable Office installation, reuse only within this worker.
+        engine = secrets.token_hex(16)
+    product = Path(__file__).resolve().parents[1]
+    probes = [product/name for name in ('parallel_office.py','parallel_edit_probe.py','parallel_residual_gate.py')]
+    return key({'fonts':font_manifest([]),'host':platform.node(),'os':platform.version(),'powerpoint':engine,
+                'checks':[digest(p) for p in [Path(__file__),Path(__file__).with_name('office.py'),*probes]]})
+
+
+def worker(url, token, root, once=False):
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    binding=key({'fonts':font_manifest([]),'worker_code':digest(__file__),
-                 'office_code':digest(Path(__file__).with_name('office.py')),'process':secrets.token_hex(16)})
+    binding=worker_binding()
     with httpx.Client(base_url=url, headers={'Authorization': 'Bearer '+token,
             'X-Image2PPT-Worker-Binding':binding}, timeout=1800,trust_env=False) as client:
         while True:
