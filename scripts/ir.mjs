@@ -40,9 +40,10 @@ export function validateIR(ir) {
     expect(IR_NODE_TYPES.includes(node?.type), `${node?.id} 不支持的节点类型 ${node?.type}。`);
     const common='id type bbox z evidence_ids';
     const byType={text:'text font bold color align wrap line_spacing_pt runs paragraphs text_override_reason source_text_bbox insets vertical_anchor',
-      shape:'geometry fill line corner_radius_px fill_gradient',image:'asset_id',
-      table:'rows font column_tracks header_row banded_rows row_heights merges cell_styles',
-      chart:'chart_type title font categories series has_legend legend_position'};
+      shape:'geometry fill fill_opacity line corner_radius_px fill_gradient shadow custom_paths',
+      image:'asset_id corner_radius_px clip_geometry crop',
+      table:'rows font column_tracks header_row banded_rows row_heights merges cell_styles borders',
+      chart:'chart_type title font categories series has_legend legend_position show_data_labels value_format bar_direction bar_grouping'};
     fields(node,common+' '+(byType[node?.type]||''),'node');
     if(node.type==='text') {
       fields(node.font,'latin ea size_pt','font');
@@ -84,12 +85,13 @@ export function validateIR(ir) {
         expect(node.paragraphs.map(p=>p.text).join('\n')===node.text,`${node.id} paragraphs 与 text 不一致。`);
       }
     }
-    if(node.line!==undefined) fields(node.line,'color width_pt','line');
+    if(node.line!==undefined) fields(node.line,'color width_pt opacity dash head_end tail_end','line');
     if(node.fill_gradient!==undefined) {
       fields(node.fill_gradient,'angle_deg stops','fill_gradient');
       expect(array(node.fill_gradient.stops),'gradient.stops 必须为数组。');
-      for(const stop of node.fill_gradient.stops) fields(stop,'offset color','gradient.stop');
+      for(const stop of node.fill_gradient.stops) fields(stop,'offset color opacity','gradient.stop');
     }
+    if(node.shadow!==undefined) fields(node.shadow,'color opacity blur_px offset_x_px offset_y_px','shadow');
   }
   expect(ir.nodes.length > 0 && ir.nodes.length <= 500, '页面需要 1—500 个节点；准备模板不能直接交付。');
   expect(ir.evidence.length > 0, '必须建立源内容清单。');
@@ -161,13 +163,52 @@ export function validateIR(ir) {
     } else if (node.type==='shape') {
       expect(IR_SHAPE_GEOMETRIES.includes(node.geometry), `${node.id} 形状不支持。`);
       expect(node.fill==='none' || color(node.fill), `${node.id} 填充无效。`);
-      if (node.line) expect(color(node.line.color) && Number.isFinite(node.line.width_pt) && node.line.width_pt>=0, `${node.id} 线条无效。`);
+      if (node.fill_opacity!==undefined) {
+        expect(node.fill!=='none', `${node.id} fill 为 none 时不得设置 fill_opacity。`);
+        expect(Number.isFinite(node.fill_opacity) && node.fill_opacity>=0 && node.fill_opacity<=1, `${node.id} fill_opacity 无效。`);
+      }
+      if (node.line) {
+        expect(color(node.line.color) && Number.isFinite(node.line.width_pt) && node.line.width_pt>=0, `${node.id} 线条无效。`);
+        if (node.line.opacity!==undefined) expect(Number.isFinite(node.line.opacity) && node.line.opacity>=0 && node.line.opacity<=1, `${node.id} line.opacity 无效。`);
+        if (node.line.dash!==undefined) expect(['solid','dash','dot'].includes(node.line.dash), `${node.id} line.dash 无效。`);
+        if (node.line.head_end!==undefined) expect(['none','triangle','stealth','oval'].includes(node.line.head_end), `${node.id} line.head_end 无效。`);
+        if (node.line.tail_end!==undefined) expect(['none','triangle','stealth','oval'].includes(node.line.tail_end), `${node.id} line.tail_end 无效。`);
+      }
       if (node.corner_radius_px!==undefined) expect(Number.isFinite(node.corner_radius_px) && node.corner_radius_px>=0 && node.corner_radius_px<=Math.min(node.bbox[2],node.bbox[3])/2, `${node.id} 圆角半径无效。`);
       if (node.fill_gradient) {
         const g=node.fill_gradient;
         expect(Number.isFinite(g.angle_deg) && array(g.stops) && g.stops.length>=2 && g.stops.length<=8, `${node.id} 渐变无效。`);
-        expect(g.stops.every(s=>Number.isFinite(s.offset) && s.offset>=0 && s.offset<=100000 && color(s.color)), `${node.id} 渐变色标无效。`);
+        expect(g.stops.every(s=>Number.isFinite(s.offset) && s.offset>=0 && s.offset<=100000 && color(s.color) && (s.opacity===undefined || (Number.isFinite(s.opacity) && s.opacity>=0 && s.opacity<=1))), `${node.id} 渐变色标无效。`);
         expect(g.stops[0].offset===0 && g.stops.at(-1).offset===100000 && g.stops.every((s,i)=>!i || s.offset>g.stops[i-1].offset), `${node.id} 渐变色标顺序无效。`);
+      }
+      if (node.shadow!==undefined) {
+        const s=node.shadow;
+        expect(color(s.color) && Number.isFinite(s.opacity) && s.opacity>=0 && s.opacity<=1
+          && Number.isFinite(s.blur_px) && s.blur_px>=0 && s.blur_px<=120
+          && Number.isFinite(s.offset_x_px) && Math.abs(s.offset_x_px)<=120
+          && Number.isFinite(s.offset_y_px) && Math.abs(s.offset_y_px)<=120, `${node.id} shadow 无效。`);
+      }
+      if (node.geometry==='custom') {
+        expect(array(node.custom_paths) && node.custom_paths.length>=1 && node.custom_paths.length<=64, `${node.id} custom 形状需要 1—64 条 custom_paths。`);
+        for (const p of node.custom_paths) {
+          fields(p,'width height commands','custom_path');
+          expect(Number.isFinite(p.width) && p.width>0 && p.width<=40000 && Number.isFinite(p.height) && p.height>0 && p.height<=40000, `${node.id} custom_path 尺寸无效。`);
+          expect(array(p.commands) && p.commands.length>=2 && p.commands.length<=2000, `${node.id} custom_path.commands 无效。`);
+          for (const cmd of p.commands) {
+            expect(cmd && typeof cmd==='object' && !array(cmd) && ['moveTo','lineTo','cubicBezierTo','close'].includes(cmd.type), `${node.id} custom_path command 类型无效。`);
+            if (cmd.type==='close') {
+              fields(cmd,'type','custom_command');
+            } else if (cmd.type==='cubicBezierTo') {
+              fields(cmd,'type x1 y1 x2 y2 x y','custom_command');
+              expect(['x1','y1','x2','y2','x','y'].every(k=>Number.isFinite(cmd[k])), `${node.id} cubicBezierTo 坐标无效。`);
+            } else {
+              fields(cmd,'type x y','custom_command');
+              expect(Number.isFinite(cmd.x) && Number.isFinite(cmd.y), `${node.id} ${cmd.type} 坐标无效。`);
+            }
+          }
+        }
+      } else {
+        expect(node.custom_paths===undefined, `${node.id} 仅 geometry="custom" 可声明 custom_paths。`);
       }
     } else if (node.type==='table') {
       // Bounds mirror native_table_arithmetic_gate.py so a hand-authored IR can
@@ -224,6 +265,10 @@ export function validateIR(ir) {
           if(s.bold!==undefined) expect(typeof s.bold==='boolean', `${node.id} cell bold 无效。`);
         }
       }
+      if (node.borders!==undefined) {
+        fields(node.borders,'color width_pt','table.borders');
+        expect(color(node.borders.color) && Number.isFinite(node.borders.width_pt) && node.borders.width_pt>0 && node.borders.width_pt<=12, `${node.id} borders 无效。`);
+      }
     } else if (node.type==='chart') {
       expect(IR_CHART_TYPES.includes(node.chart_type), `${node.id} 图表类型不支持。`);
       // The delivered package's title gate fails an empty title or the engine's
@@ -244,8 +289,9 @@ export function validateIR(ir) {
       let points=0;
       for (const s of node.series) {
         expect(s && typeof s==='object' && !array(s), `${node.id} series 项必须为对象。`);
-        fields(s,'name values','series');
+        fields(s,'name values color','series');
         expect(typeof s.name==='string' && s.name.trim().length>0 && s.name.length<=2000, `${node.id} series 缺少名称。`);
+        if (s.color!==undefined) expect(color(s.color), `${node.id} series.color 无效。`);
         expect(array(s.values) && s.values.length===node.categories.length, `${node.id} series values 长度必须等于 categories 长度。`);
         expect(s.values.every(v=>(typeof v==='number' && Number.isFinite(v)) || v===null), `${node.id} series values 须为有限数字或 null。`);
         points+=s.values.length;
@@ -253,8 +299,17 @@ export function validateIR(ir) {
       expect(points<=100000, `${node.id} 图表数据点过多。`);
       if (node.has_legend!==undefined) expect(typeof node.has_legend==='boolean', `${node.id} has_legend 必须为 boolean。`);
       if (node.legend_position!==undefined) expect(['left','top','topRight','right','bottom'].includes(node.legend_position), `${node.id} legend_position 无效。`);
+      if (node.show_data_labels!==undefined) expect(typeof node.show_data_labels==='boolean', `${node.id} show_data_labels 必须为 boolean。`);
+      if (node.value_format!==undefined) expect(typeof node.value_format==='string' && node.value_format.trim().length>0 && node.value_format.length<=64, `${node.id} value_format 无效。`);
+      if (node.bar_direction!==undefined) expect(['column','bar'].includes(node.bar_direction), `${node.id} bar_direction 无效。`);
+      if (node.bar_grouping!==undefined) expect(['clustered','stacked','percentStacked'].includes(node.bar_grouping), `${node.id} bar_grouping 无效。`);
     } else if (node.type==='image') {
       useAsset(node.asset_id,node.id);
+      if (node.corner_radius_px!==undefined) expect(Number.isFinite(node.corner_radius_px) && node.corner_radius_px>=0 && node.corner_radius_px<=Math.min(node.bbox[2],node.bbox[3])/2, `${node.id} 圆角半径无效。`);
+      if (node.clip_geometry!==undefined) expect(['rect','roundRect','ellipse'].includes(node.clip_geometry), `${node.id} clip_geometry 无效。`);
+      if (node.crop!==undefined) {
+        expect(array(node.crop) && node.crop.length===4 && node.crop.every(v=>Number.isFinite(v) && v>=0 && v<1) && node.crop[0]+node.crop[2]<0.98 && node.crop[1]+node.crop[3]<0.98, `${node.id} crop 无效。`);
+      }
     }
   }
   expect(ir.nodes.filter(n=>n.type==='table').length<=100, '一页最多 100 个表格。');

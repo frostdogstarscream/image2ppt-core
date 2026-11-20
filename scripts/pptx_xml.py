@@ -5,6 +5,7 @@ audits its native objects using the standard library.
 """
 import argparse
 import json
+import math
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
@@ -74,10 +75,139 @@ def adapt_slide(xml, ir):
         if nv is not None:
             objects[nv.get("name")] = item
     ids = [int(e.get("id", "0")) for e in xml.findall(".//p:cNvPr", NS)]
+    sw, sh = ir["canvas"]["source_px"]
+    tw, th = ir["canvas"]["target_px"]
+    scale = tw / sw
+
+    def _set_alpha(clr_el, opacity):
+        if clr_el is None or opacity is None:
+            return
+        val = max(0, min(100000, round(opacity * 100000)))
+        if val >= 100000:
+            return
+        for old_a in list(clr_el.findall("a:alpha", NS)):
+            clr_el.remove(old_a)
+        ET.SubElement(clr_el, q("a:alpha"), {"val": str(val)})
+
     for node in ir["nodes"]:
         item = objects.get(node["id"])
         if item is None:
             raise ValueError("导出对象没有保留节点名称: " + node["id"])
+        if node["type"] == "shape":
+            sp_pr = item.find("p:spPr", NS)
+            if sp_pr is not None:
+                if node.get("geometry") == "custom" and node.get("custom_paths"):
+                    prst = sp_pr.find("a:prstGeom", NS)
+                    if prst is not None:
+                        p_idx = list(sp_pr).index(prst)
+                        sp_pr.remove(prst)
+                        cg = ET.Element(q("a:custGeom"))
+                        for tag_name in ("a:avLst", "a:gdLst", "a:ahLst", "a:cxnLst"):
+                            ET.SubElement(cg, q(tag_name))
+                        ET.SubElement(cg, q("a:rect"), {"l": "l", "t": "t", "r": "r", "b": "b"})
+                        path_lst = ET.SubElement(cg, q("a:pathLst"))
+                        for p in node["custom_paths"]:
+                            pa = ET.SubElement(path_lst, q("a:path"), {
+                                "w": str(max(1, round(p["width"] * 100))),
+                                "h": str(max(1, round(p["height"] * 100))),
+                            })
+                            for cmd in p["commands"]:
+                                ctype = cmd["type"]
+                                if ctype == "close":
+                                    ET.SubElement(pa, q("a:close"))
+                                elif ctype == "cubicBezierTo":
+                                    cb = ET.SubElement(pa, q("a:cubicBezTo"))
+                                    for kx, ky in (("x1", "y1"), ("x2", "y2"), ("x", "y")):
+                                        ET.SubElement(cb, q("a:pt"), {
+                                            "x": str(round(cmd[kx] * 100)),
+                                            "y": str(round(cmd[ky] * 100)),
+                                        })
+                                else:
+                                    tag = "a:moveTo" if ctype == "moveTo" else "a:lnTo"
+                                    el = ET.SubElement(pa, q(tag))
+                                    ET.SubElement(el, q("a:pt"), {
+                                        "x": str(round(cmd["x"] * 100)),
+                                        "y": str(round(cmd["y"] * 100)),
+                                    })
+                        sp_pr.insert(p_idx, cg)
+                if node.get("fill_opacity") is not None:
+                    _set_alpha(sp_pr.find("a:solidFill/a:srgbClr", NS), node["fill_opacity"])
+                if node.get("fill_gradient"):
+                    gs_list = sp_pr.findall("a:gradFill/a:gsLst/a:gs", NS)
+                    for gs_spec, gs_el in zip(node["fill_gradient"]["stops"], gs_list):
+                        _set_alpha(gs_el.find("a:srgbClr", NS), gs_spec.get("opacity"))
+                line_spec = node.get("line")
+                ln_el = sp_pr.find("a:ln", NS)
+                if line_spec and ln_el is not None:
+                    _set_alpha(ln_el.find("a:solidFill/a:srgbClr", NS), line_spec.get("opacity"))
+                    for end_key, end_tag in (("head_end", "a:headEnd"), ("tail_end", "a:tailEnd")):
+                        for old_end in list(ln_el.findall(end_tag, NS)):
+                            ln_el.remove(old_end)
+                    insert_pos = len(list(ln_el))
+                    for idx_c, ch in enumerate(list(ln_el)):
+                        if ch.tag == q("a:extLst"):
+                            insert_pos = idx_c
+                            break
+                    for end_key, end_tag in (("head_end", "a:headEnd"), ("tail_end", "a:tailEnd")):
+                        end_type = line_spec.get(end_key)
+                        if end_type and end_type != "none":
+                            ln_el.insert(insert_pos, ET.Element(q(end_tag), {"type": end_type, "w": "med", "len": "med"}))
+                            insert_pos += 1
+                sh_spec = node.get("shadow")
+                if sh_spec:
+                    for old_eff in list(sp_pr.findall("a:effectLst", NS)):
+                        sp_pr.remove(old_eff)
+                    blur_emu = max(0, round(sh_spec["blur_px"] * scale * 9525))
+                    dx = sh_spec["offset_x_px"] * scale
+                    dy = sh_spec["offset_y_px"] * scale
+                    dist_emu = max(0, round(math.hypot(dx, dy) * 9525))
+                    dir_deg = math.degrees(math.atan2(dy, dx)) % 360.0 if (dx or dy) else 90.0
+                    dir_60k = round(dir_deg * 60000) % 21600000
+                    eff = ET.Element(q("a:effectLst"))
+                    outer = ET.SubElement(eff, q("a:outerShdw"), {
+                        "blurRad": str(blur_emu),
+                        "dist": str(dist_emu),
+                        "dir": str(dir_60k),
+                        "algn": "tl",
+                        "rotWithShape": "0",
+                    })
+                    srgb = ET.SubElement(outer, q("a:srgbClr"), {"val": sh_spec["color"]})
+                    _set_alpha(srgb, sh_spec["opacity"])
+                    insert_at = len(list(sp_pr))
+                    for idx_c, ch in enumerate(list(sp_pr)):
+                        if ch.tag in (q("a:scene3d"), q("a:sp3d"), q("a:extLst")):
+                            insert_at = idx_c
+                            break
+                    sp_pr.insert(insert_at, eff)
+            continue
+        if node["type"] == "image":
+            clip = node.get("clip_geometry")
+            cr = node.get("corner_radius_px")
+            if clip in ("ellipse", "roundRect") or (cr is not None and cr > 0):
+                sp_pr = item.find("p:spPr", NS)
+                prst = sp_pr.find("a:prstGeom", NS) if sp_pr is not None else None
+                if prst is not None:
+                    for ch in list(prst):
+                        prst.remove(ch)
+                    if clip == "ellipse":
+                        prst.set("prst", "ellipse")
+                        ET.SubElement(prst, q("a:avLst"))
+                    else:
+                        prst.set("prst", "roundRect")
+                        min_side = max(1.0, min(float(node["bbox"][2]), float(node["bbox"][3])))
+                        radius = float(cr) if cr is not None else min_side * 0.08
+                        adj = min(50000, max(0, round(radius / min_side * 100000)))
+                        av = ET.SubElement(prst, q("a:avLst"))
+                        ET.SubElement(av, q("a:gd"), {"name": "adj", "fmla": f"val {adj}"})
+            continue
+        if node["type"] == "table":
+            for rpr in item.findall(".//a:rPr", NS) + item.findall(".//a:defRPr", NS) + item.findall(".//a:endParaRPr", NS):
+                for key, field in [("a:latin", "latin"), ("a:ea", "ea")]:
+                    font = rpr.find(key, NS)
+                    if font is None:
+                        font = ET.SubElement(rpr, q(key))
+                    font.set("typeface", node["font"][field])
+            continue
         if node["type"] == "text":
             # Artifact Tool currently omits zero insets from bodyPr. OOXML
             # defaults would reintroduce 9.6px horizontal / 4.8px vertical
@@ -190,7 +320,7 @@ def inspect(file):
         for name in slides:
             root = ET.fromstring(package.read(name))
             result.append({"part": name, "text_nodes": len(root.findall(".//p:sp/p:txBody", NS)),
-                           "shapes": len(root.findall(".//p:sp", NS)), "images": len(root.findall(".//p:pic", NS)),
+                           "shapes": len(root.findall(".//p:sp", NS)) + len(root.findall(".//p:cxnSp", NS)), "images": len(root.findall(".//p:pic", NS)),
                            "groups": len(root.findall(".//p:grpSp", NS)),
                            "text": [t.text or "" for t in root.findall(".//a:t", NS)],
                            "names": [e.get("name") for e in root.findall(".//p:cNvPr", NS)]})

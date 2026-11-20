@@ -23,16 +23,17 @@ export async function buildSlide(presentation, {ir, info}, pageLabel) {
   const slide=presentation.slides.add();
   slide.background.fill='#'+ir.background.color;
   const position=box=>({left:box[0]/w*tw,top:box[1]/h*th,width:box[2]/w*tw,height:box[3]/h*th});
-  async function addImage(id,asset,bbox) {
+  async function addImage(id,asset,bbox,opts={}) {
     const bytes=await fs.readFile(asset._file);
+    const crop=opts.crop?{left:opts.crop[0],top:opts.crop[1],right:opts.crop[2],bottom:opts.crop[3]}:undefined;
     const image=slide.images.add({name:id,blob:bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength),
       contentType:asset._file.toLowerCase().endsWith('.png')?'image/png':'image/jpeg',
-      alt:id,fit:'contain',position:position(bbox)});
+      alt:id,fit:crop?'cover':'contain',...(crop?{crop}:{}),position:position(bbox)});
     image.name=id;
   }
   if (ir.background.asset_id) await addImage('background-image',info.assets.get(ir.background.asset_id),[0,0,w,h]);
   for (const node of info.ordered) {
-    if (node.type==='image') { await addImage(node.id,info.assets.get(node.asset_id),node.bbox); continue; }
+    if (node.type==='image') { await addImage(node.id,info.assets.get(node.asset_id),node.bbox,{crop:node.crop}); continue; }
     if (node.type==='table') {
       // The name must be set on the handle: passing `name` in the add options is
       // silently ignored, and the OOXML adapter looks objects up by it.
@@ -49,7 +50,8 @@ export async function buildSlide(presentation, {ir, info}, pageLabel) {
       // The cell style key is `typeface`; passing latin/ea here is silently
       // ignored, and `fontSize` is in pixels.
       table.cells.block({row:0,column:0,rowCount:node.rows.length,columnCount:node.rows[0].length})
-        .assign({textStyle:{typeface:node.font.ea,fontSize:node.font.size_pt*96/72}});
+        .assign({textStyle:{typeface:node.font.ea,fontSize:node.font.size_pt*96/72},
+          ...(node.borders?{borders:{all:{style:'solid',color:'#'+node.borders.color,width:node.borders.width_pt*96/72}}}:{})});
       if(node.row_heights) node.row_heights.forEach((height,index)=>{table.rows[index].height=height;});
       for(const m of node.merges||[]) table.merge({startRow:m.row,endRow:m.row+m.row_span-1,startColumn:m.column,endColumn:m.column+m.column_span-1});
       for(const s of node.cell_styles||[]) table.cells.block({row:s.row,column:s.column,rowCount:1,columnCount:1})
@@ -63,21 +65,29 @@ export async function buildSlide(presentation, {ir, info}, pageLabel) {
       const chart=slide.charts.add(node.chart_type,{position:position(node.bbox),
         ...(node.title!==undefined?{title:node.title,titleTextStyle:typeface}:{}),
         categories:node.categories,
-        series:node.series.map(s=>({name:s.name,values:s.values})),
-        xAxis:{textStyle:typeface},yAxis:{textStyle:typeface},
+        series:node.series.map(s=>({name:s.name,values:s.values,...(s.color?{fill:'#'+s.color}:{})})),
+        xAxis:{textStyle:typeface},
+        yAxis:{textStyle:typeface,...(node.value_format?{numberFormatCode:node.value_format}:{})},
+        ...(node.show_data_labels!==undefined?{showDataLabels:node.show_data_labels}:{}),
+        ...((node.bar_direction||node.bar_grouping)?{barOptions:{
+          ...(node.bar_direction?{direction:node.bar_direction}:{}),
+          ...(node.bar_grouping?{grouping:node.bar_grouping}:{}),
+        }}:{}),
         ...(node.has_legend!==undefined?{hasLegend:node.has_legend}:{}),
         ...(node.legend_position?{legend:{position:node.legend_position,textStyle:typeface}}
           :node.has_legend?{legend:{textStyle:typeface}}:{})});
       chart.name=node.id;
       continue;
     }
-    const shape=slide.shapes.add({geometry:node.type==='text'?'textbox':node.geometry,name:node.id,position:position(node.bbox),
+    const pos=position(node.bbox);
+    const geom=(node.type==='text'?'textbox':(node.geometry==='custom'?'rect':node.geometry));
+    const shape=slide.shapes.add({geometry:geom,name:node.id,position:pos,
       fill:node.type==='text' || node.fill==='none' ? 'none' : node.fill_gradient ? {
         type:'gradient',gradientKind:'linear',angleDeg:node.fill_gradient.angle_deg,
         stops:node.fill_gradient.stops.map(s=>({offset:s.offset,color:'#'+s.color}))
       } : '#'+node.fill,
       ...(node.corner_radius_px!==undefined?{borderRadius:node.corner_radius_px/w*tw}:{}),
-      line:node.line?{style:'solid',fill:'#'+node.line.color,width:node.line.width_pt*96/72}:{fill:'none',width:0}});
+      line:node.line?{style:node.line.dash||'solid',fill:'#'+node.line.color,width:node.line.width_pt*96/72}:{fill:'none',width:0}});
     if (node.type==='text') {
       shape.text=node.runs ? [node.runs.map(r=>({run:r.text,style:{bold:r.bold??node.bold??false,color:'#'+(r.color||node.color)}}))] : node.text;
       shape.text.style={typeface:node.font.ea,fontSize:node.font.size_pt*96/72,bold:node.bold??false,

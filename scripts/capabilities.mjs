@@ -40,10 +40,12 @@ export const IR_NODE_TYPES = Object.freeze([
 // it can never become editable.
 export const IR_SHAPE_GEOMETRIES = Object.freeze([
   'rect', 'roundRect', 'ellipse', 'line',
-  // ribbons and connectors
-  'chevron', 'pentagon', 'rightArrow', 'leftArrow',
-  // common slide presets
+  // ribbons, arrows, and connectors
+  'chevron', 'pentagon', 'rightArrow', 'leftArrow', 'upArrow', 'downArrow',
+  'straightConnector1', 'bentConnector3', 'curvedConnector3',
+  // common slide presets and custom vector paths
   'trapezoid', 'parallelogram', 'hexagon', 'diamond', 'triangle',
+  'custom',
 ]);
 
 // Chart types the IR exposes. The engine carries many more; these are the ones
@@ -99,10 +101,20 @@ export function probeEngine(rt) {
   // build dropped is reported by doctor instead of surfacing as a failed
   // compile halfway through authoring a page.
   report.geometry_count = IR_SHAPE_GEOMETRIES.length;
-  report.geometry_unavailable = IR_SHAPE_GEOMETRIES.filter(geometry => attempt(() => slide.shapes.add({
-    geometry, name: 'probe_' + geometry, position: { left: 0, top: 0, width: 80, height: 40 },
-    fill: '#4477AA', line: { fill: 'none', width: 0 },
-  })) !== true);
+  report.geometry_unavailable = IR_SHAPE_GEOMETRIES.filter(geometry => attempt(() => {
+    const isLine = geometry === 'line' || geometry.endsWith('Connector1') || geometry.endsWith('Connector3');
+    return slide.shapes.add({
+      geometry, name: 'probe_' + geometry, position: { left: 0, top: 0, width: 80, height: 40 },
+      fill: isLine ? 'none' : '#4477AA',
+      line: isLine ? { style: 'solid', fill: '#4477AA', width: 2 } : { fill: 'none', width: 0 },
+      ...(geometry === 'custom' ? {
+        customPaths: [{
+          width: 80, height: 40,
+          commands: [{ type: 'moveTo', x: 0, y: 40 }, { type: 'lineTo', x: 40, y: 0 }, { type: 'lineTo', x: 80, y: 40 }, { type: 'close' }],
+        }],
+      } : {}),
+    });
+  }) !== true);
   report.tables = attempt(() => slide.tables.add({ rows: 1, columns: 1, left: 0, top: 0, width: 120, height: 40, values: [['x']] }));
   report.charts = attempt(() => slide.charts.add('bar', {
     position: { left: 0, top: 0, width: 240, height: 180 },

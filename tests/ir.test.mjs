@@ -279,3 +279,38 @@ test('the skill asks for per-sub-region decomposition, not whole-region crops',a
   }
 });
 
+test('accepts P1 extended shape, image, table, and chart properties and rejects invalid values',()=>{
+  const x=fixture();
+  x.assets=[{id:'pic',path:'pic.png',sha256:'1'.repeat(64),purpose:'module',contains_evidence_ids:['ev-pic']}];
+  x.evidence.push(
+    {id:'ev-sh',kind:'shape',bbox:[40,120,200,100]},
+    {id:'ev-ln',kind:'shape',bbox:[40,240,200,10]},
+    {id:'ev-cu',kind:'shape',bbox:[280,120,80,80]},
+    {id:'ev-pic',kind:'image',bbox:[400,120,160,120]},
+    {id:'ev-tbl2',kind:'shape',bbox:[40,280,400,120]},
+    {id:'ev-ch2',kind:'shape',bbox:[480,280,400,180]},
+  );
+  x.nodes.push(
+    {id:'card',type:'shape',bbox:[40,120,200,100],z:2,evidence_ids:['ev-sh'],geometry:'roundRect',fill:'FFFFFF',fill_opacity:0.9,corner_radius_px:10,line:{color:'CCDDEE',width_pt:1,opacity:0.8,dash:'solid'},shadow:{color:'112233',opacity:0.15,blur_px:8,offset_x_px:0,offset_y_px:3}},
+    {id:'conn',type:'shape',bbox:[40,240,200,10],z:3,evidence_ids:['ev-ln'],geometry:'straightConnector1',fill:'none',line:{color:'2266DD',width_pt:2,dash:'dash',head_end:'oval',tail_end:'triangle'}},
+    {id:'vec',type:'shape',bbox:[280,120,80,80],z:4,evidence_ids:['ev-cu'],geometry:'custom',fill:'2288EE',custom_paths:[{width:80,height:80,commands:[{type:'moveTo',x:0,y:80},{type:'cubicBezierTo',x1:20,y1:0,x2:60,y2:0,x:80,y:80},{type:'close'}]}]},
+    {id:'img2',type:'image',bbox:[400,120,160,120],z:5,asset_id:'pic',evidence_ids:[],corner_radius_px:14,clip_geometry:'roundRect',crop:[0.05,0.05,0.05,0.05]},
+    {id:'tbl2',type:'table',bbox:[40,280,400,120],z:6,evidence_ids:['ev-tbl2'],rows:[['项','值'],['A','10']],font:{latin:'Arial',ea:'Microsoft YaHei',size_pt:12},borders:{color:'CCCCCC',width_pt:0.75}},
+    {id:'ch2',type:'chart',bbox:[480,280,400,180],z:7,evidence_ids:['ev-ch2'],chart_type:'bar',categories:['A','B'],series:[{name:'S1',values:[0.2,0.5],color:'2266DD'}],font:{latin:'Arial',ea:'Microsoft YaHei',size_pt:12},show_data_labels:true,value_format:'0%',bar_direction:'column',bar_grouping:'clustered'},
+  );
+  assert.doesNotThrow(()=>validateIR(x));
+
+  const badAlpha=structuredClone(x); badAlpha.nodes[1].fill_opacity=1.5;
+  assert.throws(()=>validateIR(badAlpha),/fill_opacity/);
+  const badShadow=structuredClone(x); badShadow.nodes[1].shadow.blur_px=200;
+  assert.throws(()=>validateIR(badShadow),/shadow/);
+  const noPaths=structuredClone(x); delete noPaths.nodes[3].custom_paths;
+  assert.throws(()=>validateIR(noPaths),/custom_paths/);
+  const extraPaths=structuredClone(x); extraPaths.nodes[1].custom_paths=extraPaths.nodes[3].custom_paths;
+  assert.throws(()=>validateIR(extraPaths),/仅 geometry="custom"/);
+  const badCrop=structuredClone(x); badCrop.nodes[4].crop=[0.6,0,0.5,0];
+  assert.throws(()=>validateIR(badCrop),/crop/);
+  const badFmt=structuredClone(x); badFmt.nodes[6].value_format='';
+  assert.throws(()=>validateIR(badFmt),/value_format/);
+});
+
