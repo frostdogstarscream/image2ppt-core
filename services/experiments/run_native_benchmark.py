@@ -13,15 +13,17 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'services/product'))
 from product.materialize import digest, write
 from product.runtime.client import load_profile
+from product.runtime.provider import DEFAULT_GO_MODEL
 
 
-def run_group(client, group, output, *, baseline_only, steps, seconds, probe, variant, probe_selected=False):
+def run_group(client, group, output, *, baseline_only, steps, seconds, probe, variant,
+              probe_selected=False, agent_model=DEFAULT_GO_MODEL):
     output.mkdir(parents=True, exist_ok=True)
     sources = [row['sha256'] for row, _ in group]
     for row, path in group:
         if digest(path) != row['sha256']:
             raise ValueError(f'Frozen input changed: {path}')
-    params = dict(agent_model='hy4-flash-free', baseline_only=baseline_only, native_variant=variant, agent_steps=steps,
+    params = dict(agent_model=agent_model, baseline_only=baseline_only, native_variant=variant, agent_steps=steps,
                   runtime_seconds=seconds, model_calls=32, office_validations=60, tool_profile='all')
     receipt = output/'admission.json'
     if receipt.exists():
@@ -108,6 +110,8 @@ def main():
     parser.add_argument('--url')
     parser.add_argument('--output',required=True,type=Path)
     parser.add_argument('--pages',nargs='+')
+    parser.add_argument('--agent-model', default=DEFAULT_GO_MODEL,
+                        help='Request this model ID from the Agent provider configured on the host')
     parser.add_argument('--variant',choices=['combined','shape-only','joint-only'],default='combined')
     parser.add_argument('--baseline-only',action='store_true')
     parser.add_argument('--probe-office',action='store_true')
@@ -149,7 +153,7 @@ def main():
             name='-'.join(r['id'] for r,_ in part)
             records.append(run_group(client,part,args.output/name,baseline_only=args.baseline_only,
                                      steps=args.steps,seconds=args.seconds,probe=args.probe_office,variant=args.variant,
-                                     probe_selected=args.probe_selected))
+                                     probe_selected=args.probe_selected,agent_model=args.agent_model))
     write(args.output/'benchmark-summary.json',records)
     from native_results import write_table
     write_table(args.output.glob('*/comparison.json'), args.output/'page-comparison.csv')

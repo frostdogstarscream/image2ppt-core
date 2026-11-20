@@ -22,6 +22,9 @@ class MomaReviewer:
             transport_attempts=1,
         )
         self.settings.require_key()
+        if (os.environ.get('IMAGE2PPT_AGENT_PROVIDER') == 'deepseek'
+                and self.settings.api_key == os.environ.get('IMAGE2PPT_AGENT_API_KEY')):
+            raise PipelineError('MoMA reading and review require their own credential')
 
     def ask(self, system, context, images, contract):
         data = {**context, 'schema': contract.model_json_schema()}
@@ -42,6 +45,7 @@ class MomaReviewer:
             raise PipelineError('moma_http_' + status[1] if status else 'moma_response_unknown') from None
         if self.settings.api_key in reply.text or reply.finish_reason not in ('stop', None):
             raise PipelineError('invalid_moma_reply')
-        self.reported_model = reply.model
+        # Record the wire response; a configured model name is not an identity receipt.
+        self.reported_model = (reply.raw or {}).get('model')
         self.last_usage = reply.usage
         return contract.model_validate(json.loads(strip_code_fence(reply.text))).model_dump()

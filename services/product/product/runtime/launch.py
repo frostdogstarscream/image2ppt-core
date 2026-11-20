@@ -37,13 +37,17 @@ def main():
     parser.add_argument('--prompt-key', action='store_true')
     options = parser.parse_args()
     configure()
-    from .provider import DEFAULT_GO_MODEL
+    from .provider import DEFAULT_DEEPSEEK_MODEL, DEFAULT_GO_MODEL
     provider=os.environ.setdefault('IMAGE2PPT_AGENT_PROVIDER','opencode_go')
     if provider=='opencode_go':
         os.environ.setdefault('IMAGE2PPT_AGENT_MODEL',DEFAULT_GO_MODEL)
+    if provider=='deepseek':
+        os.environ.setdefault('IMAGE2PPT_AGENT_MODEL', DEFAULT_DEEPSEEK_MODEL)
+        os.environ.setdefault('IMAGE2PPT_REVIEW_PROVIDER','moma')
+        os.environ.setdefault('IMAGE2PPT_MOMA_READING_MODEL','qwen/qwen3.8-max')
     if options.prompt_key:
-        go=os.environ.get('IMAGE2PPT_AGENT_PROVIDER')=='opencode_go'
-        os.environ['IMAGE2PPT_AGENT_API_KEY' if go else 'MOMA_API_KEY'] = getpass.getpass('Agent model key (hidden): ')
+        separate = provider in ('opencode_go', 'deepseek') or os.environ.get('IMAGE2PPT_REVIEW_PROVIDER')=='moma'
+        os.environ['IMAGE2PPT_AGENT_API_KEY' if separate else 'MOMA_API_KEY'] = getpass.getpass('Agent model key (hidden): ')
     # Agent credentials are resolved per job after its baseline exists.
     private_values = [os.environ.get(name,'') for name in
                       ('MOMA_API_KEY','PLANNER_API_KEY','IMAGE2PPT_AGENT_API_KEY','OPENCODE_GO_API_KEY')]

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from .config import Settings
+from .config import DEEPSEEK_BASE_URL, Settings
 
 
 class ModelError(RuntimeError):
@@ -57,7 +57,9 @@ class MomaClient:
         }
         if self.settings.response_format == "json_object":
             payload["response_format"] = {"type": "json_object"}
-        if self.settings.disable_thinking:
+        if self.settings.base_url == DEEPSEEK_BASE_URL:
+            payload["thinking"] = {"type": "disabled" if self.settings.disable_thinking else "enabled"}
+        elif self.settings.disable_thinking:
             # Measured on the moma gateway: this removes reasoning_tokens entirely.
             payload["enable_thinking"] = False
 

@@ -102,23 +102,26 @@ def _stateless_vlm_audit(
     *, deck_path: Path, edit_panels: list[Path],
 ) -> dict:
     """Call VLM in a fresh stateless session (separate from Agent conversation) to audit visual fidelity."""
-    from ..go_provider import GoProvider
     from ..recovery.adaptive_policy import AdaptiveBudget
-    from .provider import configure_model
+    from .provider import agent_identity, model_identity, planning_actor
     import os
 
     request = json.loads((state.job / 'request.json').read_text('utf8'))
     budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'))
     from .provider import GO_MODEL_ALIASES
-    provider = os.environ.get('IMAGE2PPT_REVIEW_PROVIDER','opencode_go')
+    builder_provider, builder_model = agent_identity(request)
+    provider = os.environ.get('IMAGE2PPT_REVIEW_PROVIDER') or ('moma' if builder_provider=='deepseek' else 'opencode_go')
     requested = os.environ.get('IMAGE2PPT_REVIEW_MODEL') or ('qwen/qwen3.8-max' if provider=='moma' else 'hy4')
-    review_model = GO_MODEL_ALIASES.get(requested, requested)
-    from . import review_control
+    review_model = GO_MODEL_ALIASES.get(requested, requested) if provider == 'opencode_go' else requested
+    session_file = state.job/'runtime/session.json'
+    builder_session = json.loads(session_file.read_text('utf8'))['id'] if session_file.is_file() else None
+    from . import provider as model_provider, review_control
     audit_key = key({
-        'schema': 'StatelessVisualAudit/3', 'provider':provider, 'model': review_model,
-        'builder':[request.get('agent_inference_provider'),request.get('agent_model')],
+        'schema': 'StatelessVisualAudit/4', 'provider':provider, 'model': review_model,
+        'builder':[builder_provider,builder_model,builder_session],
         'policy': key(load_tolerance_config()),
-        'review_code': digest(__file__), 'controls':digest(review_control.__file__), 'scorecard': key(sc_summary), 'deck': digest(deck_path),
+        'review_code':digest(__file__), 'model_policy':digest(model_provider.__file__),
+        'controls':digest(review_control.__file__), 'scorecard':key(sc_summary), 'deck':digest(deck_path),
         'edit_panels': [digest(p) for p in edit_panels],
         'source_sha256': digest(source_path),
         'render_sha256': digest(render_path),
@@ -131,21 +134,19 @@ def _stateless_vlm_audit(
         return {**json.loads(cache_file.read_text('utf8')), 'status': 'CACHED'}
 
     try:
-        selected_provider = request.get('agent_inference_provider') or os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma')
-        builder_model = request.get('agent_model') or os.environ.get('IMAGE2PPT_AGENT_MODEL')
-        if provider == 'moma' and selected_provider == 'opencode_go':
+        if model_identity(review_model) == model_identity(builder_model):
+            raise ValueError('independent model required')
+        if provider == 'moma' and builder_provider in ('deepseek', 'moma', 'opencode_go'):
             from .moma_review import MomaReviewer
             reviewer = MomaReviewer(review_model)
-        elif provider == 'opencode_go' and selected_provider == 'opencode_go':
-            _, cfg = configure_model(state.job)
-            builder_model = cfg.model
-            reviewer = GoProvider(session=f'independent-audit-{uuid.uuid4().hex}')
-            reviewer.key = cfg.api_key
+        elif provider == builder_provider == 'opencode_go':
+            reviewer = planning_actor(state.job)
+            reviewer.session = f'independent-audit-{uuid.uuid4().hex}'
             reviewer.model = review_model
         else:
             raise ValueError('independent reviewer not configured')
-        if review_model == builder_model:
-            raise ValueError('independent model required')
+        if not reviewer.session or reviewer.session in (builder_session, state.job.name):
+            raise ValueError('independent session required')
         system_prompt = (
             'You are an independent PowerPoint reconstruction QA auditor (separate from the builder agent). '
             'The first three images are: (1) original source slide, (2) actual PowerPoint rendered slide, '
@@ -159,18 +160,28 @@ def _stateless_vlm_audit(
             'Set `passed=false` ONLY when a `severity="critical"` defect exists.'
         )
         control = review_control.verify_reviewer(reviewer,cache_dir/'controls'/provider,budget)
-        if not control['passed']:
+        verify_model = provider == 'moma' and builder_provider in ('deepseek', 'moma')
+        if not control['passed'] or (verify_model and
+                model_identity(control.get('reported_model')) != model_identity(review_model)):
             return {'status':'CONTROL_UNVERIFIED','passed':False,'control':control,'model':review_model,
                     'critical_defects':[],'minor_deviations':[]}
         if not budget.reserve('model_calls', {'tool':'audit_delivery','key':audit_key}):
             raise RuntimeError('previous independent audit response unknown')
         raw = reviewer.ask(system_prompt, {'scorecard': sc_summary},
                            [source_path, render_path, owner_preview_path, *edit_panels], VLMIndependentAuditReply)
+        reported = getattr(reviewer, 'reported_model', None)
+        actual_id = model_identity(reported)
+        if actual_id == model_identity(builder_model) or (verify_model
+                and actual_id != model_identity(review_model)):
+            return {'status':'MODEL_IDENTITY_UNVERIFIED', 'passed':False, 'provider':provider, 'model':review_model,
+                    'reported_model':reported, 'builder_model':builder_model, 'session':reviewer.session,
+                    'usage':reviewer.last_usage, 'receipt':audit_key, 'critical_defects':[], 'minor_deviations':[]}
         parsed = VLMIndependentAuditReply.model_validate(raw)
         critical = [d.model_dump() for d in parsed.defects if d.severity == 'critical']
         minor = [d.model_dump() for d in parsed.defects if d.severity != 'critical']
         verdict = {
             'status': 'READY', 'provider':provider, 'model': review_model, 'reported_model':reviewer.reported_model, 'usage':reviewer.last_usage, 'session': reviewer.session, 'receipt': audit_key, 'control':control,
+            'builder_model':builder_model, 'builder_provider':builder_provider, 'builder_session':builder_session,
             'passed': len(critical) == 0 and bool(parsed.passed),
             'critical_defects': critical,
             'minor_deviations': minor,

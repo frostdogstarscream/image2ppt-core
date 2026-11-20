@@ -4,11 +4,55 @@ from pathlib import Path
 import sys
 
 import pytest
+import httpx
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]/'experiments'))
 from native_results import results
 from native_region_metrics import measure
+
+
+@pytest.mark.parametrize('explicit_model', [None, 'deepseek-v4.1-flash'])
+def test_cli_model_binds_upload_and_resume(tmp_path, monkeypatch, explicit_model):
+    import run_native_benchmark as benchmark
+
+    source = tmp_path/'page.png'
+    Image.new('RGB',(12,12),'white').save(source)
+    manifest = tmp_path/'manifest.json'
+    save(manifest, {'pages':[{'id':'page','file':source.name,'sha256':sha256(source.read_bytes()).hexdigest()}]})
+    output = tmp_path/'results'
+    args = ['benchmark','--profile','unused','--manifest',str(manifest),
+            '--input-root',str(tmp_path),'--output',str(output)]
+    if explicit_model:
+        args += ['--agent-model',explicit_model]
+    monkeypatch.setattr(sys,'argv',args)
+    monkeypatch.setattr(benchmark,'load_profile',lambda _: {'url':'http://localhost','business_token':'fixture'})
+    uploaded = []
+
+    def respond(request):
+        if request.method == 'POST' and request.url.path == '/api/v1/jobs':
+            uploaded.append(dict(request.url.params))
+            return httpx.Response(202,json={'id':'fixture-job'})
+        if request.method == 'GET' and request.url.path == '/api/v1/jobs/fixture-job':
+            return httpx.Response(200,json={'status':'REVIEW_REQUIRED'})
+        if request.method == 'GET' and request.url.path == '/api/v1/jobs/fixture-job/artifacts':
+            return httpx.Response(200,json={'artifacts':[]})
+        raise AssertionError('Unexpected route')
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx,'Client',lambda **kw: client(transport=httpx.MockTransport(respond),**kw))
+    benchmark.main()
+    benchmark.main()
+    expected = explicit_model or 'hy4-flash-free'
+    assert len(uploaded)==1 and uploaded[0]['agent_model']==expected
+    assert 'experiment_profile' not in uploaded[0]
+    admission = json.loads((output/'page/admission.json').read_text(encoding='utf8'))
+    assert admission['job_id']=='fixture-job' and admission['params']['agent_model']==expected
+    other_model = 'hy4-flash-free' if explicit_model else 'deepseek-v4.1-flash'
+    monkeypatch.setattr(sys,'argv',args+['--agent-model',other_model])
+    with pytest.raises(ValueError,match='different comparison'):
+        benchmark.main()
+    assert len(uploaded)==1
 
 
 def save(path, value):

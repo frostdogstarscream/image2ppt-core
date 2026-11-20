@@ -58,6 +58,7 @@ def verify_reviewer(reviewer, folder: Path, budget):
         {},[img],ControlAnswer)
     observed=ControlAnswer.model_validate(result).defects
     record={'status':'TESTED','synthetic':True,'model':reviewer.model,'session':verifier_session,
+            'reported_model':getattr(reviewer,'reported_model',None),
             'usage':getattr(reviewer,'last_usage',None),'image_sha256':digest(img),'expected':expected,'observed':observed,'passed':observed==expected}
     write(receipt,record)
     return record

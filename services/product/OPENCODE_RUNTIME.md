@@ -52,6 +52,15 @@ Select Go inference by setting `IMAGE2PPT_AGENT_PROVIDER=opencode_go` and `IMAGE
 
 The Windows bootstrap accepts `agent_provider`, `agent_api_key` and `agent_model` for this configuration. Its generated access profile continues to hold business/worker credentials only. `agent_inference_provider` in health and job receipts identifies the active transport. `opencode_go_configured` refers to the legacy independent review credential.
 
+For official DeepSeek V4.1 Flash, set `IMAGE2PPT_AGENT_PROVIDER=deepseek` and
+`IMAGE2PPT_AGENT_MODEL=deepseek-flash`. The host uses `https://api.deepseek.com/v1` and
+takes the execution credential from `IMAGE2PPT_AGENT_API_KEY`. For independent MoMA
+reading and review, provide the separate `MOMA_API_KEY`, set `IMAGE2PPT_REVIEW_PROVIDER=moma`
+and set `IMAGE2PPT_REVIEW_MODEL` and `IMAGE2PPT_MOMA_READING_MODEL` to `qwen/qwen3.8-max`.
+Use `--agent-model deepseek-flash` with the fresh benchmark client. Use a new output
+directory when changing model. Run all three arms of a page pair with the same execution model,
+and report previously completed OpenCode Go pairs in a separate cohort.
+
 Submit ordered multipart `files` to `POST /api/v1/jobs`. Query the resulting job, SSE events, cancellation and artifact list under `/api/v1/jobs/{id}`. The legacy `/api/jobs` keeps its existing default route. The request ledger records `orchestrator=opencode` and `visual_review_backend=opencode`.
 
 ## Agent and evidence

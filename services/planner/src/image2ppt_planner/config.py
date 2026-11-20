@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_BASE_URL = "https://moma.cmecloud.cn/v1"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 # Measured on 2026-11-04: this model answers text and reads a real slide image through
 # the moma gateway. hacm/qwen2.5-vl-32b-instruct returned 402 (no package on the account).
 DEFAULT_MODEL = "qwen/qwen3.8-max"
