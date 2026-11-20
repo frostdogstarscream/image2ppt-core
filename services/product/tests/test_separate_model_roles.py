@@ -182,7 +182,8 @@ def test_moma_reviews_official_deepseek_and_checks_wire_identity(dual, monkeypat
     assert verified['passed'] and calls == [('qwen/qwen3.8-max',verified['session'])]
     assert verified['provider']=='moma' and verified['builder_provider']=='deepseek'
     assert verified['builder_model']=='deepseek-flash' and verified['builder_session']!=verified['session']
-    for model in ('deepseek/deepseek-v4-flash-vision-exp',None,'unrelated-model'):
+    for model in ('deepseek/deepseek-v4-flash-vision-exp','deepseek-v4-flash',
+                  'deepseek-v4.1-flash-1017',None,'unrelated-model'):
         result,calls = run_audit(dual,monkeypatch,reported=model,changes=('deck.pptx',str(model).encode()))
         assert calls and result['status']=='MODEL_IDENTITY_UNVERIFIED' and not result['passed']
     result,calls = run_audit(dual,monkeypatch,control_model='deepseek-flash',changes=('edits.png',b'other edit'))

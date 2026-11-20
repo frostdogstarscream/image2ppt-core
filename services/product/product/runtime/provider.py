@@ -34,7 +34,8 @@ def agent_identity(request):
 def model_identity(model):
     """Compare catalog and wire IDs without confusing vendor prefixes with model names."""
     name = (model or '').strip().lower().rsplit('/', 1)[-1]
-    if name in ('deepseek-v4-flash-vision-exp', 'deepseek-v4.1-flash'):
+    if name in ('deepseek-v4-flash', 'deepseek-v4-flash-vision-exp',
+                'deepseek-v4.1-flash', 'deepseek-v4.1-flash-1017'):
         return DEFAULT_DEEPSEEK_MODEL
     return GO_MODEL_ALIASES.get(name, name)
 
