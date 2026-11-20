@@ -18,6 +18,43 @@ from ..parallel_store import key
 from .region_crop import _extract_rgba, _render_lower_composite, MOVABLE_RING_ERROR
 
 
+def _diagram_backing(tile, lower, covered, core, blocked, radius, initial):
+    """Fit the exposed local background and follow faint edges attached to the silhouette."""
+    distance = cv2.distanceTransform((~core).astype('uint8'), cv2.DIST_L2, 5)
+    reach = max(2, 3 * radius)
+    ring = (distance > reach) & (distance <= 2 * reach) & ~blocked & ~covered
+    if core[covered].any():
+        # Different underlying layers cannot share one fitted gradient.
+        return initial, core
+    y, x = np.indices(core.shape)
+    yy, xx = np.nonzero(ring)
+    if len(xx) < 30:
+        return initial, core
+    design = np.column_stack((xx, yy, np.ones(len(xx))))
+    samples = lower[ring].astype(float)
+    keep = np.ones(len(xx), bool)
+    for _ in range(3):
+        coeff, _, rank, _ = np.linalg.lstsq(design[keep], samples[keep], rcond=None)
+        if rank < 3:
+            return initial, core
+        errors = np.abs(samples - design @ coeff).max(axis=1)
+        keep = errors <= max(2, np.percentile(errors, 75))
+    noise = np.percentile(errors, 80)
+    if noise > 4:
+        return initial, core
+    # Extrapolation from a single side can paint a false outline across the figure.
+    hull = cv2.convexHull(np.column_stack((xx[keep], yy[keep])).astype('int32'))
+    supported = np.zeros(core.shape, 'uint8')
+    cv2.fillConvexPoly(supported, hull, 1)
+    field = np.clip(np.rint(x[..., None]*coeff[0] + y[..., None]*coeff[1] + coeff[2]), 0, 255).astype('uint8')
+    backing = np.where(supported[..., None], field, initial)
+    signal = np.abs(tile.astype(float) - backing).max(axis=2)
+    weak = ((distance <= reach) & (signal > max(2, noise * 2)) & (signal <= 10)
+            & ~blocked & ~covered & supported.astype(bool))
+    _, labels = cv2.connectedComponents((core | weak).astype('uint8'))
+    return backing, core | (weak & np.isin(labels, np.unique(labels[core])))
+
+
 def stage_diagram(baseline, output, route):
     graph = SceneGraph.model_validate_json((baseline/'scene.json').read_text('utf8'))
     src = baseline/'source.png'
@@ -78,6 +115,8 @@ def stage_diagram(baseline, output, route):
     if (silhouette.astype(bool)&blocked).any():
         raise ValueError('diagram silhouette includes protected content')
     mask=silhouette.astype(bool)
+    backing, mask = _diagram_backing(tile, lower[y:y+h,x:x+w], covered[y:y+h,x:x+w],
+                                    mask, blocked, radius, backing)
     # No unrelated marks are admitted by a shared bounding rectangle.
     rgba=_extract_rgba(tile,backing,mask)
     rgba[~mask,3]=0

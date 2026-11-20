@@ -3,6 +3,27 @@ from product.runtime.plate_audit import reconcile
 from product.experiment import diagram_marks
 
 
+def test_diagram_recovers_gradient_and_keeps_separate_faint_marks():
+    import numpy as np
+    from product.recovery.diagram_stage import _diagram_backing
+
+    y, x = np.indices((90, 120))
+    background = np.repeat((150 + x // 4 + y // 5)[..., None], 3, axis=2).astype('uint8')
+    distance = np.hypot(x - 60, y - 45)
+    core = distance <= 13
+    shadow = (distance > 13) & (distance <= 16)
+    tile = background.copy()
+    tile[core] = 45
+    tile[shadow] -= 7
+    tile[45, 79] -= 7
+    blocked = np.zeros_like(core)
+    blocked[45, 75] = True
+    fitted, owned = _diagram_backing(tile, tile, np.zeros_like(core), core, blocked, 2,
+                                     np.full_like(tile, 180))
+    assert owned[45, 76] and not owned[45, 75] and not owned[45, 79]
+    assert np.abs(fitted[owned].astype(float) - background[owned]).max() <= 2
+
+
 def test_position_and_content_distinguish_retained_residual_and_new():
     def line(i, x, s):
         return {'id':i,'bbox':[x,2,30,10],'text':s}

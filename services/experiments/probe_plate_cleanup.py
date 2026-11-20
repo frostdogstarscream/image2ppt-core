@@ -5,8 +5,10 @@ import json
 from pathlib import Path
 import shutil
 
+import cv2
 import numpy as np
 import win32com.client
+from PIL import Image
 
 from probe_card_caption import opened, render, select_target
 from probe_region_text import HEADER, VERTICAL_RULE, DIVIDER, native_shape, region, changed_fraction
@@ -42,7 +44,20 @@ def measure(app, source, deck, out, key, case, neighbors):
             return {'status':'NO_TARGET_OBJECT'}
         _,name,shape = found
         moving = key in ('title','diagram')
-        if moving:
+        if key == 'diagram':
+            # Preserve the original coordinates on a blank slide so its outline
+            # can be compared with the vacated area without neighboring text.
+            expected = (shape.Left,shape.Top)
+            destination = p.Slides.Add(p.Slides.Count+1,12)
+            destination.FollowMasterBackground = False
+            destination.Background.Fill.Solid()
+            destination.Background.Fill.ForeColor.RGB = 0xffffff
+            shape.Cut()
+            moved = destination.Shapes.Paste().Item(1)
+            moved.Left, moved.Top = expected
+            destination_index = destination.SlideIndex
+            moved_name = moved.Name
+        elif moving:
             # Move across the slide, outside the old position and protected neighbors.
             shape.Left = p.PageSetup.SlideWidth * (.30 if key=='diagram' else .55)
             shape.Top = p.PageSetup.SlideHeight * (.05 if key=='diagram' else .13)
@@ -52,6 +67,11 @@ def measure(app, source, deck, out, key, case, neighbors):
         p.Save()
     with opened(app,copy) as p:
         shape = native_shape(p,name)
+        origin_clear = shape is None
+        if key == 'diagram':
+            destination = p.Slides(destination_index)
+            shape = next((s for n,s in named_shapes(destination.Shapes) if n == moved_name),None)
+            destination.Export(str((out/'diagram-destination.png').resolve()),'PNG',before.shape[1],before.shape[0])
         saved = shape is not None and (max(abs(shape.Left-expected[0]),abs(shape.Top-expected[1]))<1
                                        if moving else name_text(shape)==case[4])
         changed = render(p,out/(key+'-edited.png'))
@@ -72,12 +92,21 @@ def measure(app, source, deck, out, key, case, neighbors):
     retained = float((blue(patch)&old).sum()/max(1,old.sum()))
     adjacent = max(changed_fraction(before,step,b) for step in (changed,bare) for b in neighbors)
     # Keep a normal-size panel for independent review of faint neutral contours.
-    from PIL import Image
     Image.fromarray(np.hstack((reference,patch)).astype('uint8')).save(out/(key+'-origin.png'))
+    contour_residual = None
+    if key == 'diagram':
+        dest = region(np.asarray(Image.open(out/'diagram-destination.png').convert('RGB')),case[2])
+        footprint = (dest.min(axis=2) < 245).astype('uint8')
+        edge = cv2.morphologyEx(footprint,cv2.MORPH_GRADIENT,np.ones((5,5),np.uint8)).astype(bool)
+        # Compare normal-scale local contrast where the moved object's outline ran.
+        gray = cv2.cvtColor(patch.astype('float32'),cv2.COLOR_RGB2GRAY)
+        contrast = cv2.dilate(gray,None,iterations=2)-cv2.erode(gray,None,iterations=2)
+        contour_residual = float((contrast[edge]>6).mean()) if edge.any() else 1.0
+        saved = saved and origin_clear and contour_residual < .10
     passed = saved and retained<.06 and adjacent<.02 and old.any()
     return {'status':'PASS_AUTOMATED' if passed else 'REVIEW_REQUIRED','saved_reopened':bool(saved),
             'remaining_blue_fraction':retained,'neighbor_change':adjacent,'object':name,
-            'normal_size_review':'UNKNOWN'}
+            'outline_residual_fraction':contour_residual,'normal_size_review':'UNKNOWN'}
 
 
 if __name__=='__main__':
