@@ -37,16 +37,30 @@ def main():
     parser.add_argument('--prompt-key', action='store_true')
     options = parser.parse_args()
     configure()
-    from .provider import DEFAULT_GO_MODEL
-    provider=os.environ.setdefault('IMAGE2PPT_AGENT_PROVIDER','opencode_go')
-    if provider=='opencode_go':
-        os.environ.setdefault('IMAGE2PPT_AGENT_MODEL',DEFAULT_GO_MODEL)
+    from .provider import DEFAULT_DEEPSEEK_MODEL, DEFAULT_GO_MODEL, DEFAULT_MOMA_MODEL, all_secret_env_values, deepseek_api_key, moma_api_keys
+    if not os.environ.get('IMAGE2PPT_AGENT_PROVIDER'):
+        if deepseek_api_key():
+            os.environ['IMAGE2PPT_AGENT_PROVIDER'] = 'deepseek'
+        elif moma_api_keys():
+            os.environ['IMAGE2PPT_AGENT_PROVIDER'] = 'moma'
+        else:
+            os.environ['IMAGE2PPT_AGENT_PROVIDER'] = 'opencode_go'
+    provider = os.environ['IMAGE2PPT_AGENT_PROVIDER']
+    if provider == 'opencode_go':
+        os.environ.setdefault('IMAGE2PPT_AGENT_MODEL', DEFAULT_GO_MODEL)
+    elif provider == 'deepseek':
+        os.environ.setdefault('IMAGE2PPT_AGENT_MODEL', DEFAULT_DEEPSEEK_MODEL)
+    else:
+        os.environ.setdefault('IMAGE2PPT_AGENT_MODEL', DEFAULT_MOMA_MODEL)
     if options.prompt_key:
-        go=os.environ.get('IMAGE2PPT_AGENT_PROVIDER')=='opencode_go'
-        os.environ['IMAGE2PPT_AGENT_API_KEY' if go else 'MOMA_API_KEY'] = getpass.getpass('Agent model key (hidden): ')
+        if provider == 'opencode_go':
+            os.environ['IMAGE2PPT_AGENT_API_KEY'] = getpass.getpass('OpenCode Go key (hidden): ')
+        elif provider == 'deepseek':
+            os.environ['DEEPSEEK_API_KEY'] = getpass.getpass('DeepSeek key (hidden): ')
+        else:
+            os.environ['MOMA_API_KEY'] = getpass.getpass('MoMA key (hidden): ')
     # Agent credentials are resolved per job after its baseline exists.
-    private_values = [os.environ.get(name,'') for name in
-                      ('MOMA_API_KEY','PLANNER_API_KEY','IMAGE2PPT_AGENT_API_KEY','OPENCODE_GO_API_KEY')]
+    private_values = all_secret_env_values()
     if len(os.environ.get('IMAGE2PPT_PRODUCT_TOKEN', '')) < 24:
         raise RuntimeError('set IMAGE2PPT_PRODUCT_TOKEN before launching the service')
     password = os.environ.get('IMAGE2PPT_OPENCODE_PASSWORD') or secrets.token_urlsafe(32)
@@ -69,7 +83,7 @@ def main():
             ownership=contain_child(process)
         def drain():
             for line in process.stdout:
-                for secret in (password,*private_values,os.environ.get('IMAGE2PPT_PRODUCT_TOKEN','')):
+                for secret in (password, *private_values, *all_secret_env_values()):
                     if secret:line=line.replace(secret,'[REDACTED]')
                 log.write(line);log.flush()
         reader=threading.Thread(target=drain,daemon=True)

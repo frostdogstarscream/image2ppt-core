@@ -32,14 +32,26 @@ def prepare_workspace(job):
     permissions = [{'action': '*', 'resource': '*', 'effect': 'deny'},
                    {'action': 'image2ppt_*', 'resource': '*', 'effect': 'allow'},
                    {'action': 'skill', 'resource': 'image2ppt-runtime', 'effect': 'allow'}]
+    provider_names = {'opencode_go': 'OpenCode Go', 'deepseek': 'DeepSeek', 'moma': 'MoMA'}
+    provider_envs = {
+        'deepseek': ['DEEPSEEK_API_KEY', 'IMAGE2PPT_AGENT_API_KEY'],
+        'moma': ['MOMA_API_KEY', 'PLANNER_API_KEY', 'IMAGE2PPT_AGENT_API_KEY'],
+        'opencode_go': ['IMAGE2PPT_AGENT_API_KEY', 'OPENCODE_GO_API_KEY', 'PLANNER_API_KEY'],
+    }
+    agent_thinking = bool(request.get('agent_thinking', False))
+    provider_body = (
+        {'thinking': {'type': 'enabled' if agent_thinking else 'disabled'}}
+        if selected_provider == 'deepseek'
+        else {'enable_thinking': agent_thinking}
+    )
     configuration = {
         '$schema': 'https://opencode.ai/config.json', 'default_agent': 'image2ppt-runtime',
-        'providers': {identity: {'name': 'Image2PPT '+('OpenCode Go' if selected_provider=='opencode_go' else 'MoMA'),
-            'env': ['IMAGE2PPT_AGENT_API_KEY','PLANNER_API_KEY','MOMA_API_KEY'],
+        'providers': {identity: {'name': 'Image2PPT ' + provider_names.get(selected_provider, 'MoMA'),
+            'env': provider_envs.get(selected_provider, ['MOMA_API_KEY', 'PLANNER_API_KEY', 'IMAGE2PPT_AGENT_API_KEY']),
             'package': '@opencode/ai/providers/openai-compatible',
             'settings': {'baseURL': cfg.base_url},
             'headers':{'User-Agent':'image2ppt-opencode-runtime/1.0','x-opencode-session':job.name},
-            'body': {'enable_thinking': request.get('agent_thinking', False)},
+            'body': provider_body,
             'models': {'vision': {'modelID': cfg.model, 'name': cfg.model,
                 'capabilities': {'tools': True, 'input': ['text', 'image'], 'output': ['text']},
                 'limit': {'context': 128000, 'output': 16000}}}}},
@@ -142,8 +154,15 @@ def _run(job, client):
                    'admission': 'NOT_SENT', 'location': str(workspace)}
         write(session_file, session)
     if 'deadline' not in session:
+        runtime_s = request.get('runtime_seconds',7200)
+        now = time.time()
         started = job/'host-baseline/started.json'
-        session['deadline']=(json.loads(started.read_text('utf8'))['time'] if started.exists() else time.time())+request.get('runtime_seconds',7200)
+        if started.exists():
+            base_deadline = json.loads(started.read_text('utf8'))['time']+runtime_s
+            min_agent_window = min(runtime_s, max(300, int(runtime_s*0.5))) if runtime_s > 0 else 0
+            session['deadline'] = max(base_deadline, now+min_agent_window)
+        else:
+            session['deadline'] = now+runtime_s
         write(session_file,session)
     if session['admission'] == 'NOT_SENT':
         # A deterministic Session ID permits lookup after a lost create response.
@@ -188,6 +207,7 @@ def _run(job, client):
             state.event({'state': 'UNKNOWN', 'reason': 'prompt admission response unknown; inspect session inbox'})
             return pending(job, 'OpenCode prompt admission requires reconciliation')
     deadline = time.monotonic()+max(0,session['deadline']-time.time())
+    nudged = False
     while time.monotonic() < deadline:
         if (job/'cancel.requested').exists():
             client.request('POST', '/api/session/'+session['id']+'/interrupt')
@@ -197,6 +217,13 @@ def _run(job, client):
         try:
             # Bounded wait keeps cancellation and job-status handling responsive.
             client.request('POST', '/api/experimental/session/'+session['id']+'/wait', timeout=10)
+            cur_status = state.read()['status']
+            if cur_status not in ('SUCCEEDED', 'REVIEW_REQUIRED') and not nudged and (deadline - time.monotonic()) > 60:
+                nudged = True
+                client.request('POST', '/api/session/'+session['id']+'/message', json={
+                    'text': 'Session paused before finalization. Complete compile_pptx -> validate_office -> get_evidence (for all required_evidence IDs) -> record_visual_review -> finalize_job now.'
+                })
+                continue
             break
         except httpx.ReadTimeout:
             continue
@@ -253,9 +280,9 @@ def _agent_run(job, client=None):
             try:
                 session=json.loads(session_file.read_text('utf8'))
                 transcript=read_transcript(client,session['id'])
+                from .provider import all_secret_env_values
                 encoded=json.dumps(transcript,ensure_ascii=False)
-                for name in ('MOMA_API_KEY','PLANNER_API_KEY','IMAGE2PPT_AGENT_API_KEY','OPENCODE_GO_API_KEY','IMAGE2PPT_OPENCODE_PASSWORD','IMAGE2PPT_PRODUCT_TOKEN','IMAGE2PPT_OFFICE_WORKER_TOKEN'):
-                    secret=os.environ.get(name)
+                for secret in all_secret_env_values():
                     if secret:encoded=encoded.replace(secret,'[REDACTED]')
                 (job/'runtime/transcript.json').write_text(encoded,encoding='utf8')
                 errors=[m['error'] for m in transcript.get('data',[]) if m.get('error')]

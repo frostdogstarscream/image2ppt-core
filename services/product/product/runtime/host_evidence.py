@@ -118,8 +118,8 @@ def questions(state, current, page, failures, directory):
 
 
 AGENT_TOOLS = {'review_numbered_text','get_job_context','get_progress','get_evidence','prepare_page_evidence',
-               'plan_marked_page','batch_reconstruct_page','commit_candidate','compile_pptx',
-               'validate_office','record_visual_review','finalize_job'}
+               'inspect_scene','plan_marked_page','batch_reconstruct_page','crop_region',
+               'commit_candidate','compile_pptx','validate_office','record_visual_review','finalize_job'}
 
 
 def scoped_ids(state, current, page, block, object_ids):
@@ -130,8 +130,15 @@ def scoped_ids(state, current, page, block, object_ids):
         f, _ = state.evidence(b['questions'])
         allowed.update(it['id'] for it in read(f)['items'])
     ids = set(object_ids) if object_ids is not None else allowed
-    if (block is None and object_ids is None) or not 1<=len(ids)<=30 or not ids <= allowed:
+    if block is None and object_ids is None:
         raise ValueError('choose a question block or issue object IDs from this page')
+    if not 1<=len(ids)<=30:
+        raise ValueError(f'choose 1 to 30 issue object IDs from this page (got {len(ids)})')
+    if not ids <= allowed:
+        invalid = sorted(ids - allowed)
+        raise ValueError(
+            f'choose issue object IDs from this page only; non-issue or already-committed IDs={invalid[:12]}'
+        )
     return sorted(ids)
 
 
@@ -146,16 +153,29 @@ def normalize_arguments(state,current,tool,arguments):
         return {'page':args['page'], 'object_ids':ids}
     if tool=='batch_reconstruct_page':
         page = str(args['page'])
-        rounds = current.setdefault('repair_rounds', {}).get(page, [])
-        if len(rounds) >= 2 or (rounds and not rounds[-1]['progress']):
-            raise ValueError('local repair limit reached; review the current delivery')
         ids = scoped_ids(state,current,args['page'],args.get('block'),args.get('object_ids'))
+        rounds = current.setdefault('repair_rounds', {}).get(page, [])
+        if len(rounds) >= 4 or any(r.get('object_ids') == ids and not r.get('progress') for r in rounds):
+            raise ValueError('local repair limit reached; review the current delivery')
         return {'page':args['page'],'object_ids':ids,'verify_office':True,'include_region_crops':False}
+    if tool=='crop_region':
+        out = {'page': int(args['page']), 'allow_movable': True,
+               'allow_move_unsafe': bool(args.get('allow_move_unsafe', False)),
+               'upgrade_containers': bool(args.get('upgrade_containers', True))}
+        if args.get('object_ids') is not None:
+            oids = [str(x) for x in args['object_ids']]
+            if not 1 <= len(oids) <= 30:
+                raise ValueError('select 1 to 30 object_ids for crop_region')
+            out['object_ids'] = oids
+        if args.get('bbox') is not None:
+            out['bbox'] = [float(v) for v in args['bbox']]
+        return out
     if tool=='plan_marked_page':
         page = args['page']
         fields = args['fields']
         rows = read(current['experiment_marks'][str(page)])['rows']
         by_mark = {r['mark']:r['id'] for r in rows}
+        id_to_mark = {r['id']:r['mark'] for r in rows}
         if not fields or len(fields)>30:
             raise ValueError('select 1 to 30 numbered questions')
         for f in fields:
@@ -163,7 +183,21 @@ def normalize_arguments(state,current,tool,arguments):
                     f['route'] not in ('text','asset','surface','table','preserve') or
                     any(n not in by_mark for n in [f['mark'],*f['move_with']])):
                 raise ValueError('use only numbered marks, existing partners, a role and a route')
-        scoped_ids(state,current,page,None,[by_mark[f['mark']] for f in fields])
+        try:
+            scoped_ids(state,current,page,None,[by_mark[f['mark']] for f in fields])
+        except ValueError as exc:
+            allowed_marks = []
+            for b in current['questions'][str(page)]:
+                qf, _ = state.evidence(b['questions'])
+                for it in read(qf)['items']:
+                    m_val = it['mark'] if 'mark' in it else id_to_mark.get(it.get('id'))
+                    if m_val is not None:
+                        allowed_marks.append(m_val)
+            bad_marks = [f['mark'] for f in fields if f['mark'] not in set(allowed_marks)]
+            if bad_marks:
+                bad_desc = [f"mark {m} ({by_mark.get(m)})" for m in bad_marks[:12]]
+                raise ValueError(f"{exc}; invalid marks={bad_desc}; valid_issue_marks={sorted(set(allowed_marks))[:30]}") from None
+            raise
         return {'page':page,'fields':fields,'append':True}
     return args
 
@@ -175,6 +209,9 @@ def compact(tool,result):
     if tool=='batch_reconstruct_page':
         return {**{k:result[k] for k in ('page','status','candidate_id','failed_count','staged_count') if k in result},
                 'failures':dict(Counter(r.get('diagnostic_category','UNKNOWN') for r in result.get('failed_regions',[])))}
+    if tool=='crop_region':
+        return {**{k:result[k] for k in ('page','status','candidate_id','object_id','object_ids') if k in result},
+                'report':result.get('report', [])[:20]}
     if tool=='validate_office':
         audit = result.get('scorecard_audit', {})
         return {**{k:result[k] for k in ('status','required_evidence','failure','pptx_sha256') if k in result},

@@ -41,17 +41,46 @@ def receive(pipe_name, root):
         'IMAGE2PPT_OFFICE_MODE':'remote',
         'IMAGE2PPT_NODE':configuration['node'],
         'IMAGE2PPT_OPENCODE_BIN':str(app/'opencode.exe')})
-    if configuration.get('agent_provider')=='opencode_go':
-        os.environ.update(IMAGE2PPT_AGENT_PROVIDER='opencode_go',
+    if configuration.get('deepseek_api_key'):
+        os.environ['DEEPSEEK_API_KEY'] = configuration['deepseek_api_key']
+    moma_keys = configuration.get('moma_keys') or (
+        [configuration['moma']] if configuration.get('moma') else []
+    )
+    moma_keys = [k.strip() for k in moma_keys if isinstance(k, str) and k.strip()]
+    if moma_keys:
+        os.environ['MOMA_API_KEY'] = moma_keys[0]
+        os.environ['MOMA_API_KEYS'] = '\n'.join(moma_keys)
+    agent_provider = configuration.get('agent_provider') or (
+        'deepseek' if configuration.get('deepseek_api_key') else 'moma'
+    )
+    if agent_provider == 'opencode_go':
+        os.environ.update(
+            IMAGE2PPT_AGENT_PROVIDER='opencode_go',
             IMAGE2PPT_AGENT_API_KEY=configuration['agent_api_key'],
             OPENCODE_GO_API_KEY=configuration['agent_api_key'],
-            IMAGE2PPT_AGENT_MODEL=configuration.get('agent_model','hy4-flash-free'))
+            IMAGE2PPT_AGENT_MODEL=configuration.get('agent_model', 'hy4-flash-free'),
+        )
+    elif agent_provider == 'deepseek':
+        ds_key = configuration.get('deepseek_api_key') or configuration.get('agent_api_key', '')
+        os.environ.update(
+            IMAGE2PPT_AGENT_PROVIDER='deepseek',
+            DEEPSEEK_API_KEY=ds_key,
+            IMAGE2PPT_AGENT_API_KEY=ds_key,
+            IMAGE2PPT_AGENT_MODEL=configuration.get('agent_model', 'deepseek-flash'),
+        )
+        if not configuration.get('opencode_go_api_key'):
+            os.environ.pop('OPENCODE_GO_API_KEY', None)
     else:
-        os.environ['IMAGE2PPT_AGENT_PROVIDER']='moma'
-        os.environ['MOMA_API_KEY']=configuration['moma']
-        if configuration.get('agent_model'):
-            os.environ['IMAGE2PPT_AGENT_MODEL']=configuration['agent_model']
-            os.environ['PLANNER_MODEL']=configuration['agent_model']
+        os.environ['IMAGE2PPT_AGENT_PROVIDER'] = 'moma'
+        agent_model = configuration.get('agent_model', 'qwen/qwen3.8-max')
+        os.environ['IMAGE2PPT_AGENT_MODEL'] = agent_model
+        os.environ['PLANNER_MODEL'] = agent_model
+        if not configuration.get('opencode_go_api_key'):
+            os.environ.pop('OPENCODE_GO_API_KEY', None)
+    if configuration.get('review_provider'):
+        os.environ['IMAGE2PPT_REVIEW_PROVIDER'] = configuration['review_provider']
+    if configuration.get('review_model'):
+        os.environ['IMAGE2PPT_REVIEW_MODEL'] = configuration['review_model']
     sys.path.insert(0,str(app/'services/product'))
     log=(root/'business.log').open('a',encoding='utf8',buffering=1)
     sys.stdout=log;sys.stderr=log

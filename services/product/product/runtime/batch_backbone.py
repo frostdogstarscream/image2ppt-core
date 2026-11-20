@@ -10,6 +10,7 @@ from collections import Counter
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -427,6 +428,87 @@ def _classify_failed_region(
     return out
 
 
+def _deoverlap_same_row_ocr_lines(source: np.ndarray, ocr: dict) -> bool:
+    """Trim padded OCR boxes that partially overlap a neighbor on the same text row at a clean gap."""
+    lines = ocr.get('lines') or []
+    if len(lines) < 2:
+        return False
+    h_img, w_img = source.shape[:2]
+    changed = False
+    order = sorted(
+        range(len(lines)),
+        key=lambda i: (float(lines[i]['bbox'][1]), float(lines[i]['bbox'][0])),
+    )
+    for idx_a in range(len(order)):
+        ia = order[idx_a]
+        for idx_b in range(idx_a + 1, len(order)):
+            ib = order[idx_b]
+            la, lb = lines[ia], lines[ib]
+            ba, bb = la.get('bbox') or [], lb.get('bbox') or []
+            if len(ba) != 4 or len(bb) != 4:
+                continue
+            x1, y1, w1, h1 = [float(v) for v in ba]
+            x2, y2, w2, h2 = [float(v) for v in bb]
+            if x2 < x1:
+                la, lb = lb, la
+                x1, y1, w1, h1, x2, y2, w2, h2 = x2, y2, w2, h2, x1, y1, w1, h1
+            if min(w1, h1, w2, h2) <= 0:
+                continue
+            ov_y = min(y1 + h1, y2 + h2) - max(y1, y2)
+            if ov_y < 0.55 * min(h1, h2):
+                continue
+            # Partial horizontal overlap: left box bleeds into start of right box
+            if not (x1 < x2 < x1 + w1 + 2.0 and x2 + w2 > x1 + w1 - 4.0):
+                continue
+            rx0 = max(0, int(math.floor(x1)))
+            rx1 = min(w_img, int(math.ceil(x2 + w2)))
+            ry0 = max(0, int(math.floor(min(y1, y2))))
+            ry1 = min(h_img, int(math.ceil(max(y1 + h1, y2 + h2))))
+            oy0 = max(ry0, int(math.floor(max(y1, y2))))
+            oy1 = min(ry1, int(math.ceil(min(y1 + h1, y2 + h2))))
+            if rx1 - rx0 < 16 or oy1 - oy0 < 6:
+                continue
+            strip = source[ry0:ry1, rx0:rx1].astype(np.float32)
+            top_bot = np.concatenate([strip[0:2].reshape(-1, 3), strip[-2:].reshape(-1, 3)], axis=0)
+            bg = np.median(top_bot, axis=0)
+            band = source[oy0:oy1, rx0:rx1].astype(np.float32)
+            col_ink = (np.abs(band - bg).max(2) > 22.0).sum(axis=0) >= 2
+            s_lo = max(2, int(round(max(x1 + 6.0, x2 - 48.0))) - rx0)
+            s_hi = min(rx1 - rx0 - 2, int(round(min(x1 + w1 + 24.0, x2 + w2 - 6.0))) - rx0)
+            if s_hi - s_lo < 6:
+                continue
+            best_gap = None
+            cur_start = None
+            for col in range(s_lo, s_hi):
+                if not col_ink[col]:
+                    if cur_start is None:
+                        cur_start = col
+                elif cur_start is not None:
+                    if col - cur_start >= 4 and col_ink[:cur_start].any() and col_ink[col:].any():
+                        if best_gap is None or (col - cur_start) > (best_gap[1] - best_gap[0]):
+                            best_gap = (cur_start, col)
+                    cur_start = None
+            if cur_start is not None and (s_hi - cur_start) >= 4 and col_ink[:cur_start].any() and col_ink[s_hi:].any():
+                if best_gap is None or (s_hi - cur_start) > (best_gap[1] - best_gap[0]):
+                    best_gap = (cur_start, s_hi)
+            if best_gap is None:
+                continue
+            g0, g1 = best_gap
+            new_r1 = float(min(rx0 + g0 + 1, int(round(x2)) - 1))
+            new_x2 = float(max(x2, rx0 + g1 - 1))
+            if new_r1 - x1 >= 8.0 and new_r1 < x1 + w1 - 0.5:
+                la['bbox'] = [x1, y1, round(new_r1 - x1, 2), h1]
+                if la.get('polygon'):
+                    la['polygon'] = [[min(float(pt[0]), new_r1), float(pt[1])] for pt in la['polygon']]
+                changed = True
+            if new_x2 > x2 + 0.5 and (x2 + w2) - new_x2 >= 8.0 and new_x2 >= new_r1:
+                lb['bbox'] = [round(new_x2, 2), y2, round((x2 + w2) - new_x2, 2), h2]
+                if lb.get('polygon'):
+                    lb['polygon'] = [[max(float(pt[0]), new_x2), float(pt[1])] for pt in lb['polygon']]
+                changed = True
+    return changed
+
+
 def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list[float], str]:
     """Strip purely non-alphanumeric leading/trailing affixes when a clean pixel gap exists."""
     raw_text = line.get('text', '').strip()
@@ -791,15 +873,18 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     # Run deterministic + optional VLM page structure inventory & pixel-verified OCR proofreading
     has_vlm_creds = bool(
         os.environ.get('IMAGE2PPT_AGENT_API_KEY')
+        or os.environ.get('DEEPSEEK_API_KEY')
         or os.environ.get('OPENCODE_GO_API_KEY')
         or os.environ.get('MOMA_API_KEY')
+        or os.environ.get('MOMA_API_KEYS')
         or os.environ.get('PLANNER_API_KEY')
     )
-    do_vlm_structure = not preflight and ((bool(run_layers) and has_vlm_creds) if run_structure is None else bool(run_structure))
+    do_vlm_structure = (bool(run_layers) and has_vlm_creds) if run_structure is None else bool(run_structure)
     structure_info = parse_page_structure(
         state, source_path, ocr, layout=layout_data, assets=[], fonts=fonts, use_vlm=do_vlm_structure
     )
-    if structure_info.get('applied_ocr_corrections'):
+    deoverlapped = _deoverlap_same_row_ocr_lines(source, ocr)
+    if structure_info.get('applied_ocr_corrections') or deoverlapped:
         proof_ocr_file = directory / 'ocr-proofread.json'
         write(proof_ocr_file, ocr)
         current.setdefault('ocr', {})[str(page)] = str(proof_ocr_file)
@@ -956,6 +1041,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
                             ir.parent / 'runtime-ocr-protection.json')
             row['ir'] = str(ir)
             row['scene'] = str(ir.parent / 'scene.json')
+        shutil.copyfile(structure_file, Path(row['ir']).parent / 'page-structure.json')
         scene_initialized = True
 
     row = current['pages'][page - 1] if len(current['pages']) >= page else None
@@ -1052,31 +1138,67 @@ def _collect_office_defects(office_result: dict, graph: SceneGraph, staged_ids: 
     from .office import frame_feedback
     frame_repairs = {}
     bad_ids: set[str] = set()
+    sibling_bad_ids: set[str] = set()
     staged_set = set(staged_ids)
     for page_rows in office_result.get('residuals', []):
         for rec in page_rows:
-            if rec.get('id') not in staged_set or residual_accepted(rec):
+            oid = rec.get('id')
+            if not oid or residual_accepted(rec):
                 continue
             if rec.get('reason') == 'missing source-owner or actual-delete evidence':
                 continue
-            bad_ids.add(rec['id'])
+            if oid in staged_set:
+                bad_ids.add(oid)
+            else:
+                sibling_bad_ids.add(oid)
     for rec in office_result.get('replacements', {}).get('records', []):
         oid = rec.get('id')
-        if oid not in staged_set:
+        if not oid:
             continue
         ok = (rec.get('content_matches') and rec.get('siblings_unchanged')
               and rec.get('frame_unchanged') and rec.get('outside_pixels', 0) == 0
               and not rec.get('layout', {}).get('overflow')
               and not rec.get('layout', {}).get('unexpected_wrap'))
         if not ok:
-            fb = frame_feedback(office_result, graph, oid)
-            if fb and oid not in bad_ids:
-                frame_repairs[oid] = fb
+            if oid in staged_set:
+                fb = frame_feedback(office_result, graph, oid)
+                if fb and oid not in bad_ids:
+                    frame_repairs[oid] = fb
+                else:
+                    bad_ids.add(oid)
             else:
-                bad_ids.add(oid)
+                sibling_bad_ids.add(oid)
     failed_oid = (office_result.get('office') or {}).get('failed_object_id')
-    if failed_oid in staged_set and failed_oid not in frame_repairs:
-        bad_ids.add(failed_oid)
+    if failed_oid:
+        if failed_oid in staged_set and failed_oid not in frame_repairs:
+            bad_ids.add(failed_oid)
+        elif failed_oid not in staged_set:
+            sibling_bad_ids.add(failed_oid)
+
+    if sibling_bad_ids:
+        def _sel_box(oid):
+            rec = graph.selected.get(oid) or {}
+            box = rec.get('restore_bbox') or rec.get('bbox') or (rec.get('payload') or {}).get('bbox')
+            return box if isinstance(box, (list, tuple)) and len(box) == 4 else None
+        def _boxes_near(b1, b2, pad=4.0):
+            return (
+                b1[0] - pad < b2[0] + b2[2] + pad
+                and b2[0] - pad < b1[0] + b1[2] + pad
+                and b1[1] - pad < b2[1] + b2[3] + pad
+                and b2[1] - pad < b1[1] + b1[3] + pad
+            )
+        for other_id in sibling_bad_ids:
+            ob = _sel_box(other_id)
+            if ob is None:
+                continue
+            overlaps = [
+                sid for sid in staged_ids
+                if (sb := _sel_box(sid)) is not None and _boxes_near(ob, sb)
+            ]
+            if overlaps:
+                surfaces = [sid for sid in overlaps if (graph.selected.get(sid) or {}).get('kind') == 'surface']
+                bad_ids.update(surfaces or overlaps)
+
     return frame_repairs, bad_ids
 
 
@@ -1154,6 +1276,8 @@ def _chain_stage_from_spec(
                 step_out,
                 frame_minimum=frame_opt,
                 fit_origin=experiment_profile not in (None, 'baseline'),
+                layer_directory=layers_dir,
+                edit_headroom=(frame_opt is None),
             )
             cur_base = ir.parent
             staged_ids.append(oid)
@@ -1189,8 +1313,10 @@ def _chain_stage_from_spec(
     if include_assets and layers_dir:
         cur_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
         from .marked_routes import bind_asset_layers
-        deferred_list = bind_asset_layers([r['new_asset'] for r in marked_routes if r.get('new_asset')],
-                                          layers_dir,cur_graph.source_sha256)
+        deferred_list = bind_asset_layers(
+            [r['new_asset'] for r in marked_routes if r.get('new_asset') and r.get('id') not in skip_ids],
+            layers_dir, cur_graph.source_sha256,
+        )
         if deferred_path and Path(deferred_path).is_file():
             deferred_list.extend(json.loads(Path(deferred_path).read_text('utf8')))
         if deferred_list:
@@ -1330,7 +1456,17 @@ def _chain_stage_from_spec(
                         step_dir / 'staged', layer_directory=layers_dir,
                     )
                     cur_base = ir.parent
-                    staged_ids.append(asset.id)
+                    staged_id = asset.id
+                    if asset.kind == 'icon':
+                        from ..recovery.vector_icons import upgrade_staged_icon_to_vector_shape
+                        try:
+                            vec = upgrade_staged_icon_to_vector_shape(cur_base, asset.id, step_dir / 'vector')
+                            if vec is not None:
+                                cur_base = vec[0].parent
+                                staged_id = vec[1]
+                        except Exception:
+                            pass
+                    staged_ids.append(staged_id)
                     if compare and experiment_profile in ('vtracer','combined'):
                         from ..experiment_assets import trace_asset
                         try:
@@ -1486,57 +1622,122 @@ def restage_batch_candidate_subset(
 ) -> bool:
     """Isolate failing batch objects and apply measured frame_minimum repairs without touching parent scene."""
     spec = candidate.get('batch_spec')
-    if not spec:
+    crop_spec = candidate.get('crop_spec')
+    if not spec and not crop_spec:
         return False
     staged_graph = SceneGraph.model_validate_json((Path(candidate['ir']).parent / 'scene.json').read_text('utf8'))
     staged_ids = candidate.get('object_ids') or [candidate['object_id']]
     frame_repairs, bad_ids = _collect_office_defects(office_res, staged_graph, staged_ids)
-    if not (frame_repairs or (bad_ids and len(bad_ids) < len(staged_ids))):
-        return False
+    if spec:
+        if not (frame_repairs or (bad_ids and len(bad_ids) < len(staged_ids))):
+            return False
+    else:
+        if not (bad_ids and len(bad_ids) < len(staged_ids)):
+            return False
 
-    row = service.page(current, candidate['page'])
-    initial_baseline = Path(spec['initial_baseline'])
-    initial_graph = SceneGraph.model_validate_json((initial_baseline / 'scene.json').read_text('utf8'))
-    fonts = json.loads(Path(current['fonts']).read_text('utf8'))
-    overrides = {oid: fb['measured_frame_minimum_px'] for oid, fb in frame_repairs.items()}
-    bad_crop_ids = {oid for oid in bad_ids if staged_graph.selected.get(oid, {}).get('region_crop')}
-    bad_crop_seeds = {sid for oid in bad_crop_ids for sid in staged_graph.selected[oid].get('seed_ids', [])}
-    skip = (bad_ids - bad_crop_ids) | bad_crop_seeds | set(spec.get('pass1_failed_ids', []))
-    skip.update(i for r in spec.get('marked_routes', []) if r['route']=='preserve'
-                for i in [r['id'],*r['target_ids']])
-    unrec_pass2 = set(spec.get('unrecoverable_text_ids', [])) - bad_crop_seeds
-    wanted_list = spec.get('wanted_filter')
-    wanted_filter = set(wanted_list) if wanted_list is not None else None
+    attempt_idx = int(candidate.get('isolation_attempts', 1 if candidate.get('isolation_attempted') else 0)) + 1
+    prior_skip = set(candidate.get('isolated_skip_ids') or [])
+    prior_overrides = dict(candidate.get('auto_frame_overrides') or {})
+    bad_seeds = {
+        sid
+        for oid in bad_ids
+        for sid in (staged_graph.selected.get(oid, {}).get('seed_ids') or [])
+        if sid
+    }
 
-    directory.mkdir(parents=True, exist_ok=True)
-    repaired_base, repaired_ids, retry_errors = _chain_stage_from_spec(
-        initial_graph=initial_graph,
-        initial_baseline=initial_baseline,
-        fonts=fonts,
-        source_path=row['snapshot']['path'],
-        layers_dir=row.get('layers'),
-        deferred_path=current.get('deferred_assets', {}).get(str(candidate['page'])),
-        page_cache_dir=Path(spec['cache_dir']),
-        directory=directory,
-        tag='stage-pass2',
-        experiment_profile=spec.get('experiment_profile'),
-        marked_routes=spec.get('marked_routes', ()),
-        trials_spec=spec['trials'],
-        frame_overrides=overrides,
-        skip_ids=skip,
-        include_assets=bool(spec.get('include_assets', True)),
-        include_containers=bool(spec.get('include_containers', True)),
-        include_region_crops=bool(spec.get('include_region_crops', False)),
-        allow_move_unsafe=bool(spec.get('allow_move_unsafe', False)),
-        layout_path=spec.get('layout_path'),
-        unrecoverable_text_ids=unrec_pass2,
-        logo_ids=set(spec.get('logo_ids', [])),
-        wanted_filter=wanted_filter,
-        sam_enabled=bool(spec.get('sam_enabled', False)),
-    )
+    retry_errors: list[dict] = []
+    overrides: dict = {}
+    if crop_spec and not spec:
+        from ..recovery.region_crop import stage_region_crops
+        from ..recovery.container_stage import stage_containers_and_surfaces
 
-    isolation_failures: list[dict] = []
+        skip = prior_skip | set(bad_ids) | bad_seeds
+        initial_baseline = Path(crop_spec['initial_baseline'])
+        protected_ids = (
+            set(crop_spec['protected_text_ids'])
+            if crop_spec.get('protected_text_ids') is not None
+            else None
+        )
+        directory.mkdir(parents=True, exist_ok=True)
+        crop_ir, crop_ids, _ = stage_region_crops(
+            initial_baseline,
+            directory / f'crop-pass{attempt_idx + 1}',
+            seeds=crop_spec['seeds'],
+            allow_movable=bool(crop_spec.get('allow_movable', True)),
+            allow_move_unsafe=bool(crop_spec.get('allow_move_unsafe', False)),
+            protected_text_ids=protected_ids,
+            skip_seed_ids=skip,
+        )
+        repaired_base = crop_ir.parent if crop_ids else initial_baseline
+        repaired_ids = list(crop_ids)
+        if crop_ids and crop_spec.get('upgrade_containers'):
+            try:
+                cont_ir, cont_ids = stage_containers_and_surfaces(
+                    repaired_base,
+                    directory / f'post-crop-containers-pass{attempt_idx + 1}',
+                    skip_ids=skip,
+                    logo_ids=set(crop_spec.get('logo_ids') or []),
+                )
+                if cont_ids:
+                    repaired_base = cont_ir.parent
+                    repaired_ids.extend(cont_ids)
+            except Exception as exc:
+                retry_errors.append({
+                    'object_id': 'post_crop_containers',
+                    'kind': 'surface',
+                    'bbox': [],
+                    'failure': 'CONTAINER_STAGE_SKIPPED',
+                    'reason': str(exc),
+                })
+        merged_overrides = prior_overrides
+        fp_key = {'crop': repaired_ids}
+    else:
+        row = service.page(current, candidate['page'])
+        initial_baseline = Path(spec['initial_baseline'])
+        initial_graph = SceneGraph.model_validate_json((initial_baseline / 'scene.json').read_text('utf8'))
+        fonts = json.loads(Path(current['fonts']).read_text('utf8'))
+        overrides = {oid: fb['measured_frame_minimum_px'] for oid, fb in frame_repairs.items()}
+        merged_overrides = {**prior_overrides, **overrides}
+        skip = prior_skip | set(bad_ids) | bad_seeds | set(spec.get('pass1_failed_ids', []))
+        skip.update(i for r in spec.get('marked_routes', []) if r['route']=='preserve'
+                    for i in [r['id'],*r['target_ids']])
+        unrec_pass2 = set(spec.get('unrecoverable_text_ids', [])) - bad_seeds
+        wanted_list = spec.get('wanted_filter')
+        wanted_filter = set(wanted_list) if wanted_list is not None else None
+
+        directory.mkdir(parents=True, exist_ok=True)
+        repaired_base, repaired_ids, retry_errors = _chain_stage_from_spec(
+            initial_graph=initial_graph,
+            initial_baseline=initial_baseline,
+            fonts=fonts,
+            source_path=row['snapshot']['path'],
+            layers_dir=row.get('layers'),
+            deferred_path=current.get('deferred_assets', {}).get(str(candidate['page'])),
+            page_cache_dir=Path(spec['cache_dir']),
+            directory=directory,
+            tag=f'stage-pass{attempt_idx + 1}',
+            experiment_profile=spec.get('experiment_profile'),
+            marked_routes=spec.get('marked_routes', ()),
+            trials_spec=spec['trials'],
+            frame_overrides=merged_overrides,
+            skip_ids=skip,
+            include_assets=bool(spec.get('include_assets', True)),
+            include_containers=bool(spec.get('include_containers', True)),
+            include_region_crops=bool(spec.get('include_region_crops', False)),
+            allow_move_unsafe=bool(spec.get('allow_move_unsafe', False)),
+            layout_path=spec.get('layout_path'),
+            unrecoverable_text_ids=unrec_pass2,
+            logo_ids=set(spec.get('logo_ids', [])),
+            wanted_filter=wanted_filter,
+            sam_enabled=bool(spec.get('sam_enabled', False)),
+        )
+        fp_key = {'batch': repaired_ids}
+
+    isolation_failures: list[dict] = list(candidate.get('isolation_failures') or [])
+    existing_keys = {(f.get('object_id'), f.get('failure')) for f in isolation_failures}
     for oid in sorted(bad_ids):
+        if (oid, 'OFFICE_RESIDUAL_OR_EDIT_FAILED') in existing_keys:
+            continue
         t_match = next((t for t in staged_graph.text.texts if t.id == oid), None)
         a_match = next((a for a in staged_graph.asset.objects if a.id == oid), None)
         s_match = next((s for s in staged_graph.surface.shapes if s.id == oid), None)
@@ -1548,14 +1749,21 @@ def restage_batch_candidate_subset(
             'failure': 'OFFICE_RESIDUAL_OR_EDIT_FAILED',
             'reason': 'isolated during batch Office verification; inspect locally',
         })
+        existing_keys.add((oid, 'OFFICE_RESIDUAL_OR_EDIT_FAILED'))
     for err in retry_errors:
         if err['object_id'] in frame_repairs:
             err['measured_frame_minimum_px'] = frame_repairs[err['object_id']]['measured_frame_minimum_px']
-        isolation_failures.append(err)
+        if (err.get('object_id'), err.get('failure')) not in existing_keys:
+            isolation_failures.append(err)
+            existing_keys.add((err.get('object_id'), err.get('failure')))
 
+    candidate['isolation_attempts'] = attempt_idx
     candidate['isolation_attempted'] = True
     candidate['isolation_failures'] = isolation_failures
-    candidate['isolated_bad_ids'] = sorted(bad_ids)
+    candidate['isolated_skip_ids'] = sorted(skip)
+    candidate['isolated_bad_ids'] = sorted(set(candidate.get('isolated_bad_ids') or []) | set(bad_ids))
+    if spec:
+        candidate['auto_frame_overrides'] = merged_overrides
     if not repaired_ids:
         return False
 
@@ -1563,8 +1771,8 @@ def restage_batch_candidate_subset(
     candidate['ir'] = str(final_ir)
     candidate['object_id'] = repaired_ids[0]
     candidate['object_ids'] = repaired_ids
-    candidate['auto_repaired_frame_ids'] = [oid for oid in overrides if oid in repaired_ids]
-    candidate['fingerprint'] = key({'batch': repaired_ids, 'ir': digest(final_ir)})
+    candidate['auto_repaired_frame_ids'] = [oid for oid in merged_overrides if oid in repaired_ids]
+    candidate['fingerprint'] = key({**fp_key, 'ir': digest(final_ir)})
     candidate['files'] = {str(p): digest(p) for p in repaired_base.rglob('*') if p.is_file()}
     return True
 
@@ -1635,8 +1843,9 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     text_targets = sorted((t for t in text_targets if t.id not in preserved_ids and t.id not in covered), key=priority)
 
     request = json.loads((state.job / 'request.json').read_text('utf8'))
-    model_page = (page,len(request['sources'])) if routes else None
-    budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'), model_page=model_page)
+    page_count = max(1, len(request.get('sources') or [1]))
+    model_page = (page, len(request['sources'])) if routes else None
+    budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'), model_page=model_page, page_count=page_count)
     from ..parallel_config import ROOT
     config_file = ROOT / '.runtime/parallel-services.json'
     lama_cfg = json.loads(config_file.read_text('utf8')).get('lama') if (use_inpaint and config_file.exists()) else None
@@ -1723,6 +1932,22 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                                             'union_sha256': array_sha(union.astype('uint8')),
                                             'provider': 'layerd' if background is not None else 'lama'}
                 outcomes[idx] = _probe_text(obj, folder='joint-trials', inpaint=authorized_patch)
+            still_failed = [(idx, obj) for idx, obj in safe_members if outcomes[idx]['status'] != 'PRECHECK_PASS']
+            if background is not None and still_failed and safe_inpaint is not None:
+                try:
+                    lama_repaired = safe_inpaint(source_pixels, union)
+                except (OSError, TimeoutError, ValueError, RuntimeError):
+                    lama_repaired = None
+                if lama_repaired is not None:
+                    for idx, obj in still_failed:
+                        def lama_patch(image, mask):
+                            if not np.array_equal(mask, masks[obj.id]):
+                                raise ValueError('local ownership changed before repair')
+                            return lama_repaired
+                        lama_patch.receipt = {'group': [member.id for _, member in safe_members],
+                                              'union_sha256': array_sha(union.astype('uint8')),
+                                              'provider': 'lama'}
+                        outcomes[idx] = _probe_text(obj, folder='joint-trials-lama', inpaint=lama_patch)
         for item in outcomes:
             t_obj = item['object']
             if item['status'] == 'PRECHECK_PASS':

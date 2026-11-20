@@ -57,12 +57,19 @@ class AdaptiveBudget:
     Cost units are configurable operation weights, not an asserted currency
     price. Exhaustion stops new work while keeping completed regional receipts.
     """
-    def __init__(self, store, options=None, *, model_page=None):
+    def __init__(self, store, options=None, *, model_page=None, page_count=1):
         self.store = store
         self.model_page = model_page
         if model_page and not (1 <= model_page[0] <= model_page[1]):
             raise ValueError('invalid model reservation page')
-        self.limits = {**DEFAULTS, **(options or {})}
+        n_pages = max(1, int(page_count or 1))
+        scaled_defaults = dict(DEFAULTS)
+        if n_pages > 1:
+            scaled_defaults['model_calls'] = DEFAULTS['model_calls'] * n_pages
+            scaled_defaults['office_validations'] = DEFAULTS['office_validations'] * n_pages
+            scaled_defaults['cost_units'] = DEFAULTS['cost_units'] * n_pages
+            scaled_defaults['max_seconds'] = min(7200, DEFAULTS['max_seconds'] * n_pages)
+        self.limits = {**scaled_defaults, **(options or {})}
         if set(self.limits) != set(DEFAULTS) or any(
                 not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v < 0
                 for v in self.limits.values()):

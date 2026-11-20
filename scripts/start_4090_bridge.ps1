@@ -3,8 +3,8 @@
     [string]$BindAddress = '10.36.154.44',
     [string]$RemoteUser = 'cmcc',
     [string]$IdentityFile = (Join-Path $env:USERPROFILE '.ssh\aitoy_tts_4090_ed25519'),
-    [ValidateSet('opencode_go','moma')][string]$AgentProvider = 'opencode_go',
-    [string]$AgentModel = $(if ($AgentProvider -eq 'opencode_go') { 'hy4' } else { 'qwen/qwen3.7-flash' }),
+    [ValidateSet('deepseek','moma','opencode_go')][string]$AgentProvider = 'deepseek',
+    [string]$AgentModel = $(if ($AgentProvider -eq 'deepseek') { 'deepseek-flash' } elseif ($AgentProvider -eq 'moma') { 'qwen/qwen3.8-max' } else { 'hy4' }),
     [int]$LocalTunnelPort = 18772,
     [switch]$BootRemoteIfStopped
 )
@@ -62,6 +62,9 @@ payload = {
 }
 if '$AgentProvider' == 'opencode_go':
     payload['agent_api_key'] = os.environ['_I2P_TMP_AGENT_KEY']
+    payload['agent_model'] = '$AgentModel'
+elif '$AgentProvider' == 'deepseek':
+    payload['deepseek_api_key'] = os.environ['_I2P_TMP_AGENT_KEY']
     payload['agent_model'] = '$AgentModel'
 else:
     payload['moma'] = os.environ['_I2P_TMP_AGENT_KEY']

@@ -33,6 +33,7 @@ from .native_shapes import (
     discover_bordered_cards,
     estimate_canvas_bg_flat,
     estimate_canvas_field,
+    estimate_card_shadow,
     hex_rgb as _hex,
     soft_shadow_halo_mask,
     try_fit_native_shape_v2,
@@ -261,6 +262,30 @@ def _discover_candidates(
     return cleaned
 
 
+def _ring_parent_bg(
+    work_plate: np.ndarray,
+    box: list[int],
+    pad: int = 5,
+) -> tuple[np.ndarray, float] | None:
+    """Estimate flat parent backing median RGB and 80th-percentile residual from exterior ring."""
+    h_img, w_img = work_plate.shape[:2]
+    x, y, w, h = [int(v) for v in box]
+    rx0, ry0 = max(0, x - pad), max(0, y - pad)
+    rx1, ry1 = min(w_img, x + w + pad), min(h_img, y + h + pad)
+    ring_mask = np.ones((ry1 - ry0, rx1 - rx0), bool)
+    ring_mask[y - ry0:y - ry0 + h, x - rx0:x - rx0 + w] = False
+    vals = work_plate[ry0:ry1, rx0:rx1][ring_mask]
+    if len(vals) < 16:
+        return None
+    med0 = np.median(vals, axis=0).astype(np.float32)
+    inliers = vals[np.abs(vals.astype(np.float32) - med0).max(1) <= 12.0]
+    if len(inliers) < max(12, int(0.45 * len(vals))):
+        return None
+    parent_bg = np.median(inliers, axis=0).astype(np.float32)
+    err = float(np.percentile(np.abs(inliers.astype(np.float32) - parent_bg).max(1), 80))
+    return parent_bg, err
+
+
 def _ring_parent_patch(
     work_plate: np.ndarray,
     canvas_field: np.ndarray,
@@ -277,9 +302,8 @@ def _ring_parent_patch(
     vals = work_plate[ry0:ry1, rx0:rx1][ring_mask]
     if len(vals) < 16:
         return None
-    med0 = np.median(vals, axis=0).astype(np.float32)
-    inliers = vals[np.abs(vals.astype(np.float32) - med0).max(1) <= 12.0]
-    if len(inliers) < max(12, int(0.45 * len(vals))):
+
+    def _try_strip_or_field() -> tuple[np.ndarray, np.ndarray, float] | None:
         # Check flush-corner child inside a card: right + bottom strips agree on parent card fill
         r_strip = work_plate[y:y + h, min(w_img, x + w):min(w_img, x + w + pad)].reshape(-1, 3)
         b_strip = work_plate[min(h_img, y + h):min(h_img, y + h + pad), x:x + w].reshape(-1, 3)
@@ -300,8 +324,17 @@ def _ring_parent_patch(
             patch = canvas_field[y:y + h, x:x + w].copy()
             return patch, np.median(patch.reshape(-1, 3), axis=0), float(np.percentile(f_diff[f_inliers], 80))
         return None
+
+    med0 = np.median(vals, axis=0).astype(np.float32)
+    inliers = vals[np.abs(vals.astype(np.float32) - med0).max(1) <= 12.0]
+    if len(inliers) < max(12, int(0.45 * len(vals))):
+        return _try_strip_or_field()
     parent_bg = np.median(inliers, axis=0).astype(np.float32)
     err = float(np.percentile(np.abs(inliers.astype(np.float32) - parent_bg).max(1), 80))
+    if err > 6.5:
+        fb = _try_strip_or_field()
+        if fb is not None:
+            return fb
     # If parent_bg is very close to canvas_field, use smooth canvas_field patch so gradients stay seamless
     field_patch = canvas_field[y:y + h, x:x + w]
     if float(np.abs(np.median(field_patch.reshape(-1, 3), axis=0) - parent_bg).max()) <= 5.5:
@@ -386,6 +419,8 @@ def stage_containers_and_surfaces(
                 higher_crop_vis[ay:ay + ah, ax:ax + aw] |= apng[..., 3] > 8
             else:
                 higher_asset_vis[ay:ay + ah, ax:ax + aw] |= apng[..., 3] > 8
+        elif rec.get('foreground_shape') and oid in existing_proofs:
+            higher_asset_vis |= existing_proofs[oid]['mask']
 
     # Text guard: NEVER erase or cover uncommitted text!
     # (Draft LayerD asset proposals are NOT blindly rect-blocked here so ribbons/badges/bars
@@ -443,6 +478,39 @@ def stage_containers_and_surfaces(
     candidates = _discover_candidates(
         work_plate, canvas_field, scenery_guard, is_flat_canvas=is_flat_canvas, bar_series=bar_series
     )
+    for ps_cand in (baseline / 'page-structure.json', baseline.parent / 'page-structure.json'):
+        if ps_cand.is_file():
+            try:
+                ps_data = json.loads(ps_cand.read_text('utf8'))
+                existing_boxes = [list(b) for _, b in candidates]
+                added_ps = False
+                for el in ps_data.get('elements', []):
+                    if el.get('category') not in ('card_shape', 'ribbon_shape', 'badge_shape'):
+                        continue
+                    rb = el.get('bbox')
+                    if not rb or len(rb) != 4:
+                        continue
+                    ex = max(0, int(round(rb[0])))
+                    ey = max(0, int(round(rb[1])))
+                    ew = min(w_img - ex, int(round(rb[2])))
+                    eh = min(h_img - ey, int(round(rb[3])))
+                    if ew < 24 or eh < 18 or ew * eh > 0.68 * w_img * h_img:
+                        continue
+                    dup = any(
+                        (abs(ex - sx) <= 5 and abs(ey - sy) <= 5 and abs(ew - sw) <= 10 and abs(eh - sh) <= 10)
+                        or (intersection([ex, ey, ew, eh], [sx, sy, sw, sh]) / max(1.0, float(ew * eh + sw * sh) - intersection([ex, ey, ew, eh], [sx, sy, sw, sh])) >= 0.86)
+                        for sx, sy, sw, sh in existing_boxes
+                    )
+                    if not dup:
+                        cbox = [ex, ey, ew, eh]
+                        candidates.append(('box', cbox))
+                        existing_boxes.append(cbox)
+                        added_ps = True
+                if added_ps:
+                    candidates.sort(key=lambda item: (item[1][2] * item[1][3], item[1][1], item[1][0]))
+            except Exception:
+                pass
+            break
     if not candidates:
         return baseline / 'slideir.json', []
 
@@ -514,25 +582,40 @@ def stage_containers_and_surfaces(
 
             # Optional soft drop-shadow cleanup outside top-level cards on sky/canvas
             halo_mask = None
+            halo_clean = None
+            card_shadow = None
             if not is_flat_canvas and w >= 120 and h >= 60:
                 halo_mask = soft_shadow_halo_mask(
                     work_plate, canvas_field, [x, y, w, h], already_claimed, unresolved_guard
                 )
+                if halo_mask is not None and halo_mask.any():
+                    halo_clean = halo_mask & ~already_claimed
+                    if halo_clean.any():
+                        card_shadow = estimate_card_shadow(work_plate, canvas_field, halo_clean)
 
             s_mask = full_erase & ~already_claimed
             if int(s_mask.sum()) < 16:
                 continue
 
+            boff = shape_fit.get('bbox_offset_local')
+            sbbox = ([float(x + boff[0]), float(y + boff[1]), float(boff[2]), float(boff[3])]
+                     if boff else [float(x), float(y), float(w), float(h)])
             shape_obj = Shape(
                 id=sid,
-                bbox=[float(x), float(y), float(w), float(h)],
+                bbox=sbbox,
                 z=1,
                 geometry=shape_fit['geometry'],
                 fill=shape_fit['fill'],
+                fill_opacity=shape_fit.get('fill_opacity'),
                 line_color=shape_fit['line_color'],
                 line_width_pt=float(shape_fit['line_width_pt']),
+                line_opacity=shape_fit.get('line_opacity'),
+                line_dash=shape_fit.get('line_dash'),
+                head_end=shape_fit.get('head_end'),
+                tail_end=shape_fit.get('tail_end'),
                 corner_radius_px=shape_fit['corner_radius_px'],
                 fill_gradient=shape_fit.get('fill_gradient'),
+                shadow=card_shadow,
             )
             fused_try = fuse_incremental_scene(
                 baseline,
@@ -549,17 +632,15 @@ def stage_containers_and_surfaces(
             restore_box = [x, y, w, h]
             backing_save = parent_u8
 
-            if halo_mask is not None and halo_mask.any():
-                halo_clean = halo_mask & ~already_claimed
-                if halo_clean.any():
-                    field_u8 = np.clip(np.rint(canvas_field), 0, 255).astype(np.uint8)
-                    work_plate[halo_clean] = field_u8[halo_clean]
-                    s_mask = s_mask | halo_clean
-                    yy_m, xx_m = np.nonzero(s_mask)
-                    mx0, my0 = int(xx_m.min()), int(yy_m.min())
-                    mw0, mh0 = int(xx_m.max() - mx0 + 1), int(yy_m.max() - my0 + 1)
-                    restore_box = [mx0, my0, mw0, mh0]
-                    backing_save = np.clip(np.rint(canvas_field[my0:my0 + mh0, mx0:mx0 + mw0]), 0, 255).astype(np.uint8)
+            if halo_clean is not None and halo_clean.any():
+                field_u8 = np.clip(np.rint(canvas_field), 0, 255).astype(np.uint8)
+                work_plate[halo_clean] = field_u8[halo_clean]
+                s_mask = s_mask | halo_clean
+                yy_m, xx_m = np.nonzero(s_mask)
+                mx0, my0 = int(xx_m.min()), int(yy_m.min())
+                mw0, mh0 = int(xx_m.max() - mx0 + 1), int(yy_m.max() - my0 + 1)
+                restore_box = [mx0, my0, mw0, mh0]
+                backing_save = np.clip(np.rint(canvas_field[my0:my0 + mh0, mx0:mx0 + mw0]), 0, 255).astype(np.uint8)
 
             already_claimed |= s_mask
             surface_claimed_mask |= s_mask

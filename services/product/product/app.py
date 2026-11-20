@@ -80,37 +80,75 @@ class Queue:
             id=self.take()
             if not id:continue
             job=self.root/id
-            with (job/'worker.log').open('w',encoding='utf-8') as log:
-                env=os.environ.copy()
-                env['PYTHONPATH']=os.pathsep.join(dict.fromkeys([str(Path(__file__).resolve().parents[1]),
-                    *filter(None,env.get('PYTHONPATH','').split(os.pathsep))]))
-                # Fixed module only; uploaded names and model output never become commands.
-                process=subprocess.Popen([sys.executable,'-m','product.parallel_pipeline',str(job)],cwd=ROOT,
-                    env=env,stdout=log,stderr=log,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-                with self.lock:self.processes[id]=process
-                request=json.loads((job/'request.json').read_text())
-                deadline=time.monotonic()+(request.get('runtime_seconds',7200)+120 if request.get('orchestrator')=='opencode'
-                                           else max(3600,1800*len(request['sources'])))
-                while process.poll() is None and not self.stop_event.wait(.2) and time.monotonic()<deadline:
-                    pass
-                if process.poll() is None:
-                    self.kill(process)
-                    if not self.stop_event.is_set() and (job/'host-baseline/manifest.json').is_file():
-                        from .runtime.host_baseline import publish
-                        outcome=publish(job,{'reason':'Job watchdog deadline expired'},['TIME_BUDGET_EXHAUSTED'])
-                        self.set(id,outcome['status'])
+            process=None
+            try:
+                with (job/'worker.log').open('w',encoding='utf-8') as log:
+                    env=os.environ.copy()
+                    env['PYTHONPATH']=os.pathsep.join(dict.fromkeys([str(Path(__file__).resolve().parents[1]),
+                        *filter(None,env.get('PYTHONPATH','').split(os.pathsep))]))
+                    # Fixed module only; uploaded names and model output never become commands.
+                    process=subprocess.Popen([sys.executable,'-m','product.parallel_pipeline',str(job)],cwd=ROOT,
+                        env=env,stdout=log,stderr=log,
+                        creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                    with self.lock:self.processes[id]=process
+                    request=json.loads((job/'request.json').read_text(encoding='utf-8'))
+                    start_mono=time.monotonic()
+                    runtime_s=request.get('runtime_seconds',7200)
+                    if request.get('orchestrator')=='opencode':
+                        extra=(min(runtime_s,max(300,int(runtime_s*0.5))) if runtime_s>0 else 0) if request.get('host_stage0') else 0
+                        deadline=start_mono+runtime_s+extra+180
+                        cap_deadline=start_mono+(runtime_s*2+300 if runtime_s>0 else 180)
                     else:
-                        self.set(id,'INTERRUPTED' if self.stop_event.is_set() else 'FAILED')
-                else:
-                    try:result=json.loads((job/'result.json').read_text(encoding='utf-8'))
-                    except (OSError,ValueError):result={'status':'FAILED'}
-                    if (job/'host-baseline/manifest.json').is_file() and result.get('status')!='CANCELLED':
-                        selection=job/'runtime/delivery-selection.json'
-                        if not selection.is_file() or json.loads(selection.read_text('utf8')).get('result_sha256')!=digest(job/'result.json'):
+                        deadline=start_mono+max(3600,1800*len(request['sources']))
+                        cap_deadline=deadline
+                    session_synced=False
+                    while process.poll() is None and not self.stop_event.wait(.2) and time.monotonic()<deadline:
+                        if not session_synced and request.get('orchestrator')=='opencode':
+                            sf=job/'runtime/session.json'
+                            if sf.is_file():
+                                try:
+                                    s_dead=json.loads(sf.read_text(encoding='utf-8')).get('deadline')
+                                    if isinstance(s_dead,(int,float)):
+                                        deadline=max(deadline,min(cap_deadline,time.monotonic()+max(0.0,s_dead-time.time())+180))
+                                        session_synced=True
+                                except (OSError,ValueError):
+                                    pass
+                    if process.poll() is None:
+                        if not self.stop_event.is_set() and not (job/'cancel.requested').exists():
+                            try:
+                                (job/'cancel.requested').write_text('{"requested":true}',encoding='utf-8')
+                            except OSError:
+                                pass
+                        self.kill(process)
+                        if not self.stop_event.is_set() and (job/'host-baseline/manifest.json').is_file():
                             from .runtime.host_baseline import publish
-                            result=publish(job,{'reason':'Worker exited before selecting a verified delivery'},['WORKER_INTERRUPTED'])
-                    self.set(id,result['status'] if result.get('status') in TERMINAL else 'FAILED')
+                            outcome=publish(job,{'reason':'Job watchdog deadline expired'},['TIME_BUDGET_EXHAUSTED'])
+                            self.set(id,outcome['status'])
+                        else:
+                            self.set(id,'INTERRUPTED' if self.stop_event.is_set() else 'FAILED')
+                    else:
+                        try:result=json.loads((job/'result.json').read_text(encoding='utf-8'))
+                        except (OSError,ValueError):result={'status':'FAILED'}
+                        if (job/'host-baseline/manifest.json').is_file() and result.get('status')!='CANCELLED':
+                            selection=job/'runtime/delivery-selection.json'
+                            if not selection.is_file() or json.loads(selection.read_text(encoding='utf-8')).get('result_sha256')!=digest(job/'result.json'):
+                                from .runtime.host_baseline import publish
+                                result=publish(job,{'reason':'Worker exited before selecting a verified delivery'},['WORKER_INTERRUPTED'])
+                        self.set(id,result['status'] if result.get('status') in TERMINAL else 'FAILED')
+            except Exception as exc:
+                import traceback
+                print(f'Queue worker error for job {id}: {type(exc).__name__}: {exc}', file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                if process is not None and process.poll() is None:
+                    try:self.kill(process)
+                    except Exception:pass
+                try:
+                    with self.connect() as db:
+                        row=db.execute('SELECT state FROM jobs WHERE id=?',(id,)).fetchone()
+                    if not row or row[0] not in TERMINAL:
+                        self.set(id,'FAILED')
+                except Exception:pass
+            finally:
                 with self.lock:self.processes.pop(id,None)
 
     def kill(self,process=None):
@@ -225,25 +263,69 @@ def create_app(root=None, token=None, run_worker=True):
     @app.get('/api/health',dependencies=[Depends(auth)])
     def health():
         from .pipeline import settings
-        try:settings();ready=True
-        except (RuntimeError,OSError):ready=False
-        runtime_ready=ready and bool(os.environ.get('IMAGE2PPT_OPENCODE_URL'))
+        from .runtime.provider import (
+            DEFAULT_DEEPSEEK_MODEL, DEFAULT_GO_MODEL, DEFAULT_MOMA_MODEL,
+            DEEPSEEK_MODEL_ALIASES, GO_MODEL_ALIASES,
+            deepseek_api_key, moma_api_keys, resolve_review_config,
+        )
+        try:settings();settings_ready=True
+        except (RuntimeError,ValueError,OSError):settings_ready=False
         agent_provider=os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma')
-        return {'model_ready':ready and (bool(os.environ.get('OPENCODE_GO_API_KEY')) or runtime_ready),'moma_configured':ready and agent_provider=='moma','max_pages':12,'opencode_max_pages':32,'max_calls_per_page':None,'independent_worker':True,
+        moma_keys=moma_api_keys()
+        ds_key=deepseek_api_key()
+        go_key=bool(os.environ.get('OPENCODE_GO_API_KEY'))
+        if agent_provider=='deepseek':agent_ready=bool(ds_key)
+        elif agent_provider=='opencode_go':agent_ready=bool(os.environ.get('IMAGE2PPT_AGENT_API_KEY') or os.environ.get('OPENCODE_GO_API_KEY')) or settings_ready
+        else:agent_ready=bool(moma_keys) or settings_ready
+        runtime_ready=agent_ready and bool(os.environ.get('IMAGE2PPT_OPENCODE_URL'))
+        if agent_provider=='deepseek':
+            raw_m=os.environ.get('IMAGE2PPT_AGENT_MODEL') or DEFAULT_DEEPSEEK_MODEL
+            agent_model_val=DEEPSEEK_MODEL_ALIASES.get(raw_m,raw_m)
+        elif agent_provider=='opencode_go':
+            raw_m=os.environ.get('IMAGE2PPT_AGENT_MODEL') or DEFAULT_GO_MODEL
+            agent_model_val=GO_MODEL_ALIASES.get(raw_m,raw_m)
+        else:
+            agent_model_val=os.environ.get('IMAGE2PPT_AGENT_MODEL') or os.environ.get('MOMA_MODEL') or os.environ.get('PLANNER_MODEL') or DEFAULT_MOMA_MODEL
+        try:rev_prov,_,_,rev_model=resolve_review_config(mutate_env=False)
+        except Exception:rev_prov,rev_model=None,None
+        return {'model_ready':agent_ready and (go_key or runtime_ready),
+                'moma_configured':bool(moma_keys) or (settings_ready and agent_provider=='moma'),
+                'moma_key_count':len(moma_keys),
+                'deepseek_configured':bool(ds_key),
+                'max_pages':12,'opencode_max_pages':32,'max_calls_per_page':None,'independent_worker':True,
                 'agent_inference_provider':agent_provider,
+                'agent_model':agent_model_val,
+                'review_provider':rev_prov,
+                'review_model':rev_model,
                 'opencode_runtime_configured':runtime_ready,
-                'opencode_go_configured':bool(os.environ.get('OPENCODE_GO_API_KEY')),'italic_difference_ignored':True}
+                'opencode_go_configured':go_key,'italic_difference_ignored':True}
     @app.post('/api/provider-key',dependencies=[Depends(auth)])
     async def provider_key(request:Request):
+        def _valid_secret(val):
+            return isinstance(val,str) and 8<=len(val)<=4096 and not any(ord(c)<33 or ord(c)>126 for c in val)
         try:
-            data=await request.json();key=data.get('key','')
-            if not isinstance(key,str) or not 8<=len(key)<=4096 or any(ord(c)<33 or ord(c)>126 for c in key):
-                raise ValueError()
+            data=await request.json()
+            keys_list=data.get('keys')
+            if keys_list is not None:
+                if not isinstance(keys_list,list) or not keys_list or not all(_valid_secret(k) for k in keys_list):
+                    raise ValueError()
+                key=keys_list[0]
+            else:
+                key=data.get('key','')
+                if not _valid_secret(key):
+                    raise ValueError()
         except (ValueError,AttributeError):raise HTTPException(422,'密钥格式无效') from None
         provider=data.get('provider','moma')
         if provider=='moma':
-            os.environ['MOMA_API_KEY']=key
-            os.environ['PLANNER_API_KEY']=key
+            keys_to_set=keys_list if keys_list is not None else [key]
+            os.environ['MOMA_API_KEY']=keys_to_set[0]
+            os.environ['MOMA_API_KEYS']='\n'.join(keys_to_set)
+            if os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma')=='moma' or not os.environ.get('PLANNER_BASE_URL') or 'moma.cmecloud.cn' in os.environ.get('PLANNER_BASE_URL',''):
+                os.environ['PLANNER_API_KEY']=keys_to_set[0]
+        elif provider=='deepseek':
+            os.environ['DEEPSEEK_API_KEY']=key
+            if os.environ.get('IMAGE2PPT_AGENT_PROVIDER')=='deepseek':
+                os.environ['IMAGE2PPT_AGENT_API_KEY']=key
         elif provider=='opencode_go':os.environ['OPENCODE_GO_API_KEY']=key
         else:raise HTTPException(422,'未知模型供应商')
         return {'configured':True,'storage':'process_memory'}
@@ -251,8 +333,10 @@ def create_app(root=None, token=None, run_worker=True):
     @app.post('/api/v1/jobs',status_code=202,dependencies=[Depends(auth)])
     def submit(request:Request,files:list[UploadFile]=File(...),object_extraction:str='default',pipeline_mode:str='parallel_review',
                orchestrator:str='pipeline',goal:str='Restore these images as an editable PPTX.',fresh_perception:bool=True,
-               native_variant:str='combined',baseline_only:bool=False,experiment_profile:str|None=None,agent_steps:int|None=None,runtime_seconds:int|None=None,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=False,agent_model:str|None=None):
+               native_variant:str='combined',baseline_only:bool=False,experiment_profile:str|None=None,agent_steps:int|None=None,runtime_seconds:int|None=None,candidate_limit:int=4,model_calls:int=12,office_validations:int=60,tool_profile:str='all',agent_thinking:bool=False,agent_model:str|None=None,agent_provider:str|None=None):
         from .experiment import PROFILES
+        if agent_provider is not None and agent_provider not in ('deepseek','moma','opencode_go'):
+            raise HTTPException(422,'未知模型供应商')
         if native_variant not in ('combined','shape-only','joint-only'):
             raise HTTPException(422,'unknown native ablation')
         if experiment_profile is not None:
@@ -310,7 +394,7 @@ def create_app(root=None, token=None, run_worker=True):
                 original_refs.append({'path':str(original.relative_to(job)),'sha256':digest(original),
                                       'canonical_file':name,'canonical_sha256':digest(job/'inputs'/name)})
             write(job/'request.json',{'sources':names,'max_calls':None,'italic_difference_ignored':True,
-                                     'agent_inference_provider':os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma'),
+                                     'agent_inference_provider':agent_provider or os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma'),
                                      'agent_model':agent_model or os.environ.get('IMAGE2PPT_AGENT_MODEL'),
                                      'object_extraction':object_route,'pipeline_mode':selected_mode,'original_inputs':original_refs,
                                      'orchestrator':orchestrator,'host_stage0':orchestrator=='opencode','baseline_only':baseline_only,'native_variant':native_variant,

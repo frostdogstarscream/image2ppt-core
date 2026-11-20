@@ -94,7 +94,8 @@ def stage_asset_candidate(candidate_directory, graph, baseline_directory, output
             'independent_checks':result,'office':'NOT_RUN','go':'NOT_RUN','published':False})
         if parent!={str(p.relative_to(baseline)):digest(p) for p in baseline.rglob('*') if p.is_file()}:
             raise ValueError('asset staging modified its parent')
+        from .candidate_stage import _expose_staged_dir
         if original!={str(p.relative_to(directory)):digest(p) for p in directory.rglob('*') if p.is_file()}:
             raise ValueError('asset staging modified its source candidate')
-        staged.rename(output)
+        _expose_staged_dir(staged, output)
     return output/'slideir.json'

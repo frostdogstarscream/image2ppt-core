@@ -47,14 +47,17 @@ def unpack(data, target):
                 raise ValueError('Office packet hash mismatch')
 
 
-def submit(job, pptx, irs, directory, timeout=1800):
+def submit(job, pptx, irs, directory, timeout=1800, *, target_ids=None):
     directory = Path(directory)
     request = directory/'worker-request'
     request.mkdir(parents=True)
     shutil.copyfile(pptx, request/'input.pptx')
     for i, ir in enumerate(irs):
         shutil.copytree(Path(ir).parent, request/f'page-{i}')
-    write(request/'request.json', {'irs': [f'page-{i}/slideir.json' for i in range(len(irs))]})
+    req_payload = {'irs': [f'page-{i}/slideir.json' for i in range(len(irs))]}
+    if target_ids is not None:
+        req_payload['target_ids'] = sorted(set(target_ids))
+    write(request/'request.json', req_payload)
     pack(request, directory/'input.zip')
     write(directory/'worker-state.json', {'status': 'QUEUED', 'created': time.time(),
         'input_sha256': digest(directory/'input.zip'), 'output_directory': str(directory)})
@@ -86,7 +89,7 @@ class OfficeQueue:
                 if row['status'] != 'QUEUED':
                     continue
                 job=self.root/file.relative_to(self.root).parts[0]
-                if (job/'cancel.requested').exists():
+                if (job/'cancel.requested').exists() or (job/'result.json').exists():
                     row['status']='CANCELLED'
                     write(file,row)
                     continue
@@ -115,7 +118,8 @@ def execute_ticket(client,ticket,run,binding):
     irs=[(run/'input'/name).resolve() for name in request['irs']]
     if any(not p.is_relative_to(run/'input') for p in irs):
         raise ValueError('Office IR escaped packet')
-    result=check_local(run/'input/input.pptx',irs,run/'output/check')
+    target_ids = request.get('target_ids')
+    result=check_local(run/'input/input.pptx',irs,run/'output/check',**({'target_ids':target_ids} if target_ids is not None else {}))
     for probe_file in list((run/'output/check').rglob('*')):
         if not probe_file.is_file():
             continue
@@ -139,8 +143,14 @@ def worker(url, token, root, once=False):
     from ..parallel_store import key
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    binding=key({'fonts':font_manifest([]),'worker_code':digest(__file__),
-                 'office_code':digest(Path(__file__).with_name('office.py')),'process':secrets.token_hex(16)})
+    pkg = Path(__file__).resolve().parents[1]
+    binding = key({
+        'fonts': font_manifest([]),
+        'worker_code': digest(__file__),
+        'office_code': digest(Path(__file__).with_name('office.py')),
+        'parallel_office_code': digest(pkg / 'parallel_office.py'),
+        'parallel_probe_code': digest(pkg / 'parallel_edit_probe.py'),
+    })
     with httpx.Client(base_url=url, headers={'Authorization': 'Bearer '+token,
             'X-Image2PPT-Worker-Binding':binding}, timeout=1800,trust_env=False) as client:
         while True:

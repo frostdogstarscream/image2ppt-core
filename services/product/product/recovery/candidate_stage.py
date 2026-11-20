@@ -2,7 +2,9 @@
 import json
 import math
 from pathlib import Path
+import shutil
 from tempfile import TemporaryDirectory
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -23,6 +25,28 @@ from .diagnostics import assess_trial
 from .background_adapter import RecoveryBlocked
 from .gradient_backing import fit_gradient
 from .text_mask_completion import TextMaskCompletion
+
+
+def _expose_staged_dir(staged: Path, output: Path) -> None:
+    """Rename `staged` to `output`, retrying transient Windows AV/indexer directory locks."""
+    for delay in (0.05, 0.1, 0.2, 0.3, 0.5, 0.8):
+        try:
+            staged.rename(output)
+            return
+        except (PermissionError, OSError):
+            if output.exists():
+                raise
+            time.sleep(delay)
+    try:
+        staged.rename(output)
+    except (PermissionError, OSError):
+        if output.exists():
+            raise
+        part = output.with_name(f'.tmp-expose-{output.name}')
+        if part.exists():
+            shutil.rmtree(part, ignore_errors=True)
+        shutil.copytree(staged, part)
+        part.rename(output)
 
 
 def font_line_height(record, size):
@@ -76,7 +100,7 @@ def _find_non_colliding_frame(text, payload_bbox, spacing, max_font_px, max_glyp
     return best
 
 
-def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_size=None, exploratory=False, fit_origin=False):
+def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_size=None, exploratory=False, fit_origin=False, edit_headroom: bool = False):
     """Fit installed font bearings/leading within this local replacement scope."""
     used = {text.style, *[span.style for span in text.spans]}
     records = {(font['family'], font['bold']): font for font in fonts['fonts']}
@@ -87,6 +111,10 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
     max_font_px = styles[text.style].size_px
     advance_width = text.bbox[2]
     lines = text.text.split('\n')
+    rep_lines = None
+    if edit_headroom and minimum_size is None:
+        from ..parallel_edit_probe import replacement
+        rep_lines = replacement(text.text).split('\n')
     for identifier in used:
         style = styles[identifier]
         max_font_px = max(max_font_px, style.size_px)
@@ -97,11 +125,17 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
         max_glyph_bottom = max(max_glyph_bottom, *[face.getbbox(line)[3] for line in lines])
         max_line_len = max(max_line_len, *[math.ceil(face.getlength(line)) for line in lines])
         advance_width = max(advance_width, *[math.ceil(face.getlength(line)) + 1 for line in lines])
+        if edit_headroom and minimum_size is None and rep_lines is not None:
+            advance_width = max(
+                advance_width,
+                *[math.ceil(face.getlength(line) * 1.07) + 6 for line in lines],
+                *[math.ceil(face.getlength(rline) * 1.05) + 6 for rline in rep_lines],
+            )
         for name in (style.ea, style.latin):
             line_height = max(line_height, font_line_height(records[name, style.bold], style.size_px))
     payload = text.model_dump()
     spacing = text.line_spacing_px or max_font_px*1.2
-    metric_height = (len(lines)-1)*spacing+math.ceil(line_height)+1
+    metric_height = (len(lines)-1)*spacing+math.ceil(line_height)+(3 if (edit_headroom and minimum_size is None) else 1)
     payload['bbox'] = [*text.bbox[:2],advance_width,max(text.bbox[3]+bearing, metric_height)]
     if minimum_size is not None:
         payload['bbox'][2]=max(payload['bbox'][2],minimum_size[0])
@@ -132,7 +166,7 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
     return payload
 
 
-def stage_background(trial_directory, graph, baseline_directory, fonts, output, *, typography=None, frame_minimum=None, fit_origin=False):
+def stage_background(trial_directory, graph, baseline_directory, fonts, output, *, typography=None, frame_minimum=None, fit_origin=False, layer_directory=None, edit_headroom: bool = False):
     """Recompute all local prechecks, then atomically expose one trial directory.
 
     Failed trials leave the baseline and already staged regions untouched.
@@ -171,18 +205,25 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
     box = [x-3, y-3, w+6, h+6]
     bx, by, bw, bh = box
     context_protected=peer_protection(text,graph,source,np.zeros(source.shape[:2],bool),purpose='context',baseline_directory=baseline_directory)
-    from .region_candidates import _safe_background_model
+    from .region_candidates import _fallback_nonplanar_reference, _safe_background_model
     backing, _ = _safe_background_model(source, box, context_protected)
     ink, _ = glyph_evidence(source, box, styles[text.style].color, backing)
     original = np.zeros(source.shape[:2], bool)
     original[by:by+bh, bx:bx+bw] = ink
-    reference_ctx = (saved.get('provenance') or {}).get('background_context_width', 14)
+    prov = saved.get('provenance') or {}
+    reference_ctx = prov.get('background_context_width', 14)
     if type(reference_ctx) is not int or not 8 <= reference_ctx <= 128:
         raise ValueError('invalid source context width')
-    try:
-        reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx)
-    except RecoveryBlocked:
+    allow_vert = bool(prov.get('allow_vertical_context') or (prov.get('fit') or {}).get('allow_vertical_context'))
+    if (saved.get('reference_context') or {}).get('schema') == 'NonPlanarFallbackReference/1':
+        reference, fit_report, _ = _fallback_nonplanar_reference(source, box, backing, original, layer_directory)
+    elif allow_vert:
         reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx, allow_vertical=True)
+    else:
+        try:
+            reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx)
+        except RecoveryBlocked:
+            reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx, allow_vertical=True)
     if ((saved.get('provenance') or {}).get('fit') or {}).get('method') == 'scanline-lateral':
         from .marked_fields import striped_backing
         stripe = striped_backing(source,box,context_protected)
@@ -214,6 +255,7 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
     output.parent.mkdir(parents=True, exist_ok=True)
     identity = {'source': graph.source_sha256, 'scene': key(graph.model_dump()), 'text': text.id,
                 'typography':typography,'frame_minimum':frame_minimum,'fit_origin':fit_origin,
+                'edit_headroom':bool(edit_headroom),
                 'trial_hashes': hashes, 'fonts': key(fonts), 'font_files': font_bindings(graph, fonts),
                 'implementation_sha256': digest(__file__)}
     cid = 'c-'+key(identity)
@@ -240,6 +282,8 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
         frame_options={'minimum_size':frame_minimum['size']} if frame_minimum else {}
         if fit_origin:
             frame_options['fit_origin'] = True
+        if edit_headroom:
+            frame_options['edit_headroom'] = True
         text_payload = native_frame(proposed, styles, fonts, source.shape[1::-1], protected, box, **frame_options)
         if fit_origin and proposed.align == 'left' and any(k!=text.id and ids==graph.text.members[text.id]
                                                          for k,ids in graph.text.members.items()):
@@ -278,5 +322,5 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
         write(staged/'r12-background-preflight.json', {'candidate': candidate.model_dump(by_alias=True),
               'preflight': preflight.model_dump(by_alias=True), 'residual_recheck': report,
               'completion': completion.report, 'trial_hashes': hashes, 'published': False})
-        staged.rename(output)
+        _expose_staged_dir(staged, output)
     return output/'slideir.json'

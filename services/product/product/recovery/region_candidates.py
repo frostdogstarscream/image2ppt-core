@@ -14,11 +14,14 @@ from .diagnostics import save_trial
 from .background_adapter import RecoveryBlocked
 
 
-def _with_context_provenance(provenance, ctx_w):
-    if ctx_w == 14:
+def _with_context_provenance(provenance, ctx_w, allow_vertical=False):
+    if ctx_w == 14 and not allow_vertical:
         return provenance
     prov = dict(provenance) if isinstance(provenance, dict) else ({'receipt': provenance} if provenance is not None else {})
-    prov.setdefault('background_context_width', ctx_w)
+    if ctx_w != 14:
+        prov.setdefault('background_context_width', ctx_w)
+    if allow_vertical:
+        prov.setdefault('allow_vertical_context', True)
     return prov
 
 
@@ -173,7 +176,7 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
         row=save_trial(directory/name,source,mask,raw,protected,box,reference,fit,
             {'candidate':name,'mask_variant':mask_name,'method':method,'object_id':identifier,
              'source_sha256':graph.source_sha256,'scene_graph_sha256':key(graph.model_dump()),
-             'scene_sha256':key(graph.model_dump()),'provenance':_with_context_provenance(provenance,ctx_w)})
+             'scene_sha256':key(graph.model_dump()),'provenance':_with_context_provenance(provenance,ctx_w,allow_vertical=bool(fit.get('allow_vertical_context')))})
         records.append(row);receipt()
         return row
     try:
@@ -251,7 +254,7 @@ def generate(graph,identifier,source_file,layer_directory,directory,*,inpaint=No
         row=save_trial(directory/name,source,completion.masks[mask_name],raw,protected,box,reference,fit,
             {'candidate':name,'mask_variant':mask_name,'method':method,'object_id':identifier,
              'source_sha256':graph.source_sha256,'scene_graph_sha256':key(graph.model_dump()),
-             'scene_sha256':key(graph.model_dump()),'provenance':_with_context_provenance(provenance,ctx_w)})
+             'scene_sha256':key(graph.model_dump()),'provenance':_with_context_provenance(provenance,ctx_w,allow_vertical=bool(fit.get('allow_vertical_context')))})
         records.append(row)
     for mask_name in completion.masks:
         save(mask_name,'gradient',reference,{'fit':fit})

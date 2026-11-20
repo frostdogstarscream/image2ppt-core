@@ -149,7 +149,15 @@ class RuntimeService(ExplorationTools):
             if tool=='batch_reconstruct_page':
                 k = str(args['page'])
                 old = current.setdefault('regional_failures',{}).get(k,[])
-                current.setdefault('repair_rounds', {}).setdefault(k, []).append({'progress': False, 'candidate_id': outcome.get('candidate_id')})
+                made_progress = bool(
+                    outcome.get('status') in ('VALIDATED', 'STAGED_LOCAL')
+                    and (outcome.get('staged_count') or outcome.get('candidate_id'))
+                )
+                current.setdefault('repair_rounds', {}).setdefault(k, []).append({
+                    'progress': made_progress,
+                    'candidate_id': outcome.get('candidate_id'),
+                    'object_ids': sorted(args['object_ids']),
+                })
                 touched = set(args['object_ids'])
                 current['regional_failures'][k] = [r for r in old if r['object_id'] not in touched]+outcome.get('failed_regions',[])
             if tool=='commit_candidate' and outcome.get('status')=='COMMITTED':
@@ -268,7 +276,7 @@ class RuntimeService(ExplorationTools):
         return {'detected':[previous[r['id']] for r in data['regions']], 'models':data['models']}
 
     def crop_region(self, state, current, directory, *, page, object_ids=None, bbox=None,
-                    allow_movable=True, allow_move_unsafe=False, upgrade_containers=True):
+                    allow_movable=True, allow_move_unsafe=False, upgrade_containers=False):
         from .. import layout_evidence
         from ..recovery.region_crop import collect_crop_seeds, stage_region_crops
         row = self.page(current, page)
@@ -346,12 +354,21 @@ class RuntimeService(ExplorationTools):
             'parent_ir_sha256': digest(row['ir']), 'parent_scene_sha256': digest(row['scene']),
             'strategy': 'region_crop', 'code': self.code_binding(),
             'fingerprint': key({'crop': staged_ids, 'ir': digest(crop_ir)}),
+            'crop_spec': {
+                'initial_baseline': str(Path(row['ir']).parent),
+                'seeds': seeds,
+                'allow_movable': bool(allow_movable),
+                'allow_move_unsafe': bool(allow_move_unsafe),
+                'protected_text_ids': sorted(protected_text_ids) if protected_text_ids is not None else None,
+                'upgrade_containers': bool(upgrade_containers and object_ids is None and bbox is None),
+                'logo_ids': sorted(logo_ids),
+            },
             'files': {str(p): digest(p) for p in crop_dir.rglob('*') if p.is_file()},
         }
         current['candidates'][cid] = cand
         return {'status': 'STAGED_LOCAL', 'candidate_id': cid, 'page': page,
                 'staged_object_ids': staged_ids, 'report': full_report,
-                'next_step': f'Call commit_candidate(candidate_id="{cid}", expected_version={current["version"] + 1}) to validate and commit.'}
+                'next_step': f'Call commit_candidate(candidate_id="{cid}", expected_version={current["version"] + 1}) once to validate and commit (if validation fails, do not re-validate the identical candidate; proceed with compile_pptx or target only failing object_ids).'}
 
     def run_perception(self, state, current, directory):
         if current['pages']:
@@ -369,8 +386,9 @@ class RuntimeService(ExplorationTools):
         import numpy as np
         from PIL import Image
         request = json.loads((state.job/'request.json').read_text('utf8'))
+        page_count = max(1, len(request.get('sources') or [1]))
         store = Store(state.job/'state')
-        budget = AdaptiveBudget(store, request.get('adaptive_budget'))
+        budget = AdaptiveBudget(store, request.get('adaptive_budget'), page_count=page_count)
         provider = BudgetedActor(planning_actor(state.job), budget)
         cache = state.job/'fresh-cache' if request.get('fresh_perception') else Path(
             os.environ.get('IMAGE2PPT_PARALLEL_CACHE', str(state.job/'cache')))
@@ -425,7 +443,8 @@ class RuntimeService(ExplorationTools):
         baseline = Path(row['ir']).parent
         from ..recovery.adaptive_policy import AdaptiveBudget
         request = json.loads((state.job/'request.json').read_text('utf8'))
-        budget = AdaptiveBudget(Store(state.job/'state'), request.get('adaptive_budget'))
+        page_count = max(1, len(request.get('sources') or [1]))
+        budget = AdaptiveBudget(Store(state.job/'state'), request.get('adaptive_budget'), page_count=page_count)
         from ..recovery.text_probe import probe_one
         from ..recovery.asset_retry import retry_asset_extraction
         from ..recovery.agent_asset_stage import stage_asset_candidate
@@ -579,19 +598,60 @@ class RuntimeService(ExplorationTools):
             return {'status':'REVIEW_REQUIRED','candidate_id':candidate_id,'office_status':'NOT_RUN',
                     'failure':candidate.get('failure','CANDIDATE_NOT_STAGED'),
                     'failed_checks':candidate.get('failed_checks',[]),'evidence':candidate.get('evidence',[])}
-        ir, graph, _, _ = self._verify_staged_candidate_graph(current, candidate)
+        ir, graph, _, original = self._verify_staged_candidate_graph(current, candidate)
+        def _scoped_target_ids(cand, orig_graph, cand_graph):
+            if not orig_graph.selected:
+                return None
+            cand_ids = list(cand.get('object_ids') or ([cand['object_id']] if cand.get('object_id') else []))
+            added_ids = set(cand_graph.selected) - set(orig_graph.selected)
+            modified_ids = {
+                oid for oid in (set(orig_graph.selected) & set(cand_graph.selected))
+                if cand_graph.selected[oid] != orig_graph.selected[oid]
+            }
+            target = (set(cand_ids) | added_ids | modified_ids) & set(cand_graph.selected)
+            def _sel_box(rec):
+                box = rec.get('restore_bbox') or rec.get('bbox') or (rec.get('payload') or {}).get('bbox')
+                return box if isinstance(box, (list, tuple)) and len(box) == 4 else None
+            def _boxes_near(b1, b2, pad=4.0):
+                return (
+                    b1[0] - pad < b2[0] + b2[2] + pad
+                    and b2[0] - pad < b1[0] + b1[2] + pad
+                    and b1[1] - pad < b2[1] + b2[3] + pad
+                    and b2[1] - pad < b1[1] + b1[3] + pad
+                )
+            direct_boxes = [b for oid in target if (b := _sel_box(cand_graph.selected[oid])) is not None]
+            if direct_boxes:
+                for sid, srec in orig_graph.selected.items():
+                    if sid in target or sid not in cand_graph.selected:
+                        continue
+                    sb = _sel_box(srec)
+                    if sb is not None and any(_boxes_near(sb, db) for db in direct_boxes):
+                        target.add(sid)
+            if not target or target >= set(cand_graph.selected):
+                return None
+            return sorted(target)
+
         from .compiler import compile_local as compile_pages
         from ..parallel_pipeline import effective_texts
         with lease('compiler'):
             artifacts = compile_pages([ir], directory/'compiled', [effective_texts(graph, ir)])
-        result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check')
-        if result.get('status') == 'REVIEW_REQUIRED' and candidate.get('kind') == 'batch' and not candidate.get('isolation_attempted'):
+        scoped_ids = _scoped_target_ids(candidate, original, graph)
+        result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check',
+                                   **({'target_ids': scoped_ids} if scoped_ids is not None else {}))
+        iso_attempts = int(candidate.get('isolation_attempts', 1 if candidate.get('isolation_attempted') else 0))
+        while result.get('status') == 'REVIEW_REQUIRED' and candidate.get('kind') == 'batch' and iso_attempts < 2:
             from .batch_backbone import restage_batch_candidate_subset
-            if restage_batch_candidate_subset(self, state, current, directory/'batch-isolate', candidate, result):
-                ir, graph, _, _ = self._verify_staged_candidate_graph(current, candidate)
-                with lease('compiler'):
-                    artifacts = compile_pages([ir], directory/'compiled-pass2', [effective_texts(graph, ir)])
-                result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check-pass2')
+            pass_num = iso_attempts + 2
+            iso_dir = directory / ('batch-isolate' if pass_num == 2 else f'batch-isolate-pass{pass_num}')
+            if not restage_batch_candidate_subset(self, state, current, iso_dir, candidate, result):
+                break
+            iso_attempts = int(candidate.get('isolation_attempts', iso_attempts + 1))
+            ir, graph, _, original = self._verify_staged_candidate_graph(current, candidate)
+            with lease('compiler'):
+                artifacts = compile_pages([ir], directory / f'compiled-pass{pass_num}', [effective_texts(graph, ir)])
+            scoped_ids = _scoped_target_ids(candidate, original, graph)
+            result = self.office_check(state, artifacts['pptx'], [ir], directory / f'office-check-pass{pass_num}',
+                                       **({'target_ids': scoped_ids} if scoped_ids is not None else {}))
         if candidate.get('kind')=='text':
             from .office import frame_feedback
             feedback=frame_feedback(result,graph,candidate['object_id'])
@@ -600,11 +660,14 @@ class RuntimeService(ExplorationTools):
         candidate['validation'] = result
         if result.get('status') == 'PASS':
             candidate['status'] = 'VALIDATED'
-            candidate['validated_bundle'] = {
-                'irs': [digest(ir)],
-                'pptx': str(artifacts['pptx']),
-                'pptx_sha256': digest(artifacts['pptx']),
-            }
+            if scoped_ids is None or set(scoped_ids) >= set(graph.selected):
+                candidate['validated_bundle'] = {
+                    'irs': [digest(ir)],
+                    'pptx': str(artifacts['pptx']),
+                    'pptx_sha256': digest(artifacts['pptx']),
+                }
+            else:
+                candidate.pop('validated_bundle', None)
         elif result.get('status') == 'UNKNOWN':
             candidate['status'] = 'STAGED_LOCAL'
         else:
@@ -646,7 +709,15 @@ class RuntimeService(ExplorationTools):
         if candidate.get('status') == 'STAGED_LOCAL':
             self.validate_candidate(state, current, directory/'auto-validate', candidate_id=candidate_id)
         if candidate.get('status') != 'VALIDATED' or candidate.get('validation', {}).get('status') != 'PASS':
-            raise ValueError('candidate requires successful hard and actual edit checks')
+            val = candidate.get('validation') or {}
+            res_bad = [
+                r.get('id') for p in val.get('residuals', []) for r in p
+                if r.get('residual_check_status') != 'PASS'
+            ]
+            raise ValueError(
+                'candidate requires successful hard and actual edit checks'
+                + (f' (bad_residuals={res_bad[:10]}; do not re-validate identical candidate {candidate_id})' if res_bad else '')
+            )
         ir, _, row, _ = self._verify_staged_candidate_graph(current, candidate)
         for path, sha in candidate['validation'].get('files', {}).items():
             if digest(path) != sha:
@@ -748,11 +819,14 @@ class RuntimeService(ExplorationTools):
                 'evidence': references, 'delivery_approval': False}
 
     @staticmethod
-    def office_check(state, pptx, irs, directory):
+    def office_check(state, pptx, irs, directory, *, target_ids=None):
         from ..recovery.adaptive_policy import AdaptiveBudget
+        scoped = sorted(set(target_ids)) if target_ids is not None else None
         identity={'pptx':digest(pptx),'irs':[digest(ir) for ir in irs],
                   'implementation':RuntimeService.code_binding(),
                   'mode':os.environ.get('IMAGE2PPT_OFFICE_MODE','local')}
+        if scoped is not None:
+            identity['target_ids'] = scoped
         if identity['mode']=='remote':
             binding=state.job.parent/'office-worker-binding.json'
             identity['worker']=json.loads(binding.read_text('utf8')) if binding.exists() else {'binding':'unknown'}
@@ -769,15 +843,16 @@ class RuntimeService(ExplorationTools):
             write(Path(directory)/'checks.json',result)
             return {**result,'cache_hit':True}
         request=json.loads((state.job/'request.json').read_text('utf8'))
-        budget=AdaptiveBudget(Store(state.job/'state'),request.get('adaptive_budget'))
+        page_count=max(1,len(request.get('sources') or [1]))
+        budget=AdaptiveBudget(Store(state.job/'state'),request.get('adaptive_budget'),page_count=page_count)
         budget.reserve('office_validations',identity)
         write(receipt,{'identity':identity,'status':'UNKNOWN','operation':str(directory)})
         if os.environ.get('IMAGE2PPT_OFFICE_MODE', 'local') == 'remote':
             from .office_bridge import submit
-            result=submit(state.job, pptx, irs, directory)
+            result=submit(state.job, pptx, irs, directory, **({'target_ids': scoped} if scoped is not None else {}))
         else:
             from .office import check_local
-            result=check_local(pptx, irs, directory)
+            result=check_local(pptx, irs, directory, **({'target_ids': scoped} if scoped is not None else {}))
         write(receipt,{'identity':identity,'operation':str(directory),'result':result})
         return result
 
@@ -929,8 +1004,10 @@ class RuntimeService(ExplorationTools):
         audit = current.get('independent_audit')
         has_vlm_creds = bool(
             os.environ.get('IMAGE2PPT_AGENT_API_KEY')
+            or os.environ.get('DEEPSEEK_API_KEY')
             or os.environ.get('OPENCODE_GO_API_KEY')
             or os.environ.get('MOMA_API_KEY')
+            or os.environ.get('MOMA_API_KEYS')
         )
         if not audit or audit.get('composition_sha256') != key(composition):
             audit = run_delivery_audit(self, state, current, directory/'final-audit', use_vlm=has_vlm_creds)

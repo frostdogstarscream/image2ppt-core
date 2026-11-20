@@ -613,6 +613,59 @@ def _is_four_edge_framed(core: np.ndarray, tx0: int, ty0: int, tx1: int, ty1: in
     return min(edges) >= threshold
 
 
+def _detect_and_prepare_rounded_photo(
+    pixels: np.ndarray,
+    backing: np.ndarray,
+) -> tuple[np.ndarray, float] | None:
+    """Detect symmetric rounded outer corners on a MOVABLE opaque photo crop and clean corner bleed."""
+    h, w = pixels.shape[:2]
+    if w < 80 or h < 60 or backing.shape[:2] != (h, w):
+        return None
+    px_f = pixels.astype(np.float32)
+    bg_f = backing.astype(np.float32)
+    # Require all 4 extreme 3x3 corners to match backing while mid-edges differ cleanly
+    for ys, xs in ((slice(0, 3), slice(0, 3)), (slice(0, 3), slice(w - 3, w)),
+                   (slice(h - 3, h), slice(0, 3)), (slice(h - 3, h), slice(w - 3, w))):
+        if float(np.abs(px_f[ys, xs] - bg_f[ys, xs]).max()) > 12.0:
+            return None
+    mid_diffs = [
+        float(np.median(np.abs(px_f[:2, w // 3:2 * w // 3] - bg_f[:2, w // 3:2 * w // 3]).max(2))),
+        float(np.median(np.abs(px_f[h - 2:, w // 3:2 * w // 3] - bg_f[h - 2:, w // 3:2 * w // 3]).max(2))),
+        float(np.median(np.abs(px_f[h // 3:2 * h // 3, :2] - bg_f[h // 3:2 * h // 3, :2]).max(2))),
+        float(np.median(np.abs(px_f[h // 3:2 * h // 3, w - 2:] - bg_f[h // 3:2 * h // 3, w - 2:]).max(2))),
+    ]
+    if min(mid_diffs) <= 22.0:
+        return None
+
+    cs = min(28, w // 4, h // 4)
+    if cs < 5:
+        return None
+    bg_match = (np.abs(px_f - bg_f).max(2) <= 12.0).astype(np.uint8)
+    corner_mask = np.zeros((h, w), dtype=np.uint8)
+    counts: list[int] = []
+    for cy0, cx0, seed_pt in (
+        (0, 0, (0, 0)),
+        (0, w - cs, (cs - 1, 0)),
+        (h - cs, 0, (0, cs - 1)),
+        (h - cs, w - cs, (cs - 1, cs - 1)),
+    ):
+        sub = (1 - bg_match[cy0:cy0 + cs, cx0:cx0 + cs]).copy()
+        if sub[seed_pt[1], seed_pt[0]] != 0:
+            counts.append(0)
+            continue
+        ff_mask = np.zeros((cs + 2, cs + 2), np.uint8)
+        cv2.floodFill(sub, ff_mask, seed_pt, 2)
+        filled = (sub == 2)
+        cnt = int(filled.sum())
+        counts.append(cnt)
+        corner_mask[cy0:cy0 + cs, cx0:cx0 + cs][filled] = 255
+    if min(counts) < 3 or max(counts) > 2.5 * max(4, min(counts)):
+        return None
+    est_r = float(min(cs, max(4, round(math.sqrt(float(np.median(counts)) / 0.2146)))))
+    cleaned = cv2.inpaint(pixels, corner_mask, 3, cv2.INPAINT_TELEA)
+    return cleaned, est_r
+
+
 def _try_transparent_upgrade(
     pixels: np.ndarray,
     backing: np.ndarray,
@@ -724,6 +777,7 @@ def stage_region_crops(
     size = (plate.shape[1], plate.shape[0])
 
     foreground = np.zeros(plate.shape[:2], bool)
+    fg_masks_by_id: dict[str, np.ndarray] = {}
     for record in graph.selected.values():
         ref = record.get('owner_evidence')
         if not ref or record.get('region_crop') or record.get('container_layer'):
@@ -734,7 +788,9 @@ def stage_region_crops(
         if not proof.is_relative_to(baseline.resolve()) or digest(proof) != ref['sha256']:
             raise ValueError('region crop owner evidence binding mismatch')
         with np.load(proof, allow_pickle=False) as data:
-            foreground |= data['mask'].astype(bool)
+            m = data['mask'].astype(bool)
+            fg_masks_by_id[record['id']] = m
+            foreground |= m
 
     lower_comp, lower_covered = _render_lower_composite(plate, graph, baseline)
     appearance = np.where(foreground[..., None], lower_comp, source)
@@ -753,13 +809,14 @@ def stage_region_crops(
     shutil.copytree(baseline, output)
 
     upper_records = _upper_foreground_records(graph)
+    planned_rects = [rectangle(c['box'], size) for c in crops]
     used = {x.id for x in [*graph.text.texts, *graph.asset.objects, *graph.surface.shapes]} | set(graph.selected)
     staged: list[str] = []
     seq = 1
     movable_mask = np.zeros(plate.shape[:2], bool)
     upgraded_mask = np.zeros(plate.shape[:2], bool)
 
-    for crop in crops:
+    for idx_c, crop in enumerate(crops):
         if any(sid in skip for sid in crop['seed_ids']):
             continue
         while f'r-{seq:03d}' in used:
@@ -785,6 +842,7 @@ def stage_region_crops(
         # Lower layers (surface shapes & container assets) never block crops above them.
         # Wholly-contained upper foreground labels/icons sit above the crop; partial upper overlaps still block.
         blocked_by_upper = False
+        contained_fg = np.zeros(plate.shape[:2], bool)
         for rec in upper_records:
             rb_box = rec.get('restore_bbox') or rec.get('bbox')
             if not rb_box or not _intersects(crop['box'], [float(v) for v in rb_box]):
@@ -792,6 +850,9 @@ def stage_region_crops(
             if rec.get('region_crop') or not _contains(crop['box'], [float(v) for v in rb_box]):
                 blocked_by_upper = True
                 break
+            rid_up = rec.get('id')
+            if rid_up and rid_up in fg_masks_by_id:
+                contained_fg |= fg_masks_by_id[rid_up]
         if blocked_by_upper:
             isolated = False
         else:
@@ -813,7 +874,12 @@ def stage_region_crops(
             backing_meta = {'reason': 'crop boundary cuts continuing content'}
         else:
             try:
-                fit_protected = movable_mask | upgraded_mask | foreground
+                other_planned = np.zeros(plate.shape[:2], bool)
+                for j_c, cand_c in enumerate(crops):
+                    if j_c == idx_c or any(sid in skip for sid in cand_c['seed_ids']):
+                        continue
+                    other_planned |= planned_rects[j_c]
+                fit_protected = movable_mask | upgraded_mask | foreground | other_planned
                 backing, error, evidence = backing_from_evidence(lower_comp, [x, y, w, h], fit_protected, graph.surface)
                 if np.isfinite(error) and error <= MOVABLE_RING_ERROR:
                     safety = 'MOVABLE'
@@ -851,11 +917,12 @@ def stage_region_crops(
             full_rect = rectangle([tx, ty, tw, th], size)
             owner_mask = full_rect & ~foreground
             local_owner = owner_mask[ty:ty + th, tx:tx + tw]
+            clean_local = local_owner | (contained_fg[ty:ty + th, tx:tx + tw] & (tight_rgba[..., 3] > 200))
             backing_sub = np.clip(np.rint(backing[ty0:ty0 + th, tx0:tx0 + tw]), 0, 255).astype(np.uint8)
             proof = output / f'{rid}-owner.npz'
             np.savez_compressed(proof, mask=owner_mask, restore_bbox=[tx, ty, tw, th], backing_patch=backing_sub)
-            lower_comp[ty:ty + th, tx:tx + tw][local_owner] = backing_sub[local_owner]
-            plate_write = local_owner & ~lower_covered[ty:ty + th, tx:tx + tw]
+            lower_comp[ty:ty + th, tx:tx + tw][clean_local] = backing_sub[clean_local]
+            plate_write = clean_local & ~lower_covered[ty:ty + th, tx:tx + tw]
             plate[ty:ty + th, tx:tx + tw][plate_write] = backing_sub[plate_write]
             upgraded_mask |= owner_mask
             record = {
@@ -884,12 +951,20 @@ def stage_region_crops(
             })
             continue
 
-        Image.fromarray(np.dstack([pixels, np.full((h, w), 255, np.uint8)])).save(png)
+        round_meta: dict = {}
+        out_pixels = pixels
+        if safety == 'MOVABLE' and backing is not None:
+            rounded = _detect_and_prepare_rounded_photo(pixels, backing)
+            if rounded is not None:
+                out_pixels, est_r = rounded
+                round_meta = {'corner_radius_px': est_r, 'clip_geometry': 'roundRect'}
+
+        Image.fromarray(np.dstack([out_pixels, np.full((h, w), 255, np.uint8)])).save(png)
         graph = fused_try
         record = {
             'id': rid, 'kind': 'asset', 'region_crop': True, 'move_safety': safety,
             'bbox': [x, y, w, h], 'restore_bbox': [x, y, w, h], 'seed_ids': crop['seed_ids'],
-            'payload': {'method': METHOD, 'boundary_cuts_content': crop['cuts'], **backing_meta},
+            'payload': {'method': METHOD, 'boundary_cuts_content': crop['cuts'], **round_meta, **backing_meta},
             'state': 'STAGED', 'quality': 'REVIEW_REQUIRED', 'human_acceptance': False,
             'source_sha256': graph.source_sha256, 'original_owner': 'source-plate',
             'complete_owner_scope': safety == 'MOVABLE',
@@ -899,14 +974,16 @@ def stage_region_crops(
         if safety == 'MOVABLE':
             owner_mask = rectangle([x, y, w, h], size) & ~foreground
             local_owner = owner_mask[y:y + h, x:x + w]
+            clean_local = local_owner | contained_fg[y:y + h, x:x + w]
             backing_u8 = np.clip(np.rint(backing), 0, 255).astype(np.uint8)
             proof = output / f'{rid}-owner.npz'
             np.savez_compressed(proof, mask=owner_mask, restore_bbox=[x, y, w, h], backing_patch=backing_u8)
             record['mask_sha256'] = array_sha(owner_mask.astype('uint8'))
             record['owner_evidence'] = {'file': proof.name, 'sha256': digest(proof), 'method': 'region-crop-lateral-backing/1'}
-            lower_comp[y:y + h, x:x + w][local_owner] = backing_u8[local_owner]
-            # Layer-algebra invariant: never overwrite canvas plate pixels underneath already-erased surfaces/containers.
-            plate_write = local_owner & ~lower_covered[y:y + h, x:x + w]
+            lower_comp[y:y + h, x:x + w][clean_local] = backing_u8[clean_local]
+            # Layer-algebra invariant: never overwrite canvas plate pixels underneath already-erased surfaces/containers,
+            # while cleaning dark-blue caption islands under wholly-contained upper text/asset owners.
+            plate_write = clean_local & ~lower_covered[y:y + h, x:x + w]
             plate[y:y + h, x:x + w][plate_write] = backing_u8[plate_write]
             movable_mask |= owner_mask
         graph.transactions.append(record)

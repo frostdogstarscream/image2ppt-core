@@ -175,6 +175,9 @@ def stage_native_charts(
         if cid_str in skip:
             continue
 
+        bar_rgb_med = np.rint(np.median(crop[chart_mask], axis=0)).astype(int) if chart_mask.any() else np.array([34, 102, 221])
+        bar_hex = ''.join(f'{int(v):02X}' for v in np.clip(bar_rgb_med, 0, 255))
+
         full_mask = np.zeros((h_img, w_img), bool)
         from ..parallel_fusion import glyph_evidence
         styles = {style.id:style for style in graph.text.styles}
@@ -215,8 +218,11 @@ def stage_native_charts(
                 'chart_type': 'bar',
                 'font': {'ea': ea_font, 'latin': latin_font, 'size_pt': 9.0},
                 'categories': categories,
-                'series': [{'name': '数据', 'values': values}],
+                'series': [{'name': '数据', 'values': values, 'color': bar_hex}],
                 'has_legend': False,
+                'show_data_labels': True,
+                'bar_direction': 'column',
+                'bar_grouping': 'clustered',
             },
         })
         already_claimed |= full_mask

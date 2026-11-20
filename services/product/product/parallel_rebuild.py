@@ -410,24 +410,44 @@ def adapt(graph,directory):
         'canvas':{'source_px':graph.image_size,'target_px':graph.image_size},'background':{'color':graph.surface.background},
         'review_status':'needs_review','review_notes':['r10 parallel branches; human acceptance pending'],
         'nodes':[],'assets':[],'evidence':[],'groups':[]}
-    def image(id,bbox,file,description,z):
+    def image(id,bbox,file,description,z,*,corner_radius_px=None,clip_geometry=None,crop=None):
         ev='ev-'+id;ir['evidence'].append({'id':ev,'kind':'image','bbox':bbox,'description':description})
         ir['assets'].append({'id':id,'path':file.name,'purpose':'module','sha256':digest(file),'contains_evidence_ids':[ev],'description':description})
-        ir['nodes'].append({'id':id,'type':'image','bbox':bbox,'z':z,'asset_id':id,'evidence_ids':[]})
+        inode={'id':id,'type':'image','bbox':bbox,'z':z,'asset_id':id,'evidence_ids':[]}
+        if corner_radius_px is not None:
+            inode['corner_radius_px']=min(float(corner_radius_px),min(bbox[2],bbox[3])/2.0)
+        if clip_geometry is not None:
+            inode['clip_geometry']=clip_geometry
+        if crop is not None:
+            inode['crop']=[float(v) for v in crop]
+        ir['nodes'].append(inode)
     shape_by_id={s.id:s for s in graph.surface.shapes}
-    surfaces=sorted([c for c in chosen if c['kind']=='surface'],
-                    key=lambda c:(shape_by_id[c['id']].z,-(shape_by_id[c['id']].bbox[2]*shape_by_id[c['id']].bbox[3])))
-    image('source-plate',[0,0,*graph.image_size],backing,'Safe source backing with only committed replacement ink cleared',0)
-    for z,c in enumerate(surfaces,1):
-        s=shape_by_id[c['id']];ev='ev-'+s.id
+    def _emit_shape_node(s,z):
+        ev='ev-'+s.id
         ir['evidence'].append({'id':ev,'kind':'shape','bbox':s.bbox,'description':'source-confirmed flat backing'})
+        ln_obj={'color':s.line_color,'width_pt':s.line_width_pt}
+        if s.line_opacity is not None:ln_obj['opacity']=s.line_opacity
+        if s.line_dash is not None:ln_obj['dash']=s.line_dash
+        if s.head_end is not None:ln_obj['head_end']=s.head_end
+        if s.tail_end is not None:ln_obj['tail_end']=s.tail_end
         snode={'id':s.id,'type':'shape','geometry':s.geometry,'bbox':s.bbox,'z':z,'fill':s.fill,
-               'line':{'color':s.line_color,'width_pt':s.line_width_pt},'evidence_ids':[ev]}
+               'line':ln_obj,'evidence_ids':[ev]}
+        if s.fill_opacity is not None:
+            snode['fill_opacity']=s.fill_opacity
         if s.corner_radius_px is not None:
             snode['corner_radius_px']=min(float(s.corner_radius_px),min(s.bbox[2],s.bbox[3])/2.0)
         if s.fill_gradient is not None:
-            snode['fill_gradient']=s.fill_gradient.model_dump()
+            snode['fill_gradient']=s.fill_gradient.model_dump(exclude_none=True)
+        if s.shadow is not None:
+            snode['shadow']=s.shadow.model_dump()
+        if s.custom_paths is not None:
+            snode['custom_paths']=[p.model_dump(exclude_none=True) for p in s.custom_paths]
         ir['nodes'].append(snode)
+    surfaces=sorted([c for c in chosen if c['kind']=='surface' and not c.get('foreground_shape')],
+                    key=lambda c:(shape_by_id[c['id']].z,-(shape_by_id[c['id']].bbox[2]*shape_by_id[c['id']].bbox[3])))
+    image('source-plate',[0,0,*graph.image_size],backing,'Safe source backing with only committed replacement ink cleared',0)
+    for z,c in enumerate(surfaces,1):
+        _emit_shape_node(shape_by_id[c['id']],z)
     styles={s.id:s for s in graph.text.styles}
     def attrs(s):return {'font':{'ea':s.ea,'latin':s.latin,'size_pt':s.size_px*.75},'bold':s.bold,'color':s.color}
     container_assets=sorted([c for c in chosen if c['kind']=='asset' and c.get('container_layer')],
@@ -435,23 +455,30 @@ def adapt(graph,directory):
     # Opaque region crops sit above backings/containers and below editable foreground.
     region_crops=[c for c in chosen if c['kind']=='asset' and c.get('region_crop')]
     foreground_assets=[c for c in chosen if c['kind']=='asset' and not c.get('container_layer') and not c.get('region_crop')]
-    ordered=container_assets+region_crops+foreground_assets+[c for c in chosen if c['kind'] not in ('surface','asset')]
+    foreground_shapes=sorted([c for c in chosen if c['kind']=='surface' and c.get('foreground_shape')],
+                             key=lambda c:(shape_by_id[c['id']].z,-(shape_by_id[c['id']].bbox[2]*shape_by_id[c['id']].bbox[3])))
+    ordered=container_assets+region_crops+foreground_assets+foreground_shapes+[c for c in chosen if c['kind'] not in ('surface','asset')]
     for z,c in enumerate(ordered,len(surfaces)+1):
-        if c['kind']=='asset' and c.get('region_crop'):
-            file=reference(c['asset_reference'])
-            image(c['id'],c['bbox'],file,'Opaque source region crop ('+c.get('move_safety','MOVE_UNSAFE')+'); intrinsic content is not editable',z)
+        if c['kind']=='surface':
+            _emit_shape_node(shape_by_id[c['id']],z)
+        elif c['kind']=='asset' and c.get('region_crop'):
+            file=reference(c['asset_reference']);meta=c.get('payload',{})
+            image(c['id'],c['bbox'],file,'Opaque source region crop ('+c.get('move_safety','MOVE_UNSAFE')+'); intrinsic content is not editable',z,
+                  corner_radius_px=meta.get('corner_radius_px'),clip_geometry=meta.get('clip_geometry'),crop=meta.get('crop'))
         elif c['kind']=='asset':
             file=reference(c['asset_reference']);meta=c['payload']
-            image(c['id'],c['bbox'],file,'Complete transparent graphic candidate; '+meta['method'],z)
+            image(c['id'],c['bbox'],file,'Complete transparent graphic candidate; '+meta['method'],z,
+                  corner_radius_px=meta.get('corner_radius_px'),clip_geometry=meta.get('clip_geometry'),crop=meta.get('crop'))
         elif c['kind']=='chart':
             meta=c['payload'];ev='ev-'+c['id']
             ir['evidence'].append({'id':ev,'kind':'shape','bbox':c['bbox'],'description':'Source data chart reconstructed as native PowerPoint chart'})
             cnode={'id':c['id'],'type':'chart','bbox':c['bbox'],'z':z,'evidence_ids':[ev],
                    'chart_type':meta['chart_type'],'font':meta['font'],
                    'categories':meta['categories'],'series':meta['series']}
-            if meta.get('title'):cnode['title']=meta['title']
-            if 'has_legend' in meta:cnode['has_legend']=bool(meta['has_legend'])
-            if meta.get('legend_position'):cnode['legend_position']=meta['legend_position']
+            for k in ('title','legend_position','value_format','bar_direction','bar_grouping'):
+                if meta.get(k):cnode[k]=meta[k]
+            for k in ('has_legend','show_data_labels'):
+                if k in meta:cnode[k]=bool(meta[k])
             ir['nodes'].append(cnode)
         elif c['kind']=='table':
             ev='ev-'+c['id']

@@ -62,7 +62,29 @@ def assess(job, current):
                 actions.setdefault(action['id'],set()).add(action.get('action'))
         editables = sorted(i for i,r in selected.items() if r.get('move_safety')!='MOVE_UNSAFE'
                            and {'move-scale','delete'} <= actions.get(i,set()))
+        verified_text_boxes = [obj['bbox'] for obj in fields if obj.get('name') in editables]
+        verified_boxes = [
+            b for b in (
+                (selected[oid].get('bbox') or (selected[oid].get('payload') or {}).get('bbox'))
+                for oid in editables if oid in selected
+            )
+            if b and len(b) == 4
+        ]
         marks = read(current['experiment_marks'][k])['rows']
+        native_text_regions = sorted(
+            row['id'] for row in marks
+            if row.get('id') != 'whole-page' and any(
+                _overlap(row['bbox'], tb) >= 0.5 * max(1.0, min(row['bbox'][2]*row['bbox'][3], tb[2]*tb[3]))
+                for tb in verified_text_boxes
+            )
+        )
+        native_verified_regions = sorted(
+            row['id'] for row in marks
+            if row.get('id') != 'whole-page' and any(
+                _overlap(row['bbox'], vb) >= 0.5 * max(1.0, min(row['bbox'][2]*row['bbox'][3], vb[2]*vb[3]))
+                for vb in verified_boxes
+            )
+        )
         local = local_fidelity(source, preview, marks) if preview.is_file() else {}
         limits = load_tolerance_config()['fidelity']
         minor = [key for key, val in local.items()
@@ -70,7 +92,10 @@ def assess(job, current):
         pages.append({'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
                       'passed_edits':sorted(f'{oid}/{action}' for oid in editables for action in actions[oid]),
                       'editable_count':len(editables) if verified else None, 'selected_editables':editables,
-                      'ocr_native_hits':sorted(hits), 'native_field_count':len(fields), 'local_fidelity':local, 'minor_deviations':minor,
+                      'ocr_native_hits':sorted(hits), 'native_field_count':len(fields),
+                      'native_text_regions':native_text_regions,
+                      'native_verified_regions':native_verified_regions,
+                      'local_fidelity':local, 'minor_deviations':minor,
                       'max_local_mae':max((v['mae_rgb'] for v in local.values()), default=None), 'scorecard':measures})
     return {'pptx_sha256':sha,'office_status':office.get('status','UNKNOWN'),'verified':verified,
             'fidelity_limits':load_tolerance_config()['fidelity'],'pages':pages}
@@ -98,11 +123,17 @@ def regressions(base, candidate):
             reasons.append(prefix+'LOCAL_VISUAL_EVIDENCE_MISSING')
             continue
         limits = base.get('fidelity_limits') or load_tolerance_config()['fidelity']
+        newly_native = (
+            (set(b.get('native_verified_regions', [])) | set(b.get('native_text_regions', [])))
+            - (set(a.get('native_verified_regions', [])) | set(a.get('native_text_regions', [])))
+        )
         lost = []
         for region, old in reference.items():
             new = compared.get(region)
             if new is None:
                 lost.append(region)
+                continue
+            if region != 'whole-page' and region in newly_native:
                 continue
             de, similarity = new['delta_e2000_p95'], new['ssim']
             if (de > max(old['delta_e2000_p95'], limits['hard_max_delta_e2000_p95'])

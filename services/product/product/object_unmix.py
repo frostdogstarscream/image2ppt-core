@@ -179,8 +179,63 @@ def candidate_from_evidence(obj,source,protected,*,original_alpha=None,surface=N
                 'old_owner_ids':sorted(owner_ids),'independent_review_required':True}
 
 
+def _ring_planar_2d(source, box, protected):
+    """Fit a smooth 2D plane [1, u, v] across clean multi-sided exterior ring pixels."""
+    x, y, w, h = [round(v) for v in box]
+    h_img, w_img = source.shape[:2]
+    rx0, ry0 = max(0, x - 6), max(0, y - 6)
+    rx1, ry1 = min(w_img, x + w + 6), min(h_img, y + h + 6)
+    if rx1 - rx0 < w + 2 and ry1 - ry0 < h + 2:
+        return None
+    ring = np.ones((h_img, w_img), bool)
+    local_ring = np.ones((ry1 - ry0, rx1 - rx0), bool)
+    ix0, iy0 = max(0, x - rx0), max(0, y - ry0)
+    ix1, iy1 = min(rx1 - rx0, x + w - rx0), min(ry1 - ry0, y + h - ry0)
+    if ix1 > ix0 and iy1 > iy0:
+        local_ring[iy0:iy1, ix0:ix1] = False
+    ring[:] = False
+    ring[ry0:ry1, rx0:rx1] = local_ring
+    ring &= ~protected
+    n_ring = int(ring.sum())
+    if n_ring < 30:
+        return None
+    ry, rx = np.nonzero(ring)
+    active_sides = int((ry < y).sum() >= 8) + int((ry >= y + h).sum() >= 8) + int((rx < x).sum() >= 8) + int((rx >= x + w).sum() >= 8)
+    if active_sides < 2:
+        return None
+    vals = source[ry, rx].astype(np.float32)
+    u = (rx.astype(np.float32) - x) / float(max(w, 1))
+    v = (ry.astype(np.float32) - y) / float(max(h, 1))
+    design = np.stack([np.ones_like(u), u, v], axis=1)
+    med0 = np.median(vals, axis=0)
+    keep = np.abs(vals - med0).max(1) <= 10.0
+    if int(keep.sum()) < max(24, int(0.65 * n_ring)):
+        return None
+    coeff = None
+    for _ in range(3):
+        coeff = np.linalg.lstsq(design[keep], vals[keep], rcond=None)[0]
+        pred_ring = design @ coeff
+        err_r = np.abs(vals - pred_ring).max(1)
+        new_keep = err_r <= 5.0
+        if int(new_keep.sum()) < max(24, int(0.65 * n_ring)):
+            return None
+        keep = new_keep
+    pred_ring = design @ coeff
+    err_inliers = np.abs(vals[keep] - pred_ring[keep]).max(1)
+    p75 = float(np.percentile(err_inliers, 75))
+    p90 = float(np.percentile(err_inliers, 90))
+    if p75 > 4.0 or p90 > 6.0:
+        return None
+    gy, gx = np.mgrid[y:y + h, x:x + w]
+    gu = (gx.astype(np.float32) - x) / float(max(w, 1))
+    gv = (gy.astype(np.float32) - y) / float(max(h, 1))
+    gdesign = np.stack([np.ones_like(gu), gu, gv], axis=2)
+    backing = np.clip(np.rint(gdesign @ coeff), 0, 255).astype(np.uint8)
+    return backing, p75, {'method': 'source_ring_planar_2d/1', 'ring_samples': n_ring, 'inliers': int(keep.sum())}
+
+
 def backing_from_evidence(source,box,protected,surface=None):
-    """Prefer source-verified containing surface; otherwise use lateral samples."""
+    """Prefer source-verified containing surface, 2D planar ring, or lateral samples."""
     from reconstruction import background_model
     x,y,w,h=[round(v) for v in box];size=(source.shape[1],source.shape[0]);scope=rectangle(box,size)
     ring=rectangle([max(0,x-4),max(0,y-4),min(size[0],x+w+4)-max(0,x-4),min(size[1],y+h+4)-max(0,y-4)],size)&~scope&~protected
@@ -203,5 +258,8 @@ def backing_from_evidence(source,box,protected,surface=None):
             if np.percentile(residual,75)>6:continue
             backing=np.broadcast_to(color,(h,w,3)).copy()
             return backing,float(np.percentile(residual,75)),{'method':'source_verified_surface_color','surface_id':s.id,'samples':len(values),'ring_samples':int(ring.sum())}
+    planar=_ring_planar_2d(source,box,protected)
+    if planar is not None:
+        return planar
     backing,error=background_model(source,box,protected)
     return backing,error,{'method':'source_lateral_samples'}

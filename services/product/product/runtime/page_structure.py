@@ -131,8 +131,10 @@ def verify_and_apply_ocr_corrections(
         new_t = _norm(corr.corrected_text)
         if not new_t or new_t == raw_t:
             continue
-        # Guard 1: Only localized 1-2 character OCR misreads (never wholesale text replacement!)
+        # Guard 1: Only localized 1-2 character OCR misreads (never alter numbers or percentages)
         if abs(len(new_t) - len(raw_t)) > 1:
+            continue
+        if re.findall(r'[\d%‰]+', new_t) != re.findall(r'[\d%‰]+', raw_t):
             continue
         sim = SequenceMatcher(None, raw_t, new_t, autojunk=False).ratio()
         min_sim = 0.50 if len(raw_t) <= 4 else 0.62
@@ -160,7 +162,8 @@ def verify_and_apply_ocr_corrections(
         score_orig = float(ln.get('score', 1.0))
         if iou_raw is None or iou_new is None:
             continue
-        slack = 0.06 if score_orig < 0.97 else 0.015
+        cjk_only_diff = re.findall(r'[0-9A-Za-z%‰]+', new_t) == re.findall(r'[0-9A-Za-z%‰]+', raw_t)
+        slack = 0.14 if (cjk_only_diff and iou_new >= 0.18) else (0.06 if score_orig < 0.97 else 0.015)
         if iou_new + slack < iou_raw:
             continue
 
@@ -307,7 +310,8 @@ def parse_page_structure(
 
     request_file = state.job / 'request.json'
     request = json.loads(request_file.read_text('utf8')) if request_file.is_file() else {}
-    budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'))
+    page_count = max(1, len(request.get('sources') or [1]))
+    budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'), page_count=page_count)
 
     if use_vlm:
         cache_dir = state.job / 'cache/page-structure'

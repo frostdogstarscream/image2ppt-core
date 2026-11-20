@@ -5,6 +5,7 @@ The source-derived ownership/backing receipt is mandatory, never a PNG mask.
 """
 import json
 from pathlib import Path
+import cv2
 import numpy as np
 from PIL import Image
 from .materialize import digest,write
@@ -19,12 +20,13 @@ def residual_accepted(row):
         and row.get('move_safety')=='MOVE_UNSAFE')
 
 
-def inspect_residuals(irfile,office_dir,page,output):
+def inspect_residuals(irfile,office_dir,page,output,*,target_ids=None):
     irfile=Path(irfile);scene=json.loads((irfile.parent/'scene.json').read_text(encoding='utf-8'))
     ir=json.loads(irfile.read_text(encoding='utf-8')) if irfile.is_file() else {'nodes':[]}
     node_z={n['id']:int(n.get('z',0)) for n in ir.get('nodes',[]) if isinstance(n,dict) and 'id' in n}
     node_bbox={n['id']:n.get('bbox') for n in ir.get('nodes',[]) if isinstance(n,dict) and 'id' in n}
     records=list(scene['selected'].values());source=np.array(Image.open(irfile.parent/'source.png').convert('RGB'));proofs={};results=[]
+    targets=set(target_ids) if target_ids is not None else None
     rb=scene.get('raster_backing') or {}
     plate=None
     if rb.get('path'):
@@ -40,6 +42,7 @@ def inspect_residuals(irfile,office_dir,page,output):
         with np.load(file,allow_pickle=False) as data:
             proofs[record['id']]={k:data[k] for k in data.files}
     for record in records:
+        if targets is not None and record['id'] not in targets:continue
         identifier=record['id'];deleted=Path(office_dir)/f'{page:02d}-{identifier}-delete.png'
         base={'id':identifier,'residual_check_status':'UNKNOWN','residual_pixels_confirmed':None,'reference_sha256':record.get('owner_evidence',{}).get('sha256')}
         if record.get('region_crop') and record.get('move_safety')=='MOVE_UNSAFE' and not record.get('owner_evidence'):
@@ -71,6 +74,11 @@ def inspect_residuals(irfile,office_dir,page,output):
         for other,proof in proofs.items():
             if other!=identifier and other != record.get('payload', {}).get('background_parent_id'):
                 mask&=~proof['mask'].astype(bool)
+        orig_mask=mask.copy()
+        tol_cfg=load_tolerance_config().get('residual_gate',{})
+        plate_tol=float(tol_cfg.get('plate_backing_rgb',8.0))
+        surf_tol=float(tol_cfg.get('native_surface_backing_rgb',26.0))
+        ink_contrast=float(tol_cfg.get('source_ink_contrast_rgb',12.0))
         if record.get('kind') in ('asset','surface'):
             z_self=node_z.get(identifier,0)
             for other_rec in records:
@@ -81,6 +89,21 @@ def inspect_residuals(irfile,office_dir,page,output):
                 if z_other<=z_self:continue
                 obox=node_bbox.get(oid) or other_rec.get('bbox') or (other_rec.get('payload') or {}).get('bbox')
                 if not obox or len(obox)!=4:continue
+                if okind=='asset' and (other_rec.get('asset_reference') or {}).get('path'):
+                    aref=other_rec['asset_reference']
+                    apath=(irfile.parent/aref['path']).resolve()
+                    if apath.is_relative_to(irfile.parent.resolve()) and apath.is_file():
+                        apng=np.array(Image.open(apath).convert('RGBA'))
+                        vis=apng[...,3]>8
+                        if vis.any():
+                            vis=cv2.dilate(vis.astype('uint8'),np.ones((3,3),np.uint8))>0
+                            abox=aref.get('bbox') or obox
+                            ax,ay=[round(v) for v in abox[:2]]
+                            px0,py0=max(0,ax),max(0,ay)
+                            px1,py1=min(source.shape[1],ax+vis.shape[1]),min(source.shape[0],ay+vis.shape[0])
+                            if px1>px0 and py1>py0:
+                                mask[py0:py1,px0:px1]&=~vis[py0-ay:py1-ay,px0-ax:px1-ax]
+                            continue
                 tx,ty,tw,th=[round(v) for v in obox]
                 tx0,ty0=max(0,tx-2),max(0,ty-2)
                 tx1,ty1=min(source.shape[1],tx+tw+2),min(source.shape[0],ty+th+2)
@@ -88,11 +111,23 @@ def inspect_residuals(irfile,office_dir,page,output):
                     # Higher-z sibling objects remain rendered above this object in PowerPoint when it is deleted.
                     mask[ty0:ty1,tx0:tx1]=False
         local=mask[y:y+h,x:x+w];after=np.array(Image.open(deleted).convert('RGB'))
-        if after.shape!=source.shape or not local.any():results.append({**base,'reason':'unverifiable size or occluded owner'});continue
-        tol_cfg=load_tolerance_config().get('residual_gate',{})
-        plate_tol=float(tol_cfg.get('plate_backing_rgb',8.0))
-        surf_tol=float(tol_cfg.get('native_surface_backing_rgb',26.0))
-        ink_contrast=float(tol_cfg.get('source_ink_contrast_rgb',12.0))
+        if after.shape!=source.shape:
+            results.append({**base,'reason':'unverifiable size or occluded owner'});continue
+        if not local.any():
+            orig_local=orig_mask[y:y+h,x:x+w]
+            if record.get('kind')=='surface' and orig_local.any() and plate is not None and plate.shape==source.shape:
+                bg=data['backing_patch'].astype(float);src=source[y:y+h,x:x+w].astype(float);pl=plate[y:y+h,x:x+w].astype(float)
+                dist_p=np.abs(pl-bg).max(2);orig_p=np.abs(src-bg).max(2)
+                res_p=orig_local&(orig_p>ink_contrast)&(dist_p>plate_tol)&(np.abs(pl-src).max(2)<dist_p)
+                unk_p=orig_local&(dist_p>plate_tol)&~res_p
+                p_status='FAIL' if res_p.any() else 'UNKNOWN' if unk_p.any() else 'PASS'
+                results.append({**base,'residual_check_status':p_status,'residual_pixels_confirmed':int(res_p.sum()),
+                    'unexplained_pixels':int(unk_p.sum()),'checked_owner_pixels':int(orig_local.sum()),'delete_sha256':digest(deleted),
+                    'source_sha256':scene['source_sha256'],'tolerance_rgb':plate_tol,
+                    'reason':'surface fully occluded by higher-z siblings; underlying source-plate backing verified clean' if p_status=='PASS' else 'occluded surface source-plate backing failed verification',
+                    'scope':'proven source-owner pixels excluding other staged owners; semantic completeness needs independent review'})
+                continue
+            results.append({**base,'reason':'unverifiable size or occluded owner'});continue
         z_self=node_z.get(identifier,10**9 if record.get('kind')=='text' else 0)
         surface_under_local=np.zeros((h,w),bool)
         for other_rec in records:

@@ -78,20 +78,66 @@ def verified_owner(identifier,graph,source,baseline):
     return mask
 
 
+def _tight_peer_ink_mask(source, bbox, size, pad=2):
+    """Return a tight dilated glyph/ink mask when a peer sits on a clean local surround."""
+    import cv2
+    w_img, h_img = size
+    bx, by, bw, bh = [float(v) for v in bbox]
+    x0 = max(0, int(np.floor(bx)))
+    y0 = max(0, int(np.floor(by)))
+    x1 = min(w_img, int(np.ceil(bx + bw)))
+    y1 = min(h_img, int(np.ceil(by + bh)))
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return None
+    bx0, by0 = max(0, x0 - 2), max(0, y0 - 2)
+    bx1, by1 = min(w_img, x1 + 2), min(h_img, y1 + 2)
+    outer = source[by0:by1, bx0:bx1].astype(np.float32)
+    inner_mask = np.zeros(outer.shape[:2], bool)
+    inner_mask[y0 - by0:y1 - by0, x0 - bx0:x1 - bx0] = True
+    border_vals = outer[~inner_mask]
+    if len(border_vals) < 12:
+        border_vals = np.concatenate([outer[0, :], outer[-1, :], outer[:, 0], outer[:, -1]], axis=0)
+    bg = np.median(border_vals, axis=0)
+    if float(np.percentile(np.abs(border_vals - bg).max(1), 80)) > 8.0:
+        return None
+    crop = source[y0:y1, x0:x1].astype(np.float32)
+    ink = np.abs(crop - bg).max(2) > 14.0
+    frac = float(ink.mean())
+    if frac < 0.02 or frac > 0.72 or int(ink.sum()) < 6:
+        return None
+    full = np.zeros((h_img, w_img), bool)
+    k = 2 * pad + 1
+    full[y0:y1, x0:x1] = cv2.dilate(ink.astype('uint8'), np.ones((k, k), np.uint8)) > 0
+    return full
+
+
 def protection(text,graph,source,blocked,baseline=None,*,purpose='erase',diagnostics=None):
     from .parallel_fusion import glyph_evidence
     classified=roles(graph);surfaces={s.id:s for s in graph.surface.shapes}
     size=source.shape[1::-1];context=blocked.copy();panels=[];rows=[]
+    near_box=[text.bbox[0]-8,text.bbox[1]-8,text.bbox[2]+16,text.bbox[3]+16]
     for peer in graph.text.texts:
         if peer.id==text.id:continue
-        mask=rectangle(peer.bbox,size);context|=mask
-        rows.append((peer.id,'TEXT',mask,{'method':'independent-text-scope'}))
+        tight=_tight_peer_ink_mask(source,peer.bbox,size,pad=2) if intersection(peer.bbox,near_box) else None
+        if tight is not None:
+            context|=tight
+            rows.append((peer.id,'TEXT',tight,{'method':'tight-peer-glyph-mask/1'}))
+        else:
+            mask=rectangle(peer.bbox,size);context|=mask
+            rows.append((peer.id,'TEXT',mask,{'method':'independent-text-scope'}))
     for peer in graph.asset.objects:
         role=classified[peer.id];mask=verified_owner(peer.id,graph,source,baseline)
         if mask is not None:
             context|=mask
             rows.append((peer.id,role['role'],mask,{'method':'hash-bound-verified-owner-mask'}))
             continue
+        if (role['role']!='BACKGROUND_PANEL_CANDIDATE' and intersection(peer.bbox,near_box)
+                and (min(peer.bbox[2],peer.bbox[3])<=14 or role['role']=='FOREGROUND_OBJECT')):
+            tight=_tight_peer_ink_mask(source,peer.bbox,size,pad=2)
+            if tight is not None:
+                context|=tight
+                rows.append((peer.id,role['role'],tight,{'method':'tight-peer-ink-mask/1'}))
+                continue
         mask=rectangle(peer.bbox,size)
         report={'method':'unproved-owner-conservative-scope'}
         if role['role']=='BACKGROUND_PANEL_CANDIDATE' and intersection(peer.bbox,text.bbox):

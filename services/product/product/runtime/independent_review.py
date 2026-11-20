@@ -102,35 +102,33 @@ def _stateless_vlm_audit(
     *, deck_path: Path, edit_panels: list[Path],
 ) -> dict:
     """Call VLM in a fresh stateless session (separate from Agent conversation) to audit visual fidelity."""
-    from ..go_provider import GoProvider
     from ..recovery.adaptive_policy import AdaptiveBudget
-    from .provider import configure_model
-    import os
+    from .provider import resolve_review_config, review_actor
+    from . import review_control
 
     request = json.loads((state.job / 'request.json').read_text('utf8'))
-    budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'))
-    from .provider import GO_MODEL_ALIASES
-    requested = os.environ.get('IMAGE2PPT_REVIEW_MODEL') or 'hy4'
-    review_model = GO_MODEL_ALIASES.get(requested, requested)
-    from . import review_control
-    audit_key = key({
-        'schema': 'StatelessVisualAudit/2', 'model': review_model, 'policy': key(load_tolerance_config()),
-        'review_code': digest(__file__), 'controls':digest(review_control.__file__), 'scorecard': key(sc_summary), 'deck': digest(deck_path),
-        'edit_panels': [digest(p) for p in edit_panels],
-        'source_sha256': digest(source_path),
-        'render_sha256': digest(render_path),
-        'owner_sha256': digest(owner_preview_path),
-    })
-    cache_dir = state.job / 'cache/independent-audit'
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_file = cache_dir / f'{audit_key}.json'
-    if cache_file.is_file():
-        return {**json.loads(cache_file.read_text('utf8')), 'status': 'CACHED'}
+    page_count = max(1, len(request.get('sources') or [1]))
+    budget = AdaptiveBudget(Store(state.job / 'state'), request.get('adaptive_budget'), page_count=page_count)
+    review_model = None
 
     try:
-        selected_provider, cfg = configure_model(state.job)
-        if selected_provider != 'opencode_go' or review_model == cfg.model:
-            raise ValueError('independent OpenCode Go reviewer required')
+        review_provider, _, _, review_model = resolve_review_config(state.job)
+        audit_key = key({
+            'schema': 'StatelessVisualAudit/2', 'provider': review_provider, 'model': review_model,
+            'policy': key(load_tolerance_config()),
+            'review_code': digest(__file__), 'controls': digest(review_control.__file__),
+            'scorecard': key(sc_summary), 'deck': digest(deck_path),
+            'edit_panels': [digest(p) for p in edit_panels],
+            'source_sha256': digest(source_path),
+            'render_sha256': digest(render_path),
+            'owner_sha256': digest(owner_preview_path),
+        })
+        cache_dir = state.job / 'cache/independent-audit'
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / f'{audit_key}.json'
+        if cache_file.is_file():
+            return {**json.loads(cache_file.read_text('utf8')), 'status': 'CACHED'}
+
         system_prompt = (
             'You are an independent PowerPoint reconstruction QA auditor (separate from the builder agent). '
             'The first three images are: (1) original source slide, (2) actual PowerPoint rendered slide, '
@@ -143,14 +141,18 @@ def _stateless_vlm_audit(
             'are `severity="minor"` (`font_or_shade_deviation`) and MUST NOT fail the audit (`passed=true`). '
             'Set `passed=false` ONLY when a `severity="critical"` defect exists.'
         )
-        reviewer = GoProvider(session=f'independent-audit-{uuid.uuid4().hex}')
-        reviewer.key = cfg.api_key
-        reviewer.model = review_model
-        control = review_control.verify_reviewer(reviewer,cache_dir/'controls',budget)
+        _, _, reviewer = review_actor(state.job, f'independent-audit-{uuid.uuid4().hex}')
+        control = review_control.verify_reviewer(reviewer, cache_dir / 'controls', budget)
         if not control['passed']:
-            return {'status':'CONTROL_UNVERIFIED','passed':False,'control':control,'model':review_model,
-                    'critical_defects':[],'minor_deviations':[]}
-        if not budget.reserve('model_calls', {'tool':'audit_delivery','key':audit_key}):
+            return {'status': 'CONTROL_UNVERIFIED', 'passed': False, 'control': control,
+                    'provider': review_provider, 'model': review_model,
+                    'critical_defects': [], 'minor_deviations': []}
+        reserved_audit = False
+        for attempt in (0, 1):
+            if budget.reserve('model_calls', {'tool': 'audit_delivery', 'key': audit_key, 'attempt': attempt}):
+                reserved_audit = True
+                break
+        if not reserved_audit:
             raise RuntimeError('previous independent audit response unknown')
         raw = reviewer.ask(system_prompt, {'scorecard': sc_summary},
                            [source_path, render_path, owner_preview_path, *edit_panels], VLMIndependentAuditReply)
@@ -158,7 +160,9 @@ def _stateless_vlm_audit(
         critical = [d.model_dump() for d in parsed.defects if d.severity == 'critical']
         minor = [d.model_dump() for d in parsed.defects if d.severity != 'critical']
         verdict = {
-            'status': 'READY', 'model': review_model, 'reported_model':reviewer.reported_model, 'usage':reviewer.last_usage, 'session': reviewer.session, 'receipt': audit_key, 'control':control,
+            'status': 'READY', 'provider': review_provider, 'model': review_model,
+            'reported_model': reviewer.reported_model, 'usage': reviewer.last_usage,
+            'session': reviewer.session, 'receipt': audit_key, 'control': control,
             'passed': len(critical) == 0 and bool(parsed.passed),
             'critical_defects': critical,
             'minor_deviations': minor,

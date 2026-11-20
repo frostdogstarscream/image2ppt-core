@@ -1,4 +1,4 @@
-"""Private model contract. Public SlideIR and the fixed compiler stay unchanged."""
+"""Private model contract. Expanded in P1 alongside backward-compatible SlideIR 0.1."""
 from __future__ import annotations
 
 import math
@@ -44,6 +44,7 @@ class Text(Strict):
 class GradientStop(Strict):
     offset: int = Field(ge=0,le=100000)
     color: str = Field(pattern=r'^[0-9A-Fa-f]{6}$')
+    opacity: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class Gradient(Strict):
@@ -58,17 +59,73 @@ class Gradient(Strict):
         return self
 
 
+class Shadow(Strict):
+    color: str = Field(pattern=r'^[0-9A-Fa-f]{6}$')
+    opacity: float = Field(ge=0.0, le=1.0)
+    blur_px: float = Field(ge=0.0, le=120.0)
+    offset_x_px: float = Field(ge=-120.0, le=120.0)
+    offset_y_px: float = Field(ge=-120.0, le=120.0)
+
+
+class CustomCommand(Strict):
+    type: Literal['moveTo', 'lineTo', 'cubicBezierTo', 'close']
+    x: float | None = None
+    y: float | None = None
+    x1: float | None = None
+    y1: float | None = None
+    x2: float | None = None
+    y2: float | None = None
+
+    @model_validator(mode='after')
+    def check_coords(self):
+        if self.type == 'close':
+            if any(getattr(self, k) is not None for k in ('x', 'y', 'x1', 'y1', 'x2', 'y2')):
+                raise ValueError('close command takes no coordinates')
+        elif self.type == 'cubicBezierTo':
+            if any(getattr(self, k) is None for k in ('x1', 'y1', 'x2', 'y2', 'x', 'y')):
+                raise ValueError('cubicBezierTo requires x1,y1,x2,y2,x,y')
+        else:
+            if self.x is None or self.y is None or any(getattr(self, k) is not None for k in ('x1', 'y1', 'x2', 'y2')):
+                raise ValueError('moveTo/lineTo requires x,y')
+        return self
+
+
+class CustomPath(Strict):
+    width: float = Field(gt=0.0, le=40000.0)
+    height: float = Field(gt=0.0, le=40000.0)
+    commands: list[CustomCommand] = Field(min_length=2, max_length=2000)
+
+
 class Shape(Strict):
     id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,60}$')
     bbox: list[float] = Field(min_length=4, max_length=4)
     z: int = Field(ge=0, le=10000)
     geometry: Literal['rect','roundRect','ellipse','line','chevron','pentagon',
-                      'rightArrow','leftArrow','trapezoid','parallelogram','hexagon','diamond','triangle']
+                      'rightArrow','leftArrow','upArrow','downArrow',
+                      'straightConnector1','bentConnector3','curvedConnector3',
+                      'trapezoid','parallelogram','hexagon','diamond','triangle','custom']
     fill: str = Field(pattern=r'^(none|[0-9A-Fa-f]{6})$')
+    fill_opacity: float | None = Field(default=None, ge=0.0, le=1.0)
     line_color: str = Field(default='FFFFFF', pattern=r'^[0-9A-Fa-f]{6}$')
     line_width_pt: float = Field(default=0, ge=0, le=20)
+    line_opacity: float | None = Field(default=None, ge=0.0, le=1.0)
+    line_dash: Literal['solid', 'dash', 'dot'] | None = None
+    head_end: Literal['none', 'triangle', 'stealth', 'oval'] | None = None
+    tail_end: Literal['none', 'triangle', 'stealth', 'oval'] | None = None
     corner_radius_px: float | None = Field(default=None,ge=0)
     fill_gradient: Gradient | None = None
+    shadow: Shadow | None = None
+    custom_paths: list[CustomPath] | None = Field(default=None, min_length=1, max_length=64)
+
+    @model_validator(mode='after')
+    def check_shape_ext(self):
+        if self.geometry == 'custom' and not self.custom_paths:
+            raise ValueError('custom geometry requires custom_paths')
+        if self.geometry != 'custom' and self.custom_paths is not None:
+            raise ValueError('only custom geometry accepts custom_paths')
+        if self.fill == 'none' and self.fill_opacity is not None:
+            raise ValueError('fill_opacity invalid when fill is none')
+        return self
 
 
 class Crop(Strict):

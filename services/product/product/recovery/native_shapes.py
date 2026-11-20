@@ -11,7 +11,7 @@ import math
 import cv2
 import numpy as np
 
-from ..contracts import Gradient, GradientStop
+from ..contracts import Gradient, GradientStop, Shadow
 from ..tolerance_config import load_tolerance_config
 
 
@@ -491,6 +491,74 @@ def try_fit_native_shape_v2(
     )
     parent_med = np.median(parent_f.reshape(-1, 3), axis=0)
 
+    # Thin horizontal/vertical straight arrow connector (`straightConnector1` with `head_end`/`tail_end='triangle'`)
+    def _try_fit_arrow_connector() -> dict | None:
+        if cand_kind not in ('box', 'line') or direct_children_mask_local.any():
+            return None
+        if not ((48 <= w and 10 <= h <= 30) or (48 <= h and 10 <= w <= 30)):
+            return None
+        horiz = w >= h
+        crop_o = crop if horiz else crop.transpose(1, 0, 2)
+        par_o = parent_f if horiz else parent_f.transpose(1, 0, 2)
+        lo, ho = crop_o.shape[1], crop_o.shape[0]
+        fg_o = np.abs(crop_o - par_o).max(2) > 8.0
+        if float(fg_o.mean()) < 0.08:
+            return None
+        spans = fg_o.sum(axis=0).astype(int)
+        nonzero_cols = np.flatnonzero(spans > 0)
+        if len(nonzero_cols) < 24:
+            return None
+        c_left, c_right = int(nonzero_cols[0]), int(nonzero_cols[-1])
+        active_spans = spans[c_left:c_right + 1]
+        if len(active_spans) < 24:
+            return None
+        shaft_thickness = float(np.median(active_spans))
+        if not (1.0 <= shaft_thickness <= 6.0):
+            return None
+        head_tip = int(active_spans.max())
+        if head_tip < max(8.0, shaft_thickness * 2.1):
+            return None
+        # Head must sit strictly at one end (first 28% or last 28% of columns)
+        tip_cols = np.flatnonzero(active_spans > shaft_thickness + 2.0)
+        if len(tip_cols) < 3 or len(tip_cols) > max(6, int(0.30 * len(active_spans))):
+            return None
+        at_left = int(tip_cols.max()) <= int(0.32 * len(active_spans))
+        at_right = int(tip_cols.min()) >= int(0.68 * len(active_spans))
+        if at_left == at_right:
+            return None
+        core_fg = np.abs(crop_o - par_o).max(2) > 16.0
+        if int(core_fg.sum()) < 16:
+            return None
+        med_rgb = np.rint(np.median(crop_o[core_fg], axis=0)).astype(int)
+        if float(np.percentile(np.abs(crop_o[core_fg] - med_rgb.astype(np.float64)).max(1), 90)) > 14.0:
+            return None
+        shaft_mask = (fg_o[:, c_left:c_right + 1]) & (spans[None, c_left:c_right + 1] <= shaft_thickness + 1.5)
+        ys_s = np.nonzero(shaft_mask)[0]
+        if len(ys_s) == 0:
+            return None
+        cy_s = float(0.5 * (ys_s.min() + ys_s.max()))
+        half_s = max(1.0, 0.5 * shaft_thickness)
+        box_local = ([float(c_left), max(0.0, cy_s - half_s), float(c_right - c_left + 1), float(shaft_thickness)]
+                     if horiz else [max(0.0, cy_s - half_s), float(c_left), float(shaft_thickness), float(c_right - c_left + 1)])
+        return {
+            'geometry': 'straightConnector1',
+            'fill': 'none',
+            'fill_rgb': med_rgb,
+            'fill_gradient': None,
+            'pred_fill': crop.copy(),
+            'line_color': hex_rgb(med_rgb),
+            'line_width_pt': round(max(1.0, shaft_thickness * 0.75), 2),
+            'head_end': 'triangle' if at_left else 'none',
+            'tail_end': 'triangle' if at_right else 'none',
+            'corner_radius_px': None,
+            'bbox_offset_local': box_local,
+            'erase_mask_local': (np.abs(crop - parent_f).max(2) > 6.0) | direct_children_mask_local,
+        }
+
+    arrow_fit = _try_fit_arrow_connector()
+    if arrow_fit is not None:
+        return arrow_fit
+
     # Thin divider rules (`line` / thin `rect` bar, e.g. header accent rule or vertical column divider)
     if cand_kind == 'line' or (min(w, h) <= 6 and max(w, h) >= 36):
         if min(w, h) < 2 or max(w, h) < 32:
@@ -766,3 +834,19 @@ def soft_shadow_halo_mask(
     full = np.zeros((h_img, w_img), dtype=bool)
     full[ry0:ry1, rx0:rx1] = halo_local
     return full
+
+
+def estimate_card_shadow(
+    work_plate: np.ndarray,
+    canvas_field: np.ndarray,
+    halo_mask: np.ndarray | None,
+) -> Shadow | None:
+    """Derive subtle native `Shadow` from verified exterior shadow pixels before cleanup."""
+    if halo_mask is None or int(halo_mask.sum()) < 24:
+        return None
+    diff_luma = (canvas_field[halo_mask].astype(np.float32) - work_plate[halo_mask].astype(np.float32)).mean(axis=1)
+    darkening = float(np.median(diff_luma))
+    if not (2.0 <= darkening <= 22.0):
+        return None
+    opacity = round(min(0.22, max(0.06, darkening / 130.0)), 3)
+    return Shadow(color='1A2B44', opacity=opacity, blur_px=6.0, offset_x_px=0.0, offset_y_px=2.0)

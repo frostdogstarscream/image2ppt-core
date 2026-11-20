@@ -59,6 +59,11 @@ def background_model(rgb, bbox, excluded):
             continue
         for channel in range(3):
             rows[:, channel] = np.interp(np.arange(h), np.flatnonzero(known), rows[known, channel])
+        if np.percentile(np.abs(rows - np.median(rows, axis=0)).max(axis=1), 85) <= 3.5:
+            ys = np.arange(h, dtype=float) / float(max(1, h - 1))
+            design_v = np.stack([np.ones_like(ys), ys], axis=1)
+            coeff_v = np.linalg.lstsq(design_v, rows, rcond=None)[0]
+            rows = design_v @ coeff_v
         side_colors.append(rows)
     if not side_colors:
         raise ValueError("insufficient unprotected lateral background samples")

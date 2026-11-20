@@ -1,5 +1,6 @@
 """Read doubtful numbered text from the source crop after the host baseline is frozen."""
 import json
+import math
 import re
 import shutil
 from pathlib import Path
@@ -42,7 +43,8 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
     lines = {line['id']:line for line in ocr['lines']}
     fonts = json.loads(Path(current['fonts']).read_text('utf8'))
     request = json.loads((state.job/'request.json').read_text('utf8'))
-    budget = AdaptiveBudget(Store(state.job/'state'), request.get('adaptive_budget'))
+    page_count = max(1, len(request.get('sources') or [1]))
+    budget = AdaptiveBudget(Store(state.job/'state'), request.get('adaptive_budget'), page_count=page_count)
     source = Path(row['snapshot']['path'])
     if digest(source) != scene.source_sha256:
         raise ValueError('source reading image changed')
@@ -56,7 +58,7 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
                 or obj.spans or scene.selected[obj.id].get('kind') != 'text'):
             continue
         line = lines.get(members[0], {})
-        if line.get('text') != obj.text or line.get('score', 1) >= .94:
+        if line.get('text') != obj.text:
             continue
         x, y, w, h = map(round, line['bbox'])
         crop = image.crop((x,y,x+w,y+h))
@@ -69,7 +71,7 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
             evidence['reason'] = 'reserved_or_unknown'
             continue
         reading = CropReading.model_validate(actor.ask(
-            'Transcribe only the exact visible glyphs. If a character is malformed or unreadable, return legible=false. Do not infer words from context.',
+            'Transcribe only the exact visible glyphs. If a character is malformed or unreadable, return legible=false. Do not infer words from context. Return valid JSON matching output_schema.',
             {},[crop_path],CropReading))
         evidence.update(reading=reading.text,legible=reading.legible,model=actor.model)
         if not reading.legible or reading.text == obj.text:
@@ -86,9 +88,22 @@ def stage_readings(service, state, current, directory, *, page, object_ids):
         changes.append(change)
         obj.text = change['after']
         rec = scene.selected[obj.id]
+        if len(change['after']) > len(change['before']) and len(obj.bbox) == 4:
+            needed_w = math.ceil(obj.bbox[2] * (len(change['after']) / max(1, len(change['before'])))) + 8
+            right_limit = float(scene.image_size[0]) - obj.bbox[0] - 2.0
+            for peer in scene.text.texts:
+                if peer.id == obj.id or len(peer.bbox) != 4:
+                    continue
+                if peer.bbox[0] > obj.bbox[0] and not (peer.bbox[1] + peer.bbox[3] <= obj.bbox[1] or obj.bbox[1] + obj.bbox[3] <= peer.bbox[1]):
+                    right_limit = min(right_limit, float(peer.bbox[0]) - obj.bbox[0] - 2.0)
+            new_w = max(float(obj.bbox[2]), min(float(needed_w), max(float(obj.bbox[2]), right_limit)))
+            obj.bbox[2] = new_w
+            rec['bbox'] = list(obj.bbox)
         for field in ('payload', 'source_text_definition'):
             if field in rec:
                 rec[field]['text'] = obj.text
+                if 'bbox' in rec[field]:
+                    rec[field]['bbox'] = list(obj.bbox)
     proof = {'source_sha256':scene.source_sha256, 'observations':observ, 'changes':changes}
     write(directory/'readings.json', proof)
     if not changes:
