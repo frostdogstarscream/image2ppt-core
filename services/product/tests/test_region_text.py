@@ -129,3 +129,31 @@ def test_text_on_retained_artwork_updates_bound_asset_and_owner(tmp_path):
         np.testing.assert_array_equal(proof["mask"], prior & ~mask)
     with pytest.raises(ValueError, match="exclusively own"):
         transfer_text_ink(tmp_path, record, mask, [11, 6, 8, 3], repair, src_sha)
+
+def test_group_inpaint_retries_only_fields_that_failed_layer_trial():
+    from types import SimpleNamespace
+    from product.runtime.batch_backbone import _retry_joint_text
+
+    source = np.zeros((4, 8, 3), dtype=np.uint8)
+    masks = {key: np.zeros(source.shape[:2], bool) for key in ('one', 'two')}
+    masks['one'][1, 2] = masks['two'][1, 5] = True
+    members = [(i, SimpleNamespace(id=key)) for i, key in enumerate(masks)]
+    layer = SimpleNamespace(image=source.copy(), provenance={'below_z': 1})
+    calls = []
+
+    def repair(image, mask):
+        np.testing.assert_array_equal(mask, masks['two'])
+        calls.append('inpaint')
+        return source.copy()
+
+    def probe(obj, *, folder, inpaint):
+        inpaint(source, masks[obj.id])
+        provider = inpaint.receipt['provider']
+        calls.append((obj.id, provider))
+        ok = obj.id == 'one' or provider == 'lama'
+        return {'status': 'PRECHECK_PASS' if ok else 'BLOCKED'}
+
+    outcomes = [None, None]
+    _retry_joint_text(members, masks, [layer], source, repair, probe, outcomes)
+    assert calls == [('one', 'layerd'), ('two', 'layerd'), 'inpaint', ('two', 'lama')]
+    assert all(item['status'] == 'PRECHECK_PASS' for item in outcomes)

@@ -1047,6 +1047,40 @@ def _threadsafe_inpaint(raw_inpaint):
     return wrapped
 
 
+def _retry_joint_text(members, masks, layers, source_pixels, safe_inpaint, probe, outcomes):
+    """Try verified lower stacks, then inpaint only the fields still unresolved."""
+    from ..parallel_rebuild import array_sha
+    pending = members.copy()
+    for index in range(len(layers) + 1):
+        if not pending:
+            break
+        retry_mask = np.logical_or.reduce([masks[obj.id] for _, obj in pending])
+        if index < len(layers):
+            provider = 'layerd'
+            repaired = layers[index].image
+            provenance = layers[index].provenance
+        else:
+            provider = 'lama'
+            try:
+                repaired = safe_inpaint(source_pixels, retry_mask)
+            except (OSError, TimeoutError, ValueError, RuntimeError):
+                break
+            provenance = getattr(safe_inpaint, 'receipt', {})
+        rejected = []
+        for idx, obj in pending:
+            def authorized_patch(image, mask):
+                if not np.array_equal(mask, masks[obj.id]):
+                    raise ValueError('local ownership changed before repair')
+                return repaired
+            authorized_patch.receipt = {'group': [member.id for _, member in pending],
+                                        'union_sha256': array_sha(retry_mask.astype('uint8')),
+                                        'provider': provider, 'provenance': provenance}
+            outcomes[idx] = probe(obj, folder=f'joint-trials-{provider}-{index}', inpaint=authorized_patch)
+            if outcomes[idx]['status'] != 'PRECHECK_PASS':
+                rejected.append((idx, obj))
+        pending = rejected
+
+
 def _collect_office_defects(office_result: dict, graph: SceneGraph, staged_ids: list[str]) -> tuple[dict, set[str]]:
     from ..parallel_residual_gate import residual_accepted
     from .office import frame_feedback
@@ -1744,7 +1778,6 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         workers = min(6, max(1, len(text_targets)))
         # Capture only masks that survived ownership and text-mask completion.
         # Sharing a model call does not share pixel ownership or commit decisions.
-        from ..parallel_rebuild import array_sha
         masks = {}
         def local_probe(obj):
             def capture(image, mask):
@@ -1771,25 +1804,13 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                 if not (union & masks[obj.id]).any():
                     union |= masks[obj.id]
                     safe_members.append((idx,obj))
+            from ..recovery.layerd_adapter import lower_backgrounds
+            from ..recovery.background_adapter import RecoveryBlocked
             try:
-                from ..recovery.region_candidates import lower_backgrounds
-                candidates = lower_backgrounds(source_pixels, row['layers'], union) if row.get('layers') else ()
-                background = next(iter(candidates), None)
-            except (OSError,KeyError,ValueError,ImportError):
-                background = None
-            try:
-                repaired = background.image if background is not None else safe_inpaint(source_pixels, union)
-            except (OSError,TimeoutError,ValueError,RuntimeError):
-                continue
-            for idx, obj in safe_members:
-                def authorized_patch(image, mask):
-                    if not np.array_equal(mask, masks[obj.id]):
-                        raise ValueError('local ownership changed before repair')
-                    return repaired
-                authorized_patch.receipt = {'group': [member.id for _,member in safe_members],
-                                            'union_sha256': array_sha(union.astype('uint8')),
-                                            'provider': 'layerd' if background is not None else 'lama'}
-                outcomes[idx] = _probe_text(obj, folder='joint-trials', inpaint=authorized_patch)
+                layers = lower_backgrounds(source_pixels, row['layers'], union) if row.get('layers') else ()
+            except (RecoveryBlocked, OSError, KeyError, ValueError, ImportError):
+                layers = ()
+            _retry_joint_text(safe_members, masks, layers, source_pixels, safe_inpaint, _probe_text, outcomes)
         for item in outcomes:
             t_obj = item['object']
             if item['status'] == 'PRECHECK_PASS':

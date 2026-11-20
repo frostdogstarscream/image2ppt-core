@@ -311,7 +311,7 @@ def create_app(root=None, token=None, run_worker=True):
                                       'canonical_file':name,'canonical_sha256':digest(job/'inputs'/name)})
             write(job/'request.json',{'sources':names,'max_calls':None,'italic_difference_ignored':True,
                                      'agent_inference_provider':os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma'),
-                                     **({'region_text':os.environ.get('IMAGE2PPT_REGION_TEXT')=='1',
+                                     **({'region_text':os.environ.get('IMAGE2PPT_REGION_TEXT','1')=='1',
                                          'page_reading':os.environ.get('IMAGE2PPT_PAGE_READING')=='1'}
                                         if orchestrator=='opencode' else {}),
                                      'agent_model':agent_model or os.environ.get('IMAGE2PPT_AGENT_MODEL'),

@@ -4,12 +4,10 @@ The runtime uses OpenCode 2.1.4, MCP 1.3.0 and Pydantic 2.10.x. MCP 1.3 imports 
 
 ## Region-based text and context-assisted reading
 
-The admission host freezes two experiment settings in each new OpenCode job. Set
-`IMAGE2PPT_REGION_TEXT=1` to reconstruct text on a common title, band or card
+The admission host freezes two experiment settings in each new OpenCode job. By default, new jobs reconstruct text on a common title, band or card
 surface before falling back to individual lines. Add `IMAGE2PPT_PAGE_READING=1`
 to use the configured MoMA reading model after the deterministic Office baseline.
-The upload API is unchanged. Existing jobs keep their recorded settings. Both
-switches are opt-in pending the page 08 and frozen-set acceptance gates.
+The upload API is unchanged. Existing jobs keep their recorded settings. Set `IMAGE2PPT_REGION_TEXT=0` for a line-only comparison. Page reading remains opt-in.
 
 The page reader sees a numbered source image. An independent local reader sees
 only crops. They use fresh calls to the same model. Matching ordinary wording
