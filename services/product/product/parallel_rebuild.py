@@ -417,11 +417,32 @@ def adapt(graph,directory):
     shape_by_id={s.id:s for s in graph.surface.shapes}
     surfaces=sorted([c for c in chosen if c['kind']=='surface'],
                     key=lambda c:(shape_by_id[c['id']].z,-(shape_by_id[c['id']].bbox[2]*shape_by_id[c['id']].bbox[3])))
+    from .recovery.title_bands import title_bands
+    with Image.open(backing) as plate:
+        cleaned,bands=title_bands(np.array(plate.convert('RGBA')),chosen,graph.text.texts)
+    if bands:
+        backing=directory/('plate-bands-'+array_sha(cleaned)[:16]+'.png')
+        Image.fromarray(cleaned).save(backing)
     image('source-plate',[0,0,*graph.image_size],backing,'Safe source backing with only committed replacement ink cleared',0)
+    for band in bands:
+        x,y,width,height=band['bbox']
+        members=[]
+        for role,geometry,width_px,color in [
+            ('strip','rect',width,band['colors'][2]),
+            ('tab',band['tab_geometry'],band['tab_width'],band['colors'][1]),
+            ('number','rect',band['split'],band['colors'][0])]:
+            ident=band['id']+'-'+role
+            bounds=[x,y,width_px,height]
+            ev='ev-'+ident
+            ir['evidence'].append({'id':ev,'kind':'shape','bbox':bounds,'description':'Measured numbered title band'})
+            ir['nodes'].append({'id':ident,'type':'shape','geometry':geometry,'bbox':bounds,
+                                'z':len(ir['nodes']),'fill':color,'evidence_ids':[ev]})
+            members.append(ident)
+        ir['groups'].append({'id':band['id'],'member_ids':members})
     for z,c in enumerate(surfaces,1):
         s=shape_by_id[c['id']];ev='ev-'+s.id
         ir['evidence'].append({'id':ev,'kind':'shape','bbox':s.bbox,'description':'source-confirmed flat backing'})
-        snode={'id':s.id,'type':'shape','geometry':s.geometry,'bbox':s.bbox,'z':z,'fill':s.fill,
+        snode={'id':s.id,'type':'shape','geometry':s.geometry,'bbox':s.bbox,'z':len(ir['nodes']),'fill':s.fill,
                'line':{'color':s.line_color,'width_pt':s.line_width_pt},'evidence_ids':[ev]}
         if s.corner_radius_px is not None:
             snode['corner_radius_px']=min(float(s.corner_radius_px),min(s.bbox[2],s.bbox[3])/2.0)

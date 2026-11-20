@@ -3,6 +3,26 @@ from product.runtime.plate_audit import reconcile
 from product.experiment import diagram_marks
 
 
+def test_numbered_title_band_preserves_neighbor_and_abstains_on_unexplained_ink():
+    from types import SimpleNamespace
+    import numpy as np
+    from product.recovery.title_bands import title_bands
+    plate=np.full((95,280,4),255,'uint8')
+    plate[25:65,14:246,:3]=(222,238,250)
+    plate[25:65,14:153,:3]=(14,90,175)
+    plate[25:65,14:53,:3]=(32,134,242)
+    plate[75:80,80:95,:3]=20
+    texts=[SimpleNamespace(id='n',text='01',bbox=[21,33,19,22]),
+           SimpleNamespace(id='t',text='Example',bbox=[64,33,60,22])]
+    selected=[{'id':t.id,'kind':'text','bbox':t.bbox} for t in texts]
+    cleaned,bands=title_bands(plate,selected,texts)
+    assert len(bands)==1 and np.all(cleaned[26:64,15:245]==255)
+    assert np.array_equal(cleaned[75:80],plate[75:80])
+    plate[38:45,175:183,:3]=[35,12,200]
+    kept,bands=title_bands(plate,selected,texts)
+    assert not bands and np.array_equal(kept,plate)
+
+
 def test_badges_with_independent_light_symbols_and_a_measured_track():
     import numpy as np
     from product.recovery.diagram_parts import diagram_parts
