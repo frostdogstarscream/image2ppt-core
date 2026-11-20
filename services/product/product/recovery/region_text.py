@@ -164,6 +164,26 @@ def _external_ink(guard, source, field, box, peer, members):
     guard |= protected
 
 
+def _complete_title_ink(tile, field, scope, guard, height):
+    """On smooth paper follow whole glyph components that are anchored inside the OCR line."""
+    contrast = np.abs(tile.astype(float) - field).max(2)
+    radius = max(1, round(height * 0.12))
+    near = cv2.dilate(scope.astype("uint8"), np.ones((2*radius+1, 2*radius+1), "uint8")).astype(bool)
+    ring = near & ~scope & ~guard
+    if not ring.any() or np.percentile(contrast[ring], 85) > 10:
+        return np.zeros_like(scope)
+    components = (contrast > 14) & near
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(components.astype("uint8"), 8)
+    core_ids = set(np.unique(labels[scope & (contrast > 55)]))
+    protected_ids = set(np.unique(labels[guard]))
+    border = near & ~cv2.erode(near.astype("uint8"), np.ones((3,3), "uint8")).astype(bool)
+    protected_ids.update(np.unique(labels[border]))
+    ids = [i for i in range(1, count) if i in core_ids and i not in protected_ids
+           and stats[i, cv2.CC_STAT_WIDTH] <= 1.25 * height
+           and stats[i, cv2.CC_STAT_HEIGHT] <= 1.25 * height]
+    return np.isin(labels, ids)
+
+
 def measure_group(graph, group, source, baseline, lines):
     """Recompute bounded stroke ownership from source, foreground colours and the exposed surface."""
     members = [t for t in graph.text.texts if t.id in group["members"]]
@@ -241,6 +261,8 @@ def measure_group(graph, group, source, baseline, lines):
         n, _, stats, _ = cv2.connectedComponentsWithStats(cores.astype("uint8"), 8)
         if any(v[cv2.CC_STAT_WIDTH] > max(th * 2.4, tw * 0.42) for v in stats[1:]) and len(t.text) > 3:
             raise ValueError("foreground includes non-letter geometry")
+        if styles[t.style].role == "title" and group["kind"] in ("title", "field"):
+            mask |= _complete_title_ink(tile, field, scope, others, th)
         if (mask & (used | others)).any():
             raise ValueError("text ownership is not disjoint")
         used |= mask

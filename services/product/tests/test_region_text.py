@@ -157,3 +157,20 @@ def test_group_inpaint_retries_only_fields_that_failed_layer_trial():
     _retry_joint_text(members, masks, [layer], source, repair, probe, outcomes)
     assert calls == [('one', 'layerd'), ('two', 'layerd'), 'inpaint', ('two', 'lama')]
     assert all(item['status'] == 'PRECHECK_PASS' for item in outcomes)
+
+def test_title_keeps_two_ink_colors_and_protects_adjacent_decoration():
+    from product.recovery.region_text import _complete_title_ink
+
+    field = np.full((45, 110, 3), 250, dtype=np.uint8)
+    tile = field.copy()
+    tile[12:31, 20:24] = [25, 70, 190]
+    tile[14:30, 38:42] = [30, 30, 30]
+    tile[12:31, 57:61] = [25, 70, 190]
+    scope = np.zeros(tile.shape[:2], bool)
+    scope[13:31, 18:67] = True
+    guard = np.zeros_like(scope)
+    guard[12:31, 57:61] = True
+    mask = _complete_title_ink(tile, field, scope, guard, 20)
+    assert mask[12:31, 20:24].all()
+    assert mask[14:30, 38:42].all()
+    assert not mask[guard].any()

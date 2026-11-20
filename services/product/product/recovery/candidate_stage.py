@@ -240,8 +240,14 @@ def stage_text_pixels(graph, baseline_directory, fonts, output, *, text, region,
     with TemporaryDirectory(prefix='r12-stage-', dir=output.parent) as temporary:
         folder = Path(temporary)/'candidate'
         folder.mkdir()
-        np.savez_compressed(folder/'pixels.npz', mask=wanted,
-                            patch=written[by:by+bh, bx:bx+bw], bbox=box)
+        # The OCR frame positions text. A verified stroke may extend beyond it.
+        ys, xs = np.nonzero(wanted)
+        if not len(xs):
+            raise ValueError('empty text owner mask')
+        left, top = min(bx, int(xs.min())), min(by, int(ys.min()))
+        right, bottom = max(bx+bw, int(xs.max())+1), max(by+bh, int(ys.max())+1)
+        np.savez_compressed(folder/'pixels.npz', mask=wanted, patch=written[top:bottom, left:right],
+                            bbox=[left, top, right-left, bottom-top])
         proposed=text.model_copy(deep=True)
         definitions=[]
         if typography:
