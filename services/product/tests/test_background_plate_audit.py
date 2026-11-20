@@ -59,6 +59,8 @@ def test_connected_diagram_transfers_only_silhouette(tmp_path):
 
     image = Image.new('RGB',(240,120),'white')
     draw = ImageDraw.Draw(image)
+    # The pale rim extends beyond the detector's tight rectangle on the left.
+    draw.ellipse((20,20,53,53),fill=(248,248,248))
     draw.ellipse((24,24,49,49),fill='navy')
     draw.ellipse((139,54,164,79),fill='navy')
     draw.line((36,36,151,66),fill='navy',width=4)
@@ -76,4 +78,7 @@ def test_connected_diagram_transfers_only_silhouette(tmp_path):
     assert (plate[36,36] == 255).all()
     assert plate[64,53].tolist() == [255,0,0]
     asset=np.asarray(Image.open(ir.parent/(oid+'.png')))
-    assert asset[64-22,53-22,3]==0
+    import json
+    box = json.loads((ir.parent/'scene.json').read_text('utf8'))['selected'][oid]['bbox']
+    assert box[0] < route['bbox'][0]
+    assert asset[64-box[1],53-box[0],3]==0

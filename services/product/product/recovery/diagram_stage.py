@@ -21,7 +21,7 @@ from .region_crop import _extract_rgba, _render_lower_composite, MOVABLE_RING_ER
 def _diagram_backing(tile, lower, covered, core, blocked, radius, initial):
     """Fit the exposed local background and follow faint edges attached to the silhouette."""
     distance = cv2.distanceTransform((~core).astype('uint8'), cv2.DIST_L2, 5)
-    reach = max(2, 3 * radius)
+    reach = max(3, 5 * radius)
     ring = (distance > reach) & (distance <= 2 * reach) & ~blocked & ~covered
     if core[covered].any():
         # Different underlying layers cannot share one fitted gradient.
@@ -39,8 +39,8 @@ def _diagram_backing(tile, lower, covered, core, blocked, radius, initial):
             return initial, core
         errors = np.abs(samples - design @ coeff).max(axis=1)
         keep = errors <= max(2, np.percentile(errors, 75))
-    noise = np.percentile(errors, 80)
-    if noise > 4:
+    noise = np.median(errors)
+    if noise > 3 or np.percentile(errors, 75) > 6:
         return initial, core
     # Extrapolation from a single side can paint a false outline across the figure.
     hull = cv2.convexHull(np.column_stack((xx[keep], yy[keep])).astype('int32'))
@@ -49,10 +49,14 @@ def _diagram_backing(tile, lower, covered, core, blocked, radius, initial):
     field = np.clip(np.rint(x[..., None]*coeff[0] + y[..., None]*coeff[1] + coeff[2]), 0, 255).astype('uint8')
     backing = np.where(supported[..., None], field, initial)
     signal = np.abs(tile.astype(float) - backing).max(axis=2)
-    weak = ((distance <= reach) & (signal > max(2, noise * 2)) & (signal <= 10)
+    weak = ((distance <= reach) & (signal > max(1.5, noise * 1.5)) & (signal <= 24)
             & ~blocked & ~covered & supported.astype(bool))
     _, labels = cv2.connectedComponents((core | weak).astype('uint8'))
-    return backing, core | (weak & np.isin(labels, np.unique(labels[core])))
+    owned = core | (weak & np.isin(labels, np.unique(labels[core])))
+    # Let the measured shadow fade into the untouched card, including its texture.
+    weight = np.clip(2 * (1 - distance / reach), 0, 1)[..., None]
+    backing = np.rint(weight * backing + (1 - weight) * tile).astype('uint8')
+    return backing, owned
 
 
 def stage_diagram(baseline, output, route):
@@ -115,8 +119,26 @@ def stage_diagram(baseline, output, route):
     if (silhouette.astype(bool)&blocked).any():
         raise ValueError('diagram silhouette includes protected content')
     mask=silhouette.astype(bool)
-    backing, mask = _diagram_backing(tile, lower[y:y+h,x:x+w], covered[y:y+h,x:x+w],
-                                    mask, blocked, radius, backing)
+    # The route tightly bounds the colored subject. Its exterior shadow and
+    # clean background samples can both lie outside that rectangle.
+    margin = 10 * radius
+    left, top = min(x, margin), min(y, margin)
+    right = min(source.shape[1]-x-w, margin)
+    bottom = min(source.shape[0]-y-h, margin)
+    pad = ((top,bottom),(left,right))
+    window = np.s_[y-top:y+h+bottom,x-left:x+w+right]
+    backing, mask = _diagram_backing(source[window],lower[window],covered[window],
+                                    np.pad(mask,pad),guard[window],radius,
+                                    np.pad(backing,(*pad,(0,0)),mode='edge'))
+    # Extra sampling space is never part of the PowerPoint object's bounds.
+    rows, cols = np.nonzero(mask)
+    x0, x1 = min(left,cols.min()), max(left+w,cols.max()+1)
+    y0, y1 = min(top,rows.min()), max(top+h,rows.max()+1)
+    mask, backing = mask[y0:y1,x0:x1], backing[y0:y1,x0:x1]
+    x, y = int(x-left+x0), int(y-top+y0)
+    h, w = mask.shape
+    box = [x,y,w,h]
+    tile = source[y:y+h,x:x+w]
     # No unrelated marks are admitted by a shared bounding rectangle.
     rgba=_extract_rgba(tile,backing,mask)
     rgba[~mask,3]=0
