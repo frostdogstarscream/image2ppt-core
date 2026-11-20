@@ -45,7 +45,7 @@ def measure(app, source, deck, out, key, case, neighbors):
         if moving:
             # Move across the slide, outside the old position and protected neighbors.
             shape.Left = p.PageSetup.SlideWidth * (.30 if key=='diagram' else .55)
-            shape.Top = p.PageSetup.SlideHeight * .05
+            shape.Top = p.PageSetup.SlideHeight * (.05 if key=='diagram' else .13)
             expected = (shape.Left,shape.Top)
         else:
             shape.TextFrame.TextRange.Text = case[4]
