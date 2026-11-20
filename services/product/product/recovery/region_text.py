@@ -261,7 +261,7 @@ def measure_group(graph, group, source, baseline, lines):
         n, _, stats, _ = cv2.connectedComponentsWithStats(cores.astype("uint8"), 8)
         if any(v[cv2.CC_STAT_WIDTH] > max(th * 2.4, tw * 0.42) for v in stats[1:]) and len(t.text) > 3:
             raise ValueError("foreground includes non-letter geometry")
-        if styles[t.style].role == "title" and group["kind"] in ("title", "field"):
+        if group["kind"] in ("title", "field") and getattr(styles[t.style], "role", None) == "title":
             mask |= _complete_title_ink(tile, field, scope, others, th)
         if (mask & (used | others)).any():
             raise ValueError("text ownership is not disjoint")
