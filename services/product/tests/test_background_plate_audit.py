@@ -3,6 +3,27 @@ from product.runtime.plate_audit import reconcile
 from product.experiment import diagram_marks
 
 
+def test_badges_with_independent_light_symbols_and_a_measured_track():
+    import numpy as np
+    from product.recovery.diagram_parts import diagram_parts
+
+    img=Image.new('RGB',(190,90),'white')
+    draw=ImageDraw.Draw(img)
+    draw.polygon([(32,41),(156,22),(150,30),(35,43)],fill='lightblue')
+    draw.line((36,49,151,49),fill='steelblue',width=2)
+    anchors=[]
+    for x in (36,151):
+        draw.ellipse((x-17,32,x+17,66),fill='white')
+        draw.ellipse((x-14,35,x+14,63),fill='royalblue')
+        draw.rectangle((x-3,45,x+3,52),fill='white')
+        anchors.append([x-17,32,34,34])
+    rgb=np.array(img)
+    rgba=np.dstack((rgb,np.where(np.any(rgb!=255,axis=2),255,0).astype('uint8')))
+    parts=diagram_parts(rgb,rgba,anchors)
+    assert [p['name'] for p in parts]==['arrow','connector','disc-1','symbol-1','disc-2','symbol-2']
+    assert not diagram_parts(rgb,rgba,[anchors[0]])
+
+
 def test_diagram_recovers_gradient_and_keeps_separate_faint_marks():
     import numpy as np
     from product.recovery.diagram_stage import _diagram_backing

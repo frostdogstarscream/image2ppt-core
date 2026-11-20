@@ -436,12 +436,43 @@ def adapt(graph,directory):
     region_crops=[c for c in chosen if c['kind']=='asset' and c.get('region_crop')]
     foreground_assets=[c for c in chosen if c['kind']=='asset' and not c.get('container_layer') and not c.get('region_crop')]
     ordered=container_assets+region_crops+foreground_assets+[c for c in chosen if c['kind'] not in ('surface','asset')]
-    for z,c in enumerate(ordered,len(surfaces)+1):
+    movement=[c['move_members'] for c in chosen if c.get('move_members')]
+    grouped_members={member for members in movement for member in members}
+    for c in ordered:
+        z=len(ir['nodes'])
         if c['kind']=='asset' and c.get('region_crop'):
             file=reference(c['asset_reference'])
             image(c['id'],c['bbox'],file,'Opaque source region crop ('+c.get('move_safety','MOVE_UNSAFE')+'); intrinsic content is not editable',z)
         elif c['kind']=='asset':
             file=reference(c['asset_reference']);meta=c['payload']
+            if meta['method']=='connected-illustration' and c['id'] not in grouped_members:
+                from .recovery.diagram_parts import diagram_parts
+                x,y,w,h=map(round,c['bbox'])
+                seeds=set(c.get('seed_ids', []))
+                anchors=[[a.bbox[0]-x,a.bbox[1]-y,*a.bbox[2:]]
+                         for a in graph.asset.objects if a.id in seeds]
+                with Image.open(directory/'source.png') as source, Image.open(file) as asset:
+                    parts=diagram_parts(np.array(source.crop((x,y,x+w,y+h)).convert('RGB')),
+                                        np.array(asset.convert('RGBA')),anchors)
+                if parts:
+                    ids=[]
+                    for part in parts:
+                        ident=c['id']+'-'+part['name']
+                        px,py,pw,ph=part['bbox']
+                        bounds=[x+px,y+py,pw,ph]
+                        if 'image' in part:
+                            path=directory/(ident+'.png')
+                            part['image'].save(path)
+                            image(ident,bounds,path,part['name'],len(ir['nodes']))
+                        else:
+                            ev='ev-'+ident
+                            ir['evidence'].append({'id':ev,'kind':'shape','bbox':bounds,'description':'Measured circular badge'})
+                            ir['nodes'].append({'id':ident,'type':'shape','geometry':'ellipse','bbox':bounds,
+                                'fill':part['fill'],'line':{'color':'FFFFFF','width_pt':part['stroke_pt']},
+                                'evidence_ids':[ev],'z':len(ir['nodes'])})
+                        ids.append(ident)
+                    ir['groups'].append({'id':c['id'],'member_ids':ids})
+                    continue
             image(c['id'],c['bbox'],file,'Complete transparent graphic candidate; '+meta['method'],z)
         elif c['kind']=='chart':
             meta=c['payload'];ev='ev-'+c['id']
@@ -477,7 +508,6 @@ def adapt(graph,directory):
                 if t.line_spacing_px:p['line_spacing_pt']=t.line_spacing_px*.75
                 node['paragraphs'].append(p)
             ir['nodes'].append(node)
-    movement=[c['move_members'] for c in chosen if c.get('move_members')]
     if movement:
         from .runtime.marked_routes import apply_move_groups
         apply_move_groups(ir,movement)
