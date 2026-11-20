@@ -1193,26 +1193,23 @@ def _chain_stage_from_spec(
     grouped_boxes = []
     if include_assets:
         from ..recovery.region_crop import stage_region_crops
-        for field in marked_routes:
+        for field in sorted(marked_routes, key=lambda item: not item.get('diagram_members')):
             if field.get('diagram_members') and field['id'] not in skip_ids and (
                 wanted_filter is None or field['id'] in wanted_filter
             ):
-                graph = SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
-                box = field['bbox']
-                if any(intersection(rec['bbox'], box) for rec in graph.selected.values()
-                       if rec.get('kind') in ('text','asset') and not rec.get('container_layer')):
-                    continue
-                seed = {'id':field['id'],'bbox':box,'kind':'asset'}
-                ir, ids, receipts = stage_region_crops(
-                    cur_base, directory/tag/('diagram-'+key(field['id'])[:12]),
-                    seeds=[seed], protected_text_ids={t.id for t in graph.text.texts}, skip_seed_ids=skip_ids)
-                if len(ids) == 1 and any(r.get('id') == ids[0] and r.get('upgraded_to_transparent_asset')
-                                        and intersection(r['bbox'],box) >= .90*box[2]*box[3] for r in receipts):
+                from ..recovery.diagram_stage import stage_diagram
+                try:
+                    ir, oid = stage_diagram(cur_base,directory/tag/('diagram-'+key(field['id'])[:12]),field)
                     cur_base = ir.parent
-                    staged_ids.extend(ids)
-                    grouped_boxes.append(box)
+                    staged_ids.append(oid)
+                    grouped_boxes.append(field['bbox'])
+                except (OSError, ValueError) as exc:
+                    stage_errors.append({'object_id':field['id'],'kind':'asset','bbox':field['bbox'],
+                                         'failure':'DIAGRAM_NOT_ISOLATED','reason':str(exc)})
                 continue
             frame = field.get('picture_frame')
+            if frame and any(intersection(frame, box) for box in grouped_boxes):
+                continue
             if not frame or field['id'] in skip_ids or (wanted_filter is not None and field['id'] not in wanted_filter):
                 continue
             seed = {'id': field['id'], 'bbox': frame, 'kind': 'asset' if field.get('intrinsic_ui') else 'layout:image',

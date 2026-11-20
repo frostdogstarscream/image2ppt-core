@@ -43,6 +43,14 @@ def plan_regions(graph, targets, inventory, source):
             and contains(e["bbox"], text.bbox)
         ]
         parent = min(parents, key=lambda e: e["bbox"][2] * e["bbox"][3], default=None)
+        # A chart detector can enclose the separate captions underneath it.
+        # A tight header observation permits a field trial, subject to all
+        # subsequent colour, neighbor ownership and actual Office checks.
+        if parent and parent["category"] == "chart" and any(
+            e["category"] == "section_header" and contains(e["bbox"], text.bbox)
+            and e["bbox"][2]*e["bbox"][3] <= 1.3*text.bbox[2]*text.bbox[3] for e in elements
+        ):
+            parent = None
         if parent:
             kind = parent["category"]
             box = clipped(parent["bbox"], graph.image_size)

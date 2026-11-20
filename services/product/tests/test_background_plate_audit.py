@@ -27,3 +27,32 @@ def test_connector_requires_visible_link_and_excludes_neighbor_text(tmp_path):
     img.save(src)
     assert len(diagram_marks(src, anchors, [])) == 1
     assert not diagram_marks(src, anchors,[{'bbox':[90,75,25,12],'ocr_line_ids':['L1']}])
+
+
+def test_connected_diagram_transfers_only_silhouette(tmp_path):
+    import numpy as np
+    from product.parallel_fusion import fuse
+    from product.parallel_rebuild import build
+    from product.recovery.diagram_stage import stage_diagram
+    from test_parallel import branches
+
+    image = Image.new('RGB',(240,120),'white')
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((24,24,49,49),fill='navy')
+    draw.ellipse((139,54,164,79),fill='navy')
+    draw.line((36,36,151,66),fill='navy',width=4)
+    draw.rectangle((48,61,64,69),fill='red')
+    path=tmp_path/'source.png'
+    image.save(path)
+    snap,evidence=branches(path)
+    graph=fuse(snap,evidence,{'lines':[]})
+    baseline=tmp_path/'baseline'
+    build(graph,snap,{'fonts':[]},baseline,strategy='off',text_candidates=False)
+    route={'id':'group','bbox':[22,22,145,61],'anchor_boxes':[[24,24,25,25],[139,54,25,25]],
+           'diagram_members':['one','two']}
+    ir,oid=stage_diagram(baseline,tmp_path/'new',route)
+    plate=np.asarray(Image.open(ir.parent/'source-plate.png').convert('RGB'))
+    assert (plate[36,36] == 255).all()
+    assert plate[64,53].tolist() == [255,0,0]
+    asset=np.asarray(Image.open(ir.parent/(oid+'.png')))
+    assert asset[64-22,53-22,3]==0

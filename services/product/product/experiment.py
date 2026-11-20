@@ -139,6 +139,10 @@ def diagram_marks(source, rows, objects):
     scale = max(1, round(np.median([min(r['bbox'][2:]) for r in anchors]) * .09))
     # Smooth local gradients disappear in the edge map; closing joins antialias gaps.
     edges = cv2.Canny(rgb, 18, 55)
+    for obj in objects:
+        if obj.get('ocr_line_ids'):
+            x,y,w,h = map(round,obj['bbox'])
+            edges[max(0,y):y+h,max(0,x):x+w] = 0
     brush = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2*scale+1, 2*scale+1))
     joined = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, brush)
     _, labels, stats, _ = cv2.connectedComponentsWithStats(joined, 8)
@@ -147,8 +151,10 @@ def diagram_marks(source, rows, objects):
         box = [int(v) for v in (x,y,w,h)]
         if w*h > width*height*.25 or count < scale*scale or w < 2*h/3:
             continue
-        if any(overlap(box, obj['bbox']) for obj in objects if obj.get('ocr_line_ids')):
-            continue
+        component = labels[y:y+h,x:x+w] == index
+        if min(component[:scale].any(0).mean(), component[-scale:].any(0).mean(),
+               component[:,:scale].any(1).mean(), component[:,-scale:].any(1).mean()) > .70:
+            continue  # A rectangular card or photograph can enclose several unrelated icons.
         if any(overlap(box, r['bbox']) >= .95*w*h for r in rows if r['label'] in ('image','table')):
             continue
         members = []

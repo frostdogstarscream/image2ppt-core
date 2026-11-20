@@ -107,6 +107,7 @@ def bind_plan(fields, inventory_path, graph, source_path):
                  )
         elif route == 'asset' and mark['label'] == 'connected_diagram':
             row['diagram_members'] = mark['member_ids']
+            row['anchor_boxes'] = [marks[i]['bbox'] for i in mark['member_ids']]
         elif route == 'asset':
             if mark['label'] == 'image':
                 row['picture_frame'] = picture_frame(source, box)
