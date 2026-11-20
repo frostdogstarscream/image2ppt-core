@@ -420,7 +420,24 @@ def adapt(graph,directory):
     from .recovery.title_bands import title_bands
     with Image.open(backing) as plate:
         cleaned,bands=title_bands(np.array(plate.convert('RGBA')),chosen,graph.text.texts)
-    if bands:
+    from .contracts import intersection
+    from .recovery.circular_badge import circular_badge
+    badges={}
+    with Image.open(directory/'source.png') as original:
+        source_rgb=np.asarray(original.convert('RGB'))
+    for record in chosen:
+        if not record.get('region_crop') or record.get('move_safety')!='MOVABLE':
+            continue
+        result=circular_badge(source_rgb,cleaned,record['bbox'])
+        if result is None:
+            continue
+        bounds,color,rgba,(left,top,mask,paper)=result
+        if any(other is not record and intersection(bounds,other['bbox']) for other in chosen):
+            continue
+        height,width=mask.shape
+        cleaned[top:top+height,left:left+width,:3][mask]=np.rint(paper)
+        badges[record['id']]=(bounds,color,rgba)
+    if bands or badges:
         backing=directory/('plate-bands-'+array_sha(cleaned)[:16]+'.png')
         Image.fromarray(cleaned).save(backing)
     image('source-plate',[0,0,*graph.image_size],backing,'Safe source backing with only committed replacement ink cleared',0)
@@ -463,6 +480,16 @@ def adapt(graph,directory):
         z=len(ir['nodes'])
         if c['kind']=='asset' and c.get('region_crop'):
             file=reference(c['asset_reference'])
+            if c['id'] in badges:
+                bounds,color,rgba=badges[c['id']]
+                ident=c['id']+'-base'
+                ir['evidence'].append({'id':'ev-'+ident,'kind':'shape','bbox':bounds})
+                ir['nodes'].append({'id':ident,'type':'shape','geometry':'ellipse','bbox':bounds,
+                                    'fill':color.upper(),'z':z,'evidence_ids':['ev-'+ident]})
+                path=directory/(c['id']+'-ink.png')
+                Image.fromarray(rgba).save(path)
+                image(c['id'],c['bbox'],path,'Transparent symbol on independent circular base',z+1)
+                continue
             image(c['id'],c['bbox'],file,'Opaque source region crop ('+c.get('move_safety','MOVE_UNSAFE')+'); intrinsic content is not editable',z)
         elif c['kind']=='asset':
             file=reference(c['asset_reference']);meta=c['payload']
@@ -528,7 +555,21 @@ def adapt(graph,directory):
                 p={'text':''.join(r['text'] for r in runs),**attrs(s),'align':t.align,'runs':runs}
                 if t.line_spacing_px:p['line_spacing_pt']=t.line_spacing_px*.75
                 node['paragraphs'].append(p)
-            ir['nodes'].append(node)
+            from .recovery.marked_fields import footer_fields
+            original_box=c.get('source_text_definition',{}).get('bbox',t.bbox)
+            parts=footer_fields(source_rgb,t.text,original_box) if not t.spans and t.id not in grouped_members else []
+            if parts:
+                ir['evidence'].pop()
+                for index,(value,bounds,color) in enumerate(parts):
+                    ident=t.id if index==0 else f'{t.id}-field-{index+1}'
+                    ir['evidence'].append({'id':'ev-'+ident,'kind':'text','bbox':bounds,'text':value})
+                    frame=[bounds[0],t.bbox[1],bounds[2]+s.size_px*.25,t.bbox[3]]
+                    run={'text':value,**attrs(s),'color':color}
+                    ir['nodes'].append({**node,'id':ident,'bbox':frame,'z':len(ir['nodes']),
+                        'text':value,'color':color,'evidence_ids':['ev-'+ident],
+                        'paragraphs':[{**run,'align':t.align,'runs':[run]}]})
+            else:
+                ir['nodes'].append(node)
     if movement:
         from .runtime.marked_routes import apply_move_groups
         apply_move_groups(ir,movement)

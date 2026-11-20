@@ -120,3 +120,37 @@ def striped_backing(source, box, protected):
         'validation_pixels': int(errors.size),
         'margin': margin,
     }
+
+def footer_fields(source, text, bbox):
+    """Resolve wide blank gutters against character advances on a one-line footer."""
+    x,y,w,h=map(round,bbox)
+    if y < .88*source.shape[0] or h<6 or w<5*h or not text or any(c.isspace() for c in text):
+        return []
+    if min(x,y)<0 or x+w>source.shape[1] or y+h>source.shape[0]:
+        return []
+    crop=source[y:y+h,x:x+w].astype(float)
+    paper=np.median(crop.reshape(-1,3),axis=0)
+    ink=np.abs(crop-paper).max(2)>50
+    columns=np.flatnonzero(ink.any(0))
+    groups=np.split(columns,np.flatnonzero(np.diff(columns)>.65*h)+1)
+    if not 2<=len(groups)<=4 or any(len(cols)<2 for cols in groups):
+        return []
+    widths=np.array([cols[-1]-cols[0]+1 for cols in groups])
+    advances=np.cumsum([1 if unicodedata.east_asian_width(c) in ('W','F') else .55 for c in text])
+    pitch=widths.sum()/advances[-1]
+    boundaries=[]
+    for distance in widths.cumsum()[:-1]:
+        error=abs(advances*pitch-distance)
+        index=int(error.argmin())
+        if error[index]>.23*pitch or index+1 in boundaries:
+            return []
+        boundaries.append(index+1)
+    fields=[]
+    for cols,start,end in zip(groups,[0,*boundaries],[*boundaries,len(text)]):
+        if end<=start:return []
+        lo,hi=int(cols[0]),int(cols[-1])+1
+        colors=crop[:,lo:hi][ink[:,lo:hi]]
+        contrast=np.abs(colors-paper).max(1)
+        color=np.median(colors[contrast>=np.percentile(contrast,70)],axis=0)
+        fields.append((text[start:end],[x+lo,y,hi-lo,h],bytes(np.rint(color).astype('uint8')).hex().upper()))
+    return fields
