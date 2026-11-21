@@ -1146,6 +1146,7 @@ def _chain_stage_from_spec(
     experiment_profile: str | None = None,
     marked_routes: tuple | list = (),
     prepared_tables=None,
+    single_object_only=False,
 ) -> tuple[Path, list[str], list[dict]]:
     from .. import layout_evidence, matting
     from ..object_stage import infer_sam
@@ -1255,7 +1256,7 @@ def _chain_stage_from_spec(
             seed = {'id': field['id'], 'bbox': frame, 'kind': 'asset' if field.get('intrinsic_ui') else 'layout:image',
                     'picture_frame': frame if field.get('intrinsic_ui') else None}
             pic_ir, pic_ids, evidence = stage_region_crops(
-                cur_base, directory/tag/('picture-'+key(field['id'])[:12]), seeds=[seed], single_object_only=True, skip_seed_ids=skip_ids)
+                cur_base, directory/tag/('picture-'+key(field['id'])[:12]), seeds=[seed], single_object_only=single_object_only, skip_seed_ids=skip_ids)
             if pic_ids:
                 cur_base = pic_ir.parent
                 staged_ids.extend(pic_ids)
@@ -1436,7 +1437,7 @@ def _chain_stage_from_spec(
             graph=SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
             if route['id'] not in graph.selected:
                 ir,ids,_ = stage_region_crops(cur_base,directory/tag/('marked-asset-'+key(route['id'])[:12]),
-                    seeds=[{'id':route['id'],'bbox':route['bbox'],'kind':'asset'}],single_object_only=True,skip_seed_ids=skip_ids)
+                    seeds=[{'id':route['id'],'bbox':route['bbox'],'kind':'asset'}],single_object_only=single_object_only,skip_seed_ids=skip_ids)
                 if ids:
                     cur_base=ir.parent
                     staged_ids.extend(ids)
@@ -1506,8 +1507,8 @@ def _chain_stage_from_spec(
             try:
                 crop_ir, crop_ids, _ = stage_region_crops(
                     cur_base, crop_dir,
-                    seeds=crop_seeds, single_object_only=True,
-                    allow_move_unsafe=False,
+                    seeds=crop_seeds, single_object_only=single_object_only,
+                    allow_move_unsafe=allow_move_unsafe and not single_object_only,
                     protected_text_ids=protected_text_ids,
                     skip_seed_ids=skip_ids,
                 )
@@ -1619,6 +1620,7 @@ def restage_batch_candidate_subset(
         page_cache_dir=Path(spec['cache_dir']),
         directory=directory,
         tag='stage-pass2',
+        single_object_only=spec.get('single_object_only', False),
         experiment_profile=spec.get('experiment_profile'),
         marked_routes=spec.get('marked_routes', ()),
         trials_spec=spec['trials'],
@@ -1894,6 +1896,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         directory=directory,
         tag='stage-pass1',
         prepared_tables=prepared_tables,
+        single_object_only=request.get('object_scoped_delivery', False),
         experiment_profile=request.get('experiment_profile'),
         marked_routes=routes,
         trials_spec=trials_spec,
@@ -1938,6 +1941,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         'files': {str(p): digest(p) for p in final_base.rglob('*') if p.is_file()},
         'batch_spec': {
             'initial_baseline': str(initial_baseline),
+            'single_object_only': request.get('object_scoped_delivery', False),
             'experiment_profile':request.get('experiment_profile'),
             'marked_routes':routes,
             'cache_dir': str(directory),

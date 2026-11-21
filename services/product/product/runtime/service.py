@@ -321,9 +321,12 @@ class RuntimeService(ExplorationTools):
             _, base_protected = collect_crop_seeds(graph, unrecoverable_text_ids=unrec_set, logo_ids=logo_ids)
             protected_text_ids = base_protected - wanted
 
+        scoped = json.loads((state.job/'request.json').read_text('utf8')).get('object_scoped_delivery', False)
+        if scoped and bbox is not None:
+            raise ValueError('object fallback requires a source object ID')
         crop_ir, staged_ids, report = stage_region_crops(
             Path(row['ir']).parent, directory / 'staged',
-            seeds=seeds, allow_movable=allow_movable, allow_move_unsafe=False, single_object_only=True,
+            seeds=seeds, allow_movable=allow_movable, allow_move_unsafe=allow_move_unsafe and not scoped, single_object_only=scoped,
             protected_text_ids=protected_text_ids,
         )
         full_report = [*layout_report, *report]
