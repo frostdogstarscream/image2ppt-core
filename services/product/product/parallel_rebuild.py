@@ -429,7 +429,8 @@ def adapt(graph,directory):
     with Image.open(directory/'source.png') as original:
         source_rgb=np.asarray(original.convert('RGB'))
     for record in chosen:
-        if not record.get('region_crop') or record.get('move_safety')!='MOVABLE':
+        crop_candidate=record.get('region_crop') or record.get('payload',{}).get('upgraded_from_region_crop')
+        if not crop_candidate or record.get('move_safety')!='MOVABLE':
             continue
         result=circular_badge(source_rgb,cleaned,record['bbox'])
         if result is None:
@@ -497,7 +498,7 @@ def adapt(graph,directory):
     grouped_members={member for members in movement for member in members}
     for c in ordered:
         z=len(ir['nodes'])
-        if c['kind']=='asset' and c.get('region_crop'):
+        if c['kind']=='asset' and (c.get('region_crop') or c['id'] in badges):
             file=reference(c['asset_reference'])
             if c['id'] in badges:
                 bounds,color,rgba=badges[c['id']]

@@ -39,6 +39,27 @@ def inspect_residuals(irfile,office_dir,page,output):
         if not file.is_relative_to(irfile.parent.resolve()) or digest(file)!=ref['sha256']:raise ValueError('source owner evidence binding mismatch')
         with np.load(file,allow_pickle=False) as data:
             proofs[record['id']]={k:data[k] for k in data.files}
+    # Each independently deleted footer field owns only its part of the OCR line.
+    # The source-derived gutters partition every original mask pixel exactly once.
+    from .recovery.marked_fields import footer_fields
+    for record in list(records):
+        parent=record['id']
+        if parent+'-field-2' not in node_bbox or parent not in proofs:
+            continue
+        original=record.get('source_text_definition',{})
+        parts=footer_fields(source,original.get('text',''),original.get('bbox',record['bbox']))
+        if not parts:
+            continue
+        proof=proofs[parent]
+        cuts=[(a[1][0]+a[1][2]+b[1][0])//2 for a,b in zip(parts,parts[1:])]
+        for index,(left,right) in enumerate(zip([0,*cuts],[*cuts,source.shape[1]])):
+            field_id=parent if index==0 else f'{parent}-field-{index+1}'
+            mask=proof['mask'].copy()
+            mask[:,:left]=False
+            mask[:,right:]=False
+            proofs[field_id]={**proof,'mask':mask}
+            if index:
+                records.append({**record,'id':field_id,'bbox':node_bbox[field_id]})
     for record in records:
         identifier=record['id'];deleted=Path(office_dir)/f'{page:02d}-{identifier}-delete.png'
         base={'id':identifier,'residual_check_status':'UNKNOWN','residual_pixels_confirmed':None,'reference_sha256':record.get('owner_evidence',{}).get('sha256')}
