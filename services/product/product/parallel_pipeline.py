@@ -19,7 +19,32 @@ ROOT=Path(__file__).resolve().parents[3]
 
 def effective_texts(graph,irfile):
     ir=json.loads(Path(irfile).read_text(encoding='utf-8'));ids={n['id'] for n in ir['nodes'] if n['type']=='text'}
-    return SimpleNamespace(texts=[t for t in graph.text.texts if t.id in ids],styles=graph.text.styles)
+    texts=[]
+    styles=list(graph.text.styles)
+    source=None
+    for text in graph.text.texts:
+        if text.id not in ids:
+            continue
+        if text.id+'-field-2' not in ids:
+            texts.append(text)
+            continue
+        from PIL import Image
+        import numpy as np
+        from .recovery.marked_fields import footer_fields
+        if source is None:
+            with Image.open(Path(irfile).parent/'source.png') as original:
+                source=np.asarray(original.convert('RGB'))
+        box=graph.selected[text.id].get('source_text_definition',{}).get('bbox',text.bbox)
+        parts=footer_fields(source,text.text,box)
+        if ''.join(part[0] for part in parts)!=text.text:
+            raise ValueError('split fields differ from source text')
+        base=next(s for s in graph.text.styles if s.id==text.style)
+        for index,(value,_,color) in enumerate(parts):
+            field_id=text.id if index==0 else f'{text.id}-field-{index+1}'
+            style=base.model_copy(update={'id':field_id+'-verification','color':color})
+            styles.append(style)
+            texts.append(text.model_copy(update={'id':field_id,'style':style.id,'text':value,'spans':[]}))
+    return SimpleNamespace(texts=texts,styles=styles)
 
 
 def safe_graph(graph):
