@@ -243,3 +243,13 @@ def test_raster_only_upload_has_only_diagnostics_even_after_restart(job):
     assert all(not name.endswith('.pptx') for name in result['artifacts'])
     assert not (job/'delivery/result.pptx').exists()
     assert host.selected_result(job) == result
+
+def test_unmatched_symbol_inside_independent_icon_retains_review_evidence():
+    from product.runtime.plate_audit import reconcile
+    detection = {'text':'%','bbox':[10,10,80,80]}
+    icon = {'id':'icon-7','label':'icon','bbox':[5,5,100,100]}
+    assert reconcile([], [detection], [], [icon], {})[0]['status'] == 'unconfirmed_icon_reading'
+    assert reconcile([], [detection], [], [], {})[0]['status'] == 'plate_only'
+    assert reconcile([], [{**detection,'text':'8'}], [], [icon], {})[0]['status'] == 'plate_only'
+    line = {**detection,'id':'source-1'}
+    assert reconcile([line], [detection], [], [icon], {})[0]['status'] == 'retained'

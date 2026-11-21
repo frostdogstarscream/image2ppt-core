@@ -63,7 +63,16 @@ def reconcile(lines, detected, fields, marks, readings):
                      'mark_ids':owners,'plate_reading':detected[recognized]['text'] if recognized is not None else None})
     for index, item in enumerate(detected):
         if index not in seen:
-            rows.append({'ocr_id':None,'bbox':item['bbox'],'text':item['text'],'status':'plate_only','mark_ids':[]})
+            box = item['bbox']
+            reading = item['text'].strip()
+            icons = [m['id'] for m in marks if m.get('label') == 'icon'
+                     and _overlap(m['bbox'], box) >= .85 * box[2] * box[3]
+                     and _overlap(m['bbox'], box) >= .5 * m['bbox'][2] * m['bbox'][3]]
+            source_text = any(_overlap(box, line['bbox']) > 0 for line in lines)
+            ambiguous_icon = (len(reading) == 1 and not reading.isalnum() and bool(icons) and not source_text)
+            rows.append({'ocr_id':None,'bbox':box,'text':reading,
+                         'status':'unconfirmed_icon_reading' if ambiguous_icon else 'plate_only',
+                         'mark_ids':icons if ambiguous_icon else []})
     return rows
 
 
