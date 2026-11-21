@@ -11,8 +11,93 @@ import math
 import cv2
 import numpy as np
 
-from ..contracts import Gradient, GradientStop, Shadow
+from ..contracts import CustomCommand, CustomPath, Gradient, GradientStop, Shadow
 from ..tolerance_config import load_tolerance_config
+
+
+def _build_homeplate_custom_path(
+    width: float,
+    height: float,
+    shoulder_x: float,
+    r_tl: float = 0.0,
+    r_bl: float = 0.0,
+) -> list[CustomPath]:
+    """Build exact right-pointing homePlate polygon (OOXML `pentagon` is an upward house)."""
+    w = max(2.0, float(width))
+    h = max(2.0, float(height))
+    sx = max(0.0, min(w, float(shoulder_x)))
+    r_tl = max(0.0, min(0.45 * h, 0.45 * sx, float(r_tl)))
+    r_bl = max(0.0, min(0.45 * h, 0.45 * sx, float(r_bl)))
+    k = 0.55228475
+    cmds: list[CustomCommand] = [
+        CustomCommand(type='moveTo', x=round(r_tl, 2) if r_tl >= 2.0 else 0.0, y=0.0),
+        CustomCommand(type='lineTo', x=round(sx, 2), y=0.0),
+        CustomCommand(type='lineTo', x=round(w, 2), y=round(h * 0.5, 2)),
+        CustomCommand(type='lineTo', x=round(sx, 2), y=round(h, 2)),
+    ]
+    if r_bl >= 2.0:
+        cmds.append(CustomCommand(type='lineTo', x=round(r_bl, 2), y=round(h, 2)))
+        cmds.append(CustomCommand(
+            type='cubicBezierTo',
+            x1=round(r_bl * (1.0 - k), 2), y1=round(h, 2),
+            x2=0.0, y2=round(h - r_bl * (1.0 - k), 2),
+            x=0.0, y=round(h - r_bl, 2),
+        ))
+    else:
+        cmds.append(CustomCommand(type='lineTo', x=0.0, y=round(h, 2)))
+    if r_tl >= 2.0:
+        cmds.append(CustomCommand(type='lineTo', x=0.0, y=round(r_tl, 2)))
+        cmds.append(CustomCommand(
+            type='cubicBezierTo',
+            x1=0.0, y1=round(r_tl * (1.0 - k), 2),
+            x2=round(r_tl * (1.0 - k), 2), y2=0.0,
+            x=round(r_tl, 2), y=0.0,
+        ))
+    else:
+        cmds.append(CustomCommand(type='lineTo', x=0.0, y=0.0))
+    cmds.append(CustomCommand(type='close'))
+    return [CustomPath(width=round(w, 2), height=round(h, 2), commands=cmds)]
+
+
+def _build_left_cap_custom_path(
+    width: float,
+    height: float,
+    r_tl: float = 0.0,
+    r_bl: float = 0.0,
+) -> list[CustomPath]:
+    """Build rectangle with optional rounded top-left / bottom-left corners and flat right join."""
+    w = max(2.0, float(width))
+    h = max(2.0, float(height))
+    r_tl = max(0.0, min(0.45 * h, 0.45 * w, float(r_tl)))
+    r_bl = max(0.0, min(0.45 * h, 0.45 * w, float(r_bl)))
+    k = 0.55228475
+    cmds: list[CustomCommand] = [
+        CustomCommand(type='moveTo', x=round(r_tl, 2) if r_tl >= 2.0 else 0.0, y=0.0),
+        CustomCommand(type='lineTo', x=round(w, 2), y=0.0),
+        CustomCommand(type='lineTo', x=round(w, 2), y=round(h, 2)),
+    ]
+    if r_bl >= 2.0:
+        cmds.append(CustomCommand(type='lineTo', x=round(r_bl, 2), y=round(h, 2)))
+        cmds.append(CustomCommand(
+            type='cubicBezierTo',
+            x1=round(r_bl * (1.0 - k), 2), y1=round(h, 2),
+            x2=0.0, y2=round(h - r_bl * (1.0 - k), 2),
+            x=0.0, y=round(h - r_bl, 2),
+        ))
+    else:
+        cmds.append(CustomCommand(type='lineTo', x=0.0, y=round(h, 2)))
+    if r_tl >= 2.0:
+        cmds.append(CustomCommand(type='lineTo', x=0.0, y=round(r_tl, 2)))
+        cmds.append(CustomCommand(
+            type='cubicBezierTo',
+            x1=0.0, y1=round(r_tl * (1.0 - k), 2),
+            x2=round(r_tl * (1.0 - k), 2), y2=0.0,
+            x=round(r_tl, 2), y=0.0,
+        ))
+    else:
+        cmds.append(CustomCommand(type='lineTo', x=0.0, y=0.0))
+    cmds.append(CustomCommand(type='close'))
+    return [CustomPath(width=round(w, 2), height=round(h, 2), commands=cmds)]
 
 
 def hex_rgb(rgb: np.ndarray) -> str:
@@ -86,8 +171,14 @@ def estimate_canvas_field(
 
     for gy in range(gh):
         y0, y1 = gy * cell, min(h, (gy + 1) * cell)
+        ym = 0.5 * (y0 + y1)
         for gx in range(gw):
             x0, x1 = gx * cell, min(w, (gx + 1) * cell)
+            xm = 0.5 * (x0 + x1)
+            # Only anchor gradient canvas on slide perimeter margins so white interior cards never pollute sky field.
+            in_perimeter_margin = (ym <= 0.14 * h) or (xm <= max(44.0, 0.04 * w)) or (xm >= w - max(44.0, 0.04 * w))
+            if not in_perimeter_margin:
+                continue
             sm = smooth_px[y0:y1, x0:x1]
             if int(sm.sum()) < max(24, int(0.20 * (y1 - y0) * (x1 - x0))):
                 continue
@@ -114,9 +205,10 @@ def estimate_canvas_field(
 
     # Scenery guard: protect bottom/edge decorative artwork (e.g. cityscape footer)
     scenery_guard = np.zeros((h, w), dtype=bool)
-    footer_y = int(0.83 * h)
+    footer_y = int(0.895 * h)
     footer_diff = np.abs(plate[footer_y:, :].astype(np.float32) - field[footer_y:, :]).max(2)
-    footer_tex = (footer_diff > 13.0) | (std5[footer_y:, :] > 5.5)
+    smooth_card_px = (std5[footer_y:, :] <= 2.8) & (footer_diff <= 14.0)
+    footer_tex = ((footer_diff > 15.0) | (std5[footer_y:, :] > 5.5)) & (~smooth_card_px)
     if float(footer_tex[-6:, :].mean()) >= 0.25:
         n_c, lbl_c, stats_c, _ = cv2.connectedComponentsWithStats(
             cv2.dilate(footer_tex.astype('uint8'), np.ones((5, 5), np.uint8)), 8
@@ -129,13 +221,13 @@ def estimate_canvas_field(
             if cy + ch >= f_h - 4 and cw >= int(0.25 * w):
                 scenery_guard[footer_y:, :][lbl_c == cid] = True
         if scenery_guard.any():
-            scenery_guard = cv2.dilate(scenery_guard.astype('uint8'), np.ones((7, 7), np.uint8)) > 0
+            scenery_guard = cv2.dilate(scenery_guard.astype('uint8'), np.ones((3, 3), np.uint8)) > 0
 
     return field, hex_rgb(ref_rgb), scenery_guard, False
 
 
 def _split_two_tone_ribbon(plate: np.ndarray, box: list[int]) -> list[tuple[str, list[int]]]:
-    """Split a two-tone horizontal header ribbon (e.g. `[01 | 应用成效]` pentagon) at its vertical color step."""
+    """Keep clean two-tone pentagon/chevron ribbons intact for atomic pair fitting; split flat two-part bars."""
     x, y, w, h = box
     if w < 110 or h < 22 or h > 96 or w < 1.8 * h:
         return [('box', box)]
@@ -163,9 +255,160 @@ def _split_two_tone_ribbon(plate: np.ndarray, box: list[int]) -> list[tuple[str,
     d_right = np.abs(band[:, split_local + 1:min(w, split_local + 5), :] - right_med).max(axis=2)
     if float(np.percentile(d_left, 80)) > 16.0 or float(np.percentile(d_right, 80)) > 16.0:
         return [('box', box)]
+    # Verify each half is internally uniform (do not split textured/erased boxes)
+    l_half = band[:, max(4, split_local // 4):max(5, split_local - 3), :]
+    r_half = band[:, min(w - 5, split_local + 3):max(split_local + 6, w - max(18, h // 2)), :]
+    if l_half.size and float(np.percentile(np.abs(l_half - left_med).max(axis=2), 85)) > 12.0:
+        return [('box', box)]
+    if r_half.size and float(np.percentile(np.abs(r_half - right_med).max(axis=2), 85)) > 12.0:
+        return [('box', box)]
+    # Keep pentagon/chevron ribbons intact so `try_fit_two_tone_ribbon_pair` emits both layers atomically
+    par_ref = np.median(crop[:, -2:, :].reshape(-1, 3), axis=0)
+    if _detect_preset_geometry(crop, np.broadcast_to(par_ref, crop.shape), np.zeros((h, w), dtype=bool)) is not None:
+        return [('box', box)]
     return [
         ('box', [x, y, split_local, h]),
         ('box', [x + split_local, y, w - split_local, h]),
+    ]
+
+
+def try_fit_two_tone_ribbon_pair(
+    work_plate: np.ndarray,
+    box: list[int],
+    parent_patch: np.ndarray,
+    direct_children_mask_local: np.ndarray,
+) -> list[dict] | None:
+    """Fit a two-tone right-pointing ribbon into disjoint side-by-side shapes `(left_cap, right_body)`."""
+    x, y, w, h = box
+    if w < 110 or h < 22 or h > 96 or w < 1.8 * h:
+        return None
+    crop = work_plate[y:y + h, x:x + w].astype(np.float64)
+    parent_f = parent_patch.astype(np.float64) if parent_patch.ndim == 3 else np.broadcast_to(
+        np.asarray(parent_patch, dtype=np.float64), (h, w, 3)
+    )
+    preset = _detect_preset_geometry(crop, parent_f, direct_children_mask_local)
+    if preset is None:
+        return None
+    geometry, _, ext_mask, _, shoulder_x = preset
+    if geometry not in ('custom', 'pentagon', 'chevron') or shoulder_x is None:
+        return None
+    iy0, iy1 = max(2, h // 6), min(h - 2, h - h // 6)
+    if iy1 - iy0 < 8:
+        return None
+    band = crop[iy0:iy1, :, :]
+    col_med = np.median(band, axis=0)
+    step = np.abs(col_med[2:] - col_med[:-2]).max(axis=1)
+    margin_x = max(22, int(0.16 * w))
+    if w - 2 * margin_x < 16:
+        return None
+    search = step[margin_x - 1:w - margin_x - 1]
+    if len(search) == 0 or float(search.max()) < 22.0:
+        return None
+    split_local = int(search.argmax()) + margin_x
+    if split_local < 20 or w - split_local < 40 or float(split_local) >= float(shoulder_x) - 6.0:
+        return None
+
+    in_mask = (~ext_mask) & (~direct_children_mask_local)
+    perim = np.zeros((h, w), dtype=bool)
+    perim[:2, :] = perim[-2:, :] = perim[:, :2] = perim[:, -2:] = True
+    cr = min(8, max(4, h // 6))
+    perim[:cr, :cr] = perim[-cr:, :cr] = True
+    tip_cut = max(split_local + 12, w - h // 2)
+    l_interior = in_mask & (~perim)
+    l_interior[:, max(1, split_local - 3):] = False
+    r_interior = in_mask & (~perim)
+    r_interior[:, :min(w - 1, split_local + 3)] = False
+    r_interior[:, min(w - 1, tip_cut):] = False
+    if int(l_interior.sum()) < 24 or int(r_interior.sum()) < 24:
+        return None
+
+    l_rgb = np.rint(np.median(crop[l_interior], axis=0)).astype(int)
+    r_rgb = np.rint(np.median(crop[r_interior], axis=0)).astype(int)
+    if float(np.abs(l_rgb - r_rgb).max()) < 22.0:
+        return None
+    par_med = np.median(parent_f.reshape(-1, 3), axis=0)
+    if float(np.abs(l_rgb - par_med).max()) < 18.0 or float(np.abs(r_rgb - par_med).max()) < 18.0:
+        return None
+
+    crop_l = crop[:, :split_local]
+    l_int_sub = l_interior[:, :split_local]
+    l_p95 = float(np.percentile(np.abs(crop_l[l_int_sub] - l_rgb.astype(float)).max(1), 95))
+    l_grad = None
+    l_pred_cap = np.broadcast_to(l_rgb.astype(float), (h, split_local, 3)).copy()
+    if l_p95 > 16.0:
+        g_res = _fit_linear_gradient(crop_l, l_int_sub, 18.0)
+        if g_res is None:
+            return None
+        l_pred_cap, l_p95, l_grad = g_res
+        l_rgb = np.clip(np.rint(np.median(l_pred_cap[l_int_sub], axis=0)).astype(int), 0, 255)
+
+    crop_r = crop[:, split_local:]
+    r_int_sub = r_interior[:, split_local:]
+    r_p95 = float(np.percentile(np.abs(crop_r[r_int_sub] - r_rgb.astype(float)).max(1), 95))
+    r_grad = None
+    r_pred_body = np.broadcast_to(r_rgb.astype(float), (h, w - split_local, 3)).copy()
+    if r_p95 > 16.0:
+        g_res = _fit_linear_gradient(crop_r, r_int_sub, 18.0)
+        if g_res is None:
+            return None
+        r_pred_body, r_p95, r_grad = g_res
+        r_rgb = np.clip(np.rint(np.median(r_pred_body[r_int_sub], axis=0)).astype(int), 0, 255)
+
+    comb_pred = np.concatenate([l_pred_cap, r_pred_body], axis=1)
+    alt_pred = np.concatenate([
+        np.broadcast_to(r_rgb.astype(float), (h, split_local, 3)),
+        np.broadcast_to(l_rgb.astype(float), (h, w - split_local, 3)),
+    ], axis=1)
+    par_seg = _segment_max_err(crop, parent_f, comb_pred)
+    seam_seg = _segment_max_err(crop, comb_pred, alt_pred)
+    inside_all = (~ext_mask) & (~direct_children_mask_local)
+    unexp = (
+        inside_all
+        & (~perim)
+        & (np.abs(crop - comb_pred).max(2) > 16.0)
+        & (np.minimum(par_seg, seam_seg) > 18.0)
+    )
+    if float(unexp.mean()) > 0.045:
+        return None
+
+    cs_l = min(14, max(4, h // 4), max(4, split_local // 2))
+    tl_bg = int(ext_mask[:cs_l, :cs_l].sum())
+    bl_bg = int(ext_mask[h - cs_l:, :cs_l].sum())
+    r_tl = min(16.0, 0.45 * h, 0.45 * split_local, float(round(math.sqrt(tl_bg / 0.2146)))) if tl_bg >= 4 else 0.0
+    r_bl = min(16.0, 0.45 * h, 0.45 * split_local, float(round(math.sqrt(bl_bg / 0.2146)))) if bl_bg >= 4 else 0.0
+    cap_geom = 'custom' if (r_tl >= 3.0 or r_bl >= 3.0) else 'rect'
+    cap_paths = _build_left_cap_custom_path(float(split_local), float(h), r_tl, r_bl) if cap_geom == 'custom' else None
+    body_paths = _build_homeplate_custom_path(float(w - split_local), float(h), float(shoulder_x) - float(split_local), 0.0, 0.0)
+
+    erase_mask = (~ext_mask) | direct_children_mask_local
+    return [
+        {
+            'geometry': cap_geom,
+            'custom_paths': cap_paths,
+            'fill': hex_rgb(l_rgb),
+            'fill_rgb': l_rgb,
+            'fill_gradient': l_grad,
+            'pred_fill': l_pred_cap,
+            'line_color': hex_rgb(l_rgb),
+            'line_width_pt': 0.0,
+            'corner_radius_px': None,
+            'bbox_offset_local': [0.0, 0.0, float(split_local), float(h)],
+            'erase_mask_local': erase_mask[:, :split_local],
+            'full_erase_mask_local': erase_mask,
+        },
+        {
+            'geometry': 'custom',
+            'custom_paths': body_paths,
+            'fill': hex_rgb(r_rgb),
+            'fill_rgb': r_rgb,
+            'fill_gradient': r_grad,
+            'pred_fill': r_pred_body,
+            'line_color': hex_rgb(r_rgb),
+            'line_width_pt': 0.0,
+            'corner_radius_px': None,
+            'bbox_offset_local': [float(split_local), 0.0, float(w - split_local), float(h)],
+            'erase_mask_local': erase_mask[:, split_local:],
+        },
     ]
 
 
@@ -236,11 +479,11 @@ def discover_bordered_cards(
     gx = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)) / 4.0
     gy = np.abs(cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)) / 4.0
 
-    h_edge = ((gy > 2.2) & (gx < 2.2) & (~scenery_guard)).astype('uint8')
-    v_edge = ((gx > 2.2) & (gy < 2.2) & (~scenery_guard)).astype('uint8')
+    h_edge = ((gy > 1.35) & (gx < 1.8) & (~scenery_guard)).astype('uint8')
+    v_edge = ((gx > 1.35) & (gy < 1.8) & (~scenery_guard)).astype('uint8')
 
-    h_long = cv2.morphologyEx(h_edge, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (64, 1)))
-    v_long = cv2.morphologyEx(v_edge, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 48)))
+    h_long = cv2.morphologyEx(h_edge, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (52, 1)))
+    v_long = cv2.morphologyEx(v_edge, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 38)))
 
     # Bridge rounded corners (up to 18px radius) so closed card perimeters form sealed loops!
     wall = cv2.dilate(h_long | v_long, np.ones((3, 3), np.uint8))
@@ -260,11 +503,11 @@ def discover_bordered_cards(
         rect_area = float(bw * bh)
         if rect_area > 0.68 * page_area or area < 0.72 * rect_area:
             continue
-        # Expand slightly to include the border stroke around the enclosed chamber
-        rx = max(0, bx - 3)
-        ry = max(0, by - 3)
-        rw = min(w - rx, bw + 6)
-        rh = min(h - ry, bh + 6)
+        # Expand minimally (2px) to include outer border stroke without overlapping flush ribbons
+        rx = max(0, bx - 2)
+        ry = max(0, by - 2)
+        rw = min(w - rx, bw + 4)
+        rh = min(h - ry, bh + 4)
         results.append(('box', [rx, ry, rw, rh]))
     return results
 
@@ -285,9 +528,13 @@ def _corner_ext_mask(
     *,
     dilate_barrier: bool,
     thresh: float = 6.5,
+    child_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, list[int]]:
     h, w = crop.shape[:2]
-    barrier = (np.abs(crop - parent_patch).max(2) > thresh).astype('uint8')
+    barrier_b = np.abs(crop - parent_patch).max(2) > thresh
+    if child_mask is not None:
+        barrier_b |= child_mask
+    barrier = barrier_b.astype('uint8')
     if dilate_barrier:
         barrier = cv2.dilate(barrier, np.ones((2, 2), np.uint8))
     ext_mask = np.zeros((h, w), dtype=bool)
@@ -315,8 +562,8 @@ def _detect_preset_geometry(
     crop: np.ndarray,
     parent_patch: np.ndarray,
     direct_children_mask_local: np.ndarray,
-) -> tuple[str, float | None, np.ndarray] | None:
-    """Detect `ellipse`, `pentagon`, `chevron`, `roundRect`, or `rect` with analytical exterior mask."""
+) -> tuple[str, float | None, np.ndarray, list[CustomPath] | None, float | None] | None:
+    """Detect `ellipse`, `chevron`, or right-pointing `homePlate` (`custom` polygon) with exterior mask."""
     h, w = crop.shape[:2]
     fg = (np.abs(crop - parent_patch).max(2) > 6.5) | direct_children_mask_local
 
@@ -339,9 +586,9 @@ def _detect_preset_geometry(
             int((~ell_closed[h - cs_e:, w - cs_e:]).sum()),
         ]
         if iou >= 0.87 and min(corners_bg) >= max(6, int(0.18 * cs_e * cs_e)):
-            return 'ellipse', None, ~ell_in
+            return 'ellipse', None, ~ell_in, None, None
 
-    # 2. Check right-pointing `pentagon` / `chevron` ribbons (e.g. `01 应用成效`, `平台架构`)
+    # 2. Check right-pointing `homePlate` / `chevron` ribbons (e.g. `01 应用成效`, `平台架构`)
     if w >= 52 and 20 <= h <= 110 and w >= 1.2 * h:
         tip_w = min(h // 2 + 6, w // 2)
         if tip_w >= 10:
@@ -351,21 +598,21 @@ def _detect_preset_geometry(
             mid_fg = bool(fg_closed[h // 2, max(0, w - 5):w].any())
             tri_area = 0.5 * (h / 2.0) * tip_w
             if (mid_fg
-                    and tr_bg >= max(14, int(0.22 * tri_area))
-                    and br_bg >= max(14, int(0.22 * tri_area))
-                    and abs(tr_bg - br_bg) <= max(18, int(0.45 * max(tr_bg, br_bg)))):
+                    and tr_bg >= max(14, int(0.08 * tri_area))
+                    and br_bg >= max(14, int(0.08 * tri_area))
+                    and abs(tr_bg - br_bg) <= max(24, int(0.58 * max(tr_bg, br_bg)))):
                 # Estimate tip start x where top/bottom rows drop into background
                 top_fg = np.where(fg_closed[min(2, h - 1), :])[0]
                 bot_fg = np.where(fg_closed[max(0, h - 3), :])[0]
                 if len(top_fg) > 0 and len(bot_fg) > 0:
                     shoulder_x = int(round(0.5 * (top_fg.max() + bot_fg.max())))
-                    if w - shoulder_x >= 7:
+                    if w - shoulder_x >= 5:
                         yy, xx = np.mgrid[:h, :w]
                         half_h = max(1.0, (h - 1) / 2.0)
                         dy = np.abs(yy - half_h) / half_h  # 0 at center, 1 at top/bottom
                         max_x = shoulder_x + (1.0 - dy) * (w - 1 - shoulder_x)
                         pent_in = xx <= (max_x + 0.5)
-                        # Check left notch for chevron vs flat left edge for pentagon
+                        # Check left notch for chevron vs flat left edge for right-pointing homePlate
                         left_notch_bg = int((~fg_closed[h // 4:h - h // 4, :min(tip_w, w // 4)]).sum())
                         left_corners_fg = bool(fg_closed[2, :4].any() and fg_closed[h - 3, :4].any())
                         if left_corners_fg and left_notch_bg >= max(16, int(0.25 * tri_area)):
@@ -374,10 +621,22 @@ def _detect_preset_geometry(
                             chev_in = pent_in & (xx >= min_x - 0.5)
                             iou_c = int((chev_in & fg_closed).sum()) / float(max(1, int((chev_in | fg_closed).sum())))
                             if iou_c >= 0.84:
-                                return 'chevron', None, ~chev_in
+                                return 'chevron', None, ~chev_in, None, float(shoulder_x)
+                        cs_l = min(14, max(4, h // 4), max(4, shoulder_x // 3))
+                        tl_bg = int((~fg_closed[:cs_l, :cs_l]).sum())
+                        bl_bg = int((~fg_closed[h - cs_l:, :cs_l]).sum())
+                        r_tl = min(16.0, 0.45 * h, 0.45 * shoulder_x, float(round(math.sqrt(tl_bg / 0.2146)))) if tl_bg >= 4 else 0.0
+                        r_bl = min(16.0, 0.45 * h, 0.45 * shoulder_x, float(round(math.sqrt(bl_bg / 0.2146)))) if bl_bg >= 4 else 0.0
+                        if r_tl >= 3.0:
+                            pent_in &= ~((yy < r_tl) & (xx < r_tl) & (((xx - r_tl) ** 2 + (yy - r_tl) ** 2) > (r_tl + 0.5) ** 2))
+                        if r_bl >= 3.0:
+                            pent_in &= ~((yy > h - 1 - r_bl) & (xx < r_bl) & (((xx - r_bl) ** 2 + (yy - (h - 1 - r_bl)) ** 2) > (r_bl + 0.5) ** 2))
                         iou_p = int((pent_in & fg_closed).sum()) / float(max(1, int((pent_in | fg_closed).sum())))
                         if iou_p >= 0.85:
-                            return 'pentagon', None, ~pent_in
+                            custom_paths = _build_homeplate_custom_path(
+                                float(w), float(h), float(shoulder_x), r_tl, r_bl
+                            )
+                            return 'custom', None, ~pent_in, custom_paths, float(shoulder_x)
 
     return None
 
@@ -589,12 +848,13 @@ def try_fit_native_shape_v2(
     if w < 24 or h < 18:
         return None
 
-    # 1. Check preset geometry (`ellipse`, `pentagon`, `chevron`) vs `rect`/`roundRect`
+    # 1. Check preset geometry (`ellipse`, `chevron`, or right-pointing `homePlate`/`custom`) vs `rect`/`roundRect`
     preset = _detect_preset_geometry(crop, parent_f, direct_children_mask_local)
     if preset is not None:
-        geometry, corner_r, ext_corner_mask = preset
+        geometry, corner_r, ext_corner_mask, custom_paths, _ = preset
         corner_bg_counts = [0, 0, 0, 0]
     else:
+        custom_paths = None
         if w < 36 or h < 20:
             return None
         ix = min(12, max(3, w // 8))
@@ -610,14 +870,29 @@ def try_fit_native_shape_v2(
         same_fill = float(np.abs(fill_med0 - parent_med).max()) <= 6.5
         cs = min(22, max(4, w // 7), max(4, h // 4))
         ext_corner_mask, corner_bg_counts = _corner_ext_mask(
-            crop, parent_f, cs, dilate_barrier=same_fill
+            crop, parent_f, cs, dilate_barrier=same_fill, child_mask=direct_children_mask_local
         )
         if max(corner_bg_counts) > int(0.85 * cs * cs) and max(corner_bg_counts) > 140:
+            ext_corner_mask, corner_bg_counts = _corner_ext_mask(
+                crop, parent_f, cs, dilate_barrier=True, thresh=2.5, child_mask=direct_children_mask_local
+            )
+        if max(corner_bg_counts) > int(0.85 * cs * cs) and max(corner_bg_counts) > 140:
             return None
-        # Reject asymmetric chamfered polygons (e.g. two opposite 45-deg cut corners and two sharp corners)
-        if max(corner_bg_counts) >= 20 and min(corner_bg_counts) <= 2:
+        # Reject diagonal-opposite chamfered polygons or single-cut asymmetric corners,
+        # while allowing top-rounded header bands, left/right pill caps, and 3-rounded card bodies.
+        tl_c, tr_c, bl_c, br_c = corner_bg_counts
+        diag_chamfer = (
+            (tl_c >= 20 and br_c >= 20 and tr_c <= 2 and bl_c <= 2)
+            or (tr_c >= 20 and bl_c >= 20 and tl_c <= 2 and br_c <= 2)
+        )
+        single_cut = (
+            sum(v >= 20 for v in corner_bg_counts) == 1
+            and sum(v <= 2 for v in corner_bg_counts) == 3
+        )
+        if diag_chamfer or single_cut:
             return None
-        avg_corner_px = float(np.median(corner_bg_counts))
+        round_vals = [v for v in corner_bg_counts if v >= 8]
+        avg_corner_px = float(np.median(round_vals if len(round_vals) >= 2 else corner_bg_counts))
         est_r = round(math.sqrt(max(0.0, avg_corner_px) / 0.2146))
         max_r = max(0, min(22, int(min(w, h) // 2) - 1))
         if est_r < 3 or max_r < 3:
@@ -661,11 +936,12 @@ def try_fit_native_shape_v2(
                 if np.abs(cand_rgb - base_rgb).max() <= 7:
                     best_rgb = np.clip(cand_rgb, 0, 255)
         pred_fill = np.broadcast_to(best_rgb.astype(np.float64), (h, w, 3)).copy()
+        fit_p95 = flat_p95
     else:
         grad_res = _fit_linear_gradient(crop, interior_unclaimed, grad_tol)
         if grad_res is None:
             return None
-        pred_fill, _, grad_obj = grad_res
+        pred_fill, fit_p95, grad_obj = grad_res
         best_rgb = np.clip(np.rint(np.median(pred_fill[interior_unclaimed], axis=0)).astype(int), 0, 255)
 
     # Verify child backing patches agree reasonably with predicted shape fill
@@ -704,7 +980,8 @@ def try_fit_native_shape_v2(
             )
             edge_contrasts.append(float(np.median(peak_d)))
             edge_colors.append(np.median(peak_px, axis=0))
-        has_border = sum(c >= 4.5 for c in edge_contrasts) >= 3
+        border_min_c = 1.8 if (w >= 110 and h >= 42 and fit_p95 <= 7.5) else 4.5
+        has_border = sum(c >= border_min_c for c in edge_contrasts) >= 3
     else:
         edge_colors = []
 
@@ -718,7 +995,8 @@ def try_fit_native_shape_v2(
     else:
         # Borderless shape must visibly contrast with parent background!
         fill_vs_parent = float(np.percentile(np.abs(pred_fill[interior_unclaimed] - parent_f[interior_unclaimed]).max(1), 75))
-        if fill_vs_parent < 6.0:
+        min_fill_c = 2.0 if (w >= 110 and h >= 42 and fit_p95 <= 7.5) else 6.0
+        if fill_vs_parent < min_fill_c:
             return None
         line_hex = hex_rgb(best_rgb)
         line_width_pt = 0.0
@@ -784,6 +1062,7 @@ def try_fit_native_shape_v2(
     erase_mask_local = (direct_children_mask_local | proven_fill | proven_border) & ~ext_corner_mask
     return {
         'geometry': geometry,
+        'custom_paths': custom_paths,
         'fill': hex_rgb(best_rgb),
         'fill_rgb': best_rgb,
         'fill_gradient': grad_obj,

@@ -48,7 +48,7 @@ def try_vectorize_monochrome_icon(
     if rgba.ndim != 3 or rgba.shape[2] != 4:
         return None
     h, w = rgba.shape[:2]
-    if min(w, h) < 14 or max(w, h) > 120:
+    if min(w, h) < 14 or max(w, h) > 135:
         return None
     if source_crop.shape[:2] != (h, w) or backing_crop.shape[:2] != (h, w):
         return None
@@ -58,7 +58,7 @@ def try_vectorize_monochrome_icon(
     fg_frac = float(fg_vis.mean())
     if not (0.06 <= fg_frac <= 0.78):
         return None
-    if (alpha[0, :] > 48).any() or (alpha[-1, :] > 48).any() or (alpha[:, 0] > 48).any() or (alpha[:, -1] > 48).any():
+    if all(float((edge > 128).mean()) >= 0.65 for edge in (alpha[0, :], alpha[-1, :], alpha[:, 0], alpha[:, -1])):
         return None
 
     strong = alpha >= 170
@@ -70,13 +70,15 @@ def try_vectorize_monochrome_icon(
     if color_dev_p85 > 16.0:
         return None
 
-    up = cv2.resize(alpha, (w * 4, h * 4), interpolation=cv2.INTER_LINEAR)
+    pad = 2
+    alpha_pad = np.pad(alpha, pad, mode='constant', constant_values=0)
+    up = cv2.resize(alpha_pad, ((w + 2 * pad) * 4, (h + 2 * pad) * 4), interpolation=cv2.INTER_LINEAR)
     mask = (up >= 120).astype(np.uint8)
     contours, hierarchy = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
     if not contours or hierarchy is None:
         return None
     hier = hierarchy[0]
-    if len(contours) > 24:
+    if len(contours) > 36:
         return None
 
     commands: list[CustomCommand] = []
@@ -89,7 +91,9 @@ def try_vectorize_monochrome_icon(
             continue
         is_hole = int(hier[cid][3]) >= 0
         eps = 1.8 if area < 200 else 2.2
-        approx = (cv2.approxPolyDP(cnt, eps, True).reshape(-1, 2).astype(np.float64) + 0.5) / 4.0
+        approx = (cv2.approxPolyDP(cnt, eps, True).reshape(-1, 2).astype(np.float64) + 0.5) / 4.0 - float(pad)
+        approx[:, 0] = np.clip(approx[:, 0], 0.0, float(w))
+        approx[:, 1] = np.clip(approx[:, 1], 0.0, float(h))
         if len(approx) < 3:
             continue
         # Ensure opposite winding for outer vs hole contours
@@ -99,12 +103,12 @@ def try_vectorize_monochrome_icon(
         ordered_rings.append((approx, is_hole))
         total_pts += len(approx) + 1
 
-    if not ordered_rings or total_pts > 240:
+    if not ordered_rings or total_pts > 320:
         return None
 
     recomp = _rasterize_contours(ordered_rings, w, h, fg_rgb, backing_crop)
     err = np.abs(recomp - source_crop.astype(np.float32)).max(2)
-    if float(err.mean()) > 4.2 or float(np.percentile(err, 95)) > 24.0:
+    if float(err.mean()) > 4.8 or float(np.percentile(err, 95)) > 26.0:
         return None
 
     for pts, _ in ordered_rings:
@@ -136,10 +140,15 @@ def upgrade_staged_icon_to_vector_shape(
     output = Path(output_dir).resolve()
     graph = SceneGraph.model_validate_json((baseline / 'scene.json').read_text('utf8'))
     rec = graph.selected.get(asset_id)
-    if not rec or rec.get('kind') != 'asset' or rec.get('container_layer') or rec.get('region_crop'):
+    if not rec or rec.get('kind') != 'asset' or rec.get('container_layer'):
         return None
     a_obj = next((a for a in graph.asset.objects if a.id == asset_id), None)
-    if a_obj is None or a_obj.kind not in ('icon', 'decoration'):
+    is_crop = bool(rec.get('region_crop'))
+    if a_obj is None:
+        return None
+    if not is_crop and a_obj.kind not in ('icon', 'decoration'):
+        return None
+    if is_crop and (a_obj.kind not in ('icon', 'decoration', 'illustration') or bool(a_obj.intrinsic_text)):
         return None
     if any(r.kind == 'intrinsic_text' and (r.source == asset_id or r.target == asset_id) for r in graph.relations):
         return None
@@ -151,6 +160,8 @@ def upgrade_staged_icon_to_vector_shape(
         return None
 
     rgba = np.array(Image.open(asset_path).convert('RGBA'))
+    if is_crop and float((rgba[..., 3] < 24).mean()) < 0.12:
+        return None
     source = np.array(Image.open(baseline / 'source.png').convert('RGB'))
     with np.load(owner_path, allow_pickle=False) as owner_data:
         backing_patch = owner_data['backing_patch']
@@ -194,6 +205,7 @@ def upgrade_staged_icon_to_vector_shape(
 
     rec_copy = dict(rec)
     rec_copy.pop('asset_reference', None)
+    rec_copy.pop('region_crop', None)
     rec_copy['id'] = sid
     rec_copy['kind'] = 'surface'
     rec_copy['foreground_shape'] = True
@@ -225,3 +237,23 @@ def upgrade_staged_icon_to_vector_shape(
     write(output / 'scene.json', graph.model_dump())
     write(output / 'slideir.json', ir)
     return output / 'slideir.json', sid
+
+
+def upgrade_crops_to_vector_shapes(
+    baseline_dir: str | Path,
+    staged_ids: list[str],
+    work_dir: str | Path,
+) -> tuple[Path, list[str]]:
+    """Upgrade eligible tight cutout crops in `staged_ids` into native `custom` vector shapes."""
+    cur_dir = Path(baseline_dir).resolve()
+    out_root = Path(work_dir).resolve()
+    updated_ids = list(staged_ids)
+    for idx, oid in enumerate(list(staged_ids)):
+        upgraded = upgrade_staged_icon_to_vector_shape(
+            cur_dir, oid, out_root / f'vec-{idx:02d}-{oid}'
+        )
+        if upgraded is not None:
+            vec_ir, vec_sid = upgraded
+            cur_dir = vec_ir.parent
+            updated_ids[idx] = vec_sid
+    return cur_dir / 'slideir.json', updated_ids

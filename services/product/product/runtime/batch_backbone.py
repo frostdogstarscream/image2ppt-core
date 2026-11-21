@@ -211,10 +211,10 @@ def _merge_structural_ocr_items(
         if cur_item['est_size_px'] > 23.0 or cand['est_size_px'] > 23.0:
             return False, 'left'
         last_line = cur_item['lines'][-1]
-        if abs(last_line['est_size_px'] - cand['est_size_px']) > 2.4:
+        if abs(last_line['est_size_px'] - cand['est_size_px']) > 2.8:
             return False, 'left'
         h_a, h_b = max(1.0, last_line['bbox'][3]), max(1.0, cand['bbox'][3])
-        if max(h_a, h_b) / min(h_a, h_b) > 1.25:
+        if max(h_a, h_b) / min(h_a, h_b) > 1.45:
             return False, 'left'
         if max(abs(a - b) for a, b in zip(last_line['rgb'], cand['rgb'])) > 26:
             return False, 'left'
@@ -222,7 +222,7 @@ def _merge_structural_ocr_items(
         bx, by, bw, bh = cand['bbox']
         gap_y = by - (ay + ah)
         avg_h = 0.5 * (ah + bh)
-        if not (-4.0 <= gap_y <= max(9.0, 0.55 * avg_h)):
+        if not (-5.0 <= gap_y <= max(10.0, 0.62 * avg_h)):
             return False, 'left'
         x_ov = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
         min_w = max(1.0, min(aw, bw))
@@ -246,8 +246,8 @@ def _merge_structural_ocr_items(
             if sy1 > sy0:
                 strip = source[sy0:sy1, x_min:x_max].astype(float)
                 med_col = np.median(strip.reshape(-1, 3), axis=0)
-                dev = np.abs(strip.reshape(-1, 3) - med_col).max(axis=1)
-                if float(np.percentile(dev, 90)) > 16.0:
+                row_cov = (np.abs(strip - med_col).max(axis=2) > 16.0).mean(axis=1)
+                if float(row_cov.max()) > 0.48:
                     return False, 'left'
         return True, ('center' if (center_aligned and not left_aligned) else 'left')
 
@@ -973,7 +973,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         for grp in style_groups:
             if (grp['role'] == item['role'] and grp['bold'] == item['bold']
                     and abs(grp['size_sum'] / grp['count'] - item['est_size_px']) <= 1.5
-                    and np.abs(grp['rgb_sum'] / grp['count'] - rgb).max() <= 16.0):
+                    and np.abs(grp['rgb_sum'] / grp['count'] - rgb).max() <= 9.0):
                 matched = grp
                 break
         if matched is None:
@@ -1042,6 +1042,8 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
             row['ir'] = str(ir)
             row['scene'] = str(ir.parent / 'scene.json')
         shutil.copyfile(structure_file, Path(row['ir']).parent / 'page-structure.json')
+        if deferred_assets and (directory / 'deferred-assets.json').is_file():
+            shutil.copyfile(directory / 'deferred-assets.json', Path(row['ir']).parent / 'deferred-assets.json')
         scene_initialized = True
 
     row = current['pages'][page - 1] if len(current['pages']) >= page else None
@@ -1275,7 +1277,7 @@ def _chain_stage_from_spec(
                 fonts,
                 step_out,
                 frame_minimum=frame_opt,
-                fit_origin=experiment_profile not in (None, 'baseline'),
+                fit_origin=(experiment_profile != 'baseline'),
                 layer_directory=layers_dir,
                 edit_headroom=(frame_opt is None),
             )
@@ -1565,7 +1567,11 @@ def _chain_stage_from_spec(
                     skip_seed_ids=skip_ids,
                 )
                 if crop_ids:
-                    cur_base = crop_ir.parent
+                    from ..recovery.vector_icons import upgrade_crops_to_vector_shapes
+                    vec_ir, crop_ids = upgrade_crops_to_vector_shapes(
+                        crop_ir.parent, crop_ids, directory / tag / 'region-crops-vector'
+                    )
+                    cur_base = vec_ir.parent
                     staged_ids.extend(crop_ids)
                     if include_containers:
                         from ..recovery.container_stage import stage_containers_and_surfaces
@@ -1668,6 +1674,11 @@ def restage_batch_candidate_subset(
             protected_text_ids=protected_ids,
             skip_seed_ids=skip,
         )
+        if crop_ids:
+            from ..recovery.vector_icons import upgrade_crops_to_vector_shapes
+            crop_ir, crop_ids = upgrade_crops_to_vector_shapes(
+                crop_ir.parent, crop_ids, directory / f'crop-vector-pass{attempt_idx + 1}'
+            )
         repaired_base = crop_ir.parent if crop_ids else initial_baseline
         repaired_ids = list(crop_ids)
         if crop_ids and crop_spec.get('upgrade_containers'):

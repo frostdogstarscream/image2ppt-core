@@ -43,7 +43,28 @@ def peer_protection(text, graph, source, blocked, *, baseline_directory=None, di
                         blocked |= affix_guard if affix_guard.any() else rem_scope
                     else:
                         blocked |= rem_scope
-    return protection(text,graph,source,blocked,baseline_directory,purpose=purpose,diagnostics=diagnostics)
+    res = protection(text, graph, source, blocked, baseline_directory, purpose=purpose, diagnostics=diagnostics)
+    if baseline_directory is not None and purpose in ('context', 'both'):
+        base_dir = Path(baseline_directory)
+        deferred_file = next(
+            (cand for cand in (base_dir / 'deferred-assets.json', base_dir.parent / 'deferred-assets.json') if cand.is_file()),
+            None,
+        )
+        if deferred_file is not None:
+            size = source.shape[1::-1]
+            own_box = rectangle(text.bbox, size, pad=0)
+            da_mask = np.zeros(source.shape[:2], bool)
+            for da in json.loads(deferred_file.read_text('utf8')):
+                bbox = da.get('bbox')
+                if bbox and len(bbox) == 4:
+                    da_mask |= rectangle(bbox, size, pad=2)
+            da_mask &= ~own_box
+            if da_mask.any():
+                if purpose == 'context':
+                    return res | da_mask
+                erase_prot, ctx_prot = res
+                return erase_prot, ctx_prot | da_mask
+    return res
 
 
 def perimeter_background(source, box, protected):

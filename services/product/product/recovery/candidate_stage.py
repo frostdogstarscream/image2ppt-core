@@ -153,11 +153,13 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
         # An OCR box begins at visible ink. The native font also needs top bearing.
         # Move only that transparent frame, leaving the source mask and peer masks fixed.
         if clamped is None and fit_origin and len(lines) == 1:
-            for dy in range(1, min(bearing, math.ceil(max_font_px * .22)) + 1):
-                proposed = [left, top-dy, width, height+dy]
-                clamped = _find_non_colliding_frame(
-                    text, proposed, spacing, max_font_px, max_glyph_bottom, max_line_len,
-                    source_size, protected, minimum_size)
+            for dy in range(1, min(bearing, math.ceil(max_font_px * .25)) + 1):
+                for proposed in ([left, top - dy, width, height], [left, top - dy, width, height + dy]):
+                    clamped = _find_non_colliding_frame(
+                        text, proposed, spacing, max_font_px, max_glyph_bottom, max_line_len,
+                        source_size, protected, minimum_size)
+                    if clamped is not None:
+                        break
                 if clamped is not None:
                     break
         if clamped is None:
@@ -224,7 +226,8 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
             reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx)
         except RecoveryBlocked:
             reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx, allow_vertical=True)
-    if ((saved.get('provenance') or {}).get('fit') or {}).get('method') == 'scanline-lateral':
+    if (((saved.get('provenance') or {}).get('fit') or {}).get('method') == 'scanline-lateral'
+            or (saved.get('reference_context') or {}).get('method') == 'scanline-lateral'):
         from .marked_fields import striped_backing
         stripe = striped_backing(source,box,context_protected)
         if stripe is None:

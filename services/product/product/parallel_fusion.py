@@ -122,13 +122,17 @@ def glyph_evidence(source,box,foreground,backing):
     x,y,w,h=[round(v) for v in box];crop=source[y:y+h,x:x+w].astype(float)
     bg=backing.astype(float);fg=np.array([int(foreground[i:i+2],16) for i in (0,2,4)],float)
     direction=fg-bg;delta=crop-bg;den=(direction*direction).sum(2)
-    alpha=np.clip((delta*direction).sum(2)/np.maximum(den,1),0,1)
+    alpha=np.clip((delta*direction).sum(2)/np.maximum(den,1),0,1.35)
     error=np.abs(bg+alpha[...,None]*direction-crop).max(2)
     # Low-amplitude compression/background uncertainty is retained, not erased.
     # Source screenshots contain color ringing; bounded color residual accepts
     # these only along the same foreground-to-backing color direction.
     visible=np.abs(delta).max(2)>6
-    certain=visible & (error<=32) & (alpha>.005) & (den>100)
+    fg_norm2 = float((fg * fg).sum())
+    s_dark = np.clip((crop * fg).sum(2) / max(fg_norm2, 1.0), 0.35, 1.0)
+    dark_err = np.abs(s_dark[..., None] * fg - crop).max(2)
+    is_dark_ink = bool(fg.mean() < bg.mean() - 40.0 and fg_norm2 >= 900.0)
+    certain = visible & (((error <= 32) & (alpha > .005) & (den > 100)) | (is_dark_ink & (dark_err <= 28)))
     uncertain=visible & ~certain
     return certain,uncertain
 

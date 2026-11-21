@@ -93,7 +93,7 @@ def test_native_shapes_pentagon_ellipse_gradient_and_scenery_guard(tmp_path):
     pent_fit = try_fit_native_shape_v2(
         arr, [31, 31, 178, 43], np.full((43, 178, 3), [250, 252, 255], float), [], np.zeros((43, 178), bool)
     )
-    assert pent_fit is not None and pent_fit['geometry'] == 'pentagon'
+    assert pent_fit is not None and pent_fit['geometry'] == 'custom' and pent_fit['custom_paths']
 
     ell_fit = try_fit_native_shape_v2(
         arr, [380, 50, 65, 65], field[50:115, 380:445], [], np.zeros((65, 65), bool)
@@ -1662,4 +1662,149 @@ def test_p1_tail_fixes_and_native_capabilities(tmp_path, monkeypatch):
     sh_obj = estimate_card_shadow(splate, cfield, hmask)
     assert sh_obj is not None and 0.06 <= sh_obj.opacity <= 0.22
     assert _node_bleed_margin_px({'shadow': sh_obj.model_dump(), 'line': {'width_pt': 2.0, 'tail_end': 'triangle'}}) >= 15
+
+
+def test_p2_text_recall_composite_cards_and_crop_vector_icons(tmp_path):
+    from product.parallel_fusion import glyph_evidence
+    from product.parallel_rebuild import adapt
+    from product.recovery.vector_icons import upgrade_crops_to_vector_shapes
+
+    # (a) Dark-ink stroke core & collinear alpha > 1.0 glyph evidence
+    backing_a = np.full((40, 80, 3), [232, 242, 252], dtype=np.uint8)
+    src_a = backing_a.copy()
+    src_a[10:28, 16:22] = [1, 5, 62]     # deep multi-stroke navy core
+    src_a[10:28, 26:32] = [10, 25, 68]   # collinear overshoot alpha ~ 1.15 vs foreground 1C366B
+    fg_mask, unassigned = glyph_evidence(src_a, [0, 0, 80, 40], '1C366B', backing_a)
+    assert fg_mask.any()
+    assert not unassigned.any()
+    assert float(unassigned.max()) <= 20.0
+
+    # (b) Composite subtle white card + #E4EFFB header band + flush two-tone pentagon ribbon pair
+    h_img, w_img = 300, 540
+    sky = np.full((h_img, w_img, 3), [244, 249, 254], dtype=np.uint8)
+    src_b = sky.copy()
+    # Outer white card [40, 40, 460, 220] with subtle border and #E4EFFB header [42, 42, 456, 40]
+    cx0, cy0, cw, ch = 40, 40, 460, 220
+    src_b[cy0:cy0 + ch, cx0:cx0 + cw] = [253, 254, 255]
+    src_b[cy0:cy0 + 2, cx0:cx0 + cw] = [234, 241, 250]
+    src_b[cy0 + ch - 2:cy0 + ch, cx0:cx0 + cw] = [234, 241, 250]
+    src_b[cy0:cy0 + ch, cx0:cx0 + 2] = [234, 241, 250]
+    src_b[cy0:cy0 + ch, cx0 + cw - 2:cx0 + cw] = [234, 241, 250]
+    hx0, hy0, hw, hh = 42, 42, 456, 40
+    src_b[hy0:hy0 + hh, hx0:hx0 + hw] = [228, 239, 251]
+    # Flush two-tone pentagon ribbon [42, 42, 160, 40]: cap [0..52] + pentagon [52..160]
+    rw, tip = 160, 14
+    for ry_l in range(hh):
+        dx = int(round(tip * (1.0 - abs(ry_l - (hh - 1) * 0.5) / ((hh - 1) * 0.5))))
+        max_c = (rw - tip) + dx
+        src_b[hy0 + ry_l, hx0:hx0 + min(52, max_c)] = [37, 137, 249]
+        if max_c > 52:
+            src_b[hy0 + ry_l, hx0 + 52:hx0 + max_c] = [16, 98, 194]
+
+    cbase = tmp_path / 'cbase'
+    cbase.mkdir()
+    Image.fromarray(src_b).save(cbase / 'source.png')
+    Image.fromarray(src_b).save(cbase / 'source-plate.png')
+    csha = digest(cbase / 'source.png')
+    psha = digest(cbase / 'source-plate.png')
+    sg_b = SceneGraph.model_validate({
+        'schema': 'SceneGraph/1',
+        'source_sha256': csha,
+        'image_size': [w_img, h_img],
+        'method_version': 'test',
+        'text': {'schema': 'TextEvidence/1', 'source_sha256': csha, 'image_size': [w_img, h_img], 'method_version': 'test', 'styles': [], 'texts': [], 'members': {}},
+        'asset': {'schema': 'AssetEvidence/1', 'source_sha256': csha, 'image_size': [w_img, h_img], 'method_version': 'test', 'objects': []},
+        'surface': {'schema': 'SurfaceEvidence/1', 'source_sha256': csha, 'image_size': [w_img, h_img], 'method_version': 'test', 'background': 'F4F9FE', 'shapes': []},
+        'ownership': {},
+        'relations': [],
+        'raster_backing': {'path': 'source-plate.png', 'sha256': psha, 'source_sha256': csha, 'bbox': [0, 0, w_img, h_img]},
+        'selected': {},
+        'transactions': [],
+    })
+    write(cbase / 'scene.json', sg_b.model_dump())
+    write(cbase / 'slideir.json', adapt(sg_b, cbase))
+    ir_out, staged_ids = stage_containers_and_surfaces(cbase, tmp_path / 'cout')
+    out_dir = ir_out.parent
+    sg_out = SceneGraph.model_validate_json((out_dir / 'scene.json').read_text('utf8'))
+    assert len(staged_ids) >= 4
+    assert any(s.geometry == 'custom' and s.custom_paths for s in sg_out.surface.shapes)
+    compiled_b = compile_local([ir_out], tmp_path / 'composite_compiled', [effective_texts(sg_out, ir_out)])
+    import zipfile as _zf
+    with _zf.ZipFile(compiled_b['pptx']) as z_c:
+        s1_xml = z_c.read('ppt/slides/slide1.xml').decode('utf8')
+    assert '<a:custGeom>' in s1_xml
+    for sid in staged_ids:
+        rec = sg_out.selected[sid]
+        if rec.get('kind') == 'surface':
+            with np.load(out_dir / rec['owner_evidence']['file'], allow_pickle=False) as d:
+                assert int(d['mask'].sum()) >= 16
+    ribbon_recs = [
+        sg_out.selected[sid]
+        for sid in staged_ids
+        if sg_out.selected.get(sid, {}).get('method') == 'container-surface-v2-two-tone-ribbon/1'
+    ]
+    assert len(ribbon_recs) == 2
+    with np.load(out_dir / ribbon_recs[0]['owner_evidence']['file'], allow_pickle=False) as d0:
+        m0 = d0['mask'].astype(bool)
+    with np.load(out_dir / ribbon_recs[1]['owner_evidence']['file'], allow_pickle=False) as d1:
+        m1 = d1['mask'].astype(bool)
+    assert int((m0 & m1).sum()) == 0
+
+    # (c) Tight cutout region_crop vectorization via upgrade_crops_to_vector_shapes
+    rcbase = tmp_path / 'rcbase'
+    rcbase.mkdir()
+    ic_w, ic_h = 48, 48
+    yy_i, xx_i = np.mgrid[:ic_h, :ic_w]
+    ring = ((xx_i - 23.5) ** 2 + (yy_i - 23.5) ** 2 <= 18 ** 2) & ((xx_i - 23.5) ** 2 + (yy_i - 23.5) ** 2 >= 8 ** 2)
+    rgba_rc = np.zeros((ic_h, ic_w, 4), dtype=np.uint8)
+    rgba_rc[ring] = [16, 100, 220, 255]
+    src_rc = np.full((180, 220, 3), 245, dtype=np.uint8)
+    src_rc[40:40 + ic_h, 40:40 + ic_w][ring] = [16, 100, 220]
+    plate_rc = np.full((180, 220, 3), 245, dtype=np.uint8)
+    Image.fromarray(src_rc).save(rcbase / 'source.png')
+    Image.fromarray(plate_rc).save(rcbase / 'source-plate.png')
+    Image.fromarray(rgba_rc).save(rcbase / 'r-001.png')
+    r_mask = np.zeros((180, 220), bool)
+    r_mask[40:40 + ic_h, 40:40 + ic_w] = ring
+    np.savez_compressed(
+        rcbase / 'r-001-owner.npz',
+        mask=r_mask,
+        restore_bbox=[40, 40, ic_w, ic_h],
+        backing_patch=np.full((ic_h, ic_w, 3), 245, dtype=np.uint8),
+    )
+    rsha = digest(rcbase / 'source.png')
+    rpsha = digest(rcbase / 'source-plate.png')
+    sg_rc = SceneGraph.model_validate({
+        'schema': 'SceneGraph/1',
+        'source_sha256': rsha,
+        'image_size': [220, 180],
+        'method_version': 'test',
+        'text': {'schema': 'TextEvidence/1', 'source_sha256': rsha, 'image_size': [220, 180], 'method_version': 'test', 'styles': [], 'texts': [], 'members': {}},
+        'asset': {'schema': 'AssetEvidence/1', 'source_sha256': rsha, 'image_size': [220, 180], 'method_version': 'test', 'objects': [
+            {'id': 'r-001', 'kind': 'illustration', 'bbox': [40, 40, ic_w, ic_h], 'layers': ['l.png'], 'components': ['whole'],
+             'parts': [{'name': 'whole', 'bbox': [40, 40, ic_w, ic_h], 'layers': ['l.png']}], 'exclusions': [], 'replaces': [],
+             'required_owners': [], 'text_policy': 'exclude_independent_text', 'intrinsic_text': '', 'description': 'ring', 'prompt_en': 'ring'},
+        ]},
+        'surface': {'schema': 'SurfaceEvidence/1', 'source_sha256': rsha, 'image_size': [220, 180], 'method_version': 'test', 'background': 'F5F5F5', 'shapes': []},
+        'ownership': {'r-001': 'RESOLVED'},
+        'relations': [],
+        'raster_backing': {'path': 'source-plate.png', 'sha256': rpsha, 'source_sha256': rsha, 'bbox': [0, 0, 220, 180]},
+        'selected': {
+            'r-001': {
+                'id': 'r-001', 'kind': 'asset', 'region_crop': True, 'bbox': [40, 40, ic_w, ic_h],
+                'restore_bbox': [40, 40, ic_w, ic_h], 'payload': {'method': 'test'},
+                'asset_reference': {'path': 'r-001.png', 'sha256': digest(rcbase / 'r-001.png'), 'source_sha256': rsha,
+                                    'bbox': [40, 40, ic_w, ic_h], 'crop_offset': [40, 40]},
+                'owner_evidence': {'file': 'r-001-owner.npz', 'sha256': digest(rcbase / 'r-001-owner.npz')},
+            },
+        },
+        'transactions': [],
+    })
+    write(rcbase / 'scene.json', sg_rc.model_dump())
+    write(rcbase / 'slideir.json', adapt(sg_rc, rcbase))
+    vec_ir, vec_ids = upgrade_crops_to_vector_shapes(rcbase, ['r-001'], tmp_path / 'rcwork')
+    assert vec_ids == ['s-v001']
+    sg_vec = SceneGraph.model_validate_json((vec_ir.parent / 'scene.json').read_text('utf8'))
+    assert any(s.id == 's-v001' and s.geometry == 'custom' for s in sg_vec.surface.shapes)
+
 

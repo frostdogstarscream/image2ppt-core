@@ -140,10 +140,13 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
     unassigned_mask = completion.evidence['unknown'] & (delta_ref > 6)
     unassigned_px = int(unassigned_mask.sum())
     unassigned_peak = float(delta_ref[unassigned_mask].max()) if unassigned_px else 0.0
-    mild_interior_nonplanar = (fit.get('method')!='scanline-lateral' and
+    mild_interior_nonplanar = (
         unassigned_px > 0
         and bool(layer_directory or inpaint)
-        and (unassigned_peak <= 22.0 or (unassigned_px <= 4 and unassigned_peak <= 16.0))
+        and (
+            (fit.get('method') == 'scanline-lateral' and unassigned_peak <= 14.0)
+            or (fit.get('method') != 'scanline-lateral' and (unassigned_peak <= 25.0 or (unassigned_px <= 4 and unassigned_peak <= 16.0)))
+        )
     )
     if fit['validation_p95_rgb'] <= 3 and unassigned_px and not mild_interior_nonplanar:
         raise RecoveryBlocked('MASK_INCOMPLETE','visible unassigned signal blocks repair')

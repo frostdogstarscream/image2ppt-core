@@ -48,7 +48,9 @@ def measure_text_appearance(source, bbox, blocked=None):
     ink = (delta > threshold) & ~blocked[y:y+h, x:x+w]
     if int(ink.sum()) < 8:
         return None
-    strong = ink & (delta >= np.percentile(delta[ink], 75))
+    strong = ink & (delta >= np.percentile(delta[ink], 85))
+    if int(strong.sum()) < 4:
+        strong = ink & (delta >= np.percentile(delta[ink], 75))
     values = crop[strong].astype(float)
     quant = values.astype(int) // 12
     colors, counts = np.unique(quant, axis=0, return_counts=True)

@@ -71,7 +71,7 @@ def _load_baseline_metrics(prefix: str) -> dict | None:
     return None
 
 
-def run_one_slide(profile: dict, slide_path: Path, out_dir: Path, *, agent_model: str, agent_provider: str | None = None, steps: int, seconds: int) -> dict:
+def run_one_slide(profile: dict, slide_path: Path, out_dir: Path, *, agent_model: str, agent_provider: str | None = None, steps: int, seconds: int, baseline_only: bool = False) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     url = profile['url'].rstrip('/')
     token = profile['business_token']
@@ -95,6 +95,8 @@ def run_one_slide(profile: dict, slide_path: Path, out_dir: Path, *, agent_model
             'agent_thinking': False,
             'agent_model': agent_model,
         }
+        if baseline_only:
+            params['baseline_only'] = True
         if agent_provider:
             params['agent_provider'] = agent_provider
         resp = client.post('/api/v1/jobs', params=params, files=files)
@@ -289,6 +291,7 @@ def main() -> int:
     parser.add_argument('--agent-model', default='deepseek-flash')
     parser.add_argument('--steps', type=int, default=32)
     parser.add_argument('--seconds', type=int, default=2400)
+    parser.add_argument('--baseline-only', action='store_true')
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
 
@@ -309,6 +312,7 @@ def main() -> int:
                 prof, slide_p, out_root / f'slide-{pfx}',
                 agent_model=args.agent_model, agent_provider=args.agent_provider,
                 steps=args.steps, seconds=args.seconds,
+                baseline_only=args.baseline_only,
             )
             run_res['prefix'] = pfx
             run_res['baseline'] = base_m

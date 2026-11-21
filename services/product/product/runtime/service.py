@@ -335,6 +335,10 @@ class RuntimeService(ExplorationTools):
         full_report = [*layout_report, *report]
         if not staged_ids:
             return {'status': 'NO_CROPS_STAGED', 'page': page, 'report': full_report}
+        from ..recovery.vector_icons import upgrade_crops_to_vector_shapes
+        crop_ir, staged_ids = upgrade_crops_to_vector_shapes(
+            crop_ir.parent, staged_ids, directory / 'vector-icons'
+        )
         if upgrade_containers and object_ids is None and bbox is None:
             from ..recovery.container_stage import stage_containers_and_surfaces
             try:

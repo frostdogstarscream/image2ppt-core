@@ -37,6 +37,7 @@ from .native_shapes import (
     hex_rgb as _hex,
     soft_shadow_halo_mask,
     try_fit_native_shape_v2,
+    try_fit_two_tone_ribbon_pair,
 )
 
 
@@ -54,7 +55,7 @@ def _split_protruding_ticks(fg_support: np.ndarray, box: list[int], size: tuple[
     sub = fg_support[by:by + bh, bx:bx + bw]
     col_counts = sub.sum(axis=0)
     max_probe = min(28, bw // 4)
-    thin_limit = 6
+    thin_limit = max(6, int(0.32 * bh)) if (bw >= 130 and bh >= 52) else 6
     body_limit = max(18, int(0.58 * bh))
 
     results: list[tuple[str, list[int]]] = []
@@ -149,46 +150,54 @@ def _discover_candidates(
 
     def _scan_nested_children(parent_box: list[int]):
         sx, sy, sw, sh = parent_box
-        if sw < 140 or sh < 80:
+        if sw < 140 or sh < 24:
             return
-        pad_in = 6
-        if sh - 2 * pad_in < 20 or sw - 2 * pad_in < 40:
-            return
-        inner_crop = work_plate[sy + pad_in:sy + sh - pad_in, sx + pad_in:sx + sw - pad_in]
-        inner_med = np.median(inner_crop.reshape(-1, 3), axis=0)
-        inner_field = np.broadcast_to(inner_med.astype(np.float32), inner_crop.shape)
-        idiff = np.abs(inner_crop.astype(np.float32) - inner_field).max(2)
-        isup = idiff > 4.2
-        icore = idiff > 9.5
-        in_cnt, ilbl, istats, _ = cv2.connectedComponentsWithStats(isup.astype('uint8'), 8)
-        for ic in range(1, in_cnt):
-            ix, iy, iw, ih, iarea = [int(v) for v in istats[ic]]
-            if iarea < 80 or max(iw, ih) < 32:
-                continue
-            if int(((ilbl == ic) & icore).sum()) < 16:
-                continue
-            cbox = [sx + pad_in + ix, sy + pad_in + iy, iw, ih]
-            # Check if this child is a baseline-connected bar series (e.g. column 01 bar chart)
-            full_inner_field = np.broadcast_to(inner_med.astype(np.float32), work_plate.shape)
-            bar_split = _split_bar_series_on_baseline(work_plate, full_inner_field, cbox)
-            if bar_split is not None:
-                add_series(bar_split)
-                continue
-            if min(iw, ih) <= 8 and max(iw, ih) >= 36:
-                _add('line', cbox)
-            elif min(iw, ih) >= 18:
-                for r_kind, r_box in _split_two_tone_ribbon(work_plate, cbox):
-                    _add(r_kind, r_box)
+        pad_in = 6 if sh >= 80 else 2
+        if sh - 2 * pad_in >= 20 and sw - 2 * pad_in >= 40:
+            inner_crop = work_plate[sy + pad_in:sy + sh - pad_in, sx + pad_in:sx + sw - pad_in]
+            inner_med = np.median(inner_crop.reshape(-1, 3), axis=0)
+            inner_field = np.broadcast_to(inner_med.astype(np.float32), inner_crop.shape)
+            idiff = np.abs(inner_crop.astype(np.float32) - inner_field).max(2)
+            large_parent = (sw >= 360 and sh >= 220)
+            isup = idiff > (2.6 if large_parent else 4.2)
+            icore = idiff > (5.0 if large_parent else 9.5)
+            if large_parent:
+                for _, sub_box in discover_bordered_cards(inner_crop, np.zeros(inner_crop.shape[:2], bool)):
+                    cx, cy, cw, ch = sub_box
+                    _add('box', [sx + pad_in + cx, sy + pad_in + cy, cw, ch])
+            in_cnt, ilbl, istats, _ = cv2.connectedComponentsWithStats(isup.astype('uint8'), 8)
+            for ic in range(1, in_cnt):
+                ix, iy, iw, ih, iarea = [int(v) for v in istats[ic]]
+                if iarea < 80 or max(iw, ih) < 32:
+                    continue
+                if int(((ilbl == ic) & icore).sum()) < 16:
+                    continue
+                cbox = [sx + pad_in + ix, sy + pad_in + iy, iw, ih]
+                # Check if this child is a baseline-connected bar series (e.g. column 01 bar chart)
+                full_inner_field = np.broadcast_to(inner_med.astype(np.float32), work_plate.shape)
+                bar_split = _split_bar_series_on_baseline(work_plate, full_inner_field, cbox)
+                if bar_split is not None:
+                    add_series(bar_split)
+                    continue
+                if min(iw, ih) <= 8 and max(iw, ih) >= 36:
+                    _add('line', cbox)
+                elif min(iw, ih) >= 18:
+                    for r_kind, r_box in _split_two_tone_ribbon(work_plate, cbox):
+                        _add(r_kind, r_box)
+        else:
+            inner_med = np.median(work_plate[sy:sy + sh, sx:sx + sw].reshape(-1, 3), axis=0)
 
         # High-contrast flush-corner children (e.g. `01 应用成效` pentagon ribbon at card top-left `(sx+1, sy+1)`)
-        flush_crop = work_plate[sy + 1:sy + sh - 1, sx + 1:sx + sw - 1].astype(np.float32)
-        fdiff = np.abs(flush_crop - inner_med.astype(np.float32)).max(2)
-        fsup = fdiff > 16.0
+        flush_crop = work_plate[sy + 2:sy + sh - 2, sx + 1:sx + sw - 1].astype(np.float32) if sh > 8 else work_plate[sy:sy + sh, sx:sx + sw].astype(np.float32)
+        f_y0 = sy + 2 if sh > 8 else sy
+        f_x0 = sx + 1 if sh > 8 else sx
+        fdiff = (inner_med.astype(np.float32).mean() - flush_crop.mean(axis=2))
+        fsup = (fdiff > 18.0) & (np.abs(flush_crop - inner_med.astype(np.float32)).max(2) > 22.0)
         fn_cnt, _, fstats, _ = cv2.connectedComponentsWithStats(fsup.astype('uint8'), 8)
         for fc in range(1, fn_cnt):
             fx, fy, fw, fh, farea = [int(v) for v in fstats[fc]]
             if farea >= 350 and fw >= 44 and fh >= 20 and not (fw >= sw - 6 and fh >= sh - 6):
-                for r_kind, r_box in _split_two_tone_ribbon(work_plate, [sx + 1 + fx, sy + 1 + fy, fw, fh]):
+                for r_kind, r_box in _split_two_tone_ribbon(work_plate, [f_x0 + fx, f_y0 + fy, fw, fh]):
                     _add(r_kind, r_box)
 
         # Also check header band strip at top of card (`y = sy .. sy + min(90, sh//3)`)
@@ -201,25 +210,37 @@ def _discover_candidates(
                 if len(s_slice) > 0 and float(s_slice.max()) >= 5.0:
                     hdr_h = int(s_slice.argmax()) + 17
                     hdr_med = np.median(row_meds[4:max(6, hdr_h - 3)], axis=0)
-                    # A genuine full-width header band reaches the card's left & right edges (not an indented inner bar)
+                    while (
+                        hdr_h < max_hdr
+                        and float(np.abs(row_meds[hdr_h] - hdr_med).max())
+                        < float(np.abs(row_meds[hdr_h] - inner_med).max())
+                    ):
+                        hdr_h += 1
+                    # Accept header band when right edge matches hdr_med even if a dark-blue ribbon covers left edge.
                     l_strip = np.median(work_plate[sy + 4:sy + max(6, hdr_h - 3), sx + 2:min(sx + sw, sx + 10)].astype(np.float32), axis=(0, 1))
                     r_strip = np.median(work_plate[sy + 4:sy + max(6, hdr_h - 3), max(sx, sx + sw - 10):sx + sw - 2].astype(np.float32), axis=(0, 1))
                     edges_match = (
-                        float(np.abs(l_strip - hdr_med).max()) <= 8.0 or float(np.abs(r_strip - hdr_med).max()) <= 8.0
-                    ) and not (
-                        float(np.abs(l_strip - inner_med).max()) <= 4.0 and float(np.abs(r_strip - inner_med).max()) <= 4.0
+                        float(np.abs(r_strip - hdr_med).max()) <= 8.0
+                        and float(np.abs(r_strip - inner_med).max()) >= 4.0
+                    ) or (
+                        float(np.abs(l_strip - hdr_med).max()) <= 8.0
+                        and not (
+                            float(np.abs(l_strip - inner_med).max()) <= 4.0
+                            and float(np.abs(r_strip - inner_med).max()) <= 4.0
+                        )
                     )
                     if edges_match and float(np.abs(hdr_med - inner_med).max()) >= 5.0 and 24 <= hdr_h <= 88:
                         _add('box', [sx, sy, sw, hdr_h])
-                        # Check ribbon sitting inside top-left of header band
-                        hdr_crop = work_plate[sy:sy + hdr_h, sx:sx + sw].astype(np.float32)
-                        r_sup = np.abs(hdr_crop - hdr_med).max(2) > 14.0
+                        # Check flush ribbon sitting inside top-left of header band (exclude 2px outer border)
+                        hy_off = 2 if hdr_h > 10 else 0
+                        hdr_crop = work_plate[sy + hy_off:sy + hdr_h - hy_off, sx + 1:sx + sw - 1].astype(np.float32)
+                        r_sup = ((hdr_med.mean() - hdr_crop.mean(axis=2)) > 18.0) & (np.abs(hdr_crop - hdr_med).max(2) > 22.0)
                         rn, _, rstats, _ = cv2.connectedComponentsWithStats(r_sup.astype('uint8'), 8)
                         for rcid in range(1, rn):
                             rx_l, ry_l, rw_l, rh_l, rarea = [int(v) for v in rstats[rcid]]
                             if rarea >= 400 and rw_l >= 60 and rh_l >= 20:
                                 for r_kind, r_box in _split_two_tone_ribbon(
-                                    work_plate, [sx + rx_l, sy + ry_l, rw_l, rh_l]
+                                    work_plate, [sx + 1 + rx_l, sy + hy_off + ry_l, rw_l, rh_l]
                                 ):
                                     _add(r_kind, r_box)
 
@@ -303,7 +324,40 @@ def _ring_parent_patch(
     if len(vals) < 16:
         return None
 
+    # Flush-left ribbon inside a card header band: right edge sits inside the clean header fill (distinct from canvas sky)
+    if 20 <= h <= 96 and 110 <= w <= 360 and x + w + pad <= w_img:
+        r_in = work_plate[y + 3:max(y + 5, y + h - 3), x + w:x + w + pad].reshape(-1, 3)
+        if len(r_in) >= 12:
+            rm_in = np.median(r_in.astype(np.float32), axis=0)
+            r_err = float(np.percentile(np.abs(r_in.astype(np.float32) - rm_in).max(1), 80))
+            cf_med = np.median(canvas_field[y:y + h, x:x + w].reshape(-1, 3), axis=0)
+            box_med = np.median(work_plate[y:y + h, x:x + w].reshape(-1, 3).astype(np.float32), axis=0)
+            if (r_err <= 4.5
+                    and float(np.abs(rm_in - cf_med).max()) >= 10.0
+                    and float(np.abs(box_med - rm_in).max()) >= 22.0):
+                return np.broadcast_to(rm_in, (h, w, 3)).copy(), rm_in, r_err
+
     def _try_strip_or_field() -> tuple[np.ndarray, np.ndarray, float] | None:
+        # Flush-left ribbon or cap sitting inside a header band (right edge borders the clean header band)
+        if 20 <= h <= 96 and w >= 32 and x + w + pad <= w_img:
+            ry_in0, ry_in1 = y + 3, max(y + 5, y + h - 3)
+            r_in = work_plate[ry_in0:ry_in1, x + w:x + w + pad].reshape(-1, 3)
+            if len(r_in) >= 12:
+                rm_in = np.median(r_in.astype(np.float32), axis=0)
+                r_err = float(np.percentile(np.abs(r_in.astype(np.float32) - rm_in).max(1), 80))
+                box_med = np.median(work_plate[y:y + h, x:x + w].reshape(-1, 3).astype(np.float32), axis=0)
+                if r_err <= 4.5 and float(np.abs(box_med - rm_in).max()) >= 12.0:
+                    return np.broadcast_to(rm_in, (h, w, 3)).copy(), rm_in, r_err
+        # Full-width top header band sitting directly above clean card body
+        if 24 <= h <= 92 and w >= 160 and y + h + pad <= h_img:
+            bx_in0, bx_in1 = x + 8, max(x + 12, x + w - 8)
+            b_in = work_plate[y + h:y + h + pad, bx_in0:bx_in1].reshape(-1, 3)
+            if len(b_in) >= 32:
+                bm_in = np.median(b_in.astype(np.float32), axis=0)
+                b_err = float(np.percentile(np.abs(b_in.astype(np.float32) - bm_in).max(1), 80))
+                box_med = np.median(work_plate[y:y + h, x:x + w].reshape(-1, 3).astype(np.float32), axis=0)
+                if b_err <= 4.5 and float(np.abs(box_med - bm_in).max()) >= 4.5:
+                    return np.broadcast_to(bm_in, (h, w, 3)).copy(), bm_in, b_err
         # Check flush-corner child inside a card: right + bottom strips agree on parent card fill
         r_strip = work_plate[y:y + h, min(w_img, x + w):min(w_img, x + w + pad)].reshape(-1, 3)
         b_strip = work_plate[min(h_img, y + h):min(h_img, y + h + pad), x:x + w].reshape(-1, 3)
@@ -542,7 +596,7 @@ def stage_containers_and_surfaces(
         if parent_err > 7.5:
             continue
         crop_cur = work_plate[y:y + h, x:x + w]
-        if float(np.abs(crop_cur.astype(float) - parent_patch).max()) < 5.5:
+        if float(np.abs(crop_cur.astype(float) - parent_patch).max()) < 3.5:
             continue
 
         # Collect direct staged children sitting inside this container
@@ -562,6 +616,90 @@ def stage_containers_and_surfaces(
                 direct_oids.append(oid)
 
         direct_children_mask_local = already_claimed[y:y + h, x:x + w].copy()
+        ribbon_pair = (
+            try_fit_two_tone_ribbon_pair(
+                work_plate, [x, y, w, h], parent_patch, direct_children_mask_local
+            )
+            if cand_kind == 'box' else None
+        )
+        if ribbon_pair is not None:
+            pair_shapes = []
+            pair_sids = []
+            for p_idx, p_fit in enumerate(ribbon_pair):
+                while f's-{s_seq:03d}' in used_ids:
+                    s_seq += 1
+                p_sid = f's-{s_seq:03d}'
+                s_seq += 1
+                if p_sid in skip or (wanted_ids is not None and p_sid not in wanted_ids):
+                    pair_shapes = []
+                    break
+                used_ids.add(p_sid)
+                p_boff = p_fit.get('bbox_offset_local') or [0.0, 0.0, float(w), float(h)]
+                pair_shapes.append(Shape(
+                    id=p_sid,
+                    bbox=[float(x + p_boff[0]), float(y + p_boff[1]), float(p_boff[2]), float(p_boff[3])],
+                    z=1,
+                    geometry=p_fit['geometry'],
+                    fill=p_fit['fill'],
+                    fill_gradient=p_fit.get('fill_gradient'),
+                    line_color=p_fit['line_color'],
+                    line_width_pt=float(p_fit['line_width_pt']),
+                    corner_radius_px=p_fit['corner_radius_px'],
+                    custom_paths=p_fit.get('custom_paths'),
+                ))
+                pair_sids.append(p_sid)
+            if len(pair_shapes) == 2:
+                full_erase = np.zeros((h_img, w_img), bool)
+                full_erase_loc = ribbon_pair[0]['full_erase_mask_local']
+                full_erase[y:y + h, x:x + w] = full_erase_loc
+                s_mask = full_erase & ~already_claimed
+                fused_try = fuse_incremental_scene(
+                    baseline,
+                    base_graph=graph,
+                    added_shapes=pair_shapes,
+                    background_hex=canvas_hex,
+                )
+                split_w = int(round(pair_shapes[0].bbox[2]))
+                mask_left = s_mask.copy()
+                mask_left[:, x + split_w:] = False
+                mask_right = s_mask.copy()
+                mask_right[:, :x + split_w] = False
+                if (
+                    0 < split_w < w
+                    and int(mask_left.sum()) >= 16
+                    and int(mask_right.sum()) >= 16
+                    and all(fused_try.ownership.get(ps) == 'RESOLVED' for ps in pair_sids)
+                ):
+                    parent_u8 = np.clip(np.rint(parent_patch), 0, 255).astype(np.uint8)
+                    work_plate[y:y + h, x:x + w][full_erase_loc] = parent_u8[full_erase_loc]
+                    already_claimed |= s_mask
+                    surface_claimed_mask |= s_mask
+                    claimed_child_ids.update(direct_oids)
+                    graph = fused_try
+                    existing_proofs[pair_sids[0]] = {
+                        'mask': s_mask,
+                        'restore_bbox': [x, y, w, h],
+                        'backing_patch': parent_u8.astype(float),
+                    }
+                    pair_proof_specs = [
+                        (mask_left, [x, y, split_w, h], parent_u8[:, :split_w]),
+                        (mask_right, [x + split_w, y, w - split_w, h], parent_u8[:, split_w:]),
+                    ]
+                    for p_sid, p_shp, (p_mask, p_rbox, p_back) in zip(pair_sids, pair_shapes, pair_proof_specs):
+                        p_proof = output / f'{p_sid}-owner.npz'
+                        np.savez_compressed(p_proof, mask=p_mask, restore_bbox=p_rbox, backing_patch=p_back)
+                        record = {
+                            'id': p_sid, 'kind': 'surface', 'bbox': list(p_shp.bbox), 'restore_bbox': p_rbox,
+                            'payload': p_shp.model_dump(), 'method': 'container-surface-v2-two-tone-ribbon/1',
+                            'state': 'STAGED', 'quality': 'REVIEW_REQUIRED', 'human_acceptance': False,
+                            'source_sha256': graph.source_sha256, 'original_owner': 'source-plate',
+                            'complete_owner_scope': True, 'mask_sha256': array_sha(p_mask.astype('uint8')),
+                            'owner_evidence': {'file': p_proof.name, 'sha256': digest(p_proof), 'method': 'source-sampled-parent-backing/1'},
+                        }
+                        graph.transactions.append(record)
+                        graph.selected[p_sid] = record
+                        staged_new_ids.append(p_sid)
+                    continue
         shape_fit = (
             try_fit_native_shape_v2(
                 work_plate, [x, y, w, h], parent_patch, direct_patches,
@@ -616,6 +754,7 @@ def stage_containers_and_surfaces(
                 corner_radius_px=shape_fit['corner_radius_px'],
                 fill_gradient=shape_fit.get('fill_gradient'),
                 shadow=card_shadow,
+                custom_paths=shape_fit.get('custom_paths'),
             )
             fused_try = fuse_incremental_scene(
                 baseline,
@@ -710,6 +849,8 @@ def stage_containers_and_surfaces(
                 rgba[child_local_c, 3] = 0
                 fg_local &= ~child_local_c
             elif cand_kind == 'box' and aw >= 60 and ah >= 32:
+                if surface_claimed_mask[ay:ay + ah, ax:ax + aw].any():
+                    continue
                 closed_border = cv2.dilate(fg_local.astype('uint8'), np.ones((3, 3), np.uint8))
                 ext_ff = closed_border.copy()
                 ff_mask = np.zeros((ah + 2, aw + 2), np.uint8)
