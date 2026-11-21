@@ -42,3 +42,24 @@ def test_layer_choice_checks_background_in_transparent_hole():
     dirty[:,:,:3][clean[:,:,3]==0] = 240
     dirty[:,:,3] = 255
     assert select_badge_ink(source,'f0f0f0',measured,dirty)[1]['selected']=='color-unmix'
+
+
+def test_compiler_checks_all_split_fields_from_source(tmp_path):
+    import json
+    from types import SimpleNamespace
+    from PIL import Image
+    from product.contracts import Style, Text
+    from product.parallel_pipeline import effective_texts
+
+    source = np.full((200, 200, 3), 255, np.uint8)
+    for x in (12, 22, 32, 80, 90):
+        source[181:191, x:x+8] = 50
+    Image.fromarray(source).save(tmp_path/'source.png')
+    style = Style(id='s-01',role='body',ea='Arial',latin='Arial',size_px=12,bold=False,color='323232')
+    text = Text(id='t-001',bbox=[10,180,90,12],z=1,style=style.id,text='ABCDE')
+    graph = SimpleNamespace(text=SimpleNamespace(texts=[text],styles=[style]),selected={text.id:{}})
+    path=tmp_path/'slideir.json'
+    path.write_text(json.dumps({'nodes':[{'type':'text','id':'t-001','text':'incorrect'},
+                                          {'type':'text','id':'t-001-field-2','text':'incorrect'}]}),'utf8')
+    expected=effective_texts(graph,path)
+    assert [field.text for field in expected.texts]==['ABC','DE']
