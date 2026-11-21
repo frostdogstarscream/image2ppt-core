@@ -580,6 +580,7 @@ def stage_containers_and_surfaces(
                 'bbox': [float(x), float(y), float(w), float(h)],
                 'restore_bbox': restore_box,
                 'payload': shape_obj.model_dump(),
+                **({'arrow_adjustment':shape_fit['arrow_adjustment']} if 'arrow_adjustment' in shape_fit else {}),
                 'method': 'container-surface-v2-gradient-preset/1',
                 'state': 'STAGED',
                 'quality': 'REVIEW_REQUIRED',

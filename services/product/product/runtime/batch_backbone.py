@@ -1574,14 +1574,20 @@ def restage_batch_candidate_subset(
     staged_graph = SceneGraph.model_validate_json((Path(candidate['ir']).parent / 'scene.json').read_text('utf8'))
     staged_ids = candidate.get('object_ids') or [candidate['object_id']]
     frame_repairs, bad_ids = _collect_office_defects(office_res, staged_graph, staged_ids)
+    if candidate.get('isolation_attempted'):
+        bad_ids.update(frame_repairs)
+        frame_repairs.clear()
     if not (frame_repairs or (bad_ids and len(bad_ids) < len(staged_ids))):
         return False
 
+    bad_ids.update(candidate.get('isolated_bad_ids', []))
     row = service.page(current, candidate['page'])
     initial_baseline = Path(spec['initial_baseline'])
     initial_graph = SceneGraph.model_validate_json((initial_baseline / 'scene.json').read_text('utf8'))
     fonts = json.loads(Path(current['fonts']).read_text('utf8'))
     overrides = {oid: fb['measured_frame_minimum_px'] for oid, fb in frame_repairs.items()}
+    overrides={**candidate.get('frame_overrides',{}),**overrides}
+    candidate['frame_overrides']=overrides
     for trial in spec['trials']:
         members=set(trial.get('region',{}).get('members',[]))
         if members & bad_ids:

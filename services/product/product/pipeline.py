@@ -137,6 +137,8 @@ def compile_pages(irs, output, pages):
     if any((Path(ir).parent/'vector-assets.json').is_file() for ir in irs):
         from .experiment_svg import attach
         attach(artifacts['pptx'],irs)
+    from .recovery.ribbon_geometry import apply_ribbon_geometry
+    apply_ribbon_geometry(artifacts['pptx'],irs)
     verify_package(artifacts['pptx'],pages)
     return artifacts
 

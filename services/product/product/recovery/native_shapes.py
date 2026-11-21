@@ -342,7 +342,7 @@ def _detect_preset_geometry(
             return 'ellipse', None, ~ell_in
 
     # 2. Check right-pointing `pentagon` / `chevron` ribbons (e.g. `01 应用成效`, `平台架构`)
-    if w >= 52 and 20 <= h <= 110 and w >= 1.2 * h:
+    if h >= 12 and w >= 1.2 * h:
         tip_w = min(h // 2 + 6, w // 2)
         if tip_w >= 10:
             fg_closed = cv2.morphologyEx(fg.astype('uint8'), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8)) > 0
@@ -716,6 +716,8 @@ def try_fit_native_shape_v2(
     erase_mask_local = (direct_children_mask_local | proven_fill | proven_border) & ~ext_corner_mask
     return {
         'geometry': geometry,
+        **({'arrow_adjustment':round(100000*int(ext_corner_mask[0].sum())/min(w,h))}
+           if geometry=='pentagon' else {}),
         'fill': hex_rgb(best_rgb),
         'fill_rgb': best_rgb,
         'fill_gradient': grad_obj,

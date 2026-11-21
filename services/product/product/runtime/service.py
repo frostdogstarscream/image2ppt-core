@@ -598,13 +598,17 @@ class RuntimeService(ExplorationTools):
         with lease('compiler'):
             artifacts = compile_pages([ir], directory/'compiled', [effective_texts(graph, ir)])
         result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check')
-        if result.get('status') == 'REVIEW_REQUIRED' and candidate.get('kind') == 'batch' and not candidate.get('isolation_attempted'):
+        if candidate.get('kind') == 'batch':
             from .batch_backbone import restage_batch_candidate_subset
-            if restage_batch_candidate_subset(self, state, current, directory/'batch-isolate', candidate, result):
+            for attempt in range(1, 3):
+                if result.get('status') != 'REVIEW_REQUIRED':
+                    break
+                if not restage_batch_candidate_subset(self, state, current, directory/f'isolate-{attempt}', candidate, result):
+                    break
                 ir, graph, _, _ = self._verify_staged_candidate_graph(current, candidate)
                 with lease('compiler'):
-                    artifacts = compile_pages([ir], directory/'compiled-pass2', [effective_texts(graph, ir)])
-                result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check-pass2')
+                    artifacts = compile_pages([ir], directory/f'compiled-repair-{attempt}', [effective_texts(graph, ir)])
+                result = self.office_check(state, artifacts['pptx'], [ir], directory/f'office-repair-{attempt}')
         if candidate.get('kind')=='text':
             from .office import frame_feedback
             feedback=frame_feedback(result,graph,candidate['object_id'])

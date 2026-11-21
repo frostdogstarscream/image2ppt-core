@@ -116,6 +116,14 @@ def execute_ticket(client,ticket,run,binding):
     if any(not p.is_relative_to(run/'input') for p in irs):
         raise ValueError('Office IR escaped packet')
     result=check_local(run/'input/input.pptx',irs,run/'output/check')
+    if result.get('status')=='UNKNOWN' and result.get('failure')=='QA_INFRASTRUCTURE_UNAVAILABLE':
+        first_attempt=run/'first-office-attempt'
+        (run/'output/check').rename(first_attempt)
+        retry=run/'retry-input.pptx'
+        shutil.copyfile(run/'input/input.pptx',retry)
+        result=check_local(retry,irs,run/'output/check')
+        result['retry_reason']=json.loads((first_attempt/'checks.json').read_text('utf8')).get('reason')
+
     for probe_file in list((run/'output/check').rglob('*')):
         if not probe_file.is_file():
             continue
