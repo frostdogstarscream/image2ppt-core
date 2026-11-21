@@ -960,6 +960,12 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
 
     row = current['pages'][page - 1] if len(current['pages']) >= page else None
     active_graph = service.graph(row) if row else None
+    if active_graph and layers_path_str:
+        from ..recovery.circular_badge import bind_layer_foreground
+        try:
+            bind_layer_foreground(Path(row['scene']).parent, layers_path_str, source, active_graph.source_sha256)
+        except (OSError, ValueError, KeyError) as exc:
+            write(directory/'badge-layer-unavailable.json', {'reason': str(exc)})
     final_styles = [s.model_dump() for s in active_graph.text.styles] if active_graph else styles
     active_style_map = {s['id']: s for s in final_styles}
     for item in measured_items:

@@ -26,3 +26,19 @@ def test_footer_split_requires_source_gutters_and_preserves_wording():
     fields = footer_fields(source, 'ABCDE', [10, 180, 90, 12])
     assert [p[0] for p in fields] == ['ABC', 'DE']
     assert footer_fields(source, 'ABCDE', [10, 20, 90, 12]) == []
+
+
+def test_layer_choice_checks_background_in_transparent_hole():
+    from product.recovery.circular_badge import select_badge_ink
+
+    measured = np.zeros((10,10,4),np.uint8)
+    measured[2:8,4:6] = [30,60,190,255]
+    clean = measured.copy()
+    clean[2:8,4:6,0] = 35
+    source = np.full((10,10,3),240,np.uint8)
+    source[2:8,4:6] = clean[2:8,4:6,:3]
+    assert select_badge_ink(source,'f0f0f0',measured,clean)[1]['selected']=='LayerD'
+    dirty = clean.copy()
+    dirty[:,:,:3][clean[:,:,3]==0] = 240
+    dirty[:,:,3] = 255
+    assert select_badge_ink(source,'f0f0f0',measured,dirty)[1]['selected']=='color-unmix'

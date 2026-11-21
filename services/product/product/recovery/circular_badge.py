@@ -84,3 +84,67 @@ def circular_badge(source, plate, box):
             rgba,
             (left, top, erase, paper),
         )
+
+
+def bind_layer_foreground(directory, layers, source, source_sha):
+    """Carry a verified two-layer page's foreground through incremental scene copies."""
+    from pathlib import Path
+    from PIL import Image
+    from ..object_extract import load_page
+    from ..materialize import digest, write
+
+    page = load_page(layers)
+    if len(page.layers) != 2:
+        return
+    with Image.open(page.source_path) as original:
+        if not np.array_equal(np.asarray(original.convert("RGB")), source):
+            return
+    layer = page.layers[-1]
+    write(
+        Path(directory) / "badge-layer.json",
+        {
+            "source_sha256": source_sha,
+            "path": str(layer.path.resolve()),
+            "sha256": digest(layer.path),
+        },
+    )
+
+
+def select_badge_ink(pixels, face, measured, layer):
+    """Compare against source on the disc and check exposed holes/ink on a dark fill."""
+    face = np.array(list(bytes.fromhex(face)), dtype=float)
+    measured_alpha = measured[..., 3] / 255.0
+    holes = measured_alpha < 0.06
+    strokes = measured_alpha > 0.65
+    trials = []
+    best = measured
+    selected = "color-unmix"
+    best_score = float("inf")
+    for name, candidate in (("color-unmix", measured), ("LayerD", layer)):
+        if candidate is None:
+            trials.append({"method": name, "status": "unavailable"})
+            continue
+        alpha = candidate[..., 3:4] / 255.0
+        rgb = candidate[..., :3].astype(float)
+        original = rgb * alpha + face * (1 - alpha)
+        dark = rgb * alpha + 56 * (1 - alpha)
+        source_error = float(np.abs(original - pixels).max(2).mean())
+        spill = float(np.abs(dark[holes] - 56).max(1).mean()) if holes.any() else 0.0
+        coverage = float(alpha[..., 0][strokes].mean()) if strokes.any() else 0.0
+        valid = coverage >= 0.55 and spill <= 6 and source_error <= 12
+        score = source_error + spill
+        trials.append(
+            {
+                "method": name,
+                "status": "eligible" if valid else "rejected",
+                "source_error": source_error,
+                "dark_hole_error": spill,
+                "stroke_coverage": coverage,
+            }
+        )
+        if valid and score < best_score:
+            best_score, selected, best = score, name, candidate
+    return (best if np.isfinite(best_score) else None), {
+        "selected": selected if np.isfinite(best_score) else "opaque-crop",
+        "candidates": trials,
+    }

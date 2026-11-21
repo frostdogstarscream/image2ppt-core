@@ -323,7 +323,9 @@ def choose_region_background(group, graph, source, masks, fitted, guard, layers,
     ring = outline & ~union & ~guard
     gx, gy, gw, gh = group["bbox"]
     ring &= rectangle([gx, gy, gw, gh], graph.image_size)
+    group["background_decision"] = decision = {"selected":"local-fit","layer_candidates":0,"members":list(masks)}
     if ring.sum() < 10:
+        decision["reason"]="insufficient unprotected surroundings"
         return
     fallbacks = []
     if layers:
@@ -341,6 +343,7 @@ def choose_region_background(group, graph, source, masks, fitted, guard, layers,
         paint = np.abs(image[union].astype(float) - fitted[union]).max(1)
         return np.percentile(seam, 90) <= 12 and np.percentile(paint, 90) <= 19
 
+    decision["layer_candidates"]=len(fallbacks)
     chosen = next((v for v in fallbacks if acceptable(v[0])), None)
     if chosen is None and inpaint:
         neighbors = fitted[ring].astype(float)
@@ -354,6 +357,7 @@ def choose_region_background(group, graph, source, masks, fitted, guard, layers,
                 pass
     if chosen:
         image, method, provenance = chosen
+        decision["selected"]=method
         file = directory / ("region-background-" + group["id"] + ".npz")
         np.savez_compressed(file, clean=image[union])
         group["background"] = {

@@ -421,8 +421,11 @@ def adapt(graph,directory):
     with Image.open(backing) as plate:
         cleaned,bands=title_bands(np.array(plate.convert('RGBA')),chosen,graph.text.texts)
     from .contracts import intersection
-    from .recovery.circular_badge import circular_badge
+    from .recovery.circular_badge import circular_badge, select_badge_ink
     badges={}
+    badge_trials={}
+    layer_image=None
+    binding_file=directory/'badge-layer.json'
     with Image.open(directory/'source.png') as original:
         source_rgb=np.asarray(original.convert('RGB'))
     for record in chosen:
@@ -434,9 +437,25 @@ def adapt(graph,directory):
         bounds,color,rgba,(left,top,mask,paper)=result
         if any(other is not record and intersection(bounds,other['bbox']) for other in chosen):
             continue
+        if layer_image is None and binding_file.is_file():
+            binding=json.loads(binding_file.read_text('utf8'))
+            path=Path(binding['path'])
+            if (binding['source_sha256']==graph.source_sha256 and path.is_file()
+                    and digest(path)==binding['sha256']):
+                with Image.open(path) as layer:
+                    if layer.size==tuple(graph.image_size):
+                        layer_image=np.asarray(layer.convert('RGBA'))
+        x,y,w,h=map(round,record['bbox'])
+        rgba, decision=select_badge_ink(source_rgb[y:y+h,x:x+w],color,rgba,
+                            layer_image[y:y+h,x:x+w] if layer_image is not None else None)
+        badge_trials[record['id']]=decision
+        if rgba is None:
+            continue
         height,width=mask.shape
         cleaned[top:top+height,left:left+width,:3][mask]=np.rint(paper)
         badges[record['id']]=(bounds,color,rgba)
+    if badge_trials:
+        write(directory/'badge-selection.json',{'source_sha256':graph.source_sha256,'objects':badge_trials})
     if bands or badges:
         backing=directory/('plate-bands-'+array_sha(cleaned)[:16]+'.png')
         Image.fromarray(cleaned).save(backing)
