@@ -316,7 +316,7 @@ def create_app(root=None, token=None, run_worker=True):
                                         if orchestrator=='opencode' else {}),
                                      'agent_model':agent_model or os.environ.get('IMAGE2PPT_AGENT_MODEL'),
                                      'object_extraction':object_route,'pipeline_mode':selected_mode,'original_inputs':original_refs,
-                                     'orchestrator':orchestrator,'host_stage0':orchestrator=='opencode','baseline_only':baseline_only,'native_variant':native_variant,
+                                     'orchestrator':orchestrator,'host_stage0':orchestrator=='opencode','object_scoped_delivery':orchestrator=='opencode','baseline_only':baseline_only,'native_variant':native_variant,
                                      'visual_review_backend':'opencode' if orchestrator=='opencode' else 'go',
                                      'goal':goal,'fresh_perception':fresh_perception,'candidate_engine':'r12-regional' if orchestrator=='opencode' else 'off',
                                      'agent_steps':agent_steps,'runtime_seconds':runtime_seconds,

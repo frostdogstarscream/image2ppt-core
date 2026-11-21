@@ -733,6 +733,7 @@ def stage_region_crops(
     allow_movable: bool = True,
     allow_move_unsafe: bool = False,
     allow_transparent_upgrade: bool = True,
+    single_object_only: bool = False,
     max_area_fraction: float = MAX_AREA_FRACTION,
     protected_text_ids: set[str] | None = None,
     skip_seed_ids: set[str] | None = None,
@@ -793,6 +794,11 @@ def stage_region_crops(
     upgraded_mask = np.zeros(plate.shape[:2], bool)
 
     for crop in crops:
+        if single_object_only and (len(set(crop['seed_ids'])) != 1 or
+                                   any(kind == 'text' for kind in crop['kinds'])):
+            report.append({'state':'SKIPPED', 'reason':'NO_SINGLE_OBJECT_OWNER',
+                           'bbox':crop['box'], 'seed_ids':crop['seed_ids']})
+            continue
         if any(sid in skip for sid in crop['seed_ids']):
             continue
         while f'r-{seq:03d}' in used:

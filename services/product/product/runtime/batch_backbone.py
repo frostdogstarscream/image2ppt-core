@@ -1255,7 +1255,7 @@ def _chain_stage_from_spec(
             seed = {'id': field['id'], 'bbox': frame, 'kind': 'asset' if field.get('intrinsic_ui') else 'layout:image',
                     'picture_frame': frame if field.get('intrinsic_ui') else None}
             pic_ir, pic_ids, evidence = stage_region_crops(
-                cur_base, directory/tag/('picture-'+key(field['id'])[:12]), seeds=[seed], skip_seed_ids=skip_ids)
+                cur_base, directory/tag/('picture-'+key(field['id'])[:12]), seeds=[seed], single_object_only=True, skip_seed_ids=skip_ids)
             if pic_ids:
                 cur_base = pic_ir.parent
                 staged_ids.extend(pic_ids)
@@ -1436,7 +1436,7 @@ def _chain_stage_from_spec(
             graph=SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
             if route['id'] not in graph.selected:
                 ir,ids,_ = stage_region_crops(cur_base,directory/tag/('marked-asset-'+key(route['id'])[:12]),
-                    seeds=[{'id':route['id'],'bbox':route['bbox'],'kind':'asset'}],skip_seed_ids=skip_ids)
+                    seeds=[{'id':route['id'],'bbox':route['bbox'],'kind':'asset'}],single_object_only=True,skip_seed_ids=skip_ids)
                 if ids:
                     cur_base=ir.parent
                     staged_ids.extend(ids)
@@ -1506,8 +1506,8 @@ def _chain_stage_from_spec(
             try:
                 crop_ir, crop_ids, _ = stage_region_crops(
                     cur_base, crop_dir,
-                    seeds=crop_seeds,
-                    allow_move_unsafe=bool(allow_move_unsafe),
+                    seeds=crop_seeds, single_object_only=True,
+                    allow_move_unsafe=False,
                     protected_text_ids=protected_text_ids,
                     skip_seed_ids=skip_ids,
                 )
@@ -1580,7 +1580,7 @@ def restage_batch_candidate_subset(
     if not (frame_repairs or (bad_ids and len(bad_ids) < len(staged_ids))):
         return False
 
-    bad_ids.update(candidate.get('isolated_bad_ids', []))
+    # Crop sequence numbers are local to a staging pass. Persist their source identities.
     row = service.page(current, candidate['page'])
     initial_baseline = Path(spec['initial_baseline'])
     initial_graph = SceneGraph.model_validate_json((initial_baseline / 'scene.json').read_text('utf8'))
@@ -1592,9 +1592,16 @@ def restage_batch_candidate_subset(
         members=set(trial.get('region',{}).get('members',[]))
         if members & bad_ids:
             bad_ids.update(members)
-    bad_crop_ids = {oid for oid in bad_ids if staged_graph.selected.get(oid, {}).get('region_crop')}
-    bad_crop_seeds = {sid for oid in bad_crop_ids for sid in staged_graph.selected[oid].get('seed_ids', [])}
-    skip = (bad_ids - bad_crop_ids) | bad_crop_seeds | set(spec.get('pass1_failed_ids', []))
+    bad_crop_ids = {oid for oid in bad_ids if staged_graph.selected.get(oid, {}).get('seed_ids')}
+    bad_crop_seeds = {sid for oid in bad_crop_ids for sid in staged_graph.selected[oid]['seed_ids']}
+    excluded = set(candidate.get('excluded_source_ids', [])) | (bad_ids - bad_crop_ids) | bad_crop_seeds
+    candidate['excluded_source_ids'] = sorted(excluded)
+    candidate.setdefault('isolation_history', []).append({
+        'office_status': office_res.get('status'), 'failed_ids': sorted(bad_ids),
+        'excluded_source_ids': sorted(excluded), 'resized_fields': sorted(frame_repairs),
+        'residuals': [{'id': r['id'], 'status': r.get('residual_check_status'), 'reason': r.get('reason')}
+                      for rows in office_res.get('residuals', []) for r in rows if r.get('id') in bad_ids]})
+    skip = excluded | set(spec.get('pass1_failed_ids', []))
     skip.update(i for r in spec.get('marked_routes', []) if r['route']=='preserve'
                 for i in [r['id'],*r['target_ids']])
     unrec_pass2 = set(spec.get('unrecoverable_text_ids', [])) - bad_crop_seeds
@@ -1991,6 +1998,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'committed_object_ids': [],
             'auto_repaired_frame_ids': auto_repaired_frames,
             'isolated_dropped_ids': isolated_bad_ids,
+            'isolation_history': cand.get('isolation_history', []), 'office_attempts': val.get('office_attempts', 0),
             'failed_count': len(enriched),
             'failed_regions': enriched,
             'next_step': f'Batch candidate {batch_cid} is VALIDATED ({len(staged_ids)} staged, 0 committed). Call commit_candidate(candidate_id="{batch_cid}", expected_version={next_version}) to formally commit, then inspect failed_regions or compose_delivery.',
@@ -2006,6 +2014,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         'committed_count': 0,
         'committed_object_ids': [],
         'isolated_dropped_ids': isolated_bad_ids,
+        'isolation_history': cand.get('isolation_history', []), 'office_attempts': val.get('office_attempts', 0),
         'office_status': val.get('status'),
         'failed_count': len(enriched),
         'failed_regions': enriched,

@@ -11,3 +11,5 @@ description: Reconstruct uploaded slide images into maximally native-editable Po
 4. **Stage 4 — Review and deliver.** Compile, validate Office, fetch the required evidence in small batches, review the rendered changes and finalize. Check content, completeness, layout, residual, background and editing. The host compares the resulting file with its frozen baseline before delivery. Report uncertainty honestly.
 
 Use numbered issues to repair each affected page in at most two rounds. Read the independent audit and the actual PowerPoint edit panels. Stop when no newly validated edits can be committed. Missing independent review leaves the job in REVIEW_REQUIRED.
+
+An independently movable complex object may remain an image. Keep source identities through retries. Surface plans can include an optional outline hint (roundRect, homePlate or chevron). The host measures the outline and owns all replacement masks. A new upload with only page-sized raster content produces diagnostic results without a downloadable deck.

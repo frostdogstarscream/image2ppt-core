@@ -167,7 +167,7 @@ def normalize_arguments(state,current,tool,arguments):
         if not fields or len(fields)>30:
             raise ValueError('select 1 to 30 numbered questions')
         for f in fields:
-            if (set(f)!={'mark','move_with','role','route'} or f['role'] not in ROLES or
+            if (set(f)-{'shape'}!={'mark','move_with','role','route'} or ('shape' in f and (f['route'] != 'surface' or f['shape'] not in ('roundRect','homePlate','chevron'))) or f['role'] not in ROLES or
                     f['route'] not in ('text','asset','surface','table','preserve') or
                     any(n not in by_mark for n in [f['mark'],*f['move_with']])):
                 raise ValueError('use only numbered marks, existing partners, a role and a route')
@@ -181,7 +181,7 @@ def compact(tool,result):
         return {'page':result['page'],'planned_count':result['planned_count'],
                 'object_ids':[r['id'] for r in result['fields']]}
     if tool=='batch_reconstruct_page':
-        return {**{k:result[k] for k in ('page','status','candidate_id','failed_count','staged_count') if k in result},
+        return {**{k:result[k] for k in ('page','status','candidate_id','failed_count','staged_count','office_attempts','isolation_history') if k in result},
                 'failures':dict(Counter(r.get('diagnostic_category','UNKNOWN') for r in result.get('failed_regions',[])))}
     if tool=='validate_office':
         audit = result.get('scorecard_audit', {})

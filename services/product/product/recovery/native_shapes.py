@@ -376,7 +376,7 @@ def _detect_preset_geometry(
                             if iou_c >= 0.84:
                                 return 'chevron', None, ~chev_in
                         iou_p = int((pent_in & fg_closed).sum()) / float(max(1, int((pent_in | fg_closed).sum())))
-                        if iou_p >= 0.85:
+                        if left_corners_fg and iou_p >= 0.85:
                             return 'pentagon', None, ~pent_in
 
     return None

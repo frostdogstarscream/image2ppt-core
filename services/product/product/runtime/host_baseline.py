@@ -88,7 +88,21 @@ def assess(job, current):
                  if val['ssim'] < limits['min_ssim'] or val['delta_e2000_p95'] > limits['max_delta_e2000_p95']]
         plate = audit_plate(job, deck, sha, page, row['snapshot'], lines, fields, marks,
                             {v['ocr_id']:v['after'] for v in readings.values() if v.get('after')})
-        pages.append({'plate_audit':plate,'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
+        unscoped = []
+        page_width, page_height = row['snapshot']['image_size']
+        for oid, record in selected.items():
+            if record.get('kind') != 'asset':
+                continue
+            box = record['bbox']
+            covers_page = _overlap(box, (0, 0, page_width, page_height)) >= page_width * page_height
+            seeds = record.get('seed_ids', [])
+            is_crop = record.get('region_crop') or record.get('payload', {}).get('upgraded_from_region_crop')
+            trapped_text = any(item['status'] == 'unresolved' and _overlap(box, item['bbox']) >
+                               .8 * item['bbox'][2] * item['bbox'][3] for item in plate['rows'])
+            if covers_page or (is_crop and (len(seeds) != 1 or oid not in editables or
+                                            record.get('move_safety') != 'MOVABLE' or trapped_text)):
+                unscoped.append(oid)
+        pages.append({'unscoped_crops':unscoped, 'plate_audit':plate,'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
                       'passed_edits':sorted(f'{oid}/{action}' for oid in editables for action in actions[oid]),
                       'editable_count':len(editables) if verified else None, 'selected_editables':editables,
                       'ocr_native_hits':sorted(set(hits)-pending), 'revised_ocr_lines':sorted(updated),
@@ -178,6 +192,18 @@ def ensure_baseline(job):
         return state.mutate(name,{'sources':sources},None,'host-stage0-'+name,fn)
     step('prepare',lambda c,d:prepare_all(svc,state,c,d,sources=sources))
     for page in range(1,len(sources)+1):
+        if request.get('object_scoped_delivery'):
+            def preserve_text(c, d):
+                graph = svc.graph(svc.page(c, page))
+                targets = [line.id for line in graph.text.texts if line.id not in graph.selected]
+                if not targets:
+                    return {'status':'NO_TEXT_TARGETS'}
+                outcome = svc.batch_reconstruct_page(state,c,d,page=page,object_ids=targets,
+                    include_assets=False,include_containers=False,include_region_crops=False,verify_office=True)
+                if outcome['status'] == 'VALIDATED':
+                    return svc.commit_region(state,c,d/'commit',candidate_id=outcome['candidate_id'])
+                return {'status':outcome['status']}
+            step(f'preserve-text-{page}', preserve_text)
         def reconstruct(c,d):
             outcome = svc.batch_reconstruct_page(state,c,d,page=page,include_region_crops=False,verify_office=True)
             if outcome['status']=='VALIDATED':
@@ -242,8 +268,10 @@ def ensure_baseline(job):
             audit = measured['pages'][page-1]['plate_audit']
             recovered = {r['ocr_id'] for r in audit['rows'] if r['status'] == 'native'}
             recovered.intersection_update(r['ocr_id'] for r in retained)
-            if not recovered or regressions(score, measured):
-                return {'status':'KEPT_BASELINE'}
+            failures = regressions(score, measured)
+            if not recovered or failures:
+                return {'status':'KEPT_BASELINE','recovered_fields':sorted(recovered),
+                        'reasons':failures or ['NO_ADDITIONAL_NATIVE_FIELD']}
             c.update(trial)
             return {'status':'ADOPTED','recovered':sorted(recovered)}
         def safe_retry(c, d):
@@ -360,7 +388,9 @@ def selected_result(job):
     if not selection.is_file():
         return None
     receipt = read(selection)
-    if digest(job/'result.json')!=receipt['result_sha256'] or digest(job/'delivery/result.pptx')!=receipt['selected_sha256']:
+    if digest(job/'result.json') != receipt['result_sha256']:
+        raise RuntimeConflict('selected report changed')
+    if receipt['selected_sha256'] is not None and digest(job/'delivery/result.pptx') != receipt['selected_sha256']:
         raise RuntimeConflict('selected delivery bytes changed')
     return read(job/'result.json')
 
@@ -368,6 +398,27 @@ def selected_result(job):
 def publish(job, agent, reasons=None, candidate=None):
     with RuntimeState(job).publication_lock():
         return selected_result(job) or _publish(job,agent,reasons,candidate)
+
+
+def delivery_defects(score):
+    defects = []
+    for page in score['pages']:
+        audit = page.get('plate_audit', {})
+        reasons = []
+        if not score.get('verified') or not page.get('selected_editables'):
+            reasons.append('NO_VERIFIED_EDITABLE_OBJECT')
+        if audit.get('status') != 'MEASURED':
+            reasons.append('SOURCE_PLATE_UNVERIFIED')
+        retained = [row for row in audit.get('rows', [])
+                    if row['status'] in ('retained', 'residual', 'plate_only')]
+        if retained:
+            reasons.append('TEXT_STILL_ON_BACKGROUND')
+        if page.get('unscoped_crops'):
+            reasons.append('IMAGE_WITHOUT_SINGLE_OBJECT_OWNER')
+        if reasons:
+            defects.append({'page': page['page'], 'reasons': reasons, 'retained_fields': retained,
+                            'unscoped_crops': page.get('unscoped_crops', [])})
+    return defects
 
 
 def _publish(job, agent, reasons, candidate):
@@ -387,7 +438,30 @@ def _publish(job, agent, reasons, candidate):
                 any(Path(name).name!=name or not (staging/name).is_file() or digest(staging/name)!=sha
                     for name,sha in files.items())):
             reasons = ['AGENT_PACKAGE_HASH_MISMATCH']
+    strict = read(job/'request.json').get('object_scoped_delivery', False)
+    if strict and candidate and not reasons and delivery_defects(candidate):
+        reasons = ['AGENT_FAILED_OBJECT_SCOPE_GATE']
     fallback = bool(reasons)
+    if strict and fallback and delivery_defects(base):
+        result = {'status':'REVIEW_REQUIRED', 'completion':'RECONSTRUCTION_INCOMPLETE',
+                  'reason':'No verified object-scoped presentation', 'origin': ORIGIN,
+                  'failed_pages':delivery_defects(base), 'fallback_reasons':reasons,
+                  'office_pass':base['verified'], 'automatic_publication':False, 'human_acceptance':False,
+                  'baseline_pages':summary(base), 'independent_go_review':'UNKNOWN', 'wps_acceptance':'UNKNOWN'}
+        write(delivery/'summary.json', result)
+        install_file(root/'scorecard.json', delivery/'baseline-scorecard.json')
+        names = ['summary.json','baseline-scorecard.json']
+        for p in base['pages']:
+            preview = root/('page-%02d-before.png' % p['page'])
+            if preview.is_file():
+                name = 'diagnostic-page-%02d.png' % p['page']
+                install_file(preview, delivery/name)
+                names.append(name)
+        result['artifacts'] = {name:digest(delivery/name) for name in names}
+        write(job/'result.json',result)
+        write(state.root/'delivery-selection.json', {'result_sha256':digest(job/'result.json'),
+              'selected_sha256':None,'origin':ORIGIN})
+        return result
     if fallback:
         frozen = read(root/'state.json')
         if current['version']!=frozen['version'] and current['status']!='REVIEW_REQUIRED':
@@ -467,6 +541,8 @@ def _publish(job, agent, reasons, candidate):
         if candidate.get('verified') and trial.is_file() and digest(trial) == candidate['pptx_sha256']:
             install_file(trial, delivery/'agent-candidate.pptx')
             names.add('agent-candidate.pptx')
+    if strict:
+        names = {name for name in names if not name.lower().endswith('.pptx') or name == 'result.pptx'}
     result['artifacts'] = {name:digest(delivery/name) for name in sorted(names) if (delivery/name).is_file()}
     write(job/'result.json',result)
     if not fallback and result.get('pending_text_objects') and current['status'] != 'REVIEW_REQUIRED':

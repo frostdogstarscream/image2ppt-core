@@ -64,6 +64,7 @@ def schemas():
     region = {'page': page, 'object_id': string}
     plan_field={'type':'object','additionalProperties':False,'required':['mark','role','move_with','route'],
                 'properties':{'mark':{'type':'integer','minimum':1},'role':string,
+                              'shape':{'type':'string','enum':['roundRect','homePlate','chevron'], 'description':'Optional surface outline hint; measured by host.'},
                               'move_with':{'type':'array','items':{'type':'integer','minimum':1}},
                               'route':{'enum':['text','surface','asset','table','preserve']}}}
     fields = {

@@ -223,3 +223,23 @@ def test_numbered_actions_reject_whole_page_and_unowned_marks(tmp_path):
     c['repair_rounds']['1'].append({'object_ids':['a'],'progress':False})
     with pytest.raises(ValueError, match='local repair limit'):
         batch(block=1)
+
+def test_object_only_delivery_checks_each_page_and_source_plate():
+    from product.runtime.host_baseline import delivery_defects
+    photo = {'page':1,'selected_editables':['a-001'], 'plate_audit':{'status':'MEASURED','rows':[]}}
+    flat = {**photo,'page':2,'selected_editables':[]}
+    assert not delivery_defects({'verified':True,'pages':[photo]})
+    assert delivery_defects({'verified':True,'pages':[photo,flat]})[0]['page'] == 2
+    for reason, changes in [
+        ('TEXT_STILL_ON_BACKGROUND', {'plate_audit':{'status':'MEASURED','rows':[{'status':'retained'}]}}),
+        ('IMAGE_WITHOUT_SINGLE_OBJECT_OWNER', {'unscoped_crops':['r-001']})]:
+        assert reason in delivery_defects({'verified':True,'pages':[{**photo,**changes}]})[0]['reasons']
+
+def test_raster_only_upload_has_only_diagnostics_even_after_restart(job):
+    request = json.loads((job/'request.json').read_text('utf8'))
+    write(job/'request.json', {**request, 'object_scoped_delivery':True, 'baseline_only':True})
+    result = runner.run(job)
+    assert result['completion'] == 'RECONSTRUCTION_INCOMPLETE'
+    assert all(not name.endswith('.pptx') for name in result['artifacts'])
+    assert not (job/'delivery/result.pptx').exists()
+    assert host.selected_result(job) == result

@@ -47,6 +47,13 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
     from ..runtime.marked_routes import iou
 
     baseline, output = Path(baseline), Path(output)
+    from .container_stage import stage_containers_and_surfaces
+    marked_boxes = {tuple(field['bbox']): field['id'] for field in routes if field['id'] not in skip_ids}
+    ribbon_ids = []
+    if marked_boxes:
+        ribbon_ir, ribbon_ids = stage_containers_and_surfaces(
+            baseline, output.with_name(output.name+'-ribbons'), skip_ids=skip_ids, marked_boxes=marked_boxes)
+        baseline = ribbon_ir.parent
     graph = SceneGraph.model_validate_json((baseline / 'scene.json').read_text('utf8'))
     plate_ref = graph.raster_backing
     src = baseline / 'source.png'
@@ -82,6 +89,8 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         if sid in graph.selected or {field['id'], sid} & skip_ids:
             continue
         peers = [r for r in graph.selected.values() if intersection(box, r['bbox'])]
+        if any(r['kind'] == 'surface' and iou(box,r['bbox']) >= .95 for r in peers):
+            continue
         from .layered_card import contained_peers, frame_layers, native_child_faces
         layered = field.get('label') == 'card_frame'
         if not contained_peers(box, peers, layered=layered):
@@ -296,11 +305,11 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         else:
             plate[y:y+h,x:x+w,:3] = parent_patch
     if not staged:
-        return baseline / 'slideir.json', []
+        return baseline / 'slideir.json', ribbon_ids
     Image.fromarray(plate).save(output / plate_path.name)
     graph.raster_backing = {**plate_ref, 'sha256': digest(output / plate_path.name)}
     record_claims(output, (graph.selected[k] for k in staged))
     write(output / 'scene.json', graph.model_dump())
     write(output / 'transactions.json', graph.transactions)
     write(output / 'slideir.json', adapt(graph, output))
-    return output / 'slideir.json', staged
+    return output / 'slideir.json', [*ribbon_ids, *staged]

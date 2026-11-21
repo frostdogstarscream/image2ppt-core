@@ -234,6 +234,7 @@ class RuntimeService(ExplorationTools):
             row=by_mark[field['mark']]
             parents=[by_mark[n]['id'] for n in field['move_with']]
             plans.append({'id':row['id'],'bbox':row['bbox'],'role':field['role'],
+                          **({'shape':field['shape']} if 'shape' in field else {}),
                           'move_with':parents,'route':field['route'],'source_text':row.get('text','')})
         previous=current.get('marked_plans',{}).get(str(page),[]) if append else []
         merged={r['id']:r for r in [*previous,*plans]}
@@ -322,7 +323,7 @@ class RuntimeService(ExplorationTools):
 
         crop_ir, staged_ids, report = stage_region_crops(
             Path(row['ir']).parent, directory / 'staged',
-            seeds=seeds, allow_movable=allow_movable, allow_move_unsafe=allow_move_unsafe,
+            seeds=seeds, allow_movable=allow_movable, allow_move_unsafe=False, single_object_only=True,
             protected_text_ids=protected_text_ids,
         )
         full_report = [*layout_report, *report]
@@ -358,7 +359,7 @@ class RuntimeService(ExplorationTools):
             'kind': 'batch', 'status': 'STAGED_LOCAL', 'ir': str(ir),
             'parent_ir_sha256': digest(row['ir']), 'parent_scene_sha256': digest(row['scene']),
             'strategy': strategy, 'code': self.code_binding(),
-            'isolation_attempted': strategy == 'photo_frame',
+            'isolation_allowed': strategy != 'photo_frame',
             'fingerprint': key({'objects': ids, 'ir': digest(ir)}),
             'files': {str(p): digest(p) for p in ir.parent.rglob('*') if p.is_file()},
         }
@@ -598,7 +599,8 @@ class RuntimeService(ExplorationTools):
         with lease('compiler'):
             artifacts = compile_pages([ir], directory/'compiled', [effective_texts(graph, ir)])
         result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check')
-        if candidate.get('kind') == 'batch':
+        attempts = result.get('office_attempts', 0)
+        if candidate.get('kind') == 'batch' and candidate.get('isolation_allowed', candidate.get('strategy') != 'photo_frame'):
             from .batch_backbone import restage_batch_candidate_subset
             for attempt in range(1, 3):
                 if result.get('status') != 'REVIEW_REQUIRED':
@@ -609,6 +611,8 @@ class RuntimeService(ExplorationTools):
                 with lease('compiler'):
                     artifacts = compile_pages([ir], directory/f'compiled-repair-{attempt}', [effective_texts(graph, ir)])
                 result = self.office_check(state, artifacts['pptx'], [ir], directory/f'office-repair-{attempt}')
+                attempts += result.get('office_attempts', 0)
+        result = {**result, 'office_attempts': attempts}
         if candidate.get('kind')=='text':
             from .office import frame_feedback
             feedback=frame_feedback(result,graph,candidate['object_id'])
@@ -786,7 +790,7 @@ class RuntimeService(ExplorationTools):
             for path,sha in result.get('files',{}).items():
                 if digest(path)!=sha:raise RuntimeConflict('cached Office evidence changed')
             write(Path(directory)/'checks.json',result)
-            return {**result,'cache_hit':True}
+            return {**result,'cache_hit':True,'office_attempts':0}
         request=json.loads((state.job/'request.json').read_text('utf8'))
         budget=AdaptiveBudget(Store(state.job/'state'),request.get('adaptive_budget'))
         budget.reserve('office_validations',identity)
@@ -795,6 +799,20 @@ class RuntimeService(ExplorationTools):
         if os.environ.get('IMAGE2PPT_OFFICE_MODE', 'local') == 'remote':
             from .office_bridge import submit
             result=submit(state.job, pptx, irs, directory)
+            result['office_attempts'] = 1
+            if result.get('failure') == 'QA_INFRASTRUCTURE_UNAVAILABLE' and result.get('status') == 'UNKNOWN':
+                from ..parallel_store import BudgetExceeded
+                remaining = state.remaining_seconds()
+                try:
+                    retry = (remaining is None or remaining > 0) and budget.reserve(
+                        'office_validations', {'retry': identity})
+                except BudgetExceeded:
+                    retry = False
+                if retry:
+                    first_reason = result.get('reason')
+                    result = submit(state.job, pptx, irs, Path(directory)/'retry',
+                                    timeout=min(1800, remaining) if remaining else 1800)
+                    result.update(office_attempts=2, retry_reason=first_reason)
             actual = result.get('worker_binding')
             if actual and identity['worker'].get('binding') != actual:
                 # A different worker may claim the ticket after the last poll.
@@ -804,6 +822,7 @@ class RuntimeService(ExplorationTools):
         else:
             from .office import check_local
             result=check_local(pptx, irs, directory)
+            result['office_attempts'] = 1
         write(receipt,{'identity':identity,'operation':str(directory),'result':result})
         if receipt != provisional:
             provisional.unlink(missing_ok=True)

@@ -24,6 +24,7 @@ def apply_ribbon_geometry(pptx, irs):
                 continue
             part = f'ppt/slides/slide{number}.xml'
             root = ET.fromstring(archive.read(part))
+            matched = False
             for shape in root.iter(P+'sp'):
                 props = shape.find(P+'nvSpPr/'+P+'cNvPr')
                 name = props.get('name') if props is not None else None
@@ -31,7 +32,8 @@ def apply_ribbon_geometry(pptx, irs):
                     continue
                 geom = shape.find(P+'spPr/'+A+'prstGeom')
                 if geom is None or geom.get('prst') != 'pentagon':
-                    raise ValueError('right-pointing ribbon lost its editable geometry')
+                    continue
+                matched = True
                 geom.set('prst', 'homePlate')
                 guides = geom.find(A+'avLst')
                 if guides is None:
@@ -39,7 +41,10 @@ def apply_ribbon_geometry(pptx, irs):
                 guides.clear()
                 ET.SubElement(guides, A+'gd', name='adj', fmla=f'val {adjustments.pop(name)}')
             if adjustments:
-                raise ValueError('right-pointing ribbon missing from compiled slide')
+                import logging
+                logging.getLogger(__name__).warning('Missing editable ribbon geometries: %s', sorted(adjustments))
+            if not matched:
+                continue
             updates[part] = ET.tostring(root, encoding='UTF-8', xml_declaration=True, standalone=True)
         if not updates:
             return

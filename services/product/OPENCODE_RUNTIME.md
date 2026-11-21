@@ -124,3 +124,5 @@ python -m pytest services/product/tests/test_opencode_runtime.py -q
 ```
 
 Synthetic checks cover contracts and recovery behavior. Real image/Agent/Office acceptance is recorded separately under `docs/acceptance` when executed.
+
+For object-scoped uploads each Office ticket makes one physical check. On an infrastructure failure the host may reserve one extra Office validation and submit the same package a second time. Each ticket uploads its own output/check evidence. Retry evidence lives under the original operation's retry directory. Object failures are handled separately by the batch isolation path. The compact batch response includes office_attempts and isolation_history. New uploads omit presentation downloads when a page has no verified independent objects, retained text on its background, or an unverified object crop. Diagnostic previews and scorecards remain available.
