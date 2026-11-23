@@ -39,6 +39,81 @@ def test_card_keeps_verified_photo_hole_and_rejects_crossing_photo(tmp_path):
     assert rgba[65, 20, 3] == 255
 
 
+def test_previously_verified_transparent_strokes_leave_their_holes_to_the_card(tmp_path):
+    box, bounds = [10, 10, 120, 90], [44, 35, 11, 24]
+    source = np.full((120, 150, 3), 249, np.uint8)
+    source[10:100, 10:130] = 231
+    source[36:58, 48:51] = [20, 65, 150]
+    mask = np.zeros(source.shape[:2], bool)
+    mask[36:58, 48:51] = True
+    file, owner = tmp_path/'line.png', tmp_path/'owner.npz'
+    pixels = np.zeros((24, 11, 4), np.uint8)
+    pixels[1:-1, 4:7] = [20, 65, 150, 255]
+    Image.fromarray(pixels).save(file)
+    np.savez_compressed(owner, mask=mask, restore_bbox=bounds, backing_patch=np.full((24,11,3), 231, np.uint8))
+    child = {'kind':'asset', 'id':'line', 'bbox':bounds, 'restore_bbox':bounds, 'source_sha256':'src',
+             'complete_owner_scope':True,
+             'owner_evidence':{'file':owner.name,'sha256':digest(owner)},
+             'asset_reference':{'path':file.name,'sha256':digest(file),'source_sha256':'src','bbox':bounds}}
+    verified = {'line':[digest(file),digest(owner)]}
+    assert contained_peers(box,[child],layered=True,verified_assets=verified)
+    for changed in ({'move_safety':'MOVE_UNSAFE'}, {'complete_owner_scope':False}, {'restore_bbox':[0,5,70,66]},
+                    {'source_sha256':'other-page'}):
+        assert not contained_peers(box,[{**child,**changed}],layered=True,verified_assets=verified)
+    assert not contained_peers(box,[child],layered=True,verified_assets={'line':['stale',digest(owner)]})
+    clean = np.full((90,120,3),231,np.uint8)
+    parent = np.full_like(clean,249)
+    def stage():
+        return frame_layers(clean,parent,box,[child],tmp_path,[],verified_assets=verified,source_rgb=source)
+    result = stage()
+    assert result is not None and np.array_equal(result[3],mask[10:100,10:130])
+    assert not result[-1][25:49,34:45,3].any()
+    # A neighboring stroke inside a transparent hole cannot be erased.
+    source[40,45] = 0
+    assert stage() is None
+    source[40,45] = 231
+    pixels[5,1] = [8,20,112,255]
+    Image.fromarray(pixels).save(file)
+    with pytest.raises(ValueError,match='picture changed'):
+        stage()
+    child['asset_reference']['sha256'] = verified['line'][0] = digest(file)
+    assert stage() is None
+
+
+def test_dark_frame_edge_requires_quiet_exterior_and_continuous_face():
+    from product.recovery.layered_card import _continuous_frame_edge
+    source = np.full((120,160,3),252,np.uint8)
+    box = [21,20,110,76]
+    parent = np.full((76,110,3),252,np.uint8)
+    source[20:96,21:131] = [192,220,249]
+    assert _continuous_frame_edge(source,parent,box)
+    source[17:30,50] = [10,60,110]
+    assert not _continuous_frame_edge(source,parent,box)
+    source[17:30,50] = 252
+    source[20:30,50] = [192,220,249]
+    source[20,77] = [8,12,16]
+    assert not _continuous_frame_edge(source,parent,box)
+
+
+def test_child_receipt_binds_the_page_scene_and_committed_presentation(tmp_path):
+    from product.runtime.batch_backbone import committed_graphic_evidence
+    ir, scene_file = tmp_path/'slideir.json', tmp_path/'scene.json'
+    ir.write_text('{}'); scene_file.write_text('{}')
+    page={'ir':str(ir),'scene':str(scene_file)}
+    scene=SimpleNamespace(source_sha256='src',selected={'symbol':{'kind':'asset','source_sha256':'src',
+        'complete_owner_scope':True,'asset_reference':{'sha256':'pixels'},'owner_evidence':{'sha256':'mask'}}})
+    record={'page':2,'status':'COMMITTED','validation':{'status':'PASS'},'validated_bundle':{'irs':[digest(ir)]},
+            'ir':str(ir),'files':{str(scene_file):digest(scene_file)}}
+    state={'candidates':{'candidate':record}}
+    assert committed_graphic_evidence(state,page,2,scene)=={'symbol':['pixels','mask']}
+    assert not committed_graphic_evidence(state,page,1,scene)
+    record['status']='STAGED_LOCAL'
+    assert not committed_graphic_evidence(state,page,2,scene)
+    record['status']='COMMITTED'
+    scene_file.write_text('{"changed":true}')
+    assert not committed_graphic_evidence(state,page,2,scene)
+
+
 @pytest.mark.parametrize(
     'old,new',
     [

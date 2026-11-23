@@ -6,6 +6,7 @@ from PIL import Image
 from ..contracts import intersection
 from ..materialize import digest
 from ..parallel_store import key
+from ..tolerance_config import load_tolerance_config
 from .native_shapes import _fit_linear_gradient, estimate_canvas_field
 
 
@@ -40,13 +41,28 @@ def geometry_marks(source, text_rows, *, icon_boxes=()):
     return rows
 
 
-def contained_peers(box, peers, *, layered=False):
+def _verified_graphic(row, verified_assets):
+    ref = row.get('asset_reference') or {}
+    owner = row.get('owner_evidence') or {}
+    return bool(row.get('complete_owner_scope') and row.get('move_safety') != 'MOVE_UNSAFE'
+                and row.get('source_sha256') and ref.get('source_sha256') == row['source_sha256']
+                and ref.get('bbox') == row['bbox'] and ref.get('sha256') and owner.get('sha256')
+                and verified_assets and verified_assets.get(row.get('id')) == [ref['sha256'], owner['sha256']])
+
+
+def contained_peers(box, peers, *, layered=False, verified_assets=None):
     surfaces = []
     for row in peers:
         bounds = row['bbox']
         if not row.get('owner_evidence') or intersection(box, bounds) < bounds[2]*bounds[3]:
             return False
-        if row['kind'] == 'text' or row['kind'] == 'asset' and row.get('move_safety') == 'MOVABLE':
+        if row['kind'] == 'text':
+            continue
+        if row['kind'] == 'asset' and (row.get('move_safety') == 'MOVABLE'
+                                       or layered and _verified_graphic(row, verified_assets)):
+            restore = row.get('restore_bbox', bounds)
+            if layered and intersection(box, restore) < restore[2]*restore[3]:
+                return False
             continue
         if not (layered and row['kind'] == 'surface' and row.get('payload', {}).get('geometry') in ('rect', 'roundRect')):
             return False
@@ -68,7 +84,7 @@ def contained_peers(box, peers, *, layered=False):
 
 
 def bind_photo_backing(directory, record, frame_id, frame_box, field):
-    """Bind a photo or native child to its measured parent fill without changing its ownership."""
+    """Bind a child's delete backdrop to its measured parent without changing its ownership."""
     old = record['owner_evidence']
     path = directory / old['file']
     if digest(path) != old['sha256']:
@@ -85,8 +101,8 @@ def bind_photo_backing(directory, record, frame_id, frame_box, field):
     record['owner_evidence'] = {
         'file': new_path.name,
         'sha256': digest(new_path),
-        'method': ('native-card-under-verified-surface/1' if record.get('kind') == 'surface'
-                   else 'native-card-under-verified-photo/1'),
+        'method': {'surface':'native-card-under-verified-surface/1','text':'native-card-under-verified-text/1'
+                   }.get(record.get('kind'),'native-card-under-verified-photo/1'),
         'prior': dict(old),
     }
     record['payload'] = {**record.get('payload', {}), 'background_parent_id': frame_id}
@@ -108,7 +124,62 @@ def native_child_faces(box, peers):
     return faces
 
 
-def frame_layers(patch, parent, box, peers, baseline, ignore_boxes, *, child_faces=None):
+def _continuous_frame_edge(source, parent, box):
+    """Every edge pixel must be paper, card face, or their antialiased transition."""
+    x, y, w, h = box
+    reach = max(3, round(min(w, h) * .045))
+    if min(x, y) < reach or x+w+reach > source.shape[1] or y+h+reach > source.shape[0]:
+        return False
+    sides = (
+        (source[y-reach:y+4, x:x+w], parent[0]),
+        (source[y+h-4:y+h+reach, x:x+w][::-1], parent[-1]),
+        (source[y:y+h, x-reach:x+4].transpose(1,0,2), parent[:,0]),
+        (source[y:y+h, x+w-4:x+w+reach][:,::-1].transpose(1,0,2), parent[:,-1]),
+    )
+    tolerance = load_tolerance_config()['residual_gate']['source_ink_contrast_rgb']
+    for strip, backing in sides:
+        backing = backing.astype(float)
+        # A crossing line or photo must not disappear when the parent is removed.
+        if np.max(np.abs(strip[:2].astype(float)-backing)) > tolerance:
+            return False
+        inside = np.median(strip[-3:], axis=0)
+        direction = inside-backing
+        pixels = strip[2:-2].astype(float)-backing
+        scale = np.clip((pixels*direction).sum(2) / np.maximum(1,(direction*direction).sum(1)), 0, 1)
+        if np.max(np.abs(pixels-scale[...,None]*direction)) > tolerance:
+            return False
+    return True
+
+
+def _transparent_holes_match(record, proof, baseline, source, occupied, verified_assets):
+    """Verify that a previously edited graphic leaves its unowned pixels to the parent."""
+    if (not _verified_graphic(record, verified_assets) or source is None or not occupied.any()
+            or 'backing_patch' not in proof or 'restore_bbox' not in proof):
+        return False
+    ref = record['asset_reference']
+    path = baseline / ref['path']
+    if digest(path) != ref['sha256']:
+        raise ValueError('card child picture changed')
+    x, y, w, h = map(round, record['bbox'])
+    with Image.open(path) as image:
+        if image.mode != 'RGBA' or image.size != (w, h):
+            return False
+        rgba = np.asarray(image).astype(float)
+    px, py, pw, ph = map(int, proof['restore_bbox'])
+    if not (px <= x and py <= y and x+w <= px+pw and y+h <= py+ph):
+        return False
+    background = proof['backing_patch'][y-py:y-py+h, x-px:x-px+w].astype(float)
+    if background.shape != (h, w, 3) or rgba[..., 3].min() == 255:
+        return False
+    holes = ~occupied
+    original = source[y:y+h, x:x+w].astype(float)
+    tint = (rgba[..., :3]-background) * (rgba[..., 3:4]/255)
+    tolerance = load_tolerance_config()['residual_gate']['plate_backing_rgb']
+    return np.abs(original-background)[holes].max() <= tolerance and np.abs(tint)[holes].max() <= tolerance
+
+
+def frame_layers(patch, parent, box, peers, baseline, ignore_boxes, *, child_faces=None,
+                 verified_assets=None, source_rgb=None):
     """Fit exposed card paper; retain unexplained interior art and leave photo holes transparent."""
     x, y, w, h = box
     sample = np.ones((h, w), bool)
@@ -124,15 +195,23 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes, *, child_fac
             raise ValueError('card child source evidence changed')
         with np.load(f, allow_pickle=False) as proof:
             mask = proof['mask'][y : y + h, x : x + w].astype(bool)
+            if verified_assets and 'restore_bbox' in proof:
+                px, py, pw, ph = map(int, proof['restore_bbox'])
+                if not (x <= px and y <= py and px+pw <= x+w and py+ph <= y+h):
+                    return None
+            if r['kind'] == 'asset':
+                ax, ay, aw, ah = map(round, r['bbox'])
+                occupied = mask[ay-y:ay-y+ah, ax-x:ax-x+aw]
+                if occupied.shape != (ah, aw):
+                    return None
+                if not occupied.all() and not _transparent_holes_match(r, proof, baseline, source_rgb,
+                                                                       occupied, verified_assets):
+                    return None
         owned |= mask
         if r['kind'] == 'surface':
             native_children |= mask
             # Source-owner halos may extend beyond the opaque native face.
         if r['kind'] == 'asset':
-            ax, ay, aw, ah = map(round, r['bbox'])
-            occupied = mask[ay - y : ay - y + ah, ax - x : ax - x + aw]
-            if occupied.shape != (ah, aw) or not occupied.all():
-                return None
             photos |= mask
     for b in [r['bbox'] for r in peers] + list(ignore_boxes):
         ax, ay, aw, ah = map(round, b)
@@ -170,7 +249,8 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes, *, child_fac
     rim[:, [0, -1]] = True
     exterior_error = np.abs(patch.astype(float) - parent).max(2)
     bad = (exterior_error > 35) & rim
-    if bad.sum() > max(3, round(0.015 * rim.sum())):
+    if (bad.sum() > max(3, round(0.015 * rim.sum())) and
+            not (verified_assets and source_rgb is not None and _continuous_frame_edge(source_rgb, parent, box))):
         return None
     ink = (delta > 12) & ~photos
     # Keep complete islands such as photographs (including their light interiors).
@@ -201,6 +281,19 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes, *, child_fac
     # A previously hidden source pixel remains behind its opaque child. Moving
     # it into an upper picture would give that picture the wrong delete backing.
     ink &= ~(photos | native_children | child_faces | edge_blend)
+    if verified_assets and source_rgb is not None:
+        # Page-coloured pixels at a rounded corner belong below the card.
+        # A translucent art tile above the face would take that old corner with it.
+        radius = min(12,h//4,w//4)
+        yy, xx = np.ogrid[:h,:w]
+        near_corner = ((xx < radius+2) | (xx >= w-radius-2)) & ((yy < radius+2) | (yy >= h-radius-2))
+        page_color = near_corner & (exterior_error <= load_tolerance_config()['residual_gate']['source_ink_contrast_rgb'])
+        _, components = cv2.connectedComponents(page_color.astype('uint8'), connectivity=4)
+        exterior_components = np.unique(components[rim & page_color])
+        ink &= ~np.isin(components, exterior_components)
+        # Make earlier children reveal the newly measured native face. Their
+        # source owners remain unchanged and will be checked again in Office.
+        ink &= ~owned
     # Paper tint must follow a new card colour. Preserve full-opacity photo and label
     # interiors; express the low-contrast shading elsewhere as a translucent tint.
     opacity = np.where(solid, 1.0, np.minimum(delta / 170.0, 0.24))

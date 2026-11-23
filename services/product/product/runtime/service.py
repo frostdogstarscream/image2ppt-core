@@ -348,8 +348,12 @@ class RuntimeService(ExplorationTools):
 
     def stage_photo_frame(self, state, current, directory, page, frame):
         from ..recovery.marked_surfaces import stage_marked_surfaces
+        from .batch_backbone import committed_graphic_evidence
         row = self.page(current, page)
-        ir, ids = stage_marked_surfaces(Path(row['ir']).parent, directory/'staged', [frame], set())
+        request = json.loads((state.job/'request.json').read_text('utf8'))
+        verified = committed_graphic_evidence(current, row, page, self.graph(row)) if request.get('object_scoped_delivery') else {}
+        ir, ids = stage_marked_surfaces(Path(row['ir']).parent, directory/'staged', [frame], set(),
+                                        verified_assets=verified)
         if not ids:
             return {'status': 'NO_FRAME_STAGED', 'page': page}
         return self._stage_asset_candidate(state, current, directory, page, ir, ids, 'photo_frame', [])

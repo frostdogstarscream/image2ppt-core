@@ -1121,6 +1121,23 @@ def _collect_office_defects(office_result: dict, graph: SceneGraph, staged_ids: 
     return frame_repairs, bad_ids
 
 
+def committed_graphic_evidence(current, row, page, graph):
+    """Bind prior Office validation to the exact composition and ownership records."""
+    ir, scene = Path(row['ir']), Path(row['scene'])
+    for candidate in current.get('candidates', {}).values():
+        if (candidate.get('page') != page or candidate.get('status') != 'COMMITTED'
+                or candidate.get('validation', {}).get('status') != 'PASS' or candidate.get('ir') != str(ir)):
+            continue
+        if (candidate.get('validated_bundle', {}).get('irs') != [digest(ir)]
+                or candidate.get('files', {}).get(str(scene)) != digest(scene)):
+            continue
+        return {rid: [r['asset_reference']['sha256'], r['owner_evidence']['sha256']]
+                for rid, r in graph.selected.items() if r['kind'] == 'asset' and r.get('complete_owner_scope')
+                and r.get('source_sha256') == graph.source_sha256 and r.get('asset_reference', {}).get('sha256')
+                and r.get('owner_evidence', {}).get('sha256')}
+    return {}
+
+
 def _chain_stage_from_spec(
     *,
     initial_graph: SceneGraph,
@@ -1149,6 +1166,7 @@ def _chain_stage_from_spec(
     prepared_tables=None,
     single_object_only=False,
     panel_regions=None,
+    verified_assets=None,
 ) -> tuple[Path, list[str], list[dict]]:
     from .. import layout_evidence, matting
     from ..object_stage import infer_sam
@@ -1502,7 +1520,7 @@ def _chain_stage_from_spec(
         try:
             from ..recovery.marked_surfaces import stage_marked_surfaces
             card_ir, card_ids = stage_marked_surfaces(cur_base, directory/tag/'marked-cards',
-                                                      surface_routes, skip_ids)
+                                                      surface_routes, skip_ids, verified_assets=verified_assets)
         except (ImportError, OSError, ValueError, RuntimeError) as exc:
             for proposal in surface_routes:
                 stage_errors.append({'object_id':proposal['id'], 'kind':'surface', 'bbox':proposal['bbox'],
@@ -1661,6 +1679,7 @@ def restage_batch_candidate_subset(
         tag='stage-pass2',
         single_object_only=spec.get('single_object_only', False),
         panel_regions=spec.get('panel_regions'),
+        verified_assets=spec.get('verified_assets'),
         experiment_profile=spec.get('experiment_profile'),
         marked_routes=spec.get('marked_routes', ()),
         trials_spec=spec['trials'],
@@ -1925,6 +1944,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             ]
         return [_classify_failed_region(err, cg if staged_crop_boxes else initial_graph, logo_ids, staged_crop_boxes) for err in failed_regions]
 
+    verified_assets = (committed_graphic_evidence(current, row, page, initial_graph)
+                       if request.get('object_scoped_delivery') and any(r['route']=='surface' for r in routes) else {})
     final_base, staged_ids, stage_errors = _chain_stage_from_spec(
         initial_graph=initial_graph,
         initial_baseline=initial_baseline,
@@ -1938,6 +1959,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         prepared_tables=prepared_tables,
         single_object_only=request.get('object_scoped_delivery', False),
         panel_regions=panel_regions,
+        verified_assets=verified_assets,
         experiment_profile=request.get('experiment_profile'),
         marked_routes=routes,
         trials_spec=trials_spec,
@@ -1984,6 +2006,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'initial_baseline': str(initial_baseline),
             'single_object_only': request.get('object_scoped_delivery', False),
             'panel_regions': panel_regions,
+            'verified_assets': verified_assets,
             'experiment_profile':request.get('experiment_profile'),
             'marked_routes':routes,
             'cache_dir': str(directory),

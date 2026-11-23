@@ -42,7 +42,7 @@ def _fit(tile, parent):
     return np.rint(fill).astype(np.uint8), np.median(colors, axis=0)
 
 
-def stage_marked_surfaces(baseline, output, routes, skip_ids):
+def stage_marked_surfaces(baseline, output, routes, skip_ids, *, verified_assets=None):
     from reconstruction import extract_rgba
     from ..runtime.marked_routes import iou
 
@@ -65,6 +65,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
     boxes = [b for k, b in _discover_candidates(plate[..., :3], canvas, scenery, is_flat_canvas=flat)
              if k == 'box']
     original_frames = {}
+    source_rgb = None
     if any(field.get('label') == 'card_frame' for field in routes):
         # The verified photo holes change the connected components of the working plate.
         # Recover the measured frame from the same source pixels that produced its mark.
@@ -91,9 +92,11 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         peers = [r for r in graph.selected.values() if intersection(box, r['bbox'])]
         if any(r['kind'] == 'surface' and iou(box,r['bbox']) >= .95 for r in peers):
             continue
-        from .layered_card import contained_peers, frame_layers, native_child_faces
+        from .layered_card import _verified_graphic, contained_peers, frame_layers, native_child_faces
         layered = field.get('label') == 'card_frame'
-        if not contained_peers(box, peers, layered=layered):
+        frame_assets = {r['id']: verified_assets[r['id']] for r in peers
+                        if layered and r['kind']=='asset' and _verified_graphic(r, verified_assets)}
+        if not contained_peers(box, peers, layered=layered, verified_assets=frame_assets):
             continue
         if layered != any(r['kind']=='asset' for r in peers):
             continue
@@ -108,7 +111,8 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
             ignored = [o.bbox for o in [*graph.text.texts,*graph.asset.objects]
                        if o.bbox[2]*o.bbox[3] < .65*w*h and intersection(box,o.bbox)]
             child_faces = native_child_faces(box, peers)
-            result = frame_layers(patch, parent_patch, box, peers, baseline, ignored, child_faces=child_faces)
+            result = frame_layers(patch, parent_patch, box, peers, baseline, ignored, child_faces=child_faces,
+                                  verified_assets=frame_assets, source_rgb=source_rgb)
             if result is None:
                 continue
             fill, gradient, backing_field, owned, ink, rgba = result
@@ -234,7 +238,7 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids):
         if layered:
             from .layered_card import bind_photo_backing
             for child in peers:
-                if child['kind'] in ('asset','surface'):
+                if child['kind'] in ('asset','surface') or frame_assets and child['kind'] == 'text':
                     record = graph.selected[child['id']]
                     bind_photo_backing(output, record, sid, box, backing_field)
                     for transaction in graph.transactions:
