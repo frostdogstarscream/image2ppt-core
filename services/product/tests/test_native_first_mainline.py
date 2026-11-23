@@ -1808,3 +1808,301 @@ def test_p2_text_recall_composite_cards_and_crop_vector_icons(tmp_path):
     assert any(s.id == 's-v001' and s.geometry == 'custom' for s in sg_vec.surface.shapes)
 
 
+def test_container_stage_refreshes_overlying_backing_patches_and_excludes_card_corner_sky(tmp_path):
+    from product.parallel_rebuild import adapt
+    from product.recovery.container_stage import stage_containers_and_surfaces
+    from product.recovery.native_shapes import try_fit_two_tone_ribbon_pair
+
+    w, h = 560, 280
+    # Canvas sky [243,249,254], bordered card [40:520, 40:240], header [225,238,252], two-tone ribbon flush at card TL with r=9 sky corner
+    plate = np.full((h, w, 3), [243, 249, 254], dtype=np.uint8)
+    plate[40:240, 40:520] = [210, 224, 240]
+    plate[41:83, 41:519] = [225, 238, 252]
+    plate[83:239, 41:519] = [254, 255, 255]
+    # Two-tone ribbon at [41:241, 41:83] (w=200, h=42): left cap x=41..101, right body x=101..241 (tip at 241)
+    rx, ry, rw, rh = 41, 41, 200, 42
+    yy, xx = np.mgrid[:rh, :rw]
+    half_h = (rh - 1) / 2.0
+    max_x = 186.0 + (1.0 - np.abs(yy - half_h) / half_h) * (rw - 1 - 186.0)
+    in_rib = xx <= max_x + 0.5
+    # Rounded TL corner of card exposes sky [243,249,254]
+    r_tl = 9.0
+    tl_sky = (yy < r_tl) & (xx < r_tl) & (((xx - r_tl) ** 2 + (yy - r_tl) ** 2) > r_tl ** 2)
+    rib_sub = plate[ry:ry + rh, rx:rx + rw]
+    rib_sub[in_rib & (xx < 60) & (~tl_sky)] = [35, 135, 249]
+    rib_sub[in_rib & (xx >= 60)] = [16, 98, 198]
+    rib_sub[tl_sky] = [243, 249, 254]
+    plate[ry:ry + rh, rx:rx + rw] = rib_sub
+
+    # Direct unit test of sky-corner exclusion in try_fit_two_tone_ribbon_pair
+    par_hdr = np.full((rh, rw, 3), [225, 238, 252], dtype=np.float64)
+    pair = try_fit_two_tone_ribbon_pair(plate, [rx, ry, rw, rh], par_hdr, np.zeros((rh, rw), bool))
+    assert pair is not None
+    assert pair[0]['geometry'] == 'custom'
+    assert not bool(pair[0]['erase_mask_local'][0, 0])
+    assert int(pair[0]['erase_mask_local'][:6, :6].sum()) < 26
+
+    # Full container_stage test verifying overlying text t-001 backing_patch synchronization
+    base = tmp_path / 'base'
+    base.mkdir()
+    Image.fromarray(plate).save(base / 'source.png')
+    Image.fromarray(plate).save(base / 'source-plate.png')
+    t_mask = np.zeros((h, w), dtype=bool)
+    t_mask[50:74, 52:76] = True
+    # Stale pre-container backing patch differs from ribbon [35,135,249] by 11 RGB
+    stale_bp = np.full((24, 24, 3), [24, 132, 247], dtype=np.uint8)
+    t_proof = base / 't-001-owner.npz'
+    np.savez_compressed(t_proof, mask=t_mask, restore_bbox=[52, 50, 24, 24], backing_patch=stale_bp)
+    ssha = digest(base / 'source.png')
+    psha = digest(base / 'source-plate.png')
+    sg = SceneGraph.model_validate({
+        'schema': 'SceneGraph/1', 'source_sha256': ssha, 'image_size': [w, h], 'method_version': 'test',
+        'text': {'schema': 'TextEvidence/1', 'source_sha256': ssha, 'image_size': [w, h], 'method_version': 'test',
+                 'styles': [{'id': 'st', 'role': 'body', 'ea': 'Arial', 'latin': 'Arial', 'size_px': 18.0, 'bold': True, 'color': 'FFFFFF'}],
+                 'texts': [{'id': 't-001', 'text': '01', 'bbox': [52.0, 50.0, 24.0, 24.0], 'style': 'st', 'z': 5}],
+                 'members': {'t-001': ['l1']}},
+        'asset': {'schema': 'AssetEvidence/1', 'source_sha256': ssha, 'image_size': [w, h], 'method_version': 'test', 'objects': []},
+        'surface': {'schema': 'SurfaceEvidence/1', 'source_sha256': ssha, 'image_size': [w, h], 'method_version': 'test', 'background': 'F3F9FE', 'shapes': []},
+        'ownership': {'t-001': 'RESOLVED'}, 'relations': [],
+        'raster_backing': {'path': 'source-plate.png', 'sha256': psha, 'source_sha256': ssha, 'bbox': [0, 0, w, h]},
+        'selected': {
+            't-001': {
+                'id': 't-001', 'kind': 'text', 'bbox': [52.0, 50.0, 24.0, 24.0], 'restore_bbox': [52, 50, 24, 24],
+                'payload': {'id': 't-001', 'text': '01', 'bbox': [52.0, 50.0, 24.0, 24.0], 'style': 'st', 'z': 5},
+                'owner_evidence': {'file': 't-001-owner.npz', 'sha256': digest(t_proof)},
+            },
+        },
+        'transactions': [{'id': 't-001', 'owner_evidence': {'file': 't-001-owner.npz', 'sha256': digest(t_proof)}}],
+    })
+    write(base / 'scene.json', sg.model_dump())
+    write(base / 'slideir.json', adapt(sg, base))
+
+    out_dir = tmp_path / 'out'
+    _, staged_ids = stage_containers_and_surfaces(base, out_dir)
+    assert staged_ids
+    sg_out = SceneGraph.model_validate_json((out_dir / 'scene.json').read_text('utf8'))
+    new_t_ref = sg_out.selected['t-001']['owner_evidence']
+    assert new_t_ref['sha256'] == digest(out_dir / new_t_ref['file'])
+    with np.load(out_dir / new_t_ref['file'], allow_pickle=False) as d:
+        bp_updated = d['backing_patch']
+    assert np.allclose(bp_updated.mean(axis=(0, 1)), [35, 135, 249], atol=2.0)
+
+
+def test_collect_office_defects_blames_only_direct_innermost_surface():
+    from product.runtime.batch_backbone import _collect_office_defects
+
+    sg = SceneGraph.model_validate({
+        'schema': 'SceneGraph/1', 'source_sha256': 'a' * 64, 'image_size': [600, 500], 'method_version': 'test',
+        'text': {'schema': 'TextEvidence/1', 'source_sha256': 'a' * 64, 'image_size': [600, 500], 'method_version': 'test', 'styles': [], 'texts': [], 'members': {}},
+        'asset': {'schema': 'AssetEvidence/1', 'source_sha256': 'a' * 64, 'image_size': [600, 500], 'method_version': 'test', 'objects': []},
+        'surface': {'schema': 'SurfaceEvidence/1', 'source_sha256': 'a' * 64, 'image_size': [600, 500], 'method_version': 'test', 'background': 'FFFFFF', 'shapes': []},
+        'ownership': {}, 'relations': [],
+        'selected': {
+            't-005': {'id': 't-005', 'kind': 'text', 'bbox': [15, 15, 40, 30], 'restore_bbox': [15, 15, 40, 30]},
+            's-ribbon': {'id': 's-ribbon', 'kind': 'surface', 'bbox': [0, 0, 80, 60], 'restore_bbox': [0, 0, 80, 60]},
+            's-adj': {'id': 's-adj', 'kind': 'surface', 'bbox': [80, 0, 140, 60], 'restore_bbox': [80, 0, 140, 60]},
+            's-header': {'id': 's-header', 'kind': 'surface', 'bbox': [0, 0, 500, 60], 'restore_bbox': [0, 0, 500, 60]},
+            's-outer': {'id': 's-outer', 'kind': 'surface', 'bbox': [0, 0, 500, 400], 'restore_bbox': [0, 0, 500, 400]},
+        },
+    })
+    office_res = {
+        'residuals': [[{'id': 't-005', 'residual_check_status': 'FAIL'}]],
+        'replacements': {'records': []},
+        'office': {},
+    }
+    _, bad_ids = _collect_office_defects(office_res, sg, ['s-ribbon', 's-adj', 's-header', 's-outer'])
+    assert bad_ids == {'s-ribbon'}
+
+
+def test_split_decorative_ocr_keeps_chinese_comma_and_merges_paragraph():
+    from product.runtime.batch_backbone import split_decorative_ocr_line, _merge_structural_ocr_items
+
+    src = np.full((200, 500, 3), 255, dtype=np.uint8)
+    # Paint dark ink strips inside lines so split_decorative_ocr_line sees text runs
+    src[44:60, 25:340] = 50
+    t_val, b_val, aff = split_decorative_ocr_line(
+        src, {'id': 'l1', 'bbox': [20, 40, 350, 25], 'text': '内置多项智能体能力，可用于公文撰写、'}
+    )
+    assert t_val.endswith('、')
+    assert aff == ''
+
+    raw = [
+        {'id': 't-1', 'ocr_line_id': 'l1', 'text': '随着模型能力发展和', 'bbox': [100.0, 50.0, 145.0, 21.0],
+         'color_hex': '58667F', 'est_size_px': 15.4, 'bold': False, 'stripped_affix': ''},
+        {'id': 't-2', 'ocr_line_id': 'l2', 'text': '业务需求变化，持续', 'bbox': [101.0, 75.0, 144.0, 20.0],
+         'color_hex': '56647C', 'est_size_px': 15.4, 'bold': False, 'stripped_affix': ''},
+        {'id': 't-3', 'ocr_line_id': 'l3', 'text': '优化平台能力', 'bbox': [98.0, 94.0, 101.0, 26.0],
+         'color_hex': '4D5F7B', 'est_size_px': 18.4, 'bold': False, 'stripped_affix': ''},
+    ]
+    cleaned, _ = _merge_structural_ocr_items(src, raw, [])
+    assert len(cleaned) == 1
+    assert cleaned[0]['ocr_line_ids'] == ['l1', 'l2', 'l3']
+
+
+def test_validate_candidate_pass2_scopes_recheck_and_merges_untouched_pass_records(tmp_path, monkeypatch):
+    import shutil
+    from product.runtime.service import RuntimeService
+    from product.runtime.state import RuntimeState
+    import product.runtime.batch_backbone as bb
+
+    monkeypatch.setenv('IMAGE2PPT_RESOURCE_ROOT', str(tmp_path / 'leases'))
+    jobs_root = tmp_path / 'jobs'
+    job_dir = jobs_root / 'ccddeeff'
+    (job_dir / 'inputs').mkdir(parents=True)
+    src_p = job_dir / 'inputs/1.png'
+    Image.new('RGB', (200, 120), (245, 248, 252)).save(src_p)
+    snap = snapshot(src_p, job_dir / 'snap')
+    write(job_dir / 'request.json', {'sources': ['1.png'], 'orchestrator': 'opencode'})
+    fonts_p = job_dir / 'fonts.json'
+    write(fonts_p, {'schema': 'FontManifest/1', 'fonts': []})
+
+    base_scene = {
+        'schema': 'SceneGraph/1', 'source_sha256': snap['source_sha256'], 'image_size': [200, 120],
+        'transform': [1, 0, 0, 1, 0, 0], 'method_version': 'test',
+        'text': {'schema': 'TextEvidence/1', 'source_sha256': snap['source_sha256'], 'image_size': [200, 120], 'method_version': 'test',
+                 'styles': [{'id': 'st', 'role': 'body', 'ea': 'Arial', 'latin': 'Arial', 'size_px': 12.0, 'bold': False, 'color': '000000'}],
+                 'texts': [
+                     {'id': 't-far', 'text': 'far', 'bbox': [10.0, 10.0, 30.0, 14.0], 'style': 'st', 'z': 1},
+                     {'id': 't-near', 'text': 'near', 'bbox': [120.0, 60.0, 30.0, 14.0], 'style': 'st', 'z': 2},
+                 ],
+                 'members': {'t-far': ['l1'], 't-near': ['l2']}},
+        'asset': {'schema': 'AssetEvidence/1', 'source_sha256': snap['source_sha256'], 'image_size': [200, 120], 'method_version': 'test', 'objects': [
+            {'id': 'r-bad', 'kind': 'icon', 'bbox': [145, 60, 20, 20], 'layers': ['l.png'], 'replaces': [], 'components': ['c'],
+             'parts': [{'name': 'c', 'bbox': [145, 60, 20, 20], 'layers': ['l.png']}], 'required_owners': [],
+             'text_policy': 'exclude_independent_text', 'intrinsic_text': '', 'description': 'b', 'prompt_en': 'b'},
+        ]},
+        'surface': {'schema': 'SurfaceEvidence/1', 'source_sha256': snap['source_sha256'], 'image_size': [200, 120], 'method_version': 'test', 'background': 'F5F8FC', 'shapes': []},
+        'ownership': {'t-far': 'RESOLVED', 't-near': 'RESOLVED', 'r-bad': 'RESOLVED'}, 'relations': [],
+    }
+
+    bdir = job_dir / 'base'; bdir.mkdir()
+    p1dir = job_dir / 'pass1'; p1dir.mkdir()
+    p2dir = job_dir / 'pass2'; p2dir.mkdir()
+    plate_img = np.full((120, 200, 3), [245, 248, 252], dtype=np.uint8)
+    Image.fromarray(plate_img).save(p1dir / 'source-plate.png')
+    plate_p2 = plate_img.copy()
+    plate_p2[60:80, 145:165] = [100, 120, 140]  # only r-bad region restored on plate
+    Image.fromarray(plate_p2).save(p2dir / 'source-plate.png')
+
+    def _mk_proof(d, name, box):
+        p = d / f'{name}.npz'
+        np.savez_compressed(p, mask=np.zeros((120, 200), bool), restore_bbox=box, backing_patch=np.zeros((box[3], box[2], 3), np.uint8))
+        return {'file': p.name, 'sha256': digest(p)}
+
+    write(bdir / 'scene.json', {**base_scene, 'selected': {}})
+    write(bdir / 'slideir.json', {'nodes': []})
+
+    sel_far = {'id': 't-far', 'kind': 'text', 'bbox': [10, 10, 30, 14], 'restore_bbox': [10, 10, 30, 14], 'owner_evidence': _mk_proof(p1dir, 't-far', [10, 10, 30, 14])}
+    sel_near = {'id': 't-near', 'kind': 'text', 'bbox': [120, 60, 30, 14], 'restore_bbox': [120, 60, 30, 14], 'owner_evidence': _mk_proof(p1dir, 't-near', [120, 60, 30, 14])}
+    sel_bad = {'id': 'r-bad', 'kind': 'asset', 'bbox': [145, 60, 20, 20], 'restore_bbox': [145, 60, 20, 20], 'owner_evidence': _mk_proof(p1dir, 'r-bad', [145, 60, 20, 20])}
+    write(p1dir / 'scene.json', {**base_scene, 'selected': {'t-far': sel_far, 't-near': sel_near, 'r-bad': sel_bad}})
+    write(p1dir / 'slideir.json', {'nodes': []})
+
+    # Copy identical owner proofs for pass2 (same sha256 -> unmodified!)
+    shutil.copyfile(p1dir / 't-far.npz', p2dir / 't-far.npz')
+    shutil.copyfile(p1dir / 't-near.npz', p2dir / 't-near.npz')
+    write(p2dir / 'scene.json', {**base_scene, 'selected': {'t-far': sel_far, 't-near': sel_near}})
+    write(p2dir / 'slideir.json', {'nodes': []})
+
+    calls = []
+
+    def fake_compile(irs, out_dir, texts):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        pptx_p = out_dir / 'out.pptx'
+        pptx_p.write_bytes(b'pptx-' + str(len(calls)).encode())
+        return {'pptx': str(pptx_p)}
+
+    def fake_office(state, pptx, irs, directory, *, target_ids=None):
+        calls.append(target_ids)
+        if len(calls) == 1:
+            return {
+                'status': 'REVIEW_REQUIRED', 'files': {},
+                'residuals': [[
+                    {'id': 't-far', 'residual_check_status': 'PASS', 'residual_pixels': 0, 'source_bound': True, 'deleted': True},
+                    {'id': 't-near', 'residual_check_status': 'PASS', 'residual_pixels': 0, 'source_bound': True, 'deleted': True},
+                    {'id': 'r-bad', 'residual_check_status': 'FAIL', 'residual_pixels': 12},
+                ]],
+                'replacements': {'records': []}, 'office': {},
+            }
+        return {
+            'status': 'PASS', 'files': {},
+            'residuals': [[
+                {'id': oid, 'residual_check_status': 'PASS', 'residual_pixels': 0, 'source_bound': True, 'deleted': True}
+                for oid in (target_ids or [])
+            ]],
+            'replacements': {'records': []}, 'office': {},
+        }
+
+    def fake_restage(svc, state, current, iso_dir, cand, res):
+        cand['ir'] = str(p2dir / 'slideir.json')
+        cand['object_ids'] = ['t-far', 't-near']
+        cand['object_id'] = 't-far'
+        cand['isolation_attempts'] = 1
+        cand['files'] = {str(p): digest(p) for p in p2dir.rglob('*') if p.is_file()}
+        return True
+
+    monkeypatch.setattr('product.runtime.compiler.compile_local', fake_compile)
+    monkeypatch.setattr(RuntimeService, 'office_check', staticmethod(fake_office))
+    monkeypatch.setattr(bb, 'restage_batch_candidate_subset', fake_restage)
+
+    svc = RuntimeService(jobs_root)
+    state = RuntimeState(job_dir)
+    cur = {
+        'fonts': str(fonts_p),
+        'pages': [{'scene': str(bdir / 'scene.json'), 'ir': str(bdir / 'slideir.json'), 'snapshot': snap}],
+        'candidates': {'cand-p2': {
+            'id': 'cand-p2', 'page': 1, 'object_id': 't-far', 'object_ids': ['t-far', 't-near', 'r-bad'], 'kind': 'batch',
+            'status': 'STAGED_LOCAL', 'ir': str(p1dir / 'slideir.json'),
+            'parent_ir_sha256': digest(bdir / 'slideir.json'), 'parent_scene_sha256': digest(bdir / 'scene.json'),
+            'code': svc.code_binding(), 'files': {},
+        }},
+    }
+    res = svc.validate_candidate(state, cur, job_dir / 'val', candidate_id='cand-p2')
+    assert res['status'] == 'PASS'
+    assert calls[0] is None
+    assert calls[1] == ['t-near']
+    merged_ids = {r['id'] for r in res['residuals'][0]}
+    assert merged_ids == {'t-far', 't-near'}
+
+
+def test_region_crop_decomposes_tinted_circle_badges_expands_bounded_composite_and_fits_accent_bar():
+    from product.recovery.region_crop import _detect_icon_in_tinted_circle, grow_seed
+    from product.recovery.native_shapes import try_fit_native_shape_v2
+
+    # 1. Tinted light-blue circle badge with high-contrast dark-blue inner icon
+    h, w = 112, 112
+    backing = np.full((h, w, 3), [234, 244, 253], dtype=np.uint8)
+    pixels = backing.copy()
+    yy, xx = np.mgrid[:h, :w]
+    dist = np.hypot(xx - 55.5, yy - 55.5)
+    pixels[dist <= 51.0] = [221, 237, 252]  # subtle 13-RGB tinted circle
+    pixels[(yy >= 34) & (yy < 78) & (xx >= 32) & (xx < 80)] = [14, 92, 204]  # dark-blue icon
+    # Must still decompose when layout detector tags the circular icon badge as `layout:image`
+    res_inner = _detect_icon_in_tinted_circle(pixels, backing, np.zeros((h, w), bool), ['layout:image'])
+    assert res_inner is not None
+    (ix0, iy0, iw, ih), inner_bg = res_inner
+    assert 28 <= ix0 <= 34 and 30 <= iy0 <= 36 and 46 <= iw <= 56 and 42 <= ih <= 52
+    assert np.allclose(inner_bg.mean(axis=(0, 1)), [221, 237, 252], atol=2.0)
+
+    # 2. Bounded composite illustration (e.g. diagonal rising arrow 220x140 inside 1200x700 slide)
+    content = np.zeros((700, 1200), dtype=bool)
+    for k in range(180):
+        ry = 360 - int(k * 0.6)
+        rx = 700 + k
+        content[ry - 8:ry + 8, rx - 8:rx + 8] = True
+    box_g, cuts_g = grow_seed(content, [695, 320, 64, 64], (1200, 700))
+    assert not cuts_g
+    assert box_g[2] >= 170 and box_g[3] >= 100
+
+    # 3. Compact high-contrast vertical accent bar `|` (8x27) fits as native `rect`
+    plate = np.full((80, 80, 3), [234, 244, 252], dtype=np.uint8)
+    plate[20:47, 30:38] = [14, 72, 165]
+    par = np.full((27, 8, 3), [234, 244, 252], dtype=np.float64)
+    bar_fit = try_fit_native_shape_v2(plate, [30, 20, 8, 27], par, [], np.zeros((27, 8), bool), cand_kind='line')
+    assert bar_fit is not None
+    assert bar_fit['geometry'] == 'rect'
+    assert bar_fit['fill'] == '0E48A5'
+
+
+
+

@@ -165,8 +165,12 @@ def ensure_baseline(job):
         return info
     if not (root/'started.json').exists():
         write(root/'started.json',{'time':time.time()})
+    stage_timings: dict[str, float] = {}
     def step(name, fn):
-        return state.mutate(name,{'sources':sources},None,'host-stage0-'+name,fn)
+        t_s = time.perf_counter()
+        out = state.mutate(name,{'sources':sources},None,'host-stage0-'+name,fn)
+        stage_timings[name] = round(time.perf_counter() - t_s, 2)
+        return out
     step('prepare',lambda c,d:prepare_all(svc,state,c,d,sources=sources))
     for page in range(1,len(sources)+1):
         def reconstruct(c,d):
@@ -203,7 +207,18 @@ def ensure_baseline(job):
         if preview.is_file():
             shutil.copyfile(preview,root/name)
             files.append(name)
+    cand_timings = {
+        cid: c['timings']
+        for cid, c in (current.get('candidates') or {}).items()
+        if isinstance(c.get('timings'), dict)
+    }
+    isolated_drops = {
+        cid: c.get('isolated_bad_ids') or []
+        for cid, c in (current.get('candidates') or {}).items()
+        if c.get('isolated_bad_ids')
+    }
     info = {'origin':ORIGIN,'native_variant':request.get('native_variant','combined'),'sources':sources,'uploaded_sha256':originals,'finished':time.time(),
+            'stage_timings': stage_timings, 'candidate_timings': cand_timings, 'isolated_dropped_ids': isolated_drops,
             'files':{n:digest(root/n) for n in files}}
     write(manifest,info)
     return info
@@ -280,6 +295,9 @@ def _publish(job, agent, reasons, candidate):
                 install_file(staging/name,delivery/name)
     changed = not fallback and candidate['pptx_sha256']!=base['pptx_sha256']
     result.update(origin='agent-incremental' if changed else ORIGIN,baseline_sha256=manifest['files']['baseline.pptx'],
+                  baseline_timings=manifest.get('stage_timings', {}),
+                  baseline_candidate_timings=manifest.get('candidate_timings', {}),
+                  baseline_isolated_dropped_ids=manifest.get('isolated_dropped_ids', {}),
                   agent={'participated':(bool(usage.get('tool_calls')) or bool(usage.get('tokens',{}).get('output')))
                         if usage else 'UNKNOWN' if (state.root/'session.json').exists() else False,
                          'delivered_changes':changed, 'fallback_reasons':reasons or [],'usage':{k:v for k,v in usage.items() if k!='tool_calls'}},

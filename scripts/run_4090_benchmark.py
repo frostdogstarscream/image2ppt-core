@@ -197,14 +197,35 @@ def run_one_slide(profile: dict, slide_path: Path, out_dir: Path, *, agent_model
         scorecard.write_json(out_dir / 'scorecard.json', sc)
         scorecard.save_owner_preview(slide_path, pptx, out_dir / 'owner-preview.png')
 
+    ooxml_summary = None
+    if pptx.is_file():
+        import zipfile
+        from collections import Counter
+        import xml.etree.ElementTree as ET
+        with zipfile.ZipFile(pptx) as zf:
+            sxml = zf.read('ppt/slides/slide1.xml').decode('utf-8', errors='replace')
+            root_el = ET.fromstring(sxml)
+            ns_a = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
+            prst_counts = Counter(el.attrib.get('prst', '') for el in root_el.iter(f'{ns_a}prstGeom'))
+            ooxml_summary = {
+                'custGeom': sum(1 for _ in root_el.iter(f'{ns_a}custGeom')),
+                'gradFill': sum(1 for _ in root_el.iter(f'{ns_a}gradFill')),
+                'prstGeom': dict(prst_counts),
+            }
+
+    res_obj = status_data.get('result', {}) or {}
     return {
         'slide': slide_path.name,
         'job_id': job_id,
         'status': final_status or status_data.get('status'),
         'queue_status': status_data.get('status'),
         'wall_seconds': wall_s,
+        'ooxml': ooxml_summary,
+        'baseline_timings': res_obj.get('baseline_timings', {}),
+        'baseline_candidate_timings': res_obj.get('baseline_candidate_timings', {}),
+        'baseline_isolated_dropped_ids': res_obj.get('baseline_isolated_dropped_ids', {}),
         'scorecard': sc,
-        'result': status_data.get('result', {}),
+        'result': res_obj,
     }
 
 

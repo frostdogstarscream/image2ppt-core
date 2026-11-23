@@ -175,24 +175,33 @@ def grow_seed(content: np.ndarray, seed, size, *, max_grow=MAX_GROW_PX):
     seed = _clip([seed[0] - 2, seed[1] - 2, seed[2] + 4, seed[3] + 4], size)
     if seed[2] <= 0 or seed[3] <= 0:
         return [seed[0], seed[1], 0, 0], False
-    window = _clip([seed[0] - max_grow, seed[1] - max_grow, seed[2] + 2 * max_grow, seed[3] + 2 * max_grow], size)
-    wx, wy, ww, wh = window
-    local = cv2.dilate(content[wy:wy + wh, wx:wx + ww].astype(np.uint8), np.ones((3, 3), np.uint8))
-    count, labels = cv2.connectedComponents(local, connectivity=8)
-    sx, sy = seed[0] - wx, seed[1] - wy
-    hit = [int(v) for v in np.unique(labels[sy:sy + seed[3], sx:sx + seed[2]]) if v > 0]
-    if not hit:
-        return seed, False
-    mask = np.isin(labels, hit)
-    touches = ((wx > 0 and mask[:, 0].any()) or (wx + ww < size[0] and mask[:, -1].any())
-               or (wy > 0 and mask[0].any()) or (wy + wh < size[1] and mask[-1].any()))
-    if touches:
-        # Content continues beyond the bounded neighbourhood (texture, long rule,
-        # page-wide decoration). Small-first: keep the seed instead of swallowing it.
-        return seed, True
-    ys, xs = np.nonzero(mask)
-    grown = [wx + int(xs.min()), wy + int(ys.min()), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1)]
-    return _clip(_union(seed, [grown[0] - 1, grown[1] - 1, grown[2] + 2, grown[3] + 2]), size), False
+
+    def _attempt(grow_px: int):
+        window = _clip([seed[0] - grow_px, seed[1] - grow_px, seed[2] + 2 * grow_px, seed[3] + 2 * grow_px], size)
+        wx, wy, ww, wh = window
+        local = cv2.dilate(content[wy:wy + wh, wx:wx + ww].astype(np.uint8), np.ones((3, 3), np.uint8))
+        _, labels = cv2.connectedComponents(local, connectivity=8)
+        sx, sy = seed[0] - wx, seed[1] - wy
+        hit = [int(v) for v in np.unique(labels[sy:sy + seed[3], sx:sx + seed[2]]) if v > 0]
+        if not hit:
+            return seed, False
+        mask = np.isin(labels, hit)
+        touches = ((wx > 0 and mask[:, 0].any()) or (wx + ww < size[0] and mask[:, -1].any())
+                   or (wy > 0 and mask[0].any()) or (wy + wh < size[1] and mask[-1].any()))
+        if touches:
+            return seed, True
+        ys, xs = np.nonzero(mask)
+        grown = [wx + int(xs.min()), wy + int(ys.min()), int(xs.max() - xs.min() + 1), int(ys.max() - ys.min() + 1)]
+        return _clip(_union(seed, [grown[0] - 1, grown[1] - 1, grown[2] + 2, grown[3] + 2]), size), False
+
+    box, cuts = _attempt(max_grow)
+    if cuts and max_grow < 240 and max(seed[2], seed[3]) >= 56 and (seed[2] * seed[3]) >= 3600:
+        # Try one bounded composite-illustration expansion (e.g. rising arrow + badges inside a card)
+        # only for medium/large illustration seeds, rejecting tiny icons or oversized card-wide merges.
+        box2, cuts2 = _attempt(240)
+        if not cuts2 and box2[2] <= int(0.28 * size[0]) and box2[3] <= int(0.32 * size[1]):
+            return box2, False
+    return box, cuts
 
 
 def _shrink_box_away_from_protected(
@@ -666,6 +675,63 @@ def _detect_and_prepare_rounded_photo(
     return cleaned, est_r
 
 
+def _detect_icon_in_tinted_circle(
+    pixels: np.ndarray,
+    backing: np.ndarray,
+    fg_local: np.ndarray,
+    kinds: list[str],
+) -> tuple[list[int], np.ndarray] | None:
+    """Detect a high-contrast icon centered inside a low-contrast uniform tinted circular badge.
+
+    Extracting ONLY the inner icon (backed by the circle's fill color) prevents `source-unmix`
+    from turning a subtle 10-16 RGB tinted circle into mottled semi-transparent holes, and
+    leaves the clean empty circle on `source-plate.png` for `post-crop-containers` to upgrade
+    into a native editable PowerPoint `ellipse` shape.
+    """
+    if any(k in ('layout:chart', 'layout:table') for k in kinds):
+        return None
+    h, w = pixels.shape[:2]
+    if not (48 <= min(w, h) <= 185 and 0.78 <= (w / float(h)) <= 1.28):
+        return None
+    px_f = pixels.astype(np.float32)
+    bg_f = backing.astype(np.float32)
+    yy, xx = np.mgrid[:h, :w]
+    cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
+    r = min(w, h) * 0.46
+    dist = np.hypot(xx - cx, yy - cy)
+    ann = (dist >= 0.65 * r) & (dist <= 0.90 * r) & (~fg_local)
+    if int(ann.sum()) < 48:
+        return None
+    med_ann = np.median(px_f[ann], axis=0)
+    bg_med = np.median(bg_f.reshape(-1, 3), axis=0)
+    ann_diff = float(np.abs(med_ann - bg_med).max())
+    ann_p90 = float(np.percentile(np.abs(px_f[ann] - med_ann).max(1), 90))
+    if not (5.0 <= ann_diff <= 38.0 and ann_p90 <= 10.0):
+        return None
+    diff_ann = np.abs(px_f - med_ann).max(2)
+    inner_icon = (dist <= 0.72 * r) & (diff_ann > 42.0) & (~fg_local)
+    rim_icon = (dist >= 0.84 * r) & (diff_ann > 42.0) & (~fg_local)
+    if int(inner_icon.sum()) < 40 or int(rim_icon.sum()) > 4:
+        return None
+    ys, xs = np.nonzero(inner_icon)
+    ix0 = max(0, int(xs.min()) - 2)
+    iy0 = max(0, int(ys.min()) - 2)
+    ix1 = min(w, int(xs.max()) + 3)
+    iy1 = min(h, int(ys.max()) + 3)
+    iw, ih = ix1 - ix0, iy1 - iy0
+    if iw < 12 or ih < 12 or iw >= int(0.85 * w) or ih >= int(0.85 * h):
+        return None
+    # Verify the 2px perimeter around the inner icon box cleanly matches `med_ann`
+    ring_m = np.zeros((h, w), dtype=bool)
+    ring_m[iy0:iy1, ix0:ix1] = True
+    ring_m[min(iy1, iy0 + 1):max(iy0, iy1 - 1), min(ix1, ix0 + 1):max(ix0, ix1 - 1)] = False
+    ring_m &= ~fg_local
+    if not ring_m.any() or float(np.percentile(diff_ann[ring_m], 85)) > 12.0:
+        return None
+    inner_backing = np.broadcast_to(med_ann.astype(np.float32), (ih, iw, 3)).copy()
+    return [ix0, iy0, iw, ih], inner_backing
+
+
 def _try_transparent_upgrade(
     pixels: np.ndarray,
     backing: np.ndarray,
@@ -690,13 +756,17 @@ def _try_transparent_upgrade(
     if _is_four_edge_framed(core, tx0, ty0, tx1, ty1, threshold=0.70 if is_framed_kind else 0.80):
         return None
 
-    # 1) Try source-background color unmix.
-    edge_mask = (cv2.dilate(core.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0) & (delta > max(1.0, float(error)))
+    # 1) Try source-background color unmix (tighter edge floor suppresses faint sky/JPEG haze).
+    edge_thresh = max(4.5, float(error) * 1.8)
+    edge_mask = (cv2.dilate(core.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0) & (delta > edge_thresh)
     edge_mask[fg_local] = False
     if edge_mask.any():
         try:
             rgba = _extract_rgba(pixels, backing, edge_mask)
             rgba[fg_local] = 0
+            # Suppress negligible outer haze (alpha < 14 outside core) without hurting AA transitions
+            low_haze = (~core) & (rgba[..., 3] < 14)
+            rgba[low_haze] = 0
             tight = rgba[ty0:ty1 + 1, tx0:tx1 + 1]
             alpha = tight[..., 3:4].astype(np.float32) / 255.0
             recomp = tight[..., :3].astype(np.float32) * alpha + backing[ty0:ty1 + 1, tx0:tx1 + 1].astype(np.float32) * (1.0 - alpha)
@@ -706,7 +776,7 @@ def _try_transparent_upgrade(
                 err = np.abs(recomp - pixels[ty0:ty1 + 1, tx0:tx1 + 1].astype(np.float32)).max(2)[sub_mask]
                 valid_area = tight[..., 3][~sub_fg]
                 ratio = float((valid_area == 0).mean()) if valid_area.size else 0.0
-                if float(err.mean()) <= 2.5 and float(np.percentile(err, 95)) <= 6.0 and ratio >= TRANSPARENT_MIN_TIGHT_RATIO and (tight[..., 3] > 0).any():
+                if float(err.mean()) <= 2.5 and float(np.percentile(err, 95)) <= 6.5 and ratio >= TRANSPARENT_MIN_TIGHT_RATIO and (tight[..., 3] > 0).any():
                     return tight, [tx0, ty0, tw, th], 'source-unmix-crop-upgrade/1', ratio
         except Exception:
             pass
@@ -840,29 +910,67 @@ def stage_region_crops(
             continue
 
         # Lower layers (surface shapes & container assets) never block crops above them.
-        # Wholly-contained upper foreground labels/icons sit above the crop; partial upper overlaps still block.
+        # Wholly-contained upper foreground labels/icons sit above the crop; for committed text
+        # whose padded bbox grazes an adjacent small icon (e.g. icon next to label), check actual
+        # pixel mask intersection and tighten away from glyph pixels rather than falsely blocking.
         blocked_by_upper = False
         contained_fg = np.zeros(plate.shape[:2], bool)
+        crop_box_cur = list(crop['box'])
         for rec in upper_records:
             rb_box = rec.get('restore_bbox') or rec.get('bbox')
-            if not rb_box or not _intersects(crop['box'], [float(v) for v in rb_box]):
+            if not rb_box or not _intersects(crop_box_cur, [float(v) for v in rb_box]):
                 continue
-            if rec.get('region_crop') or not _contains(crop['box'], [float(v) for v in rb_box]):
+            rid_up = rec.get('id')
+            if rec.get('region_crop'):
                 blocked_by_upper = True
                 break
-            rid_up = rec.get('id')
-            if rid_up and rid_up in fg_masks_by_id:
-                contained_fg |= fg_masks_by_id[rid_up]
+            if _contains(crop_box_cur, [float(v) for v in rb_box]):
+                if rid_up and rid_up in fg_masks_by_id:
+                    contained_fg |= fg_masks_by_id[rid_up]
+                continue
+            if rec.get('kind') == 'text' and rid_up and rid_up in fg_masks_by_id:
+                up_mask = fg_masks_by_id[rid_up]
+                cx0, cy0, cw0, ch0 = crop_box_cur
+                if not up_mask[cy0:cy0 + ch0, cx0:cx0 + cw0].any():
+                    # Only padded whitespace margin touched; actual glyph pixels are disjoint!
+                    continue
+                ys_u, xs_u = np.nonzero(up_mask)
+                tight_u = [int(xs_u.min()) - 1, int(ys_u.min()) - 1,
+                           int(xs_u.max() - xs_u.min() + 3), int(ys_u.max() - ys_u.min() + 3)]
+                shrunk_box, _ = _shrink_box_away_from_protected(
+                    crop_box_cur, crop.get('seed_boxes', [crop_box_cur]), [_clip(tight_u, size)], size
+                )
+                if shrunk_box is not None and shrunk_box[2] >= 6 and shrunk_box[3] >= 6:
+                    sx0, sy0, sw0, sh0 = shrunk_box
+                    if not up_mask[sy0:sy0 + sh0, sx0:sx0 + sw0].any():
+                        crop_box_cur = shrunk_box
+                        continue
+            blocked_by_upper = True
+            break
+        if crop_box_cur != crop['box']:
+            x, y, w, h = crop_box_cur
+            crop_obj = ClosedObject(
+                id=rid, kind='illustration', bbox=[x, y, w, h], layers=['source-plate.png'],
+                components=['whole'], parts=[{'name': 'whole', 'bbox': [x, y, w, h], 'layers': ['source-plate.png']}],
+                exclusions=[], replaces=[], required_owners=[],
+                text_policy='intrinsic_label' if intrinsic else 'exclude_independent_text', intrinsic_text=intrinsic,
+                description='opaque source region crop (no semantic claim)', prompt_en='opaque source region crop',
+            )
+            fused_try = fuse_incremental_scene(baseline, base_graph=graph, added_assets=[crop_obj])
+            if fused_try.ownership.get(rid) != 'RESOLVED':
+                report.append({'id': rid, 'state': 'SKIPPED', 'reason': f"host fusion ownership={fused_try.ownership.get(rid)}",
+                               'bbox': [x, y, w, h], 'seed_ids': crop['seed_ids']})
+                continue
         if blocked_by_upper:
             isolated = False
         else:
-            # Also block if another already-staged crop in this pass intersects crop['box'].
+            # Also block if another already-staged crop in this pass intersects crop_box_cur.
             other_crops = [
                 r.get('restore_bbox') or r.get('bbox')
                 for r in graph.selected.values()
                 if r.get('region_crop') or r.get('id') in staged
             ]
-            isolated = not any(_intersects(crop['box'], [float(v) for v in ob]) for ob in other_crops if ob)
+            isolated = not any(_intersects(crop_box_cur, [float(v) for v in ob]) for ob in other_crops if ob)
 
         pixels = appearance[y:y + h, x:x + w].copy()
         safety, backing_meta, backing = 'MOVE_UNSAFE', {'reason': 'not attempted'}, None
@@ -905,9 +1013,26 @@ def stage_region_crops(
         png = output / f'{rid}.png'
         upgraded = None
         if safety == 'MOVABLE' and allow_transparent_upgrade:
-            upgraded = _try_transparent_upgrade(
-                pixels, backing, float(backing_meta['ring_error']), foreground[y:y + h, x:x + w], crop.get('kinds', []),
+            badge_inner = _detect_icon_in_tinted_circle(
+                pixels, backing, foreground[y:y + h, x:x + w], crop.get('kinds', []),
             )
+            if badge_inner is not None:
+                (ix0, iy0, iw, ih), inner_backing = badge_inner
+                sub_up = _try_transparent_upgrade(
+                    pixels[iy0:iy0 + ih, ix0:ix0 + iw],
+                    inner_backing,
+                    2.0,
+                    foreground[y + iy0:y + iy0 + ih, x + ix0:x + ix0 + iw],
+                    crop.get('kinds', []),
+                )
+                if sub_up is not None:
+                    sub_rgba, (stx, sty, stw, sth), sub_method, sub_ratio = sub_up
+                    backing[iy0:iy0 + ih, ix0:ix0 + iw] = inner_backing
+                    upgraded = (sub_rgba, [ix0 + stx, iy0 + sty, stw, sth], sub_method, sub_ratio)
+            if upgraded is None:
+                upgraded = _try_transparent_upgrade(
+                    pixels, backing, float(backing_meta['ring_error']), foreground[y:y + h, x:x + w], crop.get('kinds', []),
+                )
 
         if upgraded is not None:
             tight_rgba, (tx0, ty0, tw, th), upgrade_method, ratio = upgraded

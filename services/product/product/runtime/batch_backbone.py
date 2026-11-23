@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import shutil
 import threading
+import time
 
 import cv2
 import numpy as np
@@ -211,12 +212,14 @@ def _merge_structural_ocr_items(
         if cur_item['est_size_px'] > 23.0 or cand['est_size_px'] > 23.0:
             return False, 'left'
         last_line = cur_item['lines'][-1]
-        if abs(last_line['est_size_px'] - cand['est_size_px']) > 2.8:
+        size_diff = abs(last_line['est_size_px'] - cand['est_size_px'])
+        if size_diff > 3.5:
             return False, 'left'
         h_a, h_b = max(1.0, last_line['bbox'][3]), max(1.0, cand['bbox'][3])
         if max(h_a, h_b) / min(h_a, h_b) > 1.45:
             return False, 'left'
-        if max(abs(a - b) for a, b in zip(last_line['rgb'], cand['rgb'])) > 26:
+        rgb_diff = max(abs(a - b) for a, b in zip(last_line['rgb'], cand['rgb']))
+        if rgb_diff > 26:
             return False, 'left'
         ax, ay, aw, ah = last_line['bbox']
         bx, by, bw, bh = cand['bbox']
@@ -233,6 +236,8 @@ def _merge_structural_ocr_items(
         cx_a, cx_b = ax + aw / 2.0, bx + bw / 2.0
         center_aligned = abs(cx_a - cx_b) <= 14.0 and max(aw, bw) <= 0.32 * w_img
         if not (left_aligned or center_aligned):
+            return False, 'left'
+        if size_diff > 2.8 and not (gap_y <= 4.0 and left_aligned and rgb_diff <= 20):
             return False, 'left'
         # Do not merge across an asset or horizontal divider line.
         x_min = max(0, int(round(min(ax, bx))))
@@ -524,8 +529,8 @@ def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list
         end -= 1
     core = compact[start:end]
     prefix, suffix = compact[:start], compact[end:]
-    # Keep paired brackets or trailing punctuation that belong to wording (e.g. percentages/colons).
-    keep_marks = set('%％:：()（）[]【】《》“”"\'.,，。!?！？+=/')
+    # Keep paired brackets or trailing punctuation that belong to wording (e.g. percentages/colons/Chinese commas).
+    keep_marks = set('%％:：()（）[]【】《》“”"\'.,，。、；;!?！？+=/—–·…~')
     if (not prefix and not suffix) or len(core) < 2:
         return raw_text, bbox, ''
     if any(ch in keep_marks for ch in (prefix + suffix)):
@@ -909,7 +914,10 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         if appearance is not None and appearance['ink'].any():
             yy = np.nonzero(appearance['ink'])[0]
             ink_span = float(yy.max() - yy.min() + 1)
-            est_px = snap_ooxml_size_px(max(9.0, min(96.0, max(ink_span * 0.96, raw_h * 0.72))))
+            if ink_span >= 10.0 and raw_h > ink_span * 1.32:
+                est_px = snap_ooxml_size_px(max(9.0, min(96.0, ink_span * 0.98)))
+            else:
+                est_px = snap_ooxml_size_px(max(9.0, min(96.0, max(ink_span * 0.96, raw_h * 0.72))))
         else:
             est_px = snap_ooxml_size_px(max(9.0, min(96.0, raw_h * 0.76)))
         role = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
@@ -1182,7 +1190,7 @@ def _collect_office_defects(office_result: dict, graph: SceneGraph, staged_ids: 
             rec = graph.selected.get(oid) or {}
             box = rec.get('restore_bbox') or rec.get('bbox') or (rec.get('payload') or {}).get('bbox')
             return box if isinstance(box, (list, tuple)) and len(box) == 4 else None
-        def _boxes_near(b1, b2, pad=4.0):
+        def _boxes_near(b1, b2, pad=0.0):
             return (
                 b1[0] - pad < b2[0] + b2[2] + pad
                 and b2[0] - pad < b1[0] + b1[2] + pad
@@ -1193,13 +1201,47 @@ def _collect_office_defects(office_result: dict, graph: SceneGraph, staged_ids: 
             ob = _sel_box(other_id)
             if ob is None:
                 continue
-            overlaps = [
-                sid for sid in staged_ids
-                if (sb := _sel_box(sid)) is not None and _boxes_near(ob, sb)
+            other_area = max(1.0, float(ob[2]) * float(ob[3]))
+            other_is_surface = (graph.selected.get(other_id) or {}).get('kind') == 'surface'
+            direct_overlaps = [
+                (sid, sb, intersection(ob, sb))
+                for sid in staged_ids
+                if (sb := _sel_box(sid)) is not None and intersection(ob, sb) > 0.0
             ]
-            if overlaps:
-                surfaces = [sid for sid in overlaps if (graph.selected.get(sid) or {}).get('kind') == 'surface']
-                bad_ids.update(surfaces or overlaps)
+            if direct_overlaps:
+                surfaces = [
+                    (sid, sb, ov) for sid, sb, ov in direct_overlaps
+                    if (graph.selected.get(sid) or {}).get('kind') == 'surface'
+                    and (not other_is_surface or float(sb[2]) * float(sb[3]) > other_area)
+                ]
+                if surfaces:
+                    # Blame ONLY the innermost (smallest-area / highest-z) underlying surface(s)
+                    # that directly back `other_id`, never an outer enclosing card when an inner
+                    # surface sits between them.
+                    covering = [
+                        (sid, sb, ov) for sid, sb, ov in surfaces
+                        if ov >= 0.45 * other_area
+                    ]
+                    if covering:
+                        innermost = min(covering, key=lambda item: float(item[1][2]) * float(item[1][3]))
+                        bad_ids.add(innermost[0])
+                    else:
+                        best = max(surfaces, key=lambda item: (item[2], -(float(item[1][2]) * float(item[1][3]))))
+                        bad_ids.add(best[0])
+                else:
+                    bad_ids.update(sid for sid, _, _ in direct_overlaps)
+            else:
+                near_overlaps = [
+                    sid for sid in staged_ids
+                    if (sb := _sel_box(sid)) is not None and _boxes_near(ob, sb, pad=2.0)
+                ]
+                if near_overlaps:
+                    surfaces = [sid for sid in near_overlaps if (graph.selected.get(sid) or {}).get('kind') == 'surface']
+                    if surfaces:
+                        innermost = min(surfaces, key=lambda sid: float(_sel_box(sid)[2]) * float(_sel_box(sid)[3]))
+                        bad_ids.add(innermost)
+                    else:
+                        bad_ids.update(near_overlaps)
 
     return frame_repairs, bad_ids
 
@@ -1230,6 +1272,7 @@ def _chain_stage_from_spec(
     experiment_profile: str | None = None,
     marked_routes: tuple | list = (),
     prepared_tables=None,
+    post_text_checkpoint: dict | None = None,
 ) -> tuple[Path, list[str], list[dict]]:
     from .. import layout_evidence, matting
     from ..object_stage import infer_sam
@@ -1241,59 +1284,75 @@ def _chain_stage_from_spec(
     cur_base = initial_baseline
     staged_ids: list[str] = []
     stage_errors: list[dict] = []
-    table_fields = [r for r in marked_routes if r['route']=='table'
-                    and (wanted_filter is None or r['id'] in wanted_filter)]
-    covered_texts = {tid for record in initial_graph.selected.values() for tid in record.get('covered_text_ids', [])}
-    if table_fields:
-        from ..recovery.marked_tables import stage_tables
-        cur_base, tables, covered = prepared_tables or stage_tables(cur_base, directory/tag/'marked-tables', table_fields, skip_ids)
-        covered_texts.update(covered)
-        staged_ids.extend(tables)
-    if include_containers and wanted_filter is None and layout_path:
-        from ..recovery.chart_stage import stage_native_charts
-        layout = json.loads(Path(layout_path).read_text(encoding='utf8'))
-        chart_ir, chart_ids = stage_native_charts(cur_base, directory/tag/'charts-staged', layout=layout,
-                                                  fonts=fonts, skip_ids=skip_ids)
-        if chart_ids:
-            cur_base = chart_ir.parent
-            staged_ids.extend(chart_ids)
-            chart_scene = json.loads((cur_base/'scene.json').read_text(encoding='utf8'))
-            for cid in chart_ids:
-                covered_texts.update(chart_scene['selected'][cid]['covered_text_ids'])
-    for idx, tr in enumerate(trials_spec):
-        oid = tr['object_id']
-        if oid in skip_ids or oid in covered_texts:
-            continue
-        step_out = directory / tag / f'step-{idx:03d}-{oid}'
-        frame_opt = (
-            {'size': frame_overrides[oid], 'method': 'office_batch_auto_frame_repair/1'}
-            if oid in frame_overrides else None
-        )
-        try:
-            ir = stage_background(
-                Path(tr['trial_dir']),
-                initial_graph,
-                cur_base,
-                fonts,
-                step_out,
-                frame_minimum=frame_opt,
-                fit_origin=(experiment_profile != 'baseline'),
-                layer_directory=layers_dir,
-                edit_headroom=(frame_opt is None),
+    reused_post_text = False
+    if (
+        post_text_checkpoint
+        and post_text_checkpoint.get('path')
+        and Path(post_text_checkpoint['path']).joinpath('scene.json').is_file()
+        and not frame_overrides
+        and not (skip_ids & set(post_text_checkpoint.get('staged_ids') or []))
+    ):
+        cur_base = Path(post_text_checkpoint['path'])
+        staged_ids = list(post_text_checkpoint.get('staged_ids') or [])
+        reused_post_text = True
+
+    if not reused_post_text:
+        table_fields = [r for r in marked_routes if r['route']=='table'
+                        and (wanted_filter is None or r['id'] in wanted_filter)]
+        covered_texts = {tid for record in initial_graph.selected.values() for tid in record.get('covered_text_ids', [])}
+        if table_fields:
+            from ..recovery.marked_tables import stage_tables
+            cur_base, tables, covered = prepared_tables or stage_tables(cur_base, directory/tag/'marked-tables', table_fields, skip_ids)
+            covered_texts.update(covered)
+            staged_ids.extend(tables)
+        if include_containers and wanted_filter is None and layout_path:
+            from ..recovery.chart_stage import stage_native_charts
+            layout = json.loads(Path(layout_path).read_text(encoding='utf8'))
+            chart_ir, chart_ids = stage_native_charts(cur_base, directory/tag/'charts-staged', layout=layout,
+                                                      fonts=fonts, skip_ids=skip_ids)
+            if chart_ids:
+                cur_base = chart_ir.parent
+                staged_ids.extend(chart_ids)
+                chart_scene = json.loads((cur_base/'scene.json').read_text(encoding='utf8'))
+                for cid in chart_ids:
+                    covered_texts.update(chart_scene['selected'][cid]['covered_text_ids'])
+        for idx, tr in enumerate(trials_spec):
+            oid = tr['object_id']
+            if oid in skip_ids or oid in covered_texts:
+                continue
+            step_out = directory / tag / f'step-{idx:03d}-{oid}'
+            frame_opt = (
+                {'size': frame_overrides[oid], 'method': 'office_batch_auto_frame_repair/1'}
+                if oid in frame_overrides else None
             )
-            cur_base = ir.parent
-            staged_ids.append(oid)
-        except Exception as exc:
-            msg = str(exc)
-            code = 'FONT_LAYOUT_FAILED' if 'frame allowance' in msg else ('OWNER_CONFLICT' if 'stable owner' in msg else 'STAGE_REJECTED')
-            stage_errors.append({
-                'object_id': oid,
-                'kind': 'text',
-                'text': tr.get('text', ''),
-                'bbox': list(tr.get('bbox', [])),
-                'failure': code,
-                'reason': msg,
-            })
+            try:
+                ir = stage_background(
+                    Path(tr['trial_dir']),
+                    initial_graph,
+                    cur_base,
+                    fonts,
+                    step_out,
+                    frame_minimum=frame_opt,
+                    fit_origin=(experiment_profile != 'baseline'),
+                    layer_directory=layers_dir,
+                    edit_headroom=(frame_opt is None),
+                )
+                cur_base = ir.parent
+                staged_ids.append(oid)
+            except Exception as exc:
+                msg = str(exc)
+                code = 'FONT_LAYOUT_FAILED' if 'frame allowance' in msg else ('OWNER_CONFLICT' if 'stable owner' in msg else 'STAGE_REJECTED')
+                stage_errors.append({
+                    'object_id': oid,
+                    'kind': 'text',
+                    'text': tr.get('text', ''),
+                    'bbox': list(tr.get('bbox', [])),
+                    'failure': code,
+                    'reason': msg,
+                })
+        if post_text_checkpoint is not None and not post_text_checkpoint.get('path'):
+            post_text_checkpoint['path'] = str(cur_base)
+            post_text_checkpoint['staged_ids'] = list(staged_ids)
 
     if include_assets:
         from ..recovery.region_crop import stage_region_crops
@@ -1362,15 +1421,61 @@ def _chain_stage_from_spec(
             and a.id not in skip_ids
             and (wanted_filter is None or a.id in wanted_filter)
         ]
+        asset_cache_root = page_cache_dir / 'asset-extract-cache'
         for idx, asset in enumerate(asset_targets):
             step_dir = directory / tag / f'asset-{idx:03d}-{key(asset.id)[:12]}'
             step_dir.mkdir(parents=True, exist_ok=True)
             active_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
-            try:
-                res = retry_asset_extraction(
+            # Content-addressed cache key on local plate crop + nearby selected owners so Pass 2
+            # isolation reuses exact extraction results without re-running SAM / RMBG-2.0.
+            ax0, ay0, aw0, ah0 = [int(round(v)) for v in asset.bbox]
+            plate_path_cur = cur_base / (active_graph.raster_backing or {}).get('path', 'source-plate.png')
+            plate_patch_sha = ''
+            if plate_path_cur.is_file():
+                with Image.open(plate_path_cur) as pim:
+                    pw_c, ph_c = pim.size
+                    crop_box_c = (max(0, ax0 - 16), max(0, ay0 - 16), min(pw_c, ax0 + aw0 + 16), min(ph_c, ay0 + ah0 + 16))
+                    plate_patch_sha = key(pim.crop(crop_box_c).convert('RGB').tobytes().hex()[:4096] + str(crop_box_c))
+            nearby_sel = sorted(
+                (oid, rec.get('owner_evidence', {}).get('sha256', ''))
+                for oid, rec in active_graph.selected.items()
+                if (rb := rec.get('restore_bbox') or rec.get('bbox')) is not None
+                and intersection([ax0 - 16, ay0 - 16, aw0 + 32, ah0 + 32], rb) > 0
+            )
+            base_cache_sig = {
+                'asset_id': asset.id,
+                'bbox': list(asset.bbox),
+                'source': active_graph.source_sha256,
+                'layers': str(layers_dir),
+                'plate_patch': plate_patch_sha,
+                'nearby_sel': nearby_sel,
+            }
+
+            def _cached_retry(strategy_name: str, fallback_dir: Path, **extra_kw):
+                ckey = key({**base_cache_sig, 'strategy': strategy_name})[:16]
+                cdir = asset_cache_root / f'{asset.id}-{strategy_name}-{ckey}'
+                meta_f = cdir / 'cached-result.json'
+                if meta_f.is_file():
+                    try:
+                        cached_res = json.loads(meta_f.read_text('utf8'))
+                        cand_d = cached_res.get('candidate_directory')
+                        if cached_res.get('status') != 'CANDIDATE_READY' or (cand_d and Path(cand_d).is_dir()):
+                            return cached_res
+                    except Exception:
+                        pass
+                run_dir = cdir / 'run'
+                if run_dir.exists():
+                    shutil.rmtree(run_dir, ignore_errors=True)
+                cdir.mkdir(parents=True, exist_ok=True)
+                out_res = retry_asset_extraction(
                     active_graph, asset.id, source_path, layers_dir,
-                    cur_base, step_dir / 'extract', strategy='verified-backing',
+                    cur_base, run_dir, strategy=strategy_name, **extra_kw,
                 )
+                write(meta_f, out_res)
+                return out_res
+
+            try:
+                res = _cached_retry('verified-backing', step_dir / 'extract')
                 choices = [('verified-backing', res)]
                 compare = asset.kind in ('icon', 'logo', 'decoration')
                 if (compare or res.get('status') != 'CANDIDATE_READY') and sam_enabled:
@@ -1392,9 +1497,8 @@ def _chain_stage_from_spec(
                             pass
                     if plan_file.is_file() and sam_out.is_dir():
                         try:
-                            res_sam = retry_asset_extraction(
-                                active_graph, asset.id, source_path, layers_dir,
-                                cur_base, step_dir / 'extract-sam', strategy='sam',
+                            res_sam = _cached_retry(
+                                'sam', step_dir / 'extract-sam',
                                 sam_plan=plan_file, sam_directory=sam_out,
                             )
                             choices.append(('sam',res_sam))
@@ -1402,12 +1506,14 @@ def _chain_stage_from_spec(
                                 res = res_sam
                         except (ValueError,OSError,RuntimeError) as exc:
                             choices.append(('sam',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
-                if compare and matting.available():
+                need_rmbg2 = (
+                    compare and matting.available()
+                    and (experiment_profile not in (None, 'baseline')
+                         or not any(c.get('status') == 'CANDIDATE_READY' for _, c in choices))
+                )
+                if need_rmbg2:
                     try:
-                        res_matte = retry_asset_extraction(
-                            active_graph, asset.id, source_path, layers_dir,
-                            cur_base, step_dir / 'extract-rmbg2', strategy='rmbg2',
-                        )
+                        res_matte = _cached_retry('rmbg2', step_dir / 'extract-rmbg2')
                         choices.append(('rmbg2',res_matte))
                     except Exception as exc:
                         choices.append(('rmbg2',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
@@ -1741,6 +1847,7 @@ def restage_batch_candidate_subset(
             logo_ids=set(spec.get('logo_ids', [])),
             wanted_filter=wanted_filter,
             sam_enabled=bool(spec.get('sam_enabled', False)),
+            post_text_checkpoint=spec.get('post_text_checkpoint'),
         )
         fp_key = {'batch': repaired_ids}
 
@@ -1825,6 +1932,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                     wanted_filter.update(field['target_ids'])
         write(directory/'plan-bindings.json', routes)
     sam_enabled = bool(os.environ.get('IMAGE2PPT_SAM_URL') or os.environ.get('SAM_URL'))
+    t_batch_start = time.perf_counter()
+    timings: dict[str, float] = {}
 
     failed_regions: list[dict] = []
 
@@ -2012,6 +2121,10 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             ]
         return [_classify_failed_region(err, cg if staged_crop_boxes else initial_graph, logo_ids, staged_crop_boxes) for err in failed_regions]
 
+    t_stage_start = time.perf_counter()
+    timings['text_probe_s'] = round(t_stage_start - t_batch_start, 2)
+
+    post_text_ckpt: dict = {}
     final_base, staged_ids, stage_errors = _chain_stage_from_spec(
         initial_graph=initial_graph,
         initial_baseline=initial_baseline,
@@ -2037,7 +2150,9 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         logo_ids=logo_ids,
         wanted_filter=wanted_filter,
         sam_enabled=sam_enabled,
+        post_text_checkpoint=post_text_ckpt,
     )
+    timings['stage_pass1_s'] = round(time.perf_counter() - t_stage_start, 2)
     failed_regions.extend(stage_errors)
     pass1_failed_ids = sorted(err['object_id'] for err in stage_errors if err.get('object_id'))
 
@@ -2081,6 +2196,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'logo_ids': sorted(logo_ids),
             'wanted_filter': sorted(wanted_filter) if wanted_filter is not None else None,
             'sam_enabled': bool(sam_enabled),
+            'post_text_checkpoint': post_text_ckpt,
         },
         'auto_repaired_frame_ids': [],
         'isolated_bad_ids': [],
@@ -2106,7 +2222,13 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         }
 
     # Unified Office check & per-object failure isolation through RuntimeService.validate_candidate.
+    t_val_start = time.perf_counter()
     val = service.validate_candidate(state, current, directory / 'validate', candidate_id=batch_cid)
+    timings['validate_office_s'] = round(time.perf_counter() - t_val_start, 2)
+    timings['total_s'] = round(time.perf_counter() - t_batch_start, 2)
+    if isinstance(val.get('timings'), dict):
+        timings.update({f'val_{k}': v for k, v in val['timings'].items()})
+    cand['timings'] = timings
     cand_ir_ref[0] = Path(cand['ir'])
     failed_regions.extend(cand.get('isolation_failures', []))
     staged_ids = cand.get('object_ids', staged_ids)
@@ -2127,6 +2249,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'committed_object_ids': [],
             'auto_repaired_frame_ids': auto_repaired_frames,
             'isolated_dropped_ids': isolated_bad_ids,
+            'timings': timings,
             'failed_count': len(enriched),
             'failed_regions': enriched,
             'next_step': f'Batch candidate {batch_cid} is VALIDATED ({len(staged_ids)} staged, 0 committed). Call commit_candidate(candidate_id="{batch_cid}", expected_version={next_version}) to formally commit, then inspect failed_regions or compose_delivery.',
@@ -2142,6 +2265,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         'committed_count': 0,
         'committed_object_ids': [],
         'isolated_dropped_ids': isolated_bad_ids,
+        'timings': timings,
         'office_status': val.get('status'),
         'failed_count': len(enriched),
         'failed_regions': enriched,

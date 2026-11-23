@@ -14,7 +14,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 
-SYNC_FILES = [
+STATIC_SYNC_FILES = [
     'configs/fidelity_tolerance.json',
     'ppt-rebuild/src/reconstruction.py',
     'scripts/capabilities.mjs',
@@ -31,58 +31,6 @@ SYNC_FILES = [
     'services/product/compose_objects.mjs',
     'services/product/OPENCODE_RUNTIME.md',
     'services/product/PARALLEL_R10.md',
-    'services/product/product/app.py',
-    'services/product/product/contracts.py',
-    'services/product/product/experiment.py',
-    'services/product/product/experiment_assets.py',
-    'services/product/product/experiment_svg.py',
-    'services/product/product/go_provider.py',
-    'services/product/product/object_unmix.py',
-    'services/product/product/parallel_contracts.py',
-    'services/product/product/parallel_edit_probe.py',
-    'services/product/product/parallel_fusion.py',
-    'services/product/product/parallel_office.py',
-    'services/product/product/parallel_rebuild.py',
-    'services/product/product/parallel_residual_gate.py',
-    'services/product/product/parallel_text_candidates.py',
-    'services/product/product/parallel_typography.py',
-    'services/product/product/peer_evidence.py',
-    'services/product/product/pipeline.py',
-    'services/product/product/scorecard.py',
-    'services/product/product/tolerance_config.py',
-    'services/product/product/recovery/adaptive_policy.py',
-    'services/product/product/recovery/agent_asset_stage.py',
-    'services/product/product/recovery/asset_retry.py',
-    'services/product/product/recovery/candidate_stage.py',
-    'services/product/product/recovery/chart_stage.py',
-    'services/product/product/recovery/container_stage.py',
-    'services/product/product/recovery/gradient_backing.py',
-    'services/product/product/recovery/marked_fields.py',
-    'services/product/product/recovery/marked_ownership.py',
-    'services/product/product/recovery/marked_surfaces.py',
-    'services/product/product/recovery/marked_tables.py',
-    'services/product/product/recovery/native_shapes.py',
-    'services/product/product/recovery/region_candidates.py',
-    'services/product/product/recovery/region_crop.py',
-    'services/product/product/recovery/vector_icons.py',
-    'services/product/product/runtime/batch_backbone.py',
-    'services/product/product/runtime/client.py',
-    'services/product/product/runtime/host_baseline.py',
-    'services/product/product/runtime/host_evidence.py',
-    'services/product/product/runtime/independent_review.py',
-    'services/product/product/runtime/launch.py',
-    'services/product/product/runtime/marked_routes.py',
-    'services/product/product/runtime/mcp_server.py',
-    'services/product/product/runtime/office.py',
-    'services/product/product/runtime/office_bridge.py',
-    'services/product/product/runtime/page_structure.py',
-    'services/product/product/runtime/provider.py',
-    'services/product/product/runtime/review_control.py',
-    'services/product/product/runtime/runner.py',
-    'services/product/product/runtime/service.py',
-    'services/product/product/runtime/state.py',
-    'services/product/product/runtime/text_reading.py',
-    'services/product/product/runtime/windows_host.py',
     'skills/image2ppt-runtime/SKILL.md',
     'AGENTS.md',
     'skills/image2ppt/SKILL.md',
@@ -93,6 +41,26 @@ SYNC_FILES = [
     '.agents/skills/image2ppt/references/slideir.md',
     'skills/image2ppt-claude/references/slideir.md',
 ]
+
+
+def discover_sync_files() -> list[str]:
+    """Combine static non-product files with all Python modules under `services/product/product/`."""
+    product_root = ROOT / 'services/product/product'
+    product_py = sorted(
+        p.relative_to(ROOT).as_posix()
+        for p in product_root.rglob('*.py')
+        if '__pycache__' not in p.parts and 'tests' not in p.parts
+    )
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for rel in [*STATIC_SYNC_FILES, *product_py]:
+        if rel not in seen:
+            seen.add(rel)
+            ordered.append(rel)
+    return ordered
+
+
+SYNC_FILES = discover_sync_files()
 
 
 def sha256_bytes(data: bytes) -> str:

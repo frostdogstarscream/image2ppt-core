@@ -4,6 +4,7 @@ from collections import Counter
 import os
 from pathlib import Path
 import shutil
+import time
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -603,6 +604,18 @@ class RuntimeService(ExplorationTools):
                     'failure':candidate.get('failure','CANDIDATE_NOT_STAGED'),
                     'failed_checks':candidate.get('failed_checks',[]),'evidence':candidate.get('evidence',[])}
         ir, graph, _, original = self._verify_staged_candidate_graph(current, candidate)
+        def _sel_box(rec):
+            box = rec.get('restore_bbox') or rec.get('bbox') or (rec.get('payload') or {}).get('bbox')
+            return box if isinstance(box, (list, tuple)) and len(box) == 4 else None
+
+        def _boxes_near(b1, b2, pad=4.0):
+            return (
+                b1[0] - pad < b2[0] + b2[2] + pad
+                and b2[0] - pad < b1[0] + b1[2] + pad
+                and b1[1] - pad < b2[1] + b2[3] + pad
+                and b2[1] - pad < b1[1] + b1[3] + pad
+            )
+
         def _scoped_target_ids(cand, orig_graph, cand_graph):
             if not orig_graph.selected:
                 return None
@@ -613,16 +626,6 @@ class RuntimeService(ExplorationTools):
                 if cand_graph.selected[oid] != orig_graph.selected[oid]
             }
             target = (set(cand_ids) | added_ids | modified_ids) & set(cand_graph.selected)
-            def _sel_box(rec):
-                box = rec.get('restore_bbox') or rec.get('bbox') or (rec.get('payload') or {}).get('bbox')
-                return box if isinstance(box, (list, tuple)) and len(box) == 4 else None
-            def _boxes_near(b1, b2, pad=4.0):
-                return (
-                    b1[0] - pad < b2[0] + b2[2] + pad
-                    and b2[0] - pad < b1[0] + b1[2] + pad
-                    and b1[1] - pad < b2[1] + b2[3] + pad
-                    and b2[1] - pad < b1[1] + b1[3] + pad
-                )
             direct_boxes = [b for oid in target if (b := _sel_box(cand_graph.selected[oid])) is not None]
             if direct_boxes:
                 for sid, srec in orig_graph.selected.items():
@@ -635,27 +638,157 @@ class RuntimeService(ExplorationTools):
                 return None
             return sorted(target)
 
+        def _scoped_recheck_ids(prev_ir_path, prev_graph, prev_res, cand_ir_path, cand_graph):
+            from ..parallel_residual_gate import residual_accepted
+            if not prev_graph.selected or not cand_graph.selected:
+                return None
+            failed_oid = (prev_res.get('office') or {}).get('failed_object_id')
+            prev_res_pass = set()
+            for page_rows in prev_res.get('residuals', []):
+                for rec in page_rows:
+                    oid = rec.get('id')
+                    if oid and residual_accepted(rec):
+                        prev_res_pass.add(oid)
+            prev_repl_bad = set()
+            for rec in (prev_res.get('replacements') or {}).get('records', []):
+                oid = rec.get('id')
+                if not oid:
+                    continue
+                ok = (
+                    rec.get('content_matches') and rec.get('siblings_unchanged')
+                    and rec.get('frame_unchanged') and rec.get('outside_pixels', 0) == 0
+                    and not rec.get('layout', {}).get('overflow')
+                    and not rec.get('layout', {}).get('unexpected_wrap')
+                )
+                if not ok:
+                    prev_repl_bad.add(oid)
+            prev_passed = prev_res_pass - prev_repl_bad - ({failed_oid} if failed_oid else set())
+            added = set(cand_graph.selected) - set(prev_graph.selected)
+            removed = set(prev_graph.selected) - set(cand_graph.selected)
+            modified = {
+                oid for oid in (set(cand_graph.selected) & set(prev_graph.selected))
+                if cand_graph.selected[oid] != prev_graph.selected[oid]
+            }
+            unpassed = set(cand_graph.selected) - prev_passed
+            recheck = added | modified | unpassed
+            changed_boxes = [
+                b for b in (
+                    [_sel_box(prev_graph.selected[oid]) for oid in removed]
+                    + [_sel_box(cand_graph.selected[oid]) for oid in (added | modified)]
+                )
+                if b is not None
+            ]
+            if changed_boxes:
+                for sid, srec in cand_graph.selected.items():
+                    if sid in recheck:
+                        continue
+                    sb = _sel_box(srec)
+                    if sb is not None and any(_boxes_near(sb, cb, pad=6.0) for cb in changed_boxes):
+                        recheck.add(sid)
+            # Pixel-exact guard on source-plate.png around any remaining untouched object
+            prev_plate_p = prev_ir_path.parent / 'source-plate.png'
+            cand_plate_p = cand_ir_path.parent / 'source-plate.png'
+            if prev_plate_p.is_file() and cand_plate_p.is_file():
+                try:
+                    import numpy as np
+                    from PIL import Image
+                    p_img = np.array(Image.open(prev_plate_p).convert('RGB'))
+                    c_img = np.array(Image.open(cand_plate_p).convert('RGB'))
+                    if p_img.shape == c_img.shape:
+                        pdiff = (p_img != c_img).any(2)
+                        h_p, w_p = pdiff.shape
+                        for sid, srec in cand_graph.selected.items():
+                            if sid in recheck:
+                                continue
+                            sb = _sel_box(srec)
+                            if sb is None:
+                                recheck.add(sid)
+                                continue
+                            x0 = max(0, int(sb[0]) - 4)
+                            y0 = max(0, int(sb[1]) - 4)
+                            x1 = min(w_p, int(sb[0] + sb[2]) + 5)
+                            y1 = min(h_p, int(sb[1] + sb[3]) + 5)
+                            if x1 > x0 and y1 > y0 and pdiff[y0:y1, x0:x1].any():
+                                recheck.add(sid)
+                    else:
+                        return None
+                except Exception:
+                    return None
+            if not recheck:
+                recheck.add(sorted(cand_graph.selected)[0])
+            if recheck >= set(cand_graph.selected):
+                return None
+            return sorted(recheck)
+
+        def _merge_scoped_pass_result(prev_res, pass_res, recheck_ids, selected_ids):
+            if recheck_ids is None:
+                return pass_res
+            untouched = set(selected_ids) - set(recheck_ids)
+            if not untouched:
+                return pass_res
+            merged = dict(pass_res)
+            # Merge residual records for untouched objects that passed in prev_res
+            cur_res_pages = [list(p) for p in (pass_res.get('residuals') or [[]])]
+            prev_res_pages = prev_res.get('residuals') or []
+            if cur_res_pages and prev_res_pages:
+                seen_ids = {r.get('id') for r in cur_res_pages[0] if r.get('id')}
+                for r in prev_res_pages[0]:
+                    rid = r.get('id')
+                    if rid in untouched and rid not in seen_ids:
+                        cur_res_pages[0].append(r)
+                        seen_ids.add(rid)
+                merged['residuals'] = cur_res_pages
+            # Merge replacement records for untouched objects
+            cur_repl = dict(pass_res.get('replacements') or {})
+            prev_repl_recs = (prev_res.get('replacements') or {}).get('records') or []
+            if prev_repl_recs:
+                cur_recs = list(cur_repl.get('records') or [])
+                seen_r = {r.get('id') for r in cur_recs if r.get('id')}
+                for r in prev_repl_recs:
+                    rid = r.get('id')
+                    if rid in untouched and rid not in seen_r:
+                        cur_recs.append(r)
+                        seen_r.add(rid)
+                cur_repl['records'] = cur_recs
+                merged['replacements'] = cur_repl
+            return merged
+
         from .compiler import compile_local as compile_pages
         from ..parallel_pipeline import effective_texts
+        val_timings: dict[str, float] = {}
+        t0 = time.perf_counter()
         with lease('compiler'):
             artifacts = compile_pages([ir], directory/'compiled', [effective_texts(graph, ir)])
+        val_timings['compile_pass1_s'] = round(time.perf_counter() - t0, 2)
         scoped_ids = _scoped_target_ids(candidate, original, graph)
+        t1 = time.perf_counter()
         result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check',
                                    **({'target_ids': scoped_ids} if scoped_ids is not None else {}))
+        val_timings['office_pass1_s'] = round(time.perf_counter() - t1, 2)
         iso_attempts = int(candidate.get('isolation_attempts', 1 if candidate.get('isolation_attempted') else 0))
         while result.get('status') == 'REVIEW_REQUIRED' and candidate.get('kind') == 'batch' and iso_attempts < 2:
             from .batch_backbone import restage_batch_candidate_subset
             pass_num = iso_attempts + 2
             iso_dir = directory / ('batch-isolate' if pass_num == 2 else f'batch-isolate-pass{pass_num}')
+            prev_ir, prev_graph, prev_result = ir, graph, result
+            t_iso = time.perf_counter()
             if not restage_batch_candidate_subset(self, state, current, iso_dir, candidate, result):
                 break
+            val_timings[f'isolate_pass{pass_num}_s'] = round(time.perf_counter() - t_iso, 2)
             iso_attempts = int(candidate.get('isolation_attempts', iso_attempts + 1))
             ir, graph, _, original = self._verify_staged_candidate_graph(current, candidate)
+            t_c = time.perf_counter()
             with lease('compiler'):
                 artifacts = compile_pages([ir], directory / f'compiled-pass{pass_num}', [effective_texts(graph, ir)])
-            scoped_ids = _scoped_target_ids(candidate, original, graph)
-            result = self.office_check(state, artifacts['pptx'], [ir], directory / f'office-check-pass{pass_num}',
-                                       **({'target_ids': scoped_ids} if scoped_ids is not None else {}))
+            val_timings[f'compile_pass{pass_num}_s'] = round(time.perf_counter() - t_c, 2)
+            scoped_ids = _scoped_recheck_ids(prev_ir, prev_graph, prev_result, ir, graph)
+            t_o = time.perf_counter()
+            raw_result = self.office_check(state, artifacts['pptx'], [ir], directory / f'office-check-pass{pass_num}',
+                                           **({'target_ids': scoped_ids} if scoped_ids is not None else {}))
+            val_timings[f'office_pass{pass_num}_s'] = round(time.perf_counter() - t_o, 2)
+            val_timings[f'office_pass{pass_num}_target_count'] = len(scoped_ids) if scoped_ids is not None else len(graph.selected)
+            result = _merge_scoped_pass_result(prev_result, raw_result, scoped_ids, graph.selected)
+        result['timings'] = val_timings
         if candidate.get('kind')=='text':
             from .office import frame_feedback
             feedback=frame_feedback(result,graph,candidate['object_id'])

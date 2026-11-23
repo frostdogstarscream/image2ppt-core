@@ -168,7 +168,8 @@ def _discover_candidates(
             in_cnt, ilbl, istats, _ = cv2.connectedComponentsWithStats(isup.astype('uint8'), 8)
             for ic in range(1, in_cnt):
                 ix, iy, iw, ih, iarea = [int(v) for v in istats[ic]]
-                if iarea < 80 or max(iw, ih) < 32:
+                is_short_accent = (3 <= min(iw, ih) <= 14 and 14 <= max(iw, ih) <= 48 and max(iw, ih) >= 1.9 * min(iw, ih) and iarea >= 36)
+                if not is_short_accent and (iarea < 80 or max(iw, ih) < 32):
                     continue
                 if int(((ilbl == ic) & icore).sum()) < 16:
                     continue
@@ -179,7 +180,7 @@ def _discover_candidates(
                 if bar_split is not None:
                     add_series(bar_split)
                     continue
-                if min(iw, ih) <= 8 and max(iw, ih) >= 36:
+                if is_short_accent or (min(iw, ih) <= 8 and max(iw, ih) >= 36):
                     _add('line', cbox)
                 elif min(iw, ih) >= 18:
                     for r_kind, r_box in _split_two_tone_ribbon(work_plate, cbox):
@@ -246,10 +247,14 @@ def _discover_candidates(
 
     for cid in range(1, n_lbl):
         bx, by, bw, bh, area = [int(v) for v in stats[cid]]
-        if area < 72 or max(bw, bh) < 32:
+        is_short_accent = (3 <= min(bw, bh) <= 14 and 14 <= max(bw, bh) <= 48 and max(bw, bh) >= 1.9 * min(bw, bh) and area >= 36)
+        if not is_short_accent and (area < 72 or max(bw, bh) < 32):
             continue
         comp_mask = labels == cid
         if int((comp_mask & core).sum()) < 16:
+            continue
+        if is_short_accent:
+            _add('line', [bx, by, bw, bh])
             continue
         bar_split = _split_bar_series_on_baseline(work_plate, canvas_field, [bx, by, bw, bh])
         if bar_split is not None:
@@ -324,9 +329,10 @@ def _ring_parent_patch(
     if len(vals) < 16:
         return None
 
-    # Flush-left ribbon inside a card header band: right edge sits inside the clean header fill (distinct from canvas sky)
-    if 20 <= h <= 96 and 110 <= w <= 360 and x + w + pad <= w_img:
-        r_in = work_plate[y + 3:max(y + 5, y + h - 3), x + w:x + w + pad].reshape(-1, 3)
+    # Flush-left ribbon inside a card header band: right edge sits inside the clean header fill (distinct from canvas sky).
+    # Offset +2px past the right tip to clear 1px anti-aliasing halo on single-tone chevron/homePlate tips.
+    if 20 <= h <= 96 and 110 <= w <= 360 and x + w + 2 + pad <= w_img:
+        r_in = work_plate[y + 3:max(y + 5, y + h - 3), x + w + 2:x + w + 2 + pad].reshape(-1, 3)
         if len(r_in) >= 12:
             rm_in = np.median(r_in.astype(np.float32), axis=0)
             r_err = float(np.percentile(np.abs(r_in.astype(np.float32) - rm_in).max(1), 80))
@@ -339,9 +345,9 @@ def _ring_parent_patch(
 
     def _try_strip_or_field() -> tuple[np.ndarray, np.ndarray, float] | None:
         # Flush-left ribbon or cap sitting inside a header band (right edge borders the clean header band)
-        if 20 <= h <= 96 and w >= 32 and x + w + pad <= w_img:
+        if 20 <= h <= 96 and w >= 32 and x + w + 2 + pad <= w_img:
             ry_in0, ry_in1 = y + 3, max(y + 5, y + h - 3)
-            r_in = work_plate[ry_in0:ry_in1, x + w:x + w + pad].reshape(-1, 3)
+            r_in = work_plate[ry_in0:ry_in1, x + w + 2:x + w + 2 + pad].reshape(-1, 3)
             if len(r_in) >= 12:
                 rm_in = np.median(r_in.astype(np.float32), axis=0)
                 r_err = float(np.percentile(np.abs(r_in.astype(np.float32) - rm_in).max(1), 80))
@@ -571,6 +577,70 @@ def stage_containers_and_surfaces(
     shutil.copytree(baseline, output)
     graph.surface.background = canvas_hex
 
+    backed_by_surface: dict[str, np.ndarray] = {}
+    for oid, pinfo in existing_proofs.items():
+        rx, ry, rw, rh = pinfo['restore_bbox']
+        if graph.selected.get(oid, {}).get('kind') == 'text':
+            backed_by_surface[oid] = (
+                higher_asset_vis[ry:ry + rh, rx:rx + rw] | higher_crop_vis[ry:ry + rh, rx:rx + rw]
+            ).copy()
+        else:
+            backed_by_surface[oid] = np.zeros((rh, rw), dtype=bool)
+
+    def _refresh_overlying_backing_patches(
+        surface_box: list[int],
+        rendered_mask_local: np.ndarray,
+        pred_fill_u8: np.ndarray,
+        new_sids: set[str],
+    ) -> None:
+        """Keep overlying objects' owner_evidence backing_patch in sync with newly staged native surfaces."""
+        sx, sy, sw, sh = surface_box
+        s_area = sw * sh
+        for oid, pinfo in existing_proofs.items():
+            if oid in new_sids or oid not in graph.selected:
+                continue
+            rec = graph.selected[oid]
+            ref = rec.get('owner_evidence')
+            if not ref or not ref.get('file'):
+                continue
+            rx, ry, rw, rh = pinfo['restore_bbox']
+            if rec.get('kind') == 'surface' and (rw * rh) >= s_area:
+                continue
+            ox0, oy0 = max(sx, rx), max(sy, ry)
+            ox1, oy1 = min(sx + sw, rx + rw), min(sy + sh, ry + rh)
+            if ox1 <= ox0 or oy1 <= oy0:
+                continue
+            sl_s = (slice(oy0 - sy, oy1 - sy), slice(ox0 - sx, ox1 - sx))
+            sl_r = (slice(oy0 - ry, oy1 - ry), slice(ox0 - rx, ox1 - rx))
+            sl_g = (slice(oy0, oy1), slice(ox0, ox1))
+            already_backed = backed_by_surface.setdefault(oid, np.zeros((rh, rw), dtype=bool))
+            cand_mask = pinfo['mask'][sl_g] & rendered_mask_local[sl_s] & (~already_backed[sl_r])
+            if not cand_mask.any():
+                continue
+            old_bp = pinfo['backing_patch']
+            color_diff = np.abs(pred_fill_u8[sl_s].astype(float) - old_bp[sl_r]).max(axis=2)
+            upd = cand_mask & (color_diff <= 28.0)
+            if not upd.any():
+                continue
+            new_bp_u8 = np.clip(np.rint(old_bp), 0, 255).astype(np.uint8)
+            sub_bp = new_bp_u8[sl_r]
+            sub_bp[upd] = pred_fill_u8[sl_s][upd]
+            new_bp_u8[sl_r] = sub_bp
+            already_backed[sl_r] |= upd
+            out_proof = output / ref['file']
+            np.savez_compressed(
+                out_proof,
+                mask=pinfo['mask'],
+                restore_bbox=pinfo['restore_bbox'],
+                backing_patch=new_bp_u8,
+            )
+            new_sha = digest(out_proof)
+            ref['sha256'] = new_sha
+            for tx in graph.transactions:
+                if tx.get('id') == oid and isinstance(tx.get('owner_evidence'), dict) and tx['owner_evidence'].get('file') == ref['file']:
+                    tx['owner_evidence']['sha256'] = new_sha
+            pinfo['backing_patch'] = new_bp_u8.astype(float)
+
     used_ids = {x.id for x in [*graph.text.texts, *graph.asset.objects, *graph.surface.shapes]} | set(graph.selected)
     claimed_child_ids: set[str] = set()
     staged_new_ids: list[str] = []
@@ -676,11 +746,12 @@ def stage_containers_and_surfaces(
                     surface_claimed_mask |= s_mask
                     claimed_child_ids.update(direct_oids)
                     graph = fused_try
-                    existing_proofs[pair_sids[0]] = {
-                        'mask': s_mask,
-                        'restore_bbox': [x, y, w, h],
-                        'backing_patch': parent_u8.astype(float),
-                    }
+                    comb_pred_u8 = np.clip(
+                        np.rint(np.concatenate([ribbon_pair[0]['pred_fill'], ribbon_pair[1]['pred_fill']], axis=1)),
+                        0,
+                        255,
+                    ).astype(np.uint8)
+                    _refresh_overlying_backing_patches([x, y, w, h], full_erase_loc, comb_pred_u8, set(pair_sids))
                     pair_proof_specs = [
                         (mask_left, [x, y, split_w, h], parent_u8[:, :split_w]),
                         (mask_right, [x + split_w, y, w - split_w, h], parent_u8[:, split_w:]),
@@ -688,6 +759,12 @@ def stage_containers_and_surfaces(
                     for p_sid, p_shp, (p_mask, p_rbox, p_back) in zip(pair_sids, pair_shapes, pair_proof_specs):
                         p_proof = output / f'{p_sid}-owner.npz'
                         np.savez_compressed(p_proof, mask=p_mask, restore_bbox=p_rbox, backing_patch=p_back)
+                        existing_proofs[p_sid] = {
+                            'mask': p_mask,
+                            'restore_bbox': p_rbox,
+                            'backing_patch': p_back.astype(float),
+                        }
+                        backed_by_surface[p_sid] = np.zeros((p_rbox[3], p_rbox[2]), dtype=bool)
                         record = {
                             'id': p_sid, 'kind': 'surface', 'bbox': list(p_shp.bbox), 'restore_bbox': p_rbox,
                             'payload': p_shp.model_dump(), 'method': 'container-surface-v2-two-tone-ribbon/1',
@@ -787,6 +864,8 @@ def stage_containers_and_surfaces(
             used_ids.add(sid)
 
             graph = fused_try
+            pred_u8 = np.clip(np.rint(shape_fit['pred_fill']), 0, 255).astype(np.uint8)
+            _refresh_overlying_backing_patches([x, y, w, h], erase_loc, pred_u8, {sid})
             proof_file = output / f'{sid}-owner.npz'
             np.savez_compressed(proof_file, mask=s_mask, restore_bbox=restore_box, backing_patch=backing_save)
             existing_proofs[sid] = {
@@ -794,6 +873,7 @@ def stage_containers_and_surfaces(
                 'restore_bbox': restore_box,
                 'backing_patch': backing_save.astype(float),
             }
+            backed_by_surface[sid] = np.zeros((restore_box[3], restore_box[2]), dtype=bool)
             record = {
                 'id': sid,
                 'kind': 'surface',

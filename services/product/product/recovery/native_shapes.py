@@ -272,6 +272,48 @@ def _split_two_tone_ribbon(plate: np.ndarray, box: list[int]) -> list[tuple[str,
     ]
 
 
+def _left_corner_sky_ext(
+    crop: np.ndarray,
+    parent_f: np.ndarray,
+    left_fill_rgb: np.ndarray,
+    cs_l: int,
+) -> np.ndarray:
+    """Detect exterior card-corner sky pixels at top-left / bottom-left of a flush-left ribbon.
+
+    When a blue ribbon sits flush against a rounded card corner inside a header band, the
+    corner pixels outside the card are canvas sky (e.g. [243,249,254]) rather than the
+    header band parent ([225,238,252]). Those pixels differ from `parent_f` by ~15-22 RGB
+    but are far from the ribbon fill (`left_fill_rgb`) and connected to `(0, 0)` or `(0, h-1)`.
+    """
+    h, w = crop.shape[:2]
+    sky_ext = np.zeros((h, w), dtype=bool)
+    if cs_l < 3 or cs_l > min(h, w):
+        return sky_ext
+    lf = np.asarray(left_fill_rgb, dtype=np.float64).reshape(1, 1, 3)
+    par_med = np.median(parent_f.reshape(-1, 3), axis=0)
+    if float(np.abs(lf.reshape(3) - par_med).max()) < 35.0:
+        return sky_ext
+    lf_luma = float(lf.mean())
+    par_luma = float(par_med.mean())
+    for cy0, seed_y in ((0, 0), (h - cs_l, cs_l - 1)):
+        sub = crop[cy0:cy0 + cs_l, :cs_l]
+        sub_par = parent_f[cy0:cy0 + cs_l, :cs_l]
+        d_fill = np.abs(sub - lf).max(2)
+        d_par = np.abs(sub - sub_par).max(2)
+        brighter_than_fill = (sub.mean(2) >= par_luma - 8.0) and (lf_luma <= par_luma - 24.0) if False else (
+            (sub.mean(2) >= sub_par.mean(2) - 8.0) & (lf_luma <= par_luma - 24.0)
+        )
+        is_ext_cand = (d_fill > 26.0) & ((d_par <= 34.0) | brighter_than_fill)
+        if not is_ext_cand[seed_y, 0]:
+            continue
+        bar = (~is_ext_cand).astype(np.uint8)
+        ff = bar.copy()
+        ff_mask = np.zeros((cs_l + 2, cs_l + 2), np.uint8)
+        cv2.floodFill(ff, ff_mask, (0, seed_y), 2)
+        sky_ext[cy0:cy0 + cs_l, :cs_l] |= (ff == 2)
+    return sky_ext
+
+
 def try_fit_two_tone_ribbon_pair(
     work_plate: np.ndarray,
     box: list[int],
@@ -372,15 +414,30 @@ def try_fit_two_tone_ribbon_pair(
         return None
 
     cs_l = min(14, max(4, h // 4), max(4, split_local // 2))
+    sky_ext = _left_corner_sky_ext(crop, parent_f, l_rgb.astype(np.float64), cs_l)
+    if sky_ext.any():
+        ext_mask = ext_mask | sky_ext
     tl_bg = int(ext_mask[:cs_l, :cs_l].sum())
     bl_bg = int(ext_mask[h - cs_l:, :cs_l].sum())
     r_tl = min(16.0, 0.45 * h, 0.45 * split_local, float(round(math.sqrt(tl_bg / 0.2146)))) if tl_bg >= 4 else 0.0
     r_bl = min(16.0, 0.45 * h, 0.45 * split_local, float(round(math.sqrt(bl_bg / 0.2146)))) if bl_bg >= 4 else 0.0
+    if r_tl >= 3.0 or r_bl >= 3.0:
+        yy_c, xx_c = np.mgrid[:h, :w]
+        if r_tl >= 3.0:
+            ext_mask = ext_mask | (
+                (yy_c < r_tl) & (xx_c < r_tl)
+                & (((xx_c - r_tl) ** 2 + (yy_c - r_tl) ** 2) > (r_tl + 0.5) ** 2)
+            )
+        if r_bl >= 3.0:
+            ext_mask = ext_mask | (
+                (yy_c > h - 1 - r_bl) & (xx_c < r_bl)
+                & (((xx_c - r_bl) ** 2 + (yy_c - (h - 1 - r_bl)) ** 2) > (r_bl + 0.5) ** 2)
+            )
     cap_geom = 'custom' if (r_tl >= 3.0 or r_bl >= 3.0) else 'rect'
     cap_paths = _build_left_cap_custom_path(float(split_local), float(h), r_tl, r_bl) if cap_geom == 'custom' else None
     body_paths = _build_homeplate_custom_path(float(w - split_local), float(h), float(shoulder_x) - float(split_local), 0.0, 0.0)
 
-    erase_mask = (~ext_mask) | direct_children_mask_local
+    erase_mask = ((~ext_mask) | direct_children_mask_local) & (~sky_ext)
     return [
         {
             'geometry': cap_geom,
@@ -601,9 +658,16 @@ def _detect_preset_geometry(
                     and tr_bg >= max(14, int(0.08 * tri_area))
                     and br_bg >= max(14, int(0.08 * tri_area))
                     and abs(tr_bg - br_bg) <= max(24, int(0.58 * max(tr_bg, br_bg)))):
-                # Estimate tip start x where top/bottom rows drop into background
-                top_fg = np.where(fg_closed[min(2, h - 1), :])[0]
-                bot_fg = np.where(fg_closed[max(0, h - 3), :])[0]
+                # Estimate tip start x from core foreground so outer AA does not inflate shoulder_x
+                diff_par = np.abs(crop - parent_patch).max(2)
+                core_thresh = max(16.0, 0.30 * min(200.0, float(np.percentile(diff_par, 90))))
+                core_fg = (diff_par > core_thresh) | direct_children_mask_local
+                top_fg = np.where(core_fg[min(2, h - 1), :])[0]
+                bot_fg = np.where(core_fg[max(0, h - 3), :])[0]
+                if len(top_fg) == 0:
+                    top_fg = np.where(fg_closed[min(2, h - 1), :])[0]
+                if len(bot_fg) == 0:
+                    bot_fg = np.where(fg_closed[max(0, h - 3), :])[0]
                 if len(top_fg) > 0 and len(bot_fg) > 0:
                     shoulder_x = int(round(0.5 * (top_fg.max() + bot_fg.max())))
                     if w - shoulder_x >= 5:
@@ -623,15 +687,23 @@ def _detect_preset_geometry(
                             if iou_c >= 0.84:
                                 return 'chevron', None, ~chev_in, None, float(shoulder_x)
                         cs_l = min(14, max(4, h // 4), max(4, shoulder_x // 3))
-                        tl_bg = int((~fg_closed[:cs_l, :cs_l]).sum())
-                        bl_bg = int((~fg_closed[h - cs_l:, :cs_l]).sum())
+                        left_sample_mask = (~direct_children_mask_local)[2:max(3, h - 2), 4:max(5, min(w // 2, 40))]
+                        left_sample_px = crop[2:max(3, h - 2), 4:max(5, min(w // 2, 40))][left_sample_mask]
+                        sky_ext_p = (
+                            _left_corner_sky_ext(crop, parent_patch, np.median(left_sample_px, axis=0), cs_l)
+                            if len(left_sample_px) >= 12 else np.zeros((h, w), dtype=bool)
+                        )
+                        fg_eff = fg_closed & (~sky_ext_p)
+                        tl_bg = int((~fg_eff[:cs_l, :cs_l]).sum())
+                        bl_bg = int((~fg_eff[h - cs_l:, :cs_l]).sum())
                         r_tl = min(16.0, 0.45 * h, 0.45 * shoulder_x, float(round(math.sqrt(tl_bg / 0.2146)))) if tl_bg >= 4 else 0.0
                         r_bl = min(16.0, 0.45 * h, 0.45 * shoulder_x, float(round(math.sqrt(bl_bg / 0.2146)))) if bl_bg >= 4 else 0.0
                         if r_tl >= 3.0:
                             pent_in &= ~((yy < r_tl) & (xx < r_tl) & (((xx - r_tl) ** 2 + (yy - r_tl) ** 2) > (r_tl + 0.5) ** 2))
                         if r_bl >= 3.0:
                             pent_in &= ~((yy > h - 1 - r_bl) & (xx < r_bl) & (((xx - r_bl) ** 2 + (yy - (h - 1 - r_bl)) ** 2) > (r_bl + 0.5) ** 2))
-                        iou_p = int((pent_in & fg_closed).sum()) / float(max(1, int((pent_in | fg_closed).sum())))
+                        pent_in &= ~sky_ext_p
+                        iou_p = int((pent_in & fg_eff).sum()) / float(max(1, int((pent_in | fg_eff).sum())))
                         if iou_p >= 0.85:
                             custom_paths = _build_homeplate_custom_path(
                                 float(w), float(h), float(shoulder_x), r_tl, r_bl
@@ -818,21 +890,32 @@ def try_fit_native_shape_v2(
     if arrow_fit is not None:
         return arrow_fit
 
-    # Thin divider rules (`line` / thin `rect` bar, e.g. header accent rule or vertical column divider)
-    if cand_kind == 'line' or (min(w, h) <= 6 and max(w, h) >= 36):
-        if min(w, h) < 2 or max(w, h) < 32:
+    # Thin divider rules & short vertical/horizontal title accent bars (`line` / thin `rect` bar)
+    is_short_accent = (3 <= min(w, h) <= 14 and 14 <= max(w, h) <= 48 and max(w, h) >= 1.9 * min(w, h))
+    if cand_kind == 'line' or is_short_accent or (min(w, h) <= 6 and max(w, h) >= 36):
+        if not is_short_accent and (min(w, h) < 2 or max(w, h) < 32):
             return None
         unclaimed = ~direct_children_mask_local
         if int(unclaimed.sum()) < 16:
             return None
-        fg = np.abs(crop - parent_f).max(2) > 6.0
-        if float(fg.mean()) < 0.45:
+        fg = np.abs(crop - parent_f).max(2) > (18.0 if is_short_accent else 6.0)
+        if float(fg.mean()) < (0.40 if is_short_accent else 0.45):
             return None
-        grad_res = _fit_linear_gradient(crop, fg & unclaimed, grad_tol)
-        if grad_res is None:
-            return None
-        pred_fill, _, grad_obj = grad_res
-        med_rgb = np.rint(np.median(pred_fill[fg], axis=0)).astype(int)
+        if is_short_accent:
+            # High-contrast compact accent bar (e.g. `|` before section heading)
+            med_rgb = np.rint(np.median(crop[fg & unclaimed], axis=0)).astype(int)
+            if float(np.abs(med_rgb.astype(np.float64) - parent_med).max()) < 35.0:
+                return None
+            if float(np.percentile(np.abs(crop[fg & unclaimed] - med_rgb.astype(np.float64)).max(1), 90)) > 22.0:
+                return None
+            pred_fill = np.broadcast_to(med_rgb.astype(np.float64), (h, w, 3)).copy()
+            grad_obj = None
+        else:
+            grad_res = _fit_linear_gradient(crop, fg & unclaimed, grad_tol)
+            if grad_res is None:
+                return None
+            pred_fill, _, grad_obj = grad_res
+            med_rgb = np.rint(np.median(pred_fill[fg], axis=0)).astype(int)
         return {
             'geometry': 'rect',
             'fill': hex_rgb(med_rgb),
@@ -911,17 +994,30 @@ def try_fit_native_shape_v2(
     perimeter_zone[:, -border_t:] = True
     if ext_corner_mask.any():
         perimeter_zone |= cv2.dilate(ext_corner_mask.astype('uint8'), np.ones((5, 5), np.uint8)) > 0
+    if geometry == 'roundRect' and corner_r is not None and corner_r >= 4.0:
+        # Include all 4 geometric rounded-corner arc bands in perimeter_zone so corner AA
+        # is never misclassified as interior strong_anom when a corner has subtle shadow/ringing.
+        r_arc = float(min(corner_r, h // 3, w // 3))
+        yy_r, xx_r = np.mgrid[:h, :w]
+        r_inner = max(0.0, r_arc - 2.5)
+        for cy_c, cx_c, y_cond, x_cond in [
+            (r_arc, r_arc, yy_r <= r_arc + 1.5, xx_r <= r_arc + 1.5),
+            (r_arc, w - 1.0 - r_arc, yy_r <= r_arc + 1.5, xx_r >= w - 1.0 - r_arc - 1.5),
+            (h - 1.0 - r_arc, r_arc, yy_r >= h - 1.0 - r_arc - 1.5, xx_r <= r_arc + 1.5),
+            (h - 1.0 - r_arc, w - 1.0 - r_arc, yy_r >= h - 1.0 - r_arc - 1.5, xx_r >= w - 1.0 - r_arc - 1.5),
+        ]:
+            perimeter_zone |= y_cond & x_cond & (((xx_r - cx_c) ** 2 + (yy_r - cy_c) ** 2) >= r_inner ** 2)
 
     interior_unclaimed = (~ext_corner_mask) & (~perimeter_zone) & (~direct_children_mask_local)
     if int(interior_unclaimed.sum()) < 20:
         return None
 
-    # 3. Try flat solid fill first, then 2D linear gradient fill
+    # 3. Try flat solid fill first, then 2D linear gradient fill (and retry gradient if flat fails residual safety)
     fill_med = np.median(crop[interior_unclaimed], axis=0)
     flat_dev = np.abs(crop - fill_med).max(2)
     flat_p95 = float(np.percentile(flat_dev[interior_unclaimed], 95))
-    grad_obj: Gradient | None = None
 
+    fill_attempts: list[tuple[np.ndarray, float, Gradient | None, np.ndarray]] = []
     if flat_p95 <= solid_tol:
         base_rgb = np.rint(fill_med).astype(int)
         best_rgb = base_rgb.copy()
@@ -935,143 +1031,159 @@ def try_fit_native_shape_v2(
                 cand_rgb = np.clip(base_rgb, lo_bound, hi_bound)
                 if np.abs(cand_rgb - base_rgb).max() <= 7:
                     best_rgb = np.clip(cand_rgb, 0, 255)
-        pred_fill = np.broadcast_to(best_rgb.astype(np.float64), (h, w, 3)).copy()
-        fit_p95 = flat_p95
-    else:
+        pred_flat = np.broadcast_to(best_rgb.astype(np.float64), (h, w, 3)).copy()
+        fill_attempts.append((pred_flat, flat_p95, None, best_rgb))
+    if flat_p95 > solid_tol or flat_p95 >= 4.0:
         grad_res = _fit_linear_gradient(crop, interior_unclaimed, grad_tol)
-        if grad_res is None:
-            return None
-        pred_fill, fit_p95, grad_obj = grad_res
-        best_rgb = np.clip(np.rint(np.median(pred_fill[interior_unclaimed], axis=0)).astype(int), 0, 255)
-
-    # Verify child backing patches agree reasonably with predicted shape fill
-    if direct_child_patches and grad_obj is None:
-        all_child_px = np.concatenate(direct_child_patches, axis=0)
-        if float(np.percentile(np.abs(all_child_px - best_rgb.astype(float)).max(1), 90)) > 16.0:
-            return None
-
-    # 4. Detect optional 1px border stroke on rectangular/rounded shapes
-    has_border = False
-    if geometry in ('rect', 'roundRect'):
-        edge_strip = min(4, max(2, min(w, h) // 10))
-        trim_x = min(20, w // 5)
-        trim_y = min(20, h // 5)
-        edge_slices = [
-            (crop[:edge_strip, trim_x:w - trim_x], pred_fill[:edge_strip, trim_x:w - trim_x], parent_f[:edge_strip, trim_x:w - trim_x]),
-            (crop[h - edge_strip:, trim_x:w - trim_x], pred_fill[h - edge_strip:, trim_x:w - trim_x], parent_f[h - edge_strip:, trim_x:w - trim_x]),
-            (crop[trim_y:h - trim_y, :edge_strip].transpose(1, 0, 2), pred_fill[trim_y:h - trim_y, :edge_strip].transpose(1, 0, 2), parent_f[trim_y:h - trim_y, :edge_strip].transpose(1, 0, 2)),
-            (crop[trim_y:h - trim_y, w - edge_strip:].transpose(1, 0, 2), pred_fill[trim_y:h - trim_y, w - edge_strip:].transpose(1, 0, 2), parent_f[trim_y:h - trim_y, w - edge_strip:].transpose(1, 0, 2)),
-        ]
-        edge_contrasts = []
-        edge_colors = []
-        for e_crop, e_fill, e_par in edge_slices:
-            if e_crop.shape[1] < 4:
-                continue
-            ref_mid = 0.5 * (e_fill + e_par)
-            d_e = np.abs(e_crop - ref_mid).max(2)
-            idx_peak = d_e.argmax(axis=0)
-            cols = np.arange(e_crop.shape[1])
-            peak_px = e_crop[idx_peak, cols]
-            fill_col = e_fill[idx_peak, cols]
-            par_col = e_par[idx_peak, cols]
-            peak_d = np.minimum(
-                np.abs(peak_px - fill_col).max(1),
-                np.abs(peak_px - par_col).max(1),
-            )
-            edge_contrasts.append(float(np.median(peak_d)))
-            edge_colors.append(np.median(peak_px, axis=0))
-        border_min_c = 1.8 if (w >= 110 and h >= 42 and fit_p95 <= 7.5) else 4.5
-        has_border = sum(c >= border_min_c for c in edge_contrasts) >= 3
-    else:
-        edge_colors = []
-
-    if has_border and edge_colors:
-        raw_line = np.median(np.stack(edge_colors, axis=0), axis=0)
-        ref_mid_med = 0.5 * (best_rgb.astype(float) + parent_med)
-        deblended = np.clip(raw_line + 0.25 * (raw_line - ref_mid_med), 0, 255)
-        line_hex = hex_rgb(deblended)
-        line_width_pt = 0.75
-        line_rgb = np.array([int(line_hex[i:i + 2], 16) for i in (0, 2, 4)], dtype=np.float64)
-    else:
-        # Borderless shape must visibly contrast with parent background!
-        fill_vs_parent = float(np.percentile(np.abs(pred_fill[interior_unclaimed] - parent_f[interior_unclaimed]).max(1), 75))
-        min_fill_c = 2.0 if (w >= 110 and h >= 42 and fit_p95 <= 7.5) else 6.0
-        if fill_vs_parent < min_fill_c:
-            return None
-        line_hex = hex_rgb(best_rgb)
-        line_width_pt = 0.0
-        raw_line = best_rgb.astype(np.float64)
-        line_rgb = best_rgb.astype(np.float64)
-
-    # 5. Strict unmodeled-object safety check + soft tolerance check across ENTIRE box!
-    fill_diff = np.abs(crop - pred_fill).max(2)
-    if float(np.percentile(fill_diff[interior_unclaimed], 95)) > (grad_tol if grad_obj else solid_tol):
+        if grad_res is not None and (grad_res[2] is not None or not fill_attempts):
+            g_pred, g_p95, g_obj = grad_res
+            g_rgb = np.clip(np.rint(np.median(g_pred[interior_unclaimed], axis=0)).astype(int), 0, 255)
+            fill_attempts.append((g_pred, g_p95, g_obj, g_rgb))
+    if not fill_attempts:
         return None
 
-    proven_fill = (~ext_corner_mask) & (fill_diff <= max(13.0, (grad_tol if grad_obj else solid_tol) + 1.5))
-    if has_border:
-        line_b = np.broadcast_to(line_rgb, (h, w, 3))
-        raw_b = np.broadcast_to(raw_line, (h, w, 3))
-        seg_err = np.minimum.reduce([
-            _segment_max_err(crop, parent_f, line_b),
-            _segment_max_err(crop, pred_fill, line_b),
-            _segment_max_err(crop, parent_f, raw_b),
-            _segment_max_err(crop, pred_fill, raw_b),
-            _segment_max_err(crop, parent_f, pred_fill),
-        ])
-    else:
-        seg_err = _segment_max_err(crop, parent_f, pred_fill)
+    for pred_fill, fit_p95, grad_obj, best_rgb in fill_attempts:
+        # Verify child backing patches agree reasonably with predicted shape fill
+        if direct_child_patches and grad_obj is None:
+            all_child_px = np.concatenate(direct_child_patches, axis=0)
+            if float(np.percentile(np.abs(all_child_px - best_rgb.astype(float)).max(1), 90)) > 16.0:
+                continue
 
-    proven_border = perimeter_zone & (~ext_corner_mask) & (seg_err <= border_tol)
+        # 4. Detect optional 1px border stroke on rectangular/rounded shapes
+        has_border = False
+        if geometry in ('rect', 'roundRect'):
+            edge_strip = min(4, max(2, min(w, h) // 10))
+            trim_x = min(20, w // 5)
+            trim_y = min(20, h // 5)
+            edge_slices = [
+                (crop[:edge_strip, trim_x:w - trim_x], pred_fill[:edge_strip, trim_x:w - trim_x], parent_f[:edge_strip, trim_x:w - trim_x]),
+                (crop[h - edge_strip:, trim_x:w - trim_x], pred_fill[h - edge_strip:, trim_x:w - trim_x], parent_f[h - edge_strip:, trim_x:w - trim_x]),
+                (crop[trim_y:h - trim_y, :edge_strip].transpose(1, 0, 2), pred_fill[trim_y:h - trim_y, :edge_strip].transpose(1, 0, 2), parent_f[trim_y:h - trim_y, :edge_strip].transpose(1, 0, 2)),
+                (crop[trim_y:h - trim_y, w - edge_strip:].transpose(1, 0, 2), pred_fill[trim_y:h - trim_y, w - edge_strip:].transpose(1, 0, 2), parent_f[trim_y:h - trim_y, w - edge_strip:].transpose(1, 0, 2)),
+            ]
+            edge_contrasts = []
+            edge_colors = []
+            for e_crop, e_fill, e_par in edge_slices:
+                if e_crop.shape[1] < 4:
+                    continue
+                ref_mid = 0.5 * (e_fill + e_par)
+                d_e = np.abs(e_crop - ref_mid).max(2)
+                idx_peak = d_e.argmax(axis=0)
+                cols = np.arange(e_crop.shape[1])
+                peak_px = e_crop[idx_peak, cols]
+                fill_col = e_fill[idx_peak, cols]
+                par_col = e_par[idx_peak, cols]
+                peak_d = np.minimum(
+                    np.abs(peak_px - fill_col).max(1),
+                    np.abs(peak_px - par_col).max(1),
+                )
+                edge_contrasts.append(float(np.median(peak_d)))
+                edge_colors.append(np.median(peak_px, axis=0))
+            border_min_c = 1.8 if (w >= 110 and h >= 42 and fit_p95 <= 7.5) else 4.5
+            has_border = sum(c >= border_min_c for c in edge_contrasts) >= 3
+        else:
+            edge_colors = []
 
-    outer_rim = np.zeros((h, w), dtype=bool)
-    outer_rim[:2, :] = True
-    outer_rim[-2:, :] = True
-    outer_rim[:, :2] = True
-    outer_rim[:, -2:] = True
-    if ext_corner_mask.any():
-        outer_rim |= cv2.dilate(ext_corner_mask.astype('uint8'), np.ones((3, 3), np.uint8)) > 0
-    ext_aa_bg = outer_rim & (np.abs(crop - parent_f).max(2) <= 9.0) & (~proven_fill) & (~proven_border)
+        fill_vs_parent = float(np.percentile(np.abs(pred_fill[interior_unclaimed] - parent_f[interior_unclaimed]).max(1), 75))
+        if has_border and edge_colors:
+            raw_line = np.median(np.stack(edge_colors, axis=0), axis=0)
+            ref_mid_med = 0.5 * (best_rgb.astype(float) + parent_med)
+            deblended = np.clip(raw_line + 0.25 * (raw_line - ref_mid_med), 0, 255)
+            line_hex = hex_rgb(deblended)
+            line_width_pt = 0.75
+            line_rgb = np.array([int(line_hex[i:i + 2], 16) for i in (0, 2, 4)], dtype=np.float64)
+        else:
+            # Borderless shape must visibly contrast with parent background!
+            min_fill_c = 2.0 if (w >= 110 and h >= 42 and fit_p95 <= 7.5) else 6.0
+            if fill_vs_parent < min_fill_c:
+                continue
+            line_hex = hex_rgb(best_rgb)
+            line_width_pt = 0.0
+            raw_line = best_rgb.astype(np.float64)
+            line_rgb = best_rgb.astype(np.float64)
 
-    explained = direct_children_mask_local | ext_corner_mask | ext_aa_bg | proven_fill | proven_border
-    unexplained = ~explained
-    unexp_count = int(unexplained.sum())
+        # 5. Strict unmodeled-object safety check + soft tolerance check across ENTIRE box!
+        fill_diff = np.abs(crop - pred_fill).max(2)
+        if float(np.percentile(fill_diff[interior_unclaimed], 95)) > (grad_tol if grad_obj else solid_tol):
+            continue
 
-    if unexp_count > 0:
-        if unexp_count / float(w * h) > max_unexp_frac:
-            return None
-        # HARD SAFETY INVARIANT: Never swallow any compact unmodeled icon/glyph component
-        # anywhere inside the interior OR outer margin band!
-        n_u, _, u_stats, _ = cv2.connectedComponentsWithStats(unexplained.astype('uint8'), 8)
-        for uid in range(1, n_u):
-            uw, uh, uarea = int(u_stats[uid][2]), int(u_stats[uid][3]), int(u_stats[uid][4])
-            if (uw >= max_comp_side and uh >= max_comp_side) or uarea >= max_comp_area:
-                return None
+        proven_fill = (~ext_corner_mask) & (fill_diff <= max(13.0, (grad_tol if grad_obj else solid_tol) + 1.5))
+        if has_border:
+            line_b = np.broadcast_to(line_rgb, (h, w, 3))
+            raw_b = np.broadcast_to(raw_line, (h, w, 3))
+            seg_err = np.minimum.reduce([
+                _segment_max_err(crop, parent_f, line_b),
+                _segment_max_err(crop, pred_fill, line_b),
+                _segment_max_err(crop, parent_f, raw_b),
+                _segment_max_err(crop, pred_fill, raw_b),
+                _segment_max_err(crop, parent_f, pred_fill),
+            ])
+        else:
+            seg_err = _segment_max_err(crop, parent_f, pred_fill)
 
-    # Double-check interior anomalies (e.g. internal dashed dividers or small icons)
-    strong_anom = (~ext_corner_mask) & (~direct_children_mask_local) & (~perimeter_zone) & (fill_diff > 14.5)
-    if strong_anom.any():
-        if int(strong_anom.sum()) >= 18:
-            return None
-        n_a, _, a_stats, _ = cv2.connectedComponentsWithStats(strong_anom.astype('uint8'), 8)
-        for aid in range(1, n_a):
-            aw_c, ah_c, a_area = int(a_stats[aid][2]), int(a_stats[aid][3]), int(a_stats[aid][4])
-            if (aw_c >= 3 and ah_c >= 3 and a_area >= 10) or a_area >= 14:
-                return None
+        proven_border = perimeter_zone & (~ext_corner_mask) & (seg_err <= border_tol)
+        # Allow 1px-thin high-contrast edge ringing overshoot strictly inside perimeter_zone
+        if (not has_border) and fill_vs_parent >= 45.0:
+            proven_border |= perimeter_zone & (~ext_corner_mask) & (fill_diff <= border_tol + 6.0)
 
-    erase_mask_local = (direct_children_mask_local | proven_fill | proven_border) & ~ext_corner_mask
-    return {
-        'geometry': geometry,
-        'custom_paths': custom_paths,
-        'fill': hex_rgb(best_rgb),
-        'fill_rgb': best_rgb,
-        'fill_gradient': grad_obj,
-        'pred_fill': pred_fill,
-        'line_color': line_hex,
-        'line_width_pt': line_width_pt,
-        'corner_radius_px': corner_r,
-        'erase_mask_local': erase_mask_local,
-    }
+        outer_rim = np.zeros((h, w), dtype=bool)
+        outer_rim[:2, :] = True
+        outer_rim[-2:, :] = True
+        outer_rim[:, :2] = True
+        outer_rim[:, -2:] = True
+        if ext_corner_mask.any():
+            outer_rim |= cv2.dilate(ext_corner_mask.astype('uint8'), np.ones((3, 3), np.uint8)) > 0
+        ext_aa_bg = outer_rim & (np.abs(crop - parent_f).max(2) <= 9.0) & (~proven_fill) & (~proven_border)
+
+        explained = direct_children_mask_local | ext_corner_mask | ext_aa_bg | proven_fill | proven_border
+        unexplained = ~explained
+        unexp_count = int(unexplained.sum())
+
+        failed_safety = False
+        if unexp_count > 0:
+            if unexp_count / float(w * h) > max_unexp_frac:
+                failed_safety = True
+            else:
+                # HARD SAFETY INVARIANT: Never swallow any compact unmodeled icon/glyph component
+                # anywhere inside the interior OR outer margin band!
+                n_u, _, u_stats, _ = cv2.connectedComponentsWithStats(unexplained.astype('uint8'), 8)
+                for uid in range(1, n_u):
+                    uw, uh, uarea = int(u_stats[uid][2]), int(u_stats[uid][3]), int(u_stats[uid][4])
+                    if (uw >= max_comp_side and uh >= max_comp_side) or uarea >= max_comp_area:
+                        failed_safety = True
+                        break
+        if failed_safety:
+            continue
+
+        # Double-check interior anomalies (e.g. internal dashed dividers or small icons)
+        anom_thresh = max(14.5, (grad_tol if grad_obj else solid_tol) + 1.5)
+        strong_anom = (~ext_corner_mask) & (~direct_children_mask_local) & (~perimeter_zone) & (fill_diff > anom_thresh)
+        if strong_anom.any():
+            if int(strong_anom.sum()) >= 18:
+                continue
+            n_a, _, a_stats, _ = cv2.connectedComponentsWithStats(strong_anom.astype('uint8'), 8)
+            for aid in range(1, n_a):
+                aw_c, ah_c, a_area = int(a_stats[aid][2]), int(a_stats[aid][3]), int(a_stats[aid][4])
+                if (aw_c >= 3 and ah_c >= 3 and a_area >= 10) or a_area >= 14:
+                    failed_safety = True
+                    break
+            if failed_safety:
+                continue
+
+        erase_mask_local = (direct_children_mask_local | proven_fill | proven_border) & ~ext_corner_mask
+        return {
+            'geometry': geometry,
+            'custom_paths': custom_paths,
+            'fill': hex_rgb(best_rgb),
+            'fill_rgb': best_rgb,
+            'fill_gradient': grad_obj,
+            'pred_fill': pred_fill,
+            'line_color': line_hex,
+            'line_width_pt': line_width_pt,
+            'corner_radius_px': corner_r,
+            'erase_mask_local': erase_mask_local,
+        }
+    return None
 
 
 def soft_shadow_halo_mask(
