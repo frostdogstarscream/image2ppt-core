@@ -71,6 +71,7 @@ def stage_badge_symbols(baseline, output, layout, *, wanted=None, skip=(), panel
             group[1].add(alias)
     layer = _layer_image(baseline, graph) if groups else None
     staged = []
+    decisions = []
     claimed = np.zeros(source.shape[:2], bool)
     for disc, (candidate, aliases) in sorted(groups.items()):
         if panel_regions is not None and not any(intersection(disc, box) >= disc[2]*disc[3] for box in panel_regions):
@@ -93,6 +94,7 @@ def stage_badge_symbols(baseline, output, layout, *, wanted=None, skip=(), panel
         excluded = {name for name in ('LayerD','color-unmix') if oid+'-'+name in skip}
         rgba, decision = select_badge_ink(source[tile], candidate['face'], candidate['rgba'],
                                          layer[tile] if layer is not None else None, excluded=excluded, strict_holes=True)
+        decisions.append({'object_id':oid, 'disc':disc, 'bbox':box, 'evidence_ids':sorted(aliases), **decision})
         if rgba is None:
             continue
         obj = ClosedObject(id=oid, kind='icon', bbox=box, layers=['source-plate.png'],
@@ -128,6 +130,8 @@ def stage_badge_symbols(baseline, output, layout, *, wanted=None, skip=(), panel
         graph.transactions.append(record)
         occupied.append(box)
         staged.append(oid)
+    if decisions:
+        write(output.parent/(output.name+'-trials.json'), {'source_sha256':graph.source_sha256, 'objects':decisions})
     if not staged:
         return baseline, []
     Image.fromarray(plate).save(output / plate_path.name)

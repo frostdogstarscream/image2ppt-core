@@ -186,11 +186,14 @@ def select_badge_ink(pixels, face, measured, layer, *, excluded=(), strict_holes
         spill = float(np.abs(dark[holes] - 56).max(1).mean()) if holes.any() else 0.0
         coverage = float(alpha[..., 0][strokes].mean()) if strokes.any() else 0.0
         valid = coverage >= 0.55 and spill <= 6 and source_error <= 12
-        if strict_holes and holes.any():
+        # Low-alpha edge pixels are visible antialiasing, even on a dark fill.
+        # Test the backdrop only at pixels that the source footprint leaves empty.
+        empty = measured[..., 3] == 0
+        if strict_holes and empty.any():
             for background in (48, 230):
-                contrast = rgb[holes] * alpha[holes] + background * (1 - alpha[holes])
+                contrast = rgb[empty] * alpha[empty] + background * (1 - alpha[empty])
                 valid = valid and np.percentile(abs(contrast-background).max(1), 95) <= 8
-            valid = valid and not np.any(alpha[..., 0][measured[..., 3] == 0] > .06)
+            valid = valid and not np.any(alpha[..., 0][empty] > .06)
         score = source_error + spill
         trials.append(
             {

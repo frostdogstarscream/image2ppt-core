@@ -71,3 +71,18 @@ def test_text_protection_and_foreground_retries_are_local(tmp_path):
     source = np.where(measured[...,3:] > 0, measured[...,:3], 240)
     assert select_badge_ink(source,'f0f0f0',measured,measured,excluded={'color-unmix'})[1]['selected']=='LayerD'
     assert select_badge_ink(source,'f0f0f0',measured,None,excluded={'color-unmix'})[0] is None
+
+
+def test_faint_antialias_is_foreground_and_open_holes_remain_transparent():
+    measured = np.zeros((16,16,4), np.uint8)
+    measured[2:14,2:14] = [253,253,253,14]
+    measured[4:12,4:12] = [40,40,150,255]
+    measured[6:10,6:10] = 0
+    alpha = measured[...,3:] / 255
+    source = np.rint(measured[...,:3]*alpha + 240*(1-alpha)).astype('uint8')
+    _, accepted = select_badge_ink(source,'f0f0f0',measured,None,strict_holes=True)
+    assert accepted['selected']=='color-unmix'
+    dirty = measured.copy()
+    dirty[7,8] = [240,240,240,255]
+    _, rejected = select_badge_ink(source,'f0f0f0',measured,dirty,strict_holes=True)
+    assert rejected['candidates'][1]['status']=='rejected'

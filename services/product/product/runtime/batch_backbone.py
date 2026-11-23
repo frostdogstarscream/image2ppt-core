@@ -1603,7 +1603,9 @@ def restage_batch_candidate_subset(
     if candidate.get('isolation_attempted'):
         bad_ids.update(frame_repairs)
         frame_repairs.clear()
-    if not (frame_repairs or (bad_ids and len(bad_ids) < len(staged_ids))):
+    variants = {oid:staged_graph.selected[oid]['variant_key'] for oid in bad_ids
+                if staged_graph.selected.get(oid, {}).get('variant_key')}
+    if not (frame_repairs or variants or (bad_ids and len(bad_ids) < len(staged_ids))):
         return False
 
     # Crop sequence numbers are local to a staging pass. Persist their source identities.
@@ -1618,8 +1620,6 @@ def restage_batch_candidate_subset(
         members=set(trial.get('region',{}).get('members',[]))
         if members & bad_ids:
             bad_ids.update(members)
-    variants = {oid:staged_graph.selected[oid]['variant_key'] for oid in bad_ids
-                if staged_graph.selected.get(oid, {}).get('variant_key')}
     bad_crop_ids = {oid for oid in bad_ids if staged_graph.selected.get(oid, {}).get('seed_ids')}
     bad_crop_seeds = {sid for oid in bad_crop_ids for sid in staged_graph.selected[oid]['seed_ids']}
     excluded = set(candidate.get('excluded_source_ids', [])) | (bad_ids - bad_crop_ids - variants.keys()) | bad_crop_seeds
