@@ -156,9 +156,12 @@ def _asset_candidates(obj,source,layers,protected,stable,strategy,sam=None,cache
         try:results.append(matte_from_evidence(obj,source,protected,original_alpha=prior,surface=surface))
         except ValueError:pass
         if _matting_binding(strategy):
-            from .matting import matte_candidate
+            from .matting import MattingTimeout, matte_candidate
             # Matting model hypothesis; acceptance remains the shared backing/owner gates.
             try:results.append(matte_candidate(obj,source,protected,surface))
+            except MattingTimeout:
+                # Keep other valid candidates without caching an interrupted model comparison.
+                cache=None
             except (ValueError,OSError,subprocess.SubprocessError):pass
     if sam and layers:
         # Each model mask remains a separate assembly hypothesis. Good stable

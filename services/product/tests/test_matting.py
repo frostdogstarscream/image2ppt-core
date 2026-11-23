@@ -1,4 +1,6 @@
+import json
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import numpy as np
@@ -14,6 +16,68 @@ from product.recovery.agent_asset_stage import stage_asset_candidate
 from product.recovery.asset_retry import retry_asset_extraction
 from test_object_extraction import fixture
 from test_parallel import branches
+
+
+def test_opencode_matte_timeout_is_bound_to_crop_model_and_job(tmp_path, monkeypatch):
+    from product.runtime.state import RuntimeState
+
+    model = tmp_path / 'weights.onnx'
+    model.write_bytes(b'fixture weights only')
+    monkeypatch.setenv('IMAGE2PPT_MATTING_MODEL', str(model))
+    monkeypatch.setattr(matting, 'binding', lambda: {'model_sha256': digest(model)})
+    calls = []
+
+    def run_child(argv, **kwargs):
+        assert argv[-2:] == ['--size', '16'] and 0 < kwargs['timeout'] <= 120
+        with Image.open(argv[3]) as image:
+            value = image.getpixel((0, 0))[0]
+            calls.append(value)
+            if value in (1, 3):
+                raise subprocess.TimeoutExpired(argv, kwargs['timeout'])
+            Image.new('L', image.size, color=255).save(argv[4])
+
+    monkeypatch.setattr(matting.subprocess, 'run', run_child)
+
+    def predict(value):
+        return matting.predict_alpha(np.full((10, 12, 3), value, np.uint8), size=16)
+
+    state = RuntimeState(tmp_path)
+    def operation(current, directory):
+        for value in (1, 1):
+            with pytest.raises(matting.MattingTimeout):
+                predict(value)
+        assert predict(2).shape == (10, 12)
+        for value in (3, 4):
+            with pytest.raises(matting.MattingTimeout):
+                predict(value)
+        return {'status': 'completed-with-other-candidates'}
+
+    state.mutate('batch', {}, None, 'optional-matte-test', operation)
+    assert calls == [1, 2, 3]
+    history = json.loads((state.root/'rmbg-timeouts.json').read_text('utf8'))
+    assert history['model']['model_sha256'] == digest(model)
+    assert len(history['timeouts']) == 2
+    with matting.job_matting(tmp_path/'another-job'):
+        assert predict(4).min() == 1
+    assert calls == [1, 2, 3, 4]
+
+
+def test_interrupted_matte_does_not_cache_other_candidates_as_a_full_comparison(tmp_path, monkeypatch):
+    from product import parallel_rebuild
+
+    source, _ = _scene()
+    obj = SimpleNamespace(id='glyph', bbox=[28, 18, 24, 24], layers=[], exclusions=[], parts=[])
+    monkeypatch.setattr(parallel_rebuild, '_matting_binding', lambda strategy: {'model_sha256': 'fixture'})
+    monkeypatch.setattr(parallel_rebuild, 'matte_from_evidence', lambda *a, **kw: ('sample', {'method': 'fitted'}))
+
+    def interrupted(*args):
+        raise matting.MattingTimeout('RMBG_TIMEOUT')
+
+    monkeypatch.setattr(matting, 'matte_candidate', interrupted)
+    kept = parallel_rebuild._asset_candidates(obj, source, None, np.zeros(source.shape[:2], bool),
+                                               [], 'auto', cache=tmp_path)
+    assert kept == [('sample', {'method': 'fitted'})]
+    assert not list(tmp_path.rglob('manifest.json'))
 
 
 def _scene():

@@ -169,6 +169,55 @@ def test_tampered_candidate_cannot_stage(fixture):
     with pytest.raises(ValueError,match='tampered'):stage(candidate,fixture[0],base,fixture[3]/'staged')
 
 
+def test_one_field_can_replace_ink_across_plate_card_and_verified_cutout(fixture):
+    graph, _, source, folder = fixture
+    candidate, base = trial_fixture(fixture)
+    baseline = json.loads((base/'scene.json').read_text('utf8'))
+    plate = np.array(Image.open(base/'source-plate.png').convert('RGBA'))
+    for name, left, width in [('card',49,5), ('cutout',54,3)]:
+        bounds = [left,40,width,6]
+        ink = source[40:46,left:left+width]
+        paint = np.full_like(ink,254)
+        path = base/(name+'.png')
+        Image.fromarray(ink).convert('RGBA').save(path)
+        claim = np.zeros(source.shape[:2],bool)
+        claim[40:46,left:left+width] = True
+        proof = base/(name+'.npz')
+        np.savez_compressed(proof,mask=claim,restore_bbox=bounds,backing_patch=paint)
+        record = {'id':name,'kind':'asset','state':'STAGED','bbox':bounds,'seed_ids':['symbol'],
+                  'retained_card_artwork':name=='card','move_safety':'MOVABLE',
+                  'payload':{'method':'color-unmix','upgraded_from_region_crop':name=='cutout'},
+                  'asset_reference':{'path':path.name,'sha256':digest(path),'bbox':bounds,'source_sha256':graph.source_sha256},
+                  'owner_evidence':{'file':proof.name,'sha256':digest(proof)}}
+        baseline['selected'][name] = record
+        baseline['transactions'].append(record)
+        plate[40:46,left:left+width,:3] = paint
+    Image.fromarray(plate).save(base/'source-plate.png')
+    baseline['raster_backing']['sha256']=digest(base/'source-plate.png')
+    write(base/'scene.json',baseline)
+    write(base/'transactions.json',baseline['transactions'])
+    payload = json.loads((candidate/'payload.json').read_text('utf8'))
+    payload.update(owner_method='region-surface-text', source_artwork=['card','cutout'],
+                   text_cutouts={'cutout':{'field':'t','asset_sha256':digest(base/'cutout.png'),
+                                 'seed':'symbol','reading':'测试','ocr_identity':'fixture'}})
+    write(candidate/'payload.json',payload)
+    proposal = json.loads((candidate/'candidate.json').read_text('utf8'))
+    proposal['references']['payload.json'] = digest(candidate/'payload.json')
+    write(candidate/'candidate.json',proposal)
+    before = {p.name:digest(p) for p in base.iterdir() if p.is_file()}
+    output = stage(candidate,graph,base,folder/'staged').parent
+    chosen = json.loads((output/'scene.json').read_text('utf8'))['selected']
+    assert 'cutout' not in chosen and set(chosen['t']['source_owners']) == {'card','cutout','source-plate'}
+    with Image.open(output/'card.png') as image:
+        assert np.all(np.asarray(image)[:,1:,3]==0)
+        assert np.all(np.asarray(image)[:,0,3]==255)
+    with Image.open(output/'source-plate.png') as clean:
+        assert np.all(np.asarray(clean)[40:46,50:60,:3]==254)
+    nodes = json.loads((output/'slideir.json').read_text('utf8'))['nodes']
+    assert [(n['id'],n['type']) for n in nodes if n['id'] in ('t','cutout','card')] == [('card','image'),('t','text')]
+    assert before == {p.name:digest(p) for p in base.iterdir() if p.is_file()}
+
+
 def test_stale_scene_cannot_stage(fixture):
     candidate,base=trial_fixture(fixture);fixture[0].method_version='changed'
     with pytest.raises(ValueError,match='stale'):stage(candidate,fixture[0],base,fixture[3]/'staged')

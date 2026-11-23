@@ -123,7 +123,9 @@ class RuntimeState:
                 db.execute('INSERT INTO operations VALUES(?,?,?,NULL)', (token, fingerprint, 'RESERVED'))
             self.event({'tool': operation, 'state': 'RUNNING', 'operation_id': token})
             try:
-                result = execute(current, directory)
+                from ..matting import job_matting
+                with job_matting(self.root):
+                    result = execute(current, directory)
                 current['version'] += 1
                 result = {**result, 'version': current['version'],'remaining_seconds':self.remaining_seconds()}
                 # A recovery receipt is written before publishing the mutable head.

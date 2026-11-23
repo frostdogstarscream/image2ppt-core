@@ -128,6 +128,8 @@ python services/product/opencode_client.py --profile .runtime/opencode-client.dp
 
 ## Checks
 
+Optional RMBG-2.0 graphic extraction in an OpenCode operation runs the configured model in a separate process. GPU queue time and inference share `matting.timeout_seconds` (default 120 seconds). A timed-out crop can still use the LayerD, SAM or fitted-background candidates. The job records the crop fingerprint, dimensions and model binding in `runtime/rmbg-timeouts.json` and skips the same failed input on retries. A second distinct timeout exhausts that job's RMBG retry allowance. Other jobs start with a separate allowance. An interrupted comparison does not populate the shared pixel cache.
+
 ```powershell
 python -m pytest services/product/tests/test_opencode_runtime.py -q
 ./image2ppt.ps1 test

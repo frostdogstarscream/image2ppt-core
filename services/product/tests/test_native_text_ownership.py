@@ -5,11 +5,12 @@ import numpy as np
 from PIL import Image
 import pytest
 
-from product.materialize import digest
+from product.materialize import digest, write
 from product.recovery.region_artwork import verify_text_cutout
 from product.runtime.batch_backbone import split_decorative_ocr_line, _text_stage_failure, _classify_failed_region
 from product.runtime.plate_audit import bind_native_paragraphs, bind_separate_symbols, native_line_fields, reconcile
 from product.runtime.host_baseline import delivery_defects
+from product.runtime.host_evidence import normalize_arguments
 
 
 @pytest.mark.parametrize('ending', list('、，。；：！？）％…'))
@@ -43,6 +44,26 @@ def test_numbered_fields_and_retry_share_the_original_failed_geometry():
         result = _classify_failed_region(row,graph)
         assert result['max_repair_attempts'] and result['conflicting_peer_ids']==['possible-peer']
         assert result['failure']=='FONT_LAYOUT_FAILED' and result['group_members']==members
+
+
+def test_planner_cannot_convert_a_source_field_to_a_picture_inside_a_card(tmp_path):
+    marks = tmp_path/'marks.json'
+    questions = tmp_path/'questions.json'
+    rows = [{'id':'field','mark':7,'label':'text','ocr_ids':['line'],'bbox':[12,12,50,10]},
+            {'id':'parent','mark':3,'label':'card_frame','bbox':[0,0,80,36]}]
+    write(marks, {'rows':rows})
+    write(questions, {'items':rows})
+    state = SimpleNamespace(evidence=lambda _: (questions, {}))
+    current = {'experiment_marks':{'1':str(marks)},'questions':{'1':[{'block':1,'questions':'q'}]},
+               'scene_relations':{'1':{'source_fields':{'line':{'text':'完整字段'}}}}}
+    def plan(mark, route, role):
+        return normalize_arguments(state,current,'plan_marked_page',{'page':1,
+            'fields':[{'mark':mark,'route':route,'role':role,'move_with':[]}]})
+    for route in ('asset','preserve'):
+        with pytest.raises(ValueError,match='native text'):
+            plan(7,route,'field')
+    assert plan(7,'text','field')['fields'][0]['mark']==7
+    assert plan(3,'surface','card')['fields'][0]['mark']==3
 
 
 def test_measured_ui_chevron_survives_beside_a_label_but_math_operator_stays_native():

@@ -14,8 +14,10 @@ RMBG-2.0 weights are CC BY-NC 4.0 (non-commercial use only).
 """
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from functools import lru_cache
+import hashlib
 import importlib.util
 import json
 import os
@@ -23,19 +25,34 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 
 import numpy as np
 from PIL import Image
 
-from .materialize import digest
+from .materialize import digest, write
 from .object_extract import rectangle
 from .parallel_config import ROOT
 from .resource_lease import lease
 
 WORKER = ROOT / 'services/matting/worker.py'
+_JOB_TIMEOUT_RECORD = ContextVar('rmbg_job_timeout_record', default=None)
 PAD = 8
 MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 STD = np.array([0.229, 0.224, 0.225], np.float32)
+
+
+class MattingTimeout(ValueError):
+    """Optional inference did not finish. Other asset proposals are still valid."""
+
+
+@contextmanager
+def job_matting(runtime_directory):
+    token = _JOB_TIMEOUT_RECORD.set(Path(runtime_directory) / 'rmbg-timeouts.json')
+    try:
+        yield
+    finally:
+        _JOB_TIMEOUT_RECORD.reset(token)
 
 
 def _config() -> dict:
@@ -122,10 +139,10 @@ def _torch_model(model_dir: str):
     return mod.load_pytorch_birefnet(Path(model_dir))
 
 
-def _gpu_lease(cfg: dict):
+def _gpu_lease(cfg: dict, *, timeout=3600):
     lg = cfg.get('local_gpu_lease')
     if isinstance(lg, dict) and lg.get('root') and lg.get('name'):
-        return lease(lg['name'], root=lg['root'], capacity=1)
+        return lease(lg['name'], root=lg['root'], capacity=1, timeout=timeout)
     return nullcontext()
 
 
@@ -137,6 +154,24 @@ def predict_alpha(crop: np.ndarray, *, size: int = 1024) -> np.ndarray:
     model_path = Path(model_str)
     if _model_weights_file(model_path) is None:
         raise ValueError('matting model missing')
+    record = _JOB_TIMEOUT_RECORD.get()
+    if record is not None:
+        model = binding()
+        history = json.loads(record.read_text('utf8')) if record.exists() else {}
+        timeouts = history.get('timeouts', {}) if history.get('model') == model else {}
+        crop_id = hashlib.sha256(str((crop.shape, size)).encode() + crop.tobytes()).hexdigest()
+        if crop_id in timeouts or len(timeouts) >= 2:
+            raise MattingTimeout('RMBG_TIMEOUT: job already recorded a timeout for this crop or two distinct crops')
+        try:
+            alpha = _run_subprocess(cfg, model_str, crop, size=size, bounded=True)
+        except (subprocess.TimeoutExpired, TimeoutError) as exc:
+            timeouts[crop_id] = {'crop_size': list(crop.shape[:2][::-1]), 'input_size': size,
+                                 'reason': 'inference' if isinstance(exc, subprocess.TimeoutExpired) else 'gpu_queue'}
+            write(record, {'model': model, 'timeout_seconds': cfg['timeout'], 'timeouts': timeouts})
+            raise MattingTimeout('RMBG_TIMEOUT: optional matte unavailable for this crop') from exc
+        if alpha.shape != crop.shape[:2]:
+            raise ValueError('matte size mismatch')
+        return alpha
     image = Image.fromarray(crop).convert('RGB')
     w, h = image.size
     x = np.asarray(image.resize((size, size), Image.BILINEAR), np.float32) / 255.0
@@ -159,7 +194,7 @@ def predict_alpha(crop: np.ndarray, *, size: int = 1024) -> np.ndarray:
                 np.float32,
             ) / 255.0
         except ImportError:
-            alpha = _run_subprocess(cfg, model_str, crop)
+            alpha = _run_subprocess(cfg, model_str, crop, size=size)
     else:
         try:
             session = _ort_session(model_str, str(cfg['python_path'] or ''))
@@ -174,23 +209,27 @@ def predict_alpha(crop: np.ndarray, *, size: int = 1024) -> np.ndarray:
                 np.float32,
             ) / 255.0
         except ImportError:
-            alpha = _run_subprocess(cfg, model_str, crop)
+            alpha = _run_subprocess(cfg, model_str, crop, size=size)
     if alpha.shape != crop.shape[:2]:
         raise ValueError('matte size mismatch')
     return alpha
 
 
-def _run_subprocess(cfg: dict, model_str: str, crop: np.ndarray) -> np.ndarray:
+def _run_subprocess(cfg: dict, model_str: str, crop: np.ndarray, *, size=1024, bounded=False) -> np.ndarray:
     with tempfile.TemporaryDirectory() as tmp:
         src, out = Path(tmp) / 'crop.png', Path(tmp) / 'alpha.png'
         Image.fromarray(crop).save(src)
         env = os.environ.copy()
         if cfg['python_path']:
             env['PYTHONPATH'] = os.pathsep.join(filter(None, [cfg['python_path'], env.get('PYTHONPATH', '')]))
-        with _gpu_lease(cfg):
+        started = time.monotonic()
+        with _gpu_lease(cfg, timeout=cfg['timeout'] if bounded else 3600):
             run_kwargs = {'creationflags': getattr(subprocess, 'CREATE_NO_WINDOW', 0)} if os.name == 'nt' else {}
-            subprocess.run([cfg['python'], str(WORKER), model_str, str(src), str(out)], check=True,
-                           timeout=cfg['timeout'], env=env, stdin=subprocess.DEVNULL,
+            remaining = cfg['timeout'] - (time.monotonic() - started) if bounded else cfg['timeout']
+            if remaining <= 0:
+                raise TimeoutError('matting GPU queue wait expired')
+            subprocess.run([cfg['python'] or sys.executable, str(WORKER), model_str, str(src), str(out), '--size', str(size)], check=True,
+                           timeout=remaining, env=env, stdin=subprocess.DEVNULL,
                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **run_kwargs)
         return np.asarray(Image.open(out).convert('L'), np.float32) / 255.0
 
