@@ -2084,6 +2084,15 @@ def test_region_crop_decomposes_tinted_circle_badges_expands_bounded_composite_a
     assert 28 <= ix0 <= 34 and 30 <= iy0 <= 36 and 46 <= iw <= 56 and 42 <= ih <= 52
     assert np.allclose(inner_bg.mean(axis=(0, 1)), [221, 237, 252], atol=2.0)
 
+    # 1b. Off-center / clipped tinted badge crop (77x109, like PP-DocLayoutV3 on Shield badge)
+    clip_px = pixels[2:111, 20:97]
+    clip_bg = backing[2:111, 20:97]
+    res_clip = _detect_icon_in_tinted_circle(clip_px, clip_bg, np.zeros(clip_px.shape[:2], bool), ['layout:image'])
+    assert res_clip is not None
+    (cx0, cy0, cw, ch), clip_inner_bg = res_clip
+    assert 8 <= cx0 <= 16 and 28 <= cy0 <= 36 and 46 <= cw <= 56 and 42 <= ch <= 52
+    assert np.allclose(clip_inner_bg.mean(axis=(0, 1)), [221, 237, 252], atol=2.0)
+
     # 2. Bounded composite illustration (e.g. diagonal rising arrow 220x140 inside 1200x700 slide)
     content = np.zeros((700, 1200), dtype=bool)
     for k in range(180):

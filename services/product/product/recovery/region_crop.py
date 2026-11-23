@@ -681,54 +681,93 @@ def _detect_icon_in_tinted_circle(
     fg_local: np.ndarray,
     kinds: list[str],
 ) -> tuple[list[int], np.ndarray] | None:
-    """Detect a high-contrast icon centered inside a low-contrast uniform tinted circular badge.
+    """Detect a high-contrast icon inside a low-contrast uniform tinted circular/pad badge.
 
-    Extracting ONLY the inner icon (backed by the circle's fill color) prevents `source-unmix`
-    from turning a subtle 10-16 RGB tinted circle into mottled semi-transparent holes, and
-    leaves the clean empty circle on `source-plate.png` for `post-crop-containers` to upgrade
-    into a native editable PowerPoint `ellipse` shape.
+    Handles both centered circular badge crops (e.g. from LayerD) and off-center or clipped
+    tinted-pad crops (e.g. from PP-DocLayoutV3 `layout:image` boxes). Extracting ONLY the
+    inner icon (backed by the pad's fill color) prevents `source-unmix` from turning a subtle
+    10-16 RGB tinted circle/pad into mottled semi-transparent holes, and leaves the clean empty
+    circle/pad on `source-plate.png` for `post-crop-containers` to upgrade into a native
+    editable PowerPoint `ellipse`/`roundRect` shape.
     """
     if any(k in ('layout:chart', 'layout:table') for k in kinds):
         return None
     h, w = pixels.shape[:2]
-    if not (48 <= min(w, h) <= 185 and 0.78 <= (w / float(h)) <= 1.28):
+    if not (48 <= min(w, h) <= 185 and max(w, h) <= 210 and 0.55 <= (w / float(h)) <= 1.80):
         return None
     px_f = pixels.astype(np.float32)
     bg_f = backing.astype(np.float32)
-    yy, xx = np.mgrid[:h, :w]
-    cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
-    r = min(w, h) * 0.46
-    dist = np.hypot(xx - cx, yy - cy)
-    ann = (dist >= 0.65 * r) & (dist <= 0.90 * r) & (~fg_local)
-    if int(ann.sum()) < 48:
-        return None
-    med_ann = np.median(px_f[ann], axis=0)
     bg_med = np.median(bg_f.reshape(-1, 3), axis=0)
-    ann_diff = float(np.abs(med_ann - bg_med).max())
-    ann_p90 = float(np.percentile(np.abs(px_f[ann] - med_ann).max(1), 90))
-    if not (5.0 <= ann_diff <= 38.0 and ann_p90 <= 10.0):
+
+    # Path 1: Centered circular badge (exact annulus check)
+    if 0.78 <= (w / float(h)) <= 1.28:
+        yy, xx = np.mgrid[:h, :w]
+        cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
+        r = min(w, h) * 0.46
+        dist = np.hypot(xx - cx, yy - cy)
+        ann = (dist >= 0.65 * r) & (dist <= 0.90 * r) & (~fg_local)
+        if int(ann.sum()) >= 48:
+            med_ann = np.median(px_f[ann], axis=0)
+            ann_diff = float(np.abs(med_ann - bg_med).max())
+            ann_p90 = float(np.percentile(np.abs(px_f[ann] - med_ann).max(1), 90))
+            if 5.0 <= ann_diff <= 38.0 and ann_p90 <= 10.0:
+                diff_ann = np.abs(px_f - med_ann).max(2)
+                inner_icon = (dist <= 0.72 * r) & (diff_ann > 42.0) & (~fg_local)
+                rim_icon = (dist >= 0.84 * r) & (diff_ann > 42.0) & (~fg_local)
+                if int(inner_icon.sum()) >= 40 and int(rim_icon.sum()) <= 4:
+                    ys, xs = np.nonzero(inner_icon)
+                    ix0 = max(0, int(xs.min()) - 2)
+                    iy0 = max(0, int(ys.min()) - 2)
+                    ix1 = min(w, int(xs.max()) + 3)
+                    iy1 = min(h, int(ys.max()) + 3)
+                    iw, ih = ix1 - ix0, iy1 - iy0
+                    if 12 <= iw < int(0.85 * w) and 12 <= ih < int(0.85 * h):
+                        ring_m = np.zeros((h, w), dtype=bool)
+                        ring_m[iy0:iy1, ix0:ix1] = True
+                        ring_m[min(iy1, iy0 + 1):max(iy0, iy1 - 1), min(ix1, ix0 + 1):max(ix0, ix1 - 1)] = False
+                        ring_m &= ~fg_local
+                        if ring_m.any() and float(np.percentile(diff_ann[ring_m], 85)) <= 12.0:
+                            inner_backing = np.broadcast_to(med_ann.astype(np.float32), (ih, iw, 3)).copy()
+                            return [ix0, iy0, iw, ih], inner_backing
+
+    # Path 2: Off-center or clipped tinted pad (icon surrounded by a uniform subtle tinted pad)
+    diff_bg = np.abs(px_f - bg_f).max(2)
+    hi = (diff_bg > 42.0) & (~fg_local)
+    if int(hi.sum()) < 40:
         return None
-    diff_ann = np.abs(px_f - med_ann).max(2)
-    inner_icon = (dist <= 0.72 * r) & (diff_ann > 42.0) & (~fg_local)
-    rim_icon = (dist >= 0.84 * r) & (diff_ann > 42.0) & (~fg_local)
-    if int(inner_icon.sum()) < 40 or int(rim_icon.sum()) > 4:
+    ys, xs = np.nonzero(hi)
+    hx0, hy0, hx1, hy1 = int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+    hw, hh = hx1 - hx0, hy1 - hy0
+    if not (12 <= hw <= 115 and 12 <= hh <= 115) or (hw * hh) > 0.72 * (w * h):
         return None
-    ys, xs = np.nonzero(inner_icon)
-    ix0 = max(0, int(xs.min()) - 2)
-    iy0 = max(0, int(ys.min()) - 2)
-    ix1 = min(w, int(xs.max()) + 3)
-    iy1 = min(h, int(ys.max()) + 3)
+    # Sample 2..9px surround ring around the high-contrast icon bbox
+    pad_out = np.zeros((h, w), dtype=bool)
+    pad_out[max(0, hy0 - 9):min(h, hy1 + 9), max(0, hx0 - 9):min(w, hx1 + 9)] = True
+    pad_in = np.zeros((h, w), dtype=bool)
+    pad_in[max(0, hy0 - 1):min(h, hy1 + 1), max(0, hx0 - 1):min(w, hx1 + 1)] = True
+    surround = pad_out & (~pad_in) & (~hi) & (~fg_local)
+    if int(surround.sum()) < 48:
+        return None
+    med_pad = np.median(px_f[surround], axis=0)
+    pad_diff = float(np.abs(med_pad - bg_med).max())
+    pad_p85 = float(np.percentile(np.abs(px_f[surround] - med_pad).max(1), 85))
+    if not (5.0 <= pad_diff <= 38.0 and pad_p85 <= 10.0):
+        return None
+    diff_pad = np.abs(px_f - med_pad).max(2)
+    ix0 = max(0, hx0 - 2)
+    iy0 = max(0, hy0 - 2)
+    ix1 = min(w, hx1 + 2)
+    iy1 = min(h, hy1 + 2)
     iw, ih = ix1 - ix0, iy1 - iy0
-    if iw < 12 or ih < 12 or iw >= int(0.85 * w) or ih >= int(0.85 * h):
+    if iw < 12 or ih < 12 or (iw * ih) > 0.78 * (w * h):
         return None
-    # Verify the 2px perimeter around the inner icon box cleanly matches `med_ann`
     ring_m = np.zeros((h, w), dtype=bool)
     ring_m[iy0:iy1, ix0:ix1] = True
     ring_m[min(iy1, iy0 + 1):max(iy0, iy1 - 1), min(ix1, ix0 + 1):max(ix0, ix1 - 1)] = False
     ring_m &= ~fg_local
-    if not ring_m.any() or float(np.percentile(diff_ann[ring_m], 85)) > 12.0:
+    if not ring_m.any() or float(np.percentile(diff_pad[ring_m], 85)) > 12.0:
         return None
-    inner_backing = np.broadcast_to(med_ann.astype(np.float32), (ih, iw, 3)).copy()
+    inner_backing = np.broadcast_to(med_pad.astype(np.float32), (ih, iw, 3)).copy()
     return [ix0, iy0, iw, ih], inner_backing
 
 
