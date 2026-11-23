@@ -40,7 +40,7 @@ def check_local(pptx, irs, directory):
     try:
         with lease('office'):
             try:
-                actual = inspect(pptx, irs, directory/'office')
+                actual = inspect(pptx, irs, directory/'office', text_hidden_views=True)
             except OfficeValidationError as exc:
                 report_file = directory/'office/report.json'
                 actual = json.loads(report_file.read_text('utf8')) if report_file.is_file() else {

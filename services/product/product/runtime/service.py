@@ -324,6 +324,12 @@ class RuntimeService(ExplorationTools):
         scoped = json.loads((state.job/'request.json').read_text('utf8')).get('object_scoped_delivery', False)
         if scoped and bbox is not None:
             raise ValueError('object fallback requires a source object ID')
+        if scoped:
+            ordinary = {t.id for t in graph.text.texts if t.id not in graph.selected and t.id not in logo_ids}
+            seeds = [s for s in seeds if s['id'] not in ordinary]
+            protected_text_ids = (protected_text_ids or set()) | ordinary
+            if not seeds:
+                return {'status':'NO_CROPS_STAGED', 'page':page, 'report':layout_report}
         crop_ir, staged_ids, report = stage_region_crops(
             Path(row['ir']).parent, directory / 'staged',
             seeds=seeds, allow_movable=allow_movable, allow_move_unsafe=allow_move_unsafe and not scoped, single_object_only=scoped,
@@ -561,7 +567,24 @@ class RuntimeService(ExplorationTools):
         authorize_readings(original, graph, reading)
         if graph.source_sha256 != original.source_sha256:
             raise ValueError('source changed')
-        if not set(original.selected) <= set(graph.selected):
+        dropped = set(original.selected) - graph.selected.keys()
+        if dropped:
+            import numpy as np
+            from ..recovery.region_artwork import verify_text_cutout
+            for oid in set(graph.selected) - original.selected.keys():
+                field = graph.selected[oid]
+                for aid, evidence in field.get('text_cutouts', {}).items():
+                    if aid not in dropped or field.get('kind') != 'text' or evidence.get('field') != oid:
+                        raise ValueError('unexpected source cutout replacement')
+                    proof = field['owner_evidence']
+                    file = (ir.parent/proof['file']).resolve()
+                    if not file.is_relative_to(ir.parent.resolve()) or digest(file) != proof['sha256']:
+                        raise RuntimeConflict('text cutout replacement mask changed')
+                    with np.load(file, allow_pickle=False) as ink:
+                        verify_text_cutout(Path(row['ir']).parent, original.selected[aid], evidence,
+                            field['payload']['text'], ink['mask'], list(ink['restore_bbox']), ink['backing_patch'])
+                    dropped.remove(aid)
+        if dropped:
             raise ValueError('candidate dropped previously committed objects')
         for oid in set(graph.selected) - set(original.selected):
             if graph.ownership.get(oid) != 'RESOLVED':

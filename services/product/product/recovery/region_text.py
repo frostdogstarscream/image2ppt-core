@@ -194,6 +194,8 @@ def measure_group(graph, group, source, baseline, lines):
     others = np.zeros((h, w), bool)
     included = {t.id for t in members}
     line_ids = {line for t in members for line in graph.text.members.get(t.id, [])}
+    cutouts = group.get('text_cutouts', {})
+    cutout_seeds = {e['seed'] for e in cutouts.values()}
     for b in [t.bbox for t in graph.text.texts if t.id not in included] + [
         v["bbox"] for v in lines if v["id"] not in line_ids
     ]:
@@ -203,7 +205,7 @@ def measure_group(graph, group, source, baseline, lines):
         if not intersection(asset.bbox, box):
             continue
         rec = graph.selected.get(asset.id, {})
-        if rec.get("retained_card_artwork"):
+        if rec.get("retained_card_artwork") or asset.id in cutout_seeds:
             continue  # Transferring its pixels requires a separate, bound ownership proof in staging.
         if (
             group["kind"] == "photo"
@@ -213,14 +215,18 @@ def measure_group(graph, group, source, baseline, lines):
         ):
             continue
         others |= rectangle(asset.bbox, graph.image_size)[y : y + h, x : x + w]
+    frame_peers = others.copy()
     for rec in graph.selected.values():
-        if rec.get("retained_card_artwork") or not intersection(rec["bbox"], box):
+        if rec.get("retained_card_artwork") or rec.get('id') in cutouts or not intersection(rec["bbox"], box):
             continue
         ref = rec.get("owner_evidence")
         if not ref or digest(baseline / ref["file"]) != ref["sha256"]:
             raise ValueError("unknown previously committed pixels")
         with np.load(baseline / ref["file"], allow_pickle=False) as proof:
-            others |= proof["mask"][y : y + h, x : x + w].astype(bool)
+            claim = proof["mask"][y : y + h, x : x + w].astype(bool)
+            others |= claim
+            if not (rec.get('kind') == 'surface' and all(contains(rec['bbox'], t.bbox) for t in members)):
+                frame_peers |= claim
     used = np.zeros((h, w), bool)
     styles = {s.id: s for s in graph.text.styles}
     measured = {}
@@ -300,9 +306,9 @@ def measure_group(graph, group, source, baseline, lines):
         if peer.id not in included:
             full_guard |= rectangle(peer.bbox, graph.image_size)
     for asset in graph.asset.objects:
-        if not graph.selected.get(asset.id, {}).get("retained_card_artwork"):
+        if not graph.selected.get(asset.id, {}).get("retained_card_artwork") and asset.id not in cutout_seeds:
             full_guard |= rectangle(asset.bbox, graph.image_size)
-    full_guard[y : y + h, x : x + w] = others
+    full_guard[y : y + h, x : x + w] = frame_peers
     return measured, raw, full_guard
 
 
@@ -403,18 +409,17 @@ def stage_region(group, graph, baseline, output, fonts, frame_overrides, source,
         "ocr_evidence": key(lines),
     }
     parents = {}
+    cutouts = group.get('text_cutouts', {})
     for oid, mask in full.items():
         for aid, record in graph.selected.items():
-            if not record.get("retained_card_artwork"):
+            if not record.get("retained_card_artwork") and cutouts.get(aid, {}).get('field') != oid:
                 continue
             proof = record["owner_evidence"]
             if digest(baseline / proof["file"]) != proof["sha256"]:
                 raise ValueError("retained artwork owner binding mismatch")
             with np.load(baseline / proof["file"], allow_pickle=False) as data:
                 if (data["mask"].astype(bool) & mask).any():
-                    if oid in parents:
-                        raise ValueError("multiple card artworks share the same field")
-                    parents[oid] = aid
+                    parents.setdefault(oid, []).append(aid)
     receipt["source_artwork"] = parents
     evidence_name = "region-" + group["id"] + ".json"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -452,6 +457,7 @@ def stage_region(group, graph, baseline, output, fonts, frame_overrides, source,
                 frame_minimum=fb,
                 fit_origin=True,
                 source_artwork=parents.get(oid),
+                text_cutouts={i: cutouts[i] for i in parents.get(oid, ()) if i in cutouts},
             )
             current = out
         write(current / evidence_name, receipt)

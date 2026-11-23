@@ -11,7 +11,7 @@ from PIL import Image
 from ..materialize import digest, write
 from ..tolerance_config import load_tolerance_config
 from ..scorecard import fidelity, score_page, _native_fields, _overlap
-from .plate_audit import audit as audit_plate, native_line_fields
+from .plate_audit import audit as audit_plate, bind_native_paragraphs, native_line_fields
 from .host_evidence import prepare_all, questions, read
 from .state import RuntimeState, RuntimeConflict
 from .service import RuntimeService
@@ -53,9 +53,9 @@ def assess(job, current):
         measures = score_page(source, deck, slide=page, render_path=preview if preview.is_file() else None,
                               checks=office if verified else None)
         fields = _native_fields(measures.pop('objects'))
-        lines = read(current['ocr'][k])['lines']
-        hits = [line['id'] for line in lines if native_line_fields(line, fields)]
-        selected = read(row['scene'])['selected']
+        lines = read(current.get('source_ocr', {}).get(k, current['ocr'][k]))['lines']
+        scene = read(row['scene'])
+        selected = scene['selected']
         readings = {i:r['source_reading'] for i,r in selected.items() if r.get('source_reading')}
         updated = {v['ocr_id'] for v in readings.values()}
         # A retained OCR value may also be uncertain (for example a disputed amount).
@@ -72,6 +72,11 @@ def assess(job, current):
             if oid in selected and oid not in readings and obs.get('status') == 'pending_confirmation':
                 readings[oid] = {**obs, 'after':obs['before']}
         pending = {v['ocr_id'] for v in readings.values() if v['status']=='pending_confirmation'}
+        adopted = {v['ocr_id']:v['after'] for v in readings.values() if v.get('after')}
+        members = scene['text']['members']
+        fields = bind_native_paragraphs(lines, fields, members, adopted)
+        hits = [line['id'] for line in lines
+                if native_line_fields({**line, 'text': adopted.get(line['id'], line['text'])}, fields)]
         updated.update(pending.intersection(hits))
         actions = {}
         for action in office.get('office',{}).get('records',[]):
@@ -84,8 +89,9 @@ def assess(job, current):
         limits = load_tolerance_config()['fidelity']
         minor = [key for key, val in local.items()
                  if val['ssim'] < limits['min_ssim'] or val['delta_e2000_p95'] > limits['max_delta_e2000_p95']]
-        plate = audit_plate(job, deck, sha, page, row['snapshot'], lines, fields, marks,
-                            {v['ocr_id']:v['after'] for v in readings.values() if v.get('after')})
+        plate = audit_plate(job, deck, sha, page, row['snapshot'], lines, fields, marks, adopted,
+                            office_view=preview.with_name(f'page-{page:02d}-text-hidden.png'),
+                            view_receipt=office.get('office', {}).get('text_hidden_views', {}).get(k, {}) if verified else {})
         unscoped = []
         page_width, page_height = row['snapshot']['image_size']
         for oid, record in selected.items():
@@ -100,7 +106,11 @@ def assess(job, current):
             if covers_page or (is_crop and (len(seeds) != 1 or oid not in editables or
                                             record.get('move_safety') != 'MOVABLE' or trapped_text)):
                 unscoped.append(oid)
+        replaced = {aid: {'field':tid, 'asset_sha256':proof['asset_sha256']}
+                    for tid in editables for aid, proof in selected[tid].get('text_cutouts', {}).items()}
+        pictures = {oid:r['asset_reference']['sha256'] for oid,r in selected.items() if r.get('asset_reference')}
         pages.append({'unscoped_crops':unscoped, 'plate_audit':plate,'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
+                      'replaced_text_cutouts':replaced, 'picture_hashes':pictures,
                       'passed_edits':sorted(f'{oid}/{action}' for oid in editables for action in actions[oid]),
                       'editable_count':len(editables) if verified else None, 'selected_editables':editables,
                       'ocr_native_hits':sorted(set(hits)-pending), 'revised_ocr_lines':sorted(updated),
@@ -126,7 +136,7 @@ def regressions(base, candidate, *, reviewed_reading_draft=False):
             if new_plate.get('status') != 'MEASURED':
                 reasons.append(prefix+'PLATE_AUDIT_MISSING')
             clean = {r['ocr_id'] for r in old_plate['rows'] if r['status'] == 'native'}
-            if any(r['ocr_id'] in clean and r['status'] in ('retained','residual') for r in new_plate.get('rows', ())):
+            if any(r['ocr_id'] in clean and r['status'] in ('retained','residual','unresolved') for r in new_plate.get('rows', ())):
                 reasons.append(prefix+'NEW_VISIBLE_TEXT_ON_PLATE')
         if a['source_sha256']!=b['source_sha256']:
             reasons.append(prefix+'SOURCE_CHANGED')
@@ -134,7 +144,12 @@ def regressions(base, candidate, *, reviewed_reading_draft=False):
             reasons.append(prefix+'EDITABLE_COUNT_DECLINED')
         if set(a['ocr_native_hits'])-set(b['ocr_native_hits'])-set(b.get('revised_ocr_lines',[])) or b['native_field_count']<a['native_field_count']:
             reasons.append(prefix+'NATIVE_FIELDS_LOST')
-        if set(a.get('passed_edits', [])) - set(b.get('passed_edits', [])):
+        passed = set(b.get('passed_edits', []))
+        for aid, proof in b.get('replaced_text_cutouts', {}).items():
+            if a.get('picture_hashes', {}).get(aid) == proof['asset_sha256']:
+                passed.update(f'{aid}/{action}' for action in ('move-scale','delete')
+                              if f"{proof['field']}/{action}" in passed)
+        if set(a.get('passed_edits', [])) - passed:
             reasons.append(prefix+'OFFICE_EDITS_LOST')
         reference = a.get('local_fidelity', {})
         compared = b.get('local_fidelity', {})
@@ -267,7 +282,7 @@ def ensure_baseline(job):
     # compiled candidate removes an observed finding and keeps prior edits.
     for page_score in score['pages']:
         page = page_score['page']
-        retained = [r for r in page_score['plate_audit']['rows'] if r['status'] == 'retained']
+        retained = [r for r in page_score['plate_audit']['rows'] if r['status'] in ('retained','unresolved')]
         ids = sorted({oid for r in retained for oid in r['mark_ids']})
         if not ids or not score['verified']:
             continue
@@ -306,7 +321,7 @@ def ensure_baseline(job):
             page = page_score['page']
             k = str(page)
             issues = {oid:r['status'] for r in page_score['plate_audit']['rows']
-                      if r['status'] in ('residual','retained') for oid in r['mark_ids']}
+                      if r['status'] in ('residual','retained','unresolved') for oid in r['mark_ids']}
             c.setdefault('plate_issues', {})[k] = issues
             c['questions'][k] = questions(state, c, page, c['regional_failures'][k], d)
         return {'pages':len(score['pages'])}
@@ -431,10 +446,13 @@ def delivery_defects(score):
                     if row['status'] in ('retained', 'residual', 'plate_only')]
         if retained:
             reasons.append('TEXT_STILL_ON_BACKGROUND')
+        unresolved = [r for r in audit.get('rows', []) if r['status'] == 'unresolved']
+        if unresolved:
+            reasons.append('SOURCE_TEXT_WITHOUT_NATIVE_FIELD')
         if page.get('unscoped_crops'):
             reasons.append('IMAGE_WITHOUT_SINGLE_OBJECT_OWNER')
         if reasons:
-            defects.append({'page': page['page'], 'reasons': reasons, 'retained_fields': retained,
+            defects.append({'page': page['page'], 'reasons': reasons, 'retained_fields': retained + unresolved,
                             'unscoped_crops': page.get('unscoped_crops', [])})
     return defects
 

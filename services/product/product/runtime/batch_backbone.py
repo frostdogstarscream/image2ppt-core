@@ -340,6 +340,20 @@ def _merge_structural_ocr_items(
     return cleaned, scene_relations
 
 
+def _text_stage_failure(text, exc, members=()):
+    reason = str(exc)
+    if 'frame allowance' in reason:
+        failure = 'FONT_LAYOUT_FAILED'
+    elif 'protected neighbor' in reason:
+        failure = 'PROTECTED_NEIGHBOR'
+    elif any(word in reason for word in ('stable owner', 'ownership', 'source artwork')):
+        failure = 'OWNER_CONFLICT'
+    else:
+        failure = 'REGION_TEXT_REJECTED' if members else 'STAGE_REJECTED'
+    return {'object_id': text.id, 'text': text.text, 'bbox': list(text.bbox), 'kind': 'text',
+            'failure': failure, 'reason': reason, 'group_members': list(members)}
+
+
 def _classify_failed_region(
     entry: dict,
     graph: SceneGraph,
@@ -387,7 +401,7 @@ def _classify_failed_region(
     elif in_top_right_logo:
         category, action, cap = 'LOGO_OR_INTRINSIC_TEXT', 'retain_in_source_plate', 0
     elif failure == 'FONT_LAYOUT_FAILED':
-        category, action, cap = 'FONT_FRAME_NEIGHBOR_COLLISION', 'fit_text_layout_or_reduce_size_1px', 1
+        category, action, cap = 'FONT_FRAME_NEIGHBOR_COLLISION', 'inspect_source_ownership_and_refit_text', 1
     elif failure == 'INSUFFICIENT_CONTEXT':
         category, action, cap = 'INSUFFICIENT_LATERAL_CONTEXT', 'fit_background_context_36', 1
     elif failure == 'PROTECTED_NEIGHBOR':
@@ -428,7 +442,7 @@ def _classify_failed_region(
 
 
 def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list[float], str]:
-    """Strip purely non-alphanumeric leading/trailing affixes when a clean pixel gap exists."""
+    """Separate one isolated edge symbol. Ordinary punctuation is source wording."""
     raw_text = line.get('text', '').strip()
     bbox = [float(v) for v in line['bbox']]
     compact = raw_text.replace(' ', '').replace('\n', '')
@@ -442,20 +456,10 @@ def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list
         end -= 1
     core = compact[start:end]
     prefix, suffix = compact[:start], compact[end:]
-    # Keep paired brackets or trailing punctuation that belong to wording (e.g. percentages/colons).
-    keep_marks = set('%％:：()（）[]【】《》“”"\'.,，。!?！？+=/')
-    if (not prefix and not suffix) or len(core) < 2:
+    symbol = prefix or suffix
+    if (prefix and suffix) or len(core) < 2 or len(symbol) != 1 or symbol not in '•●○▪■◆◇▶►▸→➜➤':
         return raw_text, bbox, ''
-    if any(ch in keep_marks for ch in (prefix + suffix)):
-        return raw_text, bbox, ''
-    # Recover spaces inside the core text while stripping outer decorative marks.
-    stripped = raw_text
-    while stripped and not stripped[0].isalnum() and stripped[0] not in keep_marks:
-        stripped = stripped[1:].lstrip()
-    while stripped and not stripped[-1].isalnum() and stripped[-1] not in keep_marks:
-        stripped = stripped[:-1].rstrip()
-    if len(stripped.replace(' ', '')) < 2 or stripped == raw_text:
-        return raw_text, bbox, ''
+    stripped = (raw_text[1:] if prefix else raw_text[:-1]).strip()
     lx, ly, lw, lh = [round(v) for v in bbox]
     h_img, w_img = source.shape[:2]
     if min(lw, lh) <= 4 or lx < 0 or ly < 0 or lx + lw > w_img or ly + lh > h_img:
@@ -481,20 +485,17 @@ def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list
     if len(runs) < 2:
         return raw_text, bbox, ''
     sub_left, sub_right = 0, lw
-    if prefix and not suffix:
-        # Drop leading decorative run(s) up to proportional prefix fraction.
-        max_cut = lw * min(0.45, (len(prefix) / len(compact)) + 0.18)
-        kept = [r for r in runs if r[0] >= max(2, round(runs[0][1])) and r[0] <= max_cut]
-        sub_left = kept[0][0] if kept else runs[1][0]
-    elif suffix and not prefix:
-        min_cut = lw * max(0.50, 1.0 - (len(suffix) / len(compact)) - 0.22)
-        candidates = [i for i in range(1, len(runs)) if runs[i][0] >= min_cut and runs[i][0] - runs[i - 1][1] >= 2]
-        if not candidates:
-            return raw_text, bbox, ''
-        cut_idx = candidates[0]
-        sub_right = runs[cut_idx - 1][1]
-    else:
+    edge = runs[0] if prefix else runs[-1]
+    gaps = [right[0] - left[1] for left, right in zip(runs, runs[1:])]
+    gutter = gaps[0] if prefix else gaps[-1]
+    inner = gaps[1:] if prefix else gaps[:-1]
+    if (edge[1] - edge[0] > lh or gutter < max(2, .2 * lh)
+            or (inner and gutter < 1.3 * np.median(inner))):
         return raw_text, bbox, ''
+    if prefix:
+        sub_left = runs[1][0]
+    else:
+        sub_right = runs[-2][1]
     sub_bbox = [float(lx + sub_left), float(ly), float(max(4, sub_right - sub_left)), float(lh)]
     if is_decorative_subspan({'text': stripped, 'bbox': sub_bbox}, line):
         return stripped, sub_bbox, (prefix or suffix)
@@ -706,7 +707,10 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
             write(file,{'source_sha256':digest(source_path),'status':'UNAVAILABLE',
                         'error_type':type(exc).__name__,'lines':[]})
             current.setdefault('ocr',{})[str(page)]=str(file)
+    original_ocr = current.setdefault('source_ocr', {}).setdefault(str(page), current['ocr'][str(page)])
     ocr = json.loads(Path(current['ocr'][str(page)]).read_text('utf8'))
+    originals = {r['id']: (r['text'], list(r['bbox'])) for r in
+                 (ocr if original_ocr == current['ocr'][str(page)] else json.loads(Path(original_ocr).read_text('utf8')))['lines']}
     if 'fonts' not in current:
         font_dir = directory / 'fonts'
         font_dir.mkdir(parents=True, exist_ok=True)
@@ -847,8 +851,11 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     layers_path_str = current.get('layers', {}).get(str(page))
     if layers_path_str and Path(layers_path_str).is_dir():
         try:
-            immediate_assets, deferred_assets = discover_layerd_assets(
-                source, Path(layers_path_str), [it['bbox'] for it in raw_items])
+            # Use OCR extents for inventory, independently of subsequent layout frames.
+            # A geometrically separated symbol can still become a real graphic.
+            reservations = [item['bbox'] if item['stripped_affix'] else row['bbox']
+                            for row, item in zip(valid_lines, raw_items)]
+            immediate_assets, deferred_assets = discover_layerd_assets(source, Path(layers_path_str), reservations)
         except Exception:
             immediate_assets, deferred_assets = [], []
 
@@ -862,6 +869,14 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
 
     measured_items, scene_relations = _merge_structural_ocr_items(
         source, raw_items, [*immediate_assets, *deferred_assets], extra_logo_boxes=extra_logo_boxes)
+    # The source ledger survives paragraph merging, field splitting and font-frame growth.
+    scene_relations['source_fields'] = {
+        item['ocr_line_id']: {'text': originals[item['ocr_line_id']][0],
+                              'bbox': originals[item['ocr_line_id']][1],
+                              'render_text': item['text'], 'render_bbox': item['bbox'],
+                              'separate_symbol': item['stripped_affix']}
+        for item in raw_items
+    }
     if preflight or (profile and profile != 'baseline'):
         from ..recovery.marked_fields import split_items
         retained_fields = scene_relations.setdefault('source_retained_fields', [])
@@ -1010,7 +1025,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         'immediate_asset_count': len(immediate_assets),
         'deferred_asset_count': len(deferred_assets),
         'assets': asset_summaries,
-        'scene_relations': scene_relations,
+        'scene_relations': {k:v for k,v in scene_relations.items() if k != 'source_fields'},
         'backing_summary': {'FLAT': counts.get('FLAT', 0), 'GRADIENT': counts.get('GRADIENT', 0),
                             'COMPLEX': counts.get('COMPLEX', 0)},
         'page_structure_status': structure_info.get('vlm_status', 'SKIPPED'),
@@ -1197,6 +1212,7 @@ def _chain_stage_from_spec(
             chart_scene = json.loads((cur_base/'scene.json').read_text(encoding='utf8'))
             for cid in chart_ids:
                 covered_texts.update(chart_scene['selected'][cid]['covered_text_ids'])
+    text_by_id = {t.id: t for t in initial_graph.text.texts}
     grouped_ids=set()
     group_specs=[tr['region'] for tr in trials_spec if 'region' in tr]
     if group_specs:
@@ -1215,7 +1231,7 @@ def _chain_stage_from_spec(
                 staged_ids.extend(group['members'])
             except (ValueError, OSError, RuntimeError) as exc:
                 for oid in group['members']:
-                    stage_errors.append({'object_id':oid,'kind':'text','failure':'REGION_TEXT_REJECTED','reason':str(exc)})
+                    stage_errors.append(_text_stage_failure(text_by_id[oid], exc, group['members']))
     for idx, tr in enumerate(trials_spec):
         oid = tr.get('object_id')
         if not oid or oid in grouped_ids:
@@ -1240,16 +1256,7 @@ def _chain_stage_from_spec(
             cur_base = ir.parent
             staged_ids.append(oid)
         except Exception as exc:
-            msg = str(exc)
-            code = 'FONT_LAYOUT_FAILED' if 'frame allowance' in msg else ('OWNER_CONFLICT' if 'stable owner' in msg else 'STAGE_REJECTED')
-            stage_errors.append({
-                'object_id': oid,
-                'kind': 'text',
-                'text': tr.get('text', ''),
-                'bbox': list(tr.get('bbox', [])),
-                'failure': code,
-                'reason': msg,
-            })
+            stage_errors.append(_text_stage_failure(text_by_id[oid], exc))
 
     grouped_boxes = []
     badge_aliases = set()
@@ -1356,9 +1363,11 @@ def _chain_stage_from_spec(
                         })
 
         cur_graph = SceneGraph.model_validate_json((cur_base / 'scene.json').read_text('utf8'))
+        retired_seeds = {c['seed'] for r in cur_graph.selected.values() for c in r.get('text_cutouts', {}).values()}
         asset_targets = [
             a for a in cur_graph.asset.objects
             if a.id not in cur_graph.selected
+            and a.id not in retired_seeds
             and a.id not in badge_aliases
             and cur_graph.ownership.get(a.id) == 'RESOLVED'
             and a.id not in skip_ids
@@ -1843,6 +1852,9 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         rejected = []
         for group in plan_regions(initial_graph, text_targets, inventory, image):
             try:
+                from ..recovery.region_artwork import read_decoration_carriers
+                group['text_cutouts'] = read_decoration_carriers(initial_graph, group, initial_baseline,
+                    directory/'source-carriers', state.job/'cache', lines)
                 measured, fitted, guard = measure_group(initial_graph, group, image, initial_baseline, lines)
                 choose_region_background(group, initial_graph, image, measured, fitted, guard,
                                          row.get('layers'), safe_inpaint, directory)
@@ -1931,6 +1943,9 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         | {t.id for t in initial_graph.text.texts
            if t.id not in initial_graph.selected and (t.id in logo_ids or initial_graph.ownership.get(t.id) != 'RESOLVED')}
     )
+    if request.get('object_scoped_delivery'):
+        # Unresolved ordinary wording still belongs to its text field.
+        unrecoverable_text_ids.intersection_update(logo_ids)
     current.setdefault('batch_unrecoverable_texts', {})[str(page)] = sorted(unrecoverable_text_ids)
 
     cand_ir_ref: list[Path] = []

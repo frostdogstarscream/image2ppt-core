@@ -34,7 +34,9 @@ A measured card can also go underneath an existing transparent icon or separator
 
 When the source contains several separate cards inside a section, the host processes the cards first. Both host and Agent surface routes defer the section while any of those child frames lacks a corresponding native shape. This preserves each child's editable scope when another card is difficult to recover.
 
-The host counts an OCR line when one native field or a contiguous sequence of fields on that line matches the complete wording in reading order. The background audit records the matching field names and checks for the old writing independently. Unconfirmed readings and image-only wording do not count as confirmed native matches.
+The host retains the original OCR file, line IDs, full line bounds and wording. It binds whole native fields, complete rows of source-bound paragraphs and adjacent native fields in reading order. Punctuation participates in the match. Only an isolated, measured edge symbol can be separated during detection. Independent source text stays on the native-text route. Image-only and unresolved source rows enter the local retry queue and the delivery report.
+
+The runtime Office worker exports a second PNG per slide with editable text cleared in an unsaved copy of the presentation. Pictures, card fills, groups and their stacking order remain visible. The receipt binds this view to the checked PPTX, its hidden field names and the PNG hash. The host runs local OCR on that view and records readings from the bare plate separately. A partial native match, including a missing digit or punctuation mark, does not count as a complete field.
 
 `get_job_context` gives a small issue index for each page. Each spatial block holds up to 30 stable numbers. The Agent can assign routes and movement partners and request an incremental rebuild by block or object IDs. It can also request new evidence. Source text and placement come from the job inventory. Private evaluation references are read only by the offline evaluator.
 

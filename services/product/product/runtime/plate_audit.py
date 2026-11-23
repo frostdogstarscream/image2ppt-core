@@ -45,6 +45,23 @@ def match(line, candidates):
     return max(matches)[1] if matches else None
 
 
+def bind_native_paragraphs(lines, fields, members, readings):
+    """Bind complete native paragraphs to their actual source rows, including punctuation."""
+    by_id = {r['id']: r for r in lines}
+    result = []
+    for field in fields:
+        ids = members.get(field.get('name'), ())
+        if len(ids) > 1 and len(set(ids)) == len(ids) and all(i in by_id for i in ids):
+            rows = [by_id[i] for i in ids]
+            wording = ''.join(_norm(readings.get(i, by_id[i]['text'])) for i in ids)
+            if (wording == _norm(field['text'])
+                    and all(_overlap(r['bbox'], field['bbox']) >= .5*r['bbox'][2]*r['bbox'][3] for r in rows)
+                    and all(a['bbox'][1] + .4*a['bbox'][3] < b['bbox'][1] for a, b in zip(rows, rows[1:]))):
+                field = {**field, 'source_rows': {i: _norm(readings.get(i, by_id[i]['text'])) for i in ids}}
+        result.append(field)
+    return result
+
+
 def native_line_fields(line, fields):
     """Return the physical native fields spelling one horizontal OCR line, in order."""
     text = _norm(line['text'])
@@ -53,6 +70,8 @@ def native_line_fields(line, fields):
         return []
     pieces = []
     for field in fields:
+        if field.get('source_rows', {}).get(line.get('id')) == text:
+            return [field]
         fx, fy, fw, fh = field['bbox']
         value = _norm(field['text'])
         overlap = _overlap(line['bbox'], field['bbox'])
@@ -78,25 +97,41 @@ def native_line_fields(line, fields):
     return ordered if ''.join(_norm(f['text']) for f in ordered) == text else []
 
 
+def _visible_fragments(line, detected):
+    whole = _norm(line['text'])
+    hits = set()
+    direct = match(line, detected)
+    if direct is not None:
+        hits.add(direct)
+    for i, item in enumerate(detected):
+        fragment = _norm(item['text'])
+        box = item['bbox']
+        if (len(fragment) >= 2 and fragment in whole
+                and _overlap(line['bbox'], box) >= .7 * max(1, box[2]*box[3])):
+            hits.add(i)
+    return sorted(hits)
+
+
 def reconcile(lines, detected, fields, marks, readings):
     rows = []
     seen = set()
     for line in lines:
         oid = line['id']
         owners = [m['id'] for m in marks if m.get('label') == 'text' and oid in m.get('ocr_ids', ())]
-        recognized = match(line, detected)
+        recognized = _visible_fragments(line, detected)
         expected = {**line, 'text':readings.get(oid, line['text'])}
         exact = native_line_fields(expected, fields)
-        has_field = bool(exact) or match(expected, fields) is not None
-        if recognized is not None:
-            seen.add(recognized)
+        has_field = bool(exact)
+        seen.update(recognized)
         status = ('intrinsic' if line.get('is_logo') or line.get('intrinsic') else
-                  'residual' if has_field and recognized is not None else
+                  'residual' if has_field and recognized else
                   'native' if has_field else
-                  'retained' if recognized is not None else 'unresolved')
+                  'retained' if recognized else 'unresolved')
         rows.append({'ocr_id':oid,'bbox':line['bbox'],'text':line['text'],'status':status,
                      'mark_ids':owners, 'exact_native_fields':[f['name'] for f in exact if 'name' in f],
-                     'plate_reading':detected[recognized]['text'] if recognized is not None else None})
+                     'native_form': ('paragraph_member' if exact and exact[0].get('source_rows') else
+                                     'split_fields' if len(exact) > 1 else 'own_field' if exact else None),
+                     'plate_reading':' '.join(detected[i]['text'] for i in recognized) or None})
     for index, item in enumerate(detected):
         if index not in seen:
             box = item['bbox']
@@ -112,7 +147,7 @@ def reconcile(lines, detected, fields, marks, readings):
     return rows
 
 
-def audit(job, deck, sha, page, snapshot_row, lines, fields, marks, readings):
+def audit(job, deck, sha, page, snapshot_row, lines, fields, marks, readings, *, office_view, view_receipt):
     directory = Path(job)/'plate-audit'/sha/f'p{page}'
     directory.mkdir(parents=True, exist_ok=True)
     try:
@@ -122,8 +157,21 @@ def audit(job, deck, sha, page, snapshot_row, lines, fields, marks, readings):
         path = directory/'visible-plate.png'
         plate.save(path)
         evidence = local_ocr(snapshot(path, directory/'snapshots'), Path(job)/'cache', os.environ['IMAGE2PPT_OCR_MANIFEST'])
-        rows = reconcile(lines, evidence['lines'], fields, marks, readings)
+        if not office_view.is_file() or digest(office_view) != view_receipt.get('sha256'):
+            raise ValueError('missing bound Office text-hidden export')
+        with Image.open(office_view) as image:
+            if list(image.size) != list(plate.size):
+                raise ValueError('text-hidden Office export has the wrong size')
+        composite = local_ocr(snapshot(office_view, directory/'snapshots'), Path(job)/'cache',
+                              os.environ['IMAGE2PPT_OCR_MANIFEST'])
+        rows = reconcile(lines, composite['lines'], fields, marks, readings)
+        for row in rows:
+            if row['ocr_id'] is not None:
+                row['raster_reading'] = row['plate_reading']
+                row['plate_reading'] = ' '.join(evidence['lines'][i]['text']
+                    for i in _visible_fragments(row, evidence['lines'])) or None
         return {'status':'MEASURED','pptx_sha256':sha,'source_sha256':snapshot_row['source_sha256'],
-                'plate_sha256':digest(path),'ocr_identity':evidence['identity'],'rows':rows}
+                'plate_sha256':digest(path), 'text_hidden_sha256':view_receipt['sha256'],
+                'ocr_identity':composite['identity'],'rows':rows}
     except (OSError, ValueError, KeyError, RuntimeError) as exc:
         return {'status':'UNKNOWN','reason':type(exc).__name__,'pptx_sha256':sha,'rows':[]}

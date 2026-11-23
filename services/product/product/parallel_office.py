@@ -59,7 +59,29 @@ def leaf_shapes(shapes):
             yield shape
 
 
-def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
+def _export_without_native_text(slide, ir, path, width, height):
+    """Render the existing paint, pictures and groups with only editable glyphs removed."""
+    expected = {n['id']: n['type'] for n in ir['nodes'] if n['type'] in ('text', 'table')}
+    hidden = []
+    for shape in leaf_shapes(slide.Shapes):
+        name = str(shape.Name)
+        if name not in expected:
+            continue
+        if expected[name] == 'text':
+            shape.TextFrame.TextRange.Text = ''
+        else:
+            table = shape.Table
+            for row in range(1, table.Rows.Count + 1):
+                for col in range(1, table.Columns.Count + 1):
+                    table.Cell(row, col).Shape.TextFrame.TextRange.Text = ''
+        hidden.append(name)
+    if set(hidden) != set(expected):
+        raise ValueError('missing native text object in Office audit view')
+    slide.Export(str(path), 'PNG', width, height)
+    return {'sha256': digest(path), 'hidden_objects': sorted(hidden)}
+
+
+def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_views=False):
     import pythoncom
     import win32com.client
     pythoncom.CoInitialize()
@@ -78,6 +100,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
         deck=app.Presentations.Open(str(pptx),ReadOnly=True,Untitled=False,WithWindow=False)
         pw=round(float(deck.PageSetup.SlideWidth)/.75);ph=round(float(deck.PageSetup.SlideHeight)/.75)
         sx=pw/float(deck.PageSetup.SlideWidth);sy=ph/float(deck.PageSetup.SlideHeight);inventory=[]
+        hidden_views = {}
         for i,file in enumerate(irs,1):
             ir=json.loads(Path(file).read_text(encoding='utf-8'));slide=deck.Slides(i)
             slide.Export(str(output/f'page-{i:02d}-before.png'),'PNG',pw,ph)
@@ -85,6 +108,15 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
                 and (target_ids is None or n['id'] in target_ids)]
             if not set(targets)<=set(sig):raise ValueError('compiled object inventory mismatch')
             inventory.append((i,targets,sig))
+            if text_hidden_views:
+                # This read-only presentation is discarded before opening any edit probe.
+                try:
+                    hidden_views[str(i)] = _export_without_native_text(
+                        slide, ir, output/f'page-{i:02d}-text-hidden.png', pw, ph)
+                except Exception as exc:
+                    hidden_views[str(i)] = {'status': 'UNKNOWN', 'reason': type(exc).__name__}
+        if text_hidden_views:
+            deck.Saved = True
         deck.Close();deck=None
         for i,targets,sig in inventory:
             for name in targets:
@@ -122,6 +154,8 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
         if digest(pptx)!=original:raise ValueError('Office modified original')
         result={'status':'PASS_APP_AUTOMATED','pptx_sha256':original,'records':records,'human_acceptance':False,
                 'edit_checked':not render_only,'embedded_alpha_and_visible_rgb_checked':True,'powerpoint_version':app.Version}
+        if text_hidden_views:
+            result['text_hidden_views'] = hidden_views
         write(output/'report.json',result);return result
     except Exception as exc:
         write(output/'report.json',{'status':'FAIL_APP_AUTOMATED','failed_object_id':current_id,

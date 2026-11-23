@@ -102,7 +102,10 @@ def bind_plan(fields, inventory_path, graph, source_path, *, separate_cards=Fals
         row.pop('required_card_frames', None)
         if route == 'surface' and mark.get('required_card_frames'):
             row['required_card_frames'] = mark['required_card_frames']
-        if route in ('text', 'table', 'preserve'):
+        if route == 'text' and mark.get('ocr_ids') and mark['label'] == 'text' and separate_cards:
+            # Scope the retry to the marked field. Two touching frames can own different words.
+            row['target_ids'] = [t.id for t in graph.text.texts if t.id == mark['id']]
+        elif route in ('text', 'table', 'preserve'):
             for t in graph.text.texts:
                 covered = intersection(t.bbox, box) / max(1, t.bbox[2] * t.bbox[3])
                 if t.id == mark['id'] or covered >= 0.90:

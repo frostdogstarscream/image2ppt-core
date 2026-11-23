@@ -29,7 +29,7 @@ def prepare_all(service, state, current, directory, *, sources):
         for page, local, result in pool.map(prepare, range(1, len(sources)+1)):
             k = str(page)
             current['pages'].append(local['pages'][page-1])
-            for name in ('ocr','layers','layout','scene_relations','deferred_assets','experiment_marks','page_structure'):
+            for name in ('source_ocr','ocr','layers','layout','scene_relations','deferred_assets','experiment_marks','page_structure'):
                 if k in local.get(name, {}):
                     current.setdefault(name, {})[k] = local[name][k]
             current.setdefault('host_evidence', {})[k] = {
@@ -164,6 +164,8 @@ def normalize_arguments(state,current,tool,arguments):
         fields = args['fields']
         rows = read(current['experiment_marks'][str(page)])['rows']
         by_mark = {r['mark']:r['id'] for r in rows}
+        body_fields = {r['id'] for r in deterministic_plan(rows, current.get('scene_relations', {}).get(str(page), {}))
+                       if r['route'] == 'text'} if current.get('scene_relations', {}).get(str(page), {}).get('source_fields') else set()
         if not fields or len(fields)>30:
             raise ValueError('select 1 to 30 numbered questions')
         for f in fields:
@@ -171,6 +173,8 @@ def normalize_arguments(state,current,tool,arguments):
                     f['route'] not in ('text','asset','surface','table','preserve') or
                     any(n not in by_mark for n in [f['mark'],*f['move_with']])):
                 raise ValueError('use only numbered marks, existing partners, a role and a route')
+            if by_mark[f['mark']] in body_fields and f['route'] != 'text':
+                raise ValueError('an independent OCR field requires native text; select its parent for a table or graphic')
         scoped_ids(state,current,page,None,[by_mark[f['mark']] for f in fields])
         return {'page':page,'fields':fields,'append':True}
     return args
@@ -202,7 +206,7 @@ def context(state,request):
     for i,page in enumerate(c['pages'],1):
         blocks = c['questions'][str(i)]
         audit = base['pages'][i-1].get('plate_audit', {})
-        findings = [r for r in audit.get('rows', []) if r['status'] in ('retained','residual','plate_only')]
+        findings = [r for r in audit.get('rows', []) if r['status'] in ('retained','residual','plate_only','unresolved')]
         pages.append({'plate_audit_status':audit.get('status','UNKNOWN'),
                       'plate_findings':len(findings),
                       'plate_retry_ids':list(dict.fromkeys(oid for r in findings for oid in r['mark_ids']))[:30],

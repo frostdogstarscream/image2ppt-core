@@ -138,6 +138,7 @@ def collect_crop_seeds(
     skip = _clean_skip_seed_ids(skip_seed_ids)
     from .badge_stage import represented_badge_evidence
     skip.update(represented_badge_evidence(graph))
+    skip.update(c['seed'] for r in graph.selected.values() for c in r.get('text_cutouts', {}).values())
     unrec = None if unrecoverable_text_ids is None else (set(unrecoverable_text_ids) | logos)
     seeds: list[dict] = []
     protected_text_ids: set[str] = set()

@@ -220,7 +220,7 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
 
 def stage_text_pixels(graph, baseline_directory, fonts, output, *, text, region, source, box, wanted,
                       written, protected, method, report, completion_report, trial_directory, hashes,
-                      typography=None, frame_minimum=None, fit_origin=False, source_artwork=None):
+                      typography=None, frame_minimum=None, fit_origin=False, source_artwork=None, text_cutouts=None):
     """Stage a checked source-owner mask and corresponding editable field as one transaction."""
     styles = {s.id: s for s in graph.text.styles}
     bx, by, bw, bh = box
@@ -287,6 +287,8 @@ def stage_text_pixels(graph, baseline_directory, fonts, output, *, text, region,
                    'recovery_evidence': {'trial_path': str(trial_directory.resolve()), 'hashes': hashes}}
         if source_artwork:
             payload['source_artwork'] = source_artwork
+        if text_cutouts:
+            payload['text_cutouts'] = text_cutouts
         write(folder/'payload.json', payload)
         refs = {name: digest(folder/name) for name in ('pixels.npz', 'payload.json')}
         candidate = transition(candidate.model_copy(update={'references': refs, 'hard_gate': 'PASS'}), 'PRECHECK_PASS')

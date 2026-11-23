@@ -123,7 +123,7 @@ def execute_ticket(client,ticket,run,binding):
         suf = probe_file.suffix.lower()
         if suf == '.pptx':
             probe_file.unlink()
-        elif suf == '.png' and not (probe_file.name.endswith('-before.png') or probe_file.name.endswith('-delete.png')):
+        elif suf == '.png' and not probe_file.name.endswith(('-before.png', '-delete.png', '-text-hidden.png')):
             probe_file.unlink()
     result['files'] = {str(p): digest(p) for p in (run/'output/check').rglob('*') if p.is_file()}
     write(run/'output/check/checks.json', result)
