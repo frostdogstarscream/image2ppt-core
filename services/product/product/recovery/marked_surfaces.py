@@ -48,7 +48,8 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids, *, verified_assets
 
     baseline, output = Path(baseline), Path(output)
     from .container_stage import stage_containers_and_surfaces
-    marked_boxes = {tuple(field['bbox']): field['id'] for field in routes if field['id'] not in skip_ids}
+    marked_boxes = {tuple(field['bbox']): field['id'] for field in routes
+                    if field['id'] not in skip_ids and not field.get('required_card_frames')}
     ribbon_ids = []
     if marked_boxes:
         ribbon_ir, ribbon_ids = stage_containers_and_surfaces(
@@ -77,7 +78,14 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids, *, verified_assets
                                                is_flat_canvas=source_flat) if kind == 'box'
         }
     staged = []
-    for field in routes:
+    for field in sorted(routes, key=lambda f: (bool(f.get('required_card_frames')),
+                                               f['bbox'][2]*f['bbox'][3] if f.get('required_card_frames') else 0)):
+        children = field.get('required_card_frames', [])
+        if children:
+            surfaces = [r for r in graph.selected.values() if r['kind']=='surface']
+            if any(cid not in original_frames or not any(iou(original_frames[cid],r['bbox'])>=.80 for r in surfaces)
+                   for cid in children):
+                continue
         if field.get('label') == 'card_frame':
             box = original_frames.get(field['id'])
         else:

@@ -355,7 +355,10 @@ class RuntimeService(ExplorationTools):
         ir, ids = stage_marked_surfaces(Path(row['ir']).parent, directory/'staged', [frame], set(),
                                         verified_assets=verified)
         if not ids:
-            return {'status': 'NO_FRAME_STAGED', 'page': page}
+            response = {'status': 'NO_FRAME_STAGED', 'page': page}
+            if frame.get('required_card_frames'):
+                response['required_card_frames'] = frame['required_card_frames']
+            return response
         return self._stage_asset_candidate(state, current, directory, page, ir, ids, 'photo_frame', [])
 
     def _stage_asset_candidate(self, state, current, directory, page, ir, ids, strategy, report):

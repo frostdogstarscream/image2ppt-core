@@ -85,17 +85,23 @@ def picture_frame(source, box):
     return max(matches)[1] if matches else None
 
 
-def bind_plan(fields, inventory_path, graph, source_path):
+def bind_plan(fields, inventory_path, graph, source_path, *, separate_cards=False):
     inventory = json.loads(Path(inventory_path).read_text(encoding='utf8'))
     if inventory['source_sha256'] != graph.source_sha256 or digest(source_path) != graph.source_sha256:
         raise ValueError('marked plan belongs to a different source')
     marks = {r['id']: r for r in inventory['rows']}
+    if separate_cards:
+        from ..recovery.layered_card import ordered_card_frames
+        marks.update((r['id'],r) for r in ordered_card_frames(inventory['rows']))
     source = np.asarray(Image.open(source_path).convert('RGB'))
     routes = []
     for field in fields:
         mark = marks[field['id']]
         route, box = field['route'], mark['bbox']
         row = {**field, 'bbox': box, 'label': mark['label'], 'target_ids': []}
+        row.pop('required_card_frames', None)
+        if route == 'surface' and mark.get('required_card_frames'):
+            row['required_card_frames'] = mark['required_card_frames']
         if route in ('text', 'table', 'preserve'):
             for t in graph.text.texts:
                 covered = intersection(t.bbox, box) / max(1, t.bbox[2] * t.bbox[3])

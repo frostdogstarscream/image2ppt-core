@@ -114,6 +114,38 @@ def test_child_receipt_binds_the_page_scene_and_committed_presentation(tmp_path)
     assert not committed_graphic_evidence(state,page,2,scene)
 
 
+def test_separate_cards_precede_section_and_nested_detections_count_once():
+    from product.recovery.layered_card import ordered_card_frames
+    def mark(identifier, box):
+        return {'id':identifier,'label':'card_frame','bbox':box}
+    marks=[mark('section',[20,20,440,240]),mark('left',[30,55,198,180]),mark('right',[240,55,205,180]),
+           mark('left-inset',[35,120,185,102]),mark('right-copy',[243,56,200,178]),
+           {'id':'icon','label':'icon','bbox':[260,68,30,30]}]
+    plan=ordered_card_frames(marks)
+    assert plan==ordered_card_frames(list(reversed(marks)))
+    assert plan[-1]['id']=='section'
+    assert set(plan[-1]['required_card_frames'])=={'left','right'}
+    assert all(not r['required_card_frames'] for r in plan[:-1])
+
+
+def test_marked_surface_cannot_flatten_unbuilt_sibling_frames(tmp_path,monkeypatch):
+    from test_badge_panel_layers import flat_card_scene
+    from product.recovery.marked_surfaces import stage_marked_surfaces
+    from product.recovery.layered_card import geometry_marks
+    from product.recovery import container_stage
+    base, *_ = flat_card_scene(tmp_path)
+    rows=[{'id':'text','bbox':[110,60,70,24],'ocr_line_ids':['one']},
+          {'id':'second','bbox':[110,110,90,24],'ocr_line_ids':['two']}]
+    frames=geometry_marks(base/'source.png',rows)
+    assert frames
+    def block_early_fallback(*args,**kwargs):
+        pytest.fail('an unresolved section reached the early container fallback')
+    monkeypatch.setattr(container_stage,'stage_containers_and_surfaces',block_early_fallback)
+    out,ids=stage_marked_surfaces(base,tmp_path/'section',
+        [{**frames[0],'required_card_frames':['unbuilt-left','unbuilt-right']}],set())
+    assert ids==[] and out.parent==base and not (tmp_path/'section').exists()
+
+
 @pytest.mark.parametrize(
     'old,new',
     [

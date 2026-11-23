@@ -41,6 +41,30 @@ def geometry_marks(source, text_rows, *, icon_boxes=()):
     return rows
 
 
+def ordered_card_frames(rows):
+    """Recognize section wrappers from independent sibling frames in the same source."""
+    cards = sorted((r for r in rows if r['label']=='card_frame'),
+                   key=lambda r: (-r['bbox'][2]*r['bbox'][3], r['id']))
+    planned = []
+    for card in cards:
+        box = card['bbox']
+        children = []
+        for other in cards:
+            bounds = other['bbox']
+            area = bounds[2]*bounds[3]
+            if area >= .90*box[2]*box[3] or intersection(box, bounds) < .98*area:
+                continue
+            # Several detections of one inset or a frame within a child count as
+            # one branch. Side-by-side and vertically stacked cards stay separate.
+            if all(intersection(b['bbox'], bounds) <= .05*area for b in children):
+                children.append(other)
+        planned.append({**card, 'required_card_frames':[c['id'] for c in children] if len(children)>1 else []})
+    # Independent cards first. Nested sections can follow their smaller, fully
+    # reconstructed sections. A single inset is part of its card on this pass.
+    return sorted(planned,key=lambda r:(bool(r['required_card_frames']),
+                  (1 if r['required_card_frames'] else -1)*r['bbox'][2]*r['bbox'][3],r['id']))
+
+
 def _verified_graphic(row, verified_assets):
     ref = row.get('asset_reference') or {}
     owner = row.get('owner_evidence') or {}

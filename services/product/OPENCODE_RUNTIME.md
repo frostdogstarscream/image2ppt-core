@@ -32,6 +32,8 @@ Object-scoped uploads checkpoint verified text first. The next checkpoint fits t
 
 A measured card can also go underneath an existing transparent icon or separator. The host checks the earlier Office-validated scene, the image and its ownership mask, and the exposed source behind the transparent pixels. A line or picture crossing the card edge prevents that replacement. The new card supplies the delete background for its contained children, and the Office worker repeats their edit checks on the combined page.
 
+When the source contains several separate cards inside a section, the host processes the cards first. Both host and Agent surface routes defer the section while any of those child frames lacks a corresponding native shape. This preserves each child's editable scope when another card is difficult to recover.
+
 The host counts an OCR line when one native field or a contiguous sequence of fields on that line matches the complete wording in reading order. The background audit records the matching field names and checks for the old writing independently. Unconfirmed readings and image-only wording do not count as confirmed native matches.
 
 `get_job_context` gives a small issue index for each page. Each spatial block holds up to 30 stable numbers. The Agent can assign routes and movement partners and request an incremental rebuild by block or object IDs. It can also request new evidence. Source text and placement come from the job inventory. Private evaluation references are read only by the offline evaluator.

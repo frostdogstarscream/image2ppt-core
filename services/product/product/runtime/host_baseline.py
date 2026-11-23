@@ -242,8 +242,12 @@ def ensure_baseline(job):
             inventory = read(inventory_path)
             if inventory['source_sha256'] != sources[page-1]:
                 raise RuntimeConflict('card inventory source changed')
-            frames = sorted((r for r in inventory['rows'] if r['label'] == 'card_frame'),
-                            key=lambda r: -r['bbox'][2] * r['bbox'][3])
+            if request.get('object_scoped_delivery'):
+                from ..recovery.layered_card import ordered_card_frames
+                frames = ordered_card_frames(inventory['rows'])
+            else:
+                frames = sorted((r for r in inventory['rows'] if r['label'] == 'card_frame'),
+                                key=lambda r: -r['bbox'][2] * r['bbox'][3])
             for frame in frames:
                 def finish_frame(current, directory):
                     staged = svc.stage_photo_frame(state, current, directory, page, frame)

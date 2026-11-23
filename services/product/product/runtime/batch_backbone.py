@@ -1760,7 +1760,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     routes = []
     if fields and (request.get('host_stage0') or request.get('experiment_profile') not in (None, 'baseline')):
         from .marked_routes import bind_plan
-        routes = bind_plan(fields, current['experiment_marks'][str(page)], initial_graph, source_path)
+        routes = bind_plan(fields, current['experiment_marks'][str(page)], initial_graph, source_path,
+                           separate_cards=request.get('object_scoped_delivery', False))
         if wanted_filter is not None:
             for field in routes:
                 if field['id'] in wanted_filter:
