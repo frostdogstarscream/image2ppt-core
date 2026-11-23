@@ -40,7 +40,7 @@ def check_local(pptx, irs, directory):
     try:
         with lease('office'):
             try:
-                actual = inspect(pptx, irs, directory/'office', text_hidden_views=True)
+                actual = inspect(pptx, irs, directory/'office', text_hidden_views=True, checked_open=True)
             except OfficeValidationError as exc:
                 report_file = directory/'office/report.json'
                 actual = json.loads(report_file.read_text('utf8')) if report_file.is_file() else {
@@ -49,7 +49,7 @@ def check_local(pptx, irs, directory):
                 }
             has_text = any(n['type'] == 'text' for ir in irs
                            for n in json.loads(Path(ir).read_text('utf8'))['nodes'])
-            replacement = inspect_text(pptx, irs, directory/'replacement', include_long=False) if has_text else {
+            replacement = inspect_text(pptx, irs, directory/'replacement', include_long=False, checked_open=True) if has_text else {
                 'status': 'NOT_APPLICABLE', 'reason': 'no native text objects'}
         residuals = [inspect_residuals(ir, directory/'office', index, directory/f'residual-{index:02d}.json')
                      for index, ir in enumerate(irs, 1)]

@@ -17,6 +17,73 @@ from product.runtime.mcp_server import schemas
 from product.runtime.office_bridge import pack, unpack, OfficeQueue
 
 
+def test_incomplete_office_handle_recovers_only_the_already_opened_copy(tmp_path):
+    from types import SimpleNamespace
+    from product.parallel_office import OfficeProbeUnavailable, open_probe_document
+
+    copy = tmp_path/'attempt.pptx'
+    wrong = SimpleNamespace(FullName=str(tmp_path/'other'/copy.name), Slides=SimpleNamespace(Count=1))
+    correct = SimpleNamespace(FullName=str(copy), Slides=SimpleNamespace(Count=1))
+    opened = []
+    class Presentations:
+        match = correct
+
+        def Open(self, path, **kwargs):
+            opened.append(path)
+            return object()
+
+        def Item(self, name):
+            assert name == copy.name
+            return self.match
+
+    app = SimpleNamespace(Presentations=Presentations())
+    assert open_probe_document(app, copy, read_only=True, checked=True) is correct
+    assert opened == [str(copy)]
+    app.Presentations.match = wrong
+    with pytest.raises(OfficeProbeUnavailable):
+        open_probe_document(app, copy, read_only=False, checked=True)
+
+
+def test_worker_delivers_measured_unknown_with_locked_probe(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from product.runtime import office, office_bridge
+
+    source = tmp_path/'source'
+    write(source/'request.json', {'irs': []})
+    (source/'input.pptx').write_bytes(b'fixture')
+    packet = tmp_path/'input.zip'
+    pack(source, packet)
+    uploads = []
+    class Client:
+        def post(self, url, **kwargs):
+            if url.endswith('/result'):
+                uploads.append(kwargs['content'])
+            return SimpleNamespace(content=packet.read_bytes(), raise_for_status=lambda: None)
+
+    def failed_check(pptx, irs, directory):
+        write(directory/'office/report.json', {'status': 'UNKNOWN'})
+        (directory/'locked.pptx').write_bytes(b'scratch')
+        (directory/'~$locked.pptx').write_bytes(b'lock')
+        return {'status': 'UNKNOWN', 'failure': 'QA_INFRASTRUCTURE_UNAVAILABLE'}
+
+    unlink = Path.unlink
+    def keep_locked(path, *args, **kwargs):
+        if path.name == 'locked.pptx':
+            raise PermissionError('still open in Office')
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(office, 'check_local', failed_check)
+    monkeypatch.setattr(Path, 'unlink', keep_locked)
+    office_bridge.execute_ticket(Client(), {'ticket':'fixture'}, tmp_path/'run', 'test-worker')
+    assert len(uploads) == 1
+    out = tmp_path/'restored'
+    unpack(uploads[0], out)
+    result = json.loads((out/'result.json').read_text('utf8'))
+    assert result['status'] == 'UNKNOWN' and result['input_sha256'] == digest(packet)
+    assert (out/'check/office/report.json').is_file()
+    assert not list(out.rglob('*.pptx'))
+
+
 @pytest.fixture
 def job(tmp_path, monkeypatch):
     monkeypatch.setenv('IMAGE2PPT_RESOURCE_ROOT', str(tmp_path/'leases'))

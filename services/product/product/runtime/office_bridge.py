@@ -16,9 +16,10 @@ from ..materialize import digest, write
 from ..resource_lease import lease
 
 
-def pack(folder, target):
+def pack(folder, target, *, paths=None):
     folder, target = Path(folder), Path(target)
-    files = {str(p.relative_to(folder)).replace('\\', '/'): digest(p) for p in folder.rglob('*') if p.is_file()}
+    files = {p.relative_to(folder).as_posix(): digest(p) for p in
+             (folder.rglob('*') if paths is None else paths) if p.is_file()}
     with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('packet-manifest.json', json.dumps(files))
         for name in files:
@@ -117,20 +118,28 @@ def execute_ticket(client,ticket,run,binding):
         raise ValueError('Office IR escaped packet')
     result=check_local(run/'input/input.pptx',irs,run/'output/check')
 
-    for probe_file in list((run/'output/check').rglob('*')):
+    evidence = []
+    for probe_file in (run/'output/check').rglob('*'):
         if not probe_file.is_file():
             continue
         suf = probe_file.suffix.lower()
-        if suf == '.pptx':
-            probe_file.unlink()
-        elif suf == '.png' and not probe_file.name.endswith(('-before.png', '-delete.png', '-text-hidden.png')):
-            probe_file.unlink()
-    result['files'] = {str(p): digest(p) for p in (run/'output/check').rglob('*') if p.is_file()}
+        if probe_file.name.startswith('~$') or probe_file == run/'output/check/checks.json':
+            continue
+        if suf == '.pptx' or (suf == '.png' and not probe_file.name.endswith(('-before.png', '-delete.png', '-text-hidden.png'))):
+            try:
+                probe_file.unlink()
+            except PermissionError:
+                pass  # Office may still hold its disposable copy. It is excluded from the packet.
+            continue
+        evidence.append(probe_file)
+    result.pop('files', None)
     write(run/'output/check/checks.json', result)
+    evidence.append(run/'output/check/checks.json')
+    result['files'] = {str(p): digest(p) for p in evidence}
     result['worker_binding']=binding
     result['input_sha256']=sha256(data.content).hexdigest()
     write(run/'output/result.json',result)
-    pack(run/'output',run/'output.zip')
+    pack(run/'output',run/'output.zip',paths=[*evidence,run/'output/result.json'])
     response=client.post('/api/v1/office/result',params=ticket,content=(run/'output.zip').read_bytes())
     response.raise_for_status()
 

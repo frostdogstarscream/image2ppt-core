@@ -22,8 +22,8 @@ def layout_result(frame, bounds, lines, original_lines):
             'frame':list(frame),'text_bounds':list(bounds)}
 
 
-def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True):
-    from .parallel_office import leaf_shapes
+def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True, checked_open=False):
+    from .parallel_office import leaf_shapes, open_probe_document
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=False)
     pptx=Path(pptx).resolve();original=digest(pptx);records=[];deck=None;initialized=False
     result={'schema':'TextEditProbe/1','status':'UNKNOWN','pptx_sha256':original,'records':records,'human_acceptance':False}
@@ -42,7 +42,7 @@ def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True):
                 for variant in (('short','equal','long') if include_long else ('short','equal')):
                     action='replace-'+variant;name=node['id'];longer=variant=='long'
                     file=output/f'{page:02d}-{name}-{action}.pptx';shutil.copyfile(pptx,file)
-                    deck=app.Presentations.Open(str(file),ReadOnly=False,Untitled=False,WithWindow=False)
+                    deck=open_probe_document(app,file,read_only=False,checked=checked_open)
                     slide=deck.Slides(page);sig=signature(slide);s=next(s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name)
                     pw,ph=ir['canvas']['source_px'];sx=pw/float(deck.PageSetup.SlideWidth);sy=ph/float(deck.PageSetup.SlideHeight)
                     before=output/f'{page:02d}-{name}-{action}-before.png';slide.Export(str(before),'PNG',pw,ph)
@@ -50,7 +50,7 @@ def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True):
                     value=replacement(node['text'],longer,variant=='short').replace('\n','\r')
                     s.TextFrame.TextRange.Text=value
                     deck.Save();deck.Close();deck=None
-                    deck=app.Presentations.Open(str(file),ReadOnly=True,Untitled=False,WithWindow=False)
+                    deck=open_probe_document(app,file,read_only=True,checked=checked_open)
                     slide=deck.Slides(page);got=signature(slide);s=next(s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name);tr=s.TextFrame.TextRange
                     layout=layout_result(got[name][:4],(float(tr.BoundLeft),float(tr.BoundTop),float(tr.BoundWidth),float(tr.BoundHeight)),int(tr.Lines().Count),count)
                     png=output/f'{page:02d}-{name}-{action}.png';slide.Export(str(png),'PNG',pw,ph)

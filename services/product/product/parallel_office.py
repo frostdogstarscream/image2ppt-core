@@ -81,7 +81,31 @@ def _export_without_native_text(slide, ir, path, width, height):
     return {'sha256': digest(path), 'hidden_objects': sorted(hidden)}
 
 
-def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_views=False):
+class OfficeProbeUnavailable(RuntimeError):
+    pass
+
+
+def open_probe_document(app, path, *, read_only, checked):
+    presentations = app.Presentations
+    document = presentations.Open(str(path), ReadOnly=read_only, Untitled=False, WithWindow=False)
+    if not checked:
+        return document
+    try:
+        if Path(document.FullName) == path and document.Slides.Count:
+            return document
+    except Exception:
+        pass  # Some Office builds return an incomplete late-bound Open result.
+    # Retrieve the same open presentation. Never repeat an edit or select the active document.
+    try:
+        document = presentations.Item(path.name)
+        if Path(document.FullName) == path and document.Slides.Count:
+            return document
+    except Exception as exc:
+        raise OfficeProbeUnavailable('Office could not bind the opened probe to its expected file') from exc
+    raise OfficeProbeUnavailable('Office returned a different or empty presentation for the probe')
+
+
+def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_views=False,checked_open=False):
     import pythoncom
     import win32com.client
     pythoncom.CoInitialize()
@@ -97,7 +121,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
             str(s.TextFrame.TextRange.Text) if s.HasTextFrame and s.TextFrame.HasText else '',text_styles(s)) for s in leaf_shapes(slide.Shapes)}
     try:
         verify_pictures(pptx,irs)
-        deck=app.Presentations.Open(str(pptx),ReadOnly=True,Untitled=False,WithWindow=False)
+        deck=open_probe_document(app,pptx,read_only=True,checked=checked_open)
         pw=round(float(deck.PageSetup.SlideWidth)/.75);ph=round(float(deck.PageSetup.SlideHeight)/.75)
         sx=pw/float(deck.PageSetup.SlideWidth);sy=ph/float(deck.PageSetup.SlideHeight);inventory=[]
         hidden_views = {}
@@ -123,7 +147,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
                 current_id=name
                 for action in ('move-scale','delete'):
                     file=output/f'{i:02d}-{name}-{action}.pptx';shutil.copyfile(pptx,file)
-                    deck=app.Presentations.Open(str(file),ReadOnly=False,Untitled=False,WithWindow=False)
+                    deck=open_probe_document(app,file,read_only=False,checked=checked_open)
                     slide=deck.Slides(i);s=next(s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name);old=sig[name];wanted=None
                     if action=='delete':s.Delete()
                     else:
@@ -135,7 +159,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
                         wanted=signature(slide)[name]
                     deck.Save();deck.Close();deck=None
                     verify_pictures(file,irs,(i,name) if action=='delete' else None)
-                    deck=app.Presentations.Open(str(file),ReadOnly=True,Untitled=False,WithWindow=False)
+                    deck=open_probe_document(app,file,read_only=True,checked=checked_open)
                     slide=deck.Slides(i);got=signature(slide)
                     if {k:v for k,v in got.items() if k!=name}!={k:v for k,v in sig.items() if k!=name}:raise ValueError('Office changed sibling')
                     if action=='delete' and name in got:raise ValueError('Office deletion did not persist')
@@ -158,9 +182,12 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
             result['text_hidden_views'] = hidden_views
         write(output/'report.json',result);return result
     except Exception as exc:
-        write(output/'report.json',{'status':'FAIL_APP_AUTOMATED','failed_object_id':current_id,
+        unavailable = isinstance(exc, OfficeProbeUnavailable)
+        write(output/'report.json',{'status':'UNKNOWN' if unavailable else 'FAIL_APP_AUTOMATED','failed_object_id':current_id,
               'reason':str(exc)[:400],'error_type':type(exc).__name__,'records':records,
               'pptx_sha256':original,'human_acceptance':False})
+        if unavailable:
+            raise
         raise OfficeValidationError(current_id,str(exc)) from None
     finally:
         if deck is not None:deck.Close()
