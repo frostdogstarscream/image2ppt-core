@@ -136,6 +136,8 @@ def collect_crop_seeds(
 
     logos = set(logo_ids or ())
     skip = _clean_skip_seed_ids(skip_seed_ids)
+    from .badge_stage import represented_badge_evidence
+    skip.update(represented_badge_evidence(graph))
     unrec = None if unrecoverable_text_ids is None else (set(unrecoverable_text_ids) | logos)
     seeds: list[dict] = []
     protected_text_ids: set[str] = set()

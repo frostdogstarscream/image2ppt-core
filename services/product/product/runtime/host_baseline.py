@@ -204,6 +204,22 @@ def ensure_baseline(job):
                     return svc.commit_region(state,c,d/'commit',candidate_id=outcome['candidate_id'])
                 return {'status':outcome['status']}
             step(f'preserve-text-{page}', preserve_text)
+            if request.get('native_variant') != 'joint-only':
+                def preserve_panels(c, d):
+                    inventory_path = c.get('experiment_marks', {}).get(str(page))
+                    if not inventory_path:
+                        return {'status':'NO_PANEL_TARGETS'}
+                    inventory = read(inventory_path)
+                    if inventory['source_sha256'] != sources[page-1]:
+                        raise RuntimeConflict('panel inventory source changed')
+                    boxes = [r['bbox'] for r in inventory['rows'] if r['label']=='card_frame']
+                    if not boxes:
+                        return {'status':'NO_PANEL_TARGETS'}
+                    outcome = svc.batch_reconstruct_page(state,c,d,page=page,panel_regions=boxes,verify_office=True)
+                    if outcome['status']=='VALIDATED':
+                        return svc.commit_region(state,c,d/'commit',candidate_id=outcome['candidate_id'])
+                    return {'status':outcome['status']}
+                step(f'preserve-panels-{page}', preserve_panels)
         def reconstruct(c,d):
             outcome = svc.batch_reconstruct_page(state,c,d,page=page,include_region_crops=False,verify_office=True)
             if outcome['status']=='VALIDATED':

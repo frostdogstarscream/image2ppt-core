@@ -1147,6 +1147,7 @@ def _chain_stage_from_spec(
     marked_routes: tuple | list = (),
     prepared_tables=None,
     single_object_only=False,
+    panel_regions=None,
 ) -> tuple[Path, list[str], list[dict]]:
     from .. import layout_evidence, matting
     from ..object_stage import infer_sam
@@ -1158,7 +1159,7 @@ def _chain_stage_from_spec(
     cur_base = initial_baseline
     staged_ids: list[str] = []
     stage_errors: list[dict] = []
-    table_fields = [r for r in marked_routes if r['route']=='table'
+    table_fields = [r for r in marked_routes if panel_regions is None and r['route']=='table'
                     and (wanted_filter is None or r['id'] in wanted_filter)]
     covered_texts = {tid for record in initial_graph.selected.values() for tid in record.get('covered_text_ids', [])}
     if table_fields:
@@ -1166,7 +1167,7 @@ def _chain_stage_from_spec(
         cur_base, tables, covered = prepared_tables or stage_tables(cur_base, directory/tag/'marked-tables', table_fields, skip_ids)
         covered_texts.update(covered)
         staged_ids.extend(tables)
-    if include_containers and wanted_filter is None and layout_path:
+    if panel_regions is None and include_containers and wanted_filter is None and layout_path:
         from ..recovery.chart_stage import stage_native_charts
         layout = json.loads(Path(layout_path).read_text(encoding='utf8'))
         chart_ir, chart_ids = stage_native_charts(cur_base, directory/tag/'charts-staged', layout=layout,
@@ -1232,9 +1233,31 @@ def _chain_stage_from_spec(
             })
 
     grouped_boxes = []
+    badge_aliases = set()
+    if include_assets and single_object_only:
+        from ..recovery.badge_stage import represented_badge_evidence, stage_badge_symbols
+        layout = json.loads(Path(layout_path).read_text('utf8')) if layout_path and Path(layout_path).is_file() else None
+        cur_base, badge_ids = stage_badge_symbols(cur_base, directory/tag/'badge-symbols', layout,
+                                                  wanted=wanted_filter, skip=skip_ids, panel_regions=panel_regions)
+        staged_ids.extend(badge_ids)
+        badge_graph = SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
+        badge_aliases = represented_badge_evidence(badge_graph)
+        if panel_regions is not None:
+            from ..recovery.container_stage import stage_containers_and_surfaces
+            discs = [badge_graph.selected[i]['disc_bbox'] for i in badge_ids]
+            targets = [box for box in panel_regions if any(intersection(box,d) >= d[2]*d[3] for d in discs)]
+            if targets:
+                ir, shape_ids = stage_containers_and_surfaces(cur_base, directory/tag/'badge-panels',
+                    skip_ids=skip_ids, logo_ids=logo_ids, stable_ids=True, scope_boxes=targets)
+                if shape_ids:
+                    cur_base = ir.parent
+                    staged_ids.extend(shape_ids)
+            return cur_base, staged_ids, stage_errors
     if include_assets:
         from ..recovery.region_crop import stage_region_crops
         for field in sorted(marked_routes, key=lambda item: not item.get('diagram_members')):
+            if field['id'] in badge_aliases or set(field.get('target_ids', ())).intersection(badge_aliases):
+                continue
             if field.get('diagram_members') and field['id'] not in skip_ids and (
                 wanted_filter is None or field['id'] in wanted_filter
             ):
@@ -1308,6 +1331,7 @@ def _chain_stage_from_spec(
         asset_targets = [
             a for a in cur_graph.asset.objects
             if a.id not in cur_graph.selected
+            and a.id not in badge_aliases
             and cur_graph.ownership.get(a.id) == 'RESOLVED'
             and a.id not in skip_ids
             and not any(intersection(a.bbox, box) for box in grouped_boxes)
@@ -1447,7 +1471,8 @@ def _chain_stage_from_spec(
         cont_dir = directory / tag / 'containers-staged'
         try:
             cont_ir, cont_ids = stage_containers_and_surfaces(
-                cur_base, cont_dir, skip_ids=skip_ids, logo_ids=logo_ids, wanted_ids=wanted_filter
+                cur_base, cont_dir, skip_ids=skip_ids, logo_ids=logo_ids, wanted_ids=wanted_filter,
+                stable_ids=single_object_only
             )
             if cont_ids:
                 cur_base = cont_ir.parent
@@ -1519,7 +1544,7 @@ def _chain_stage_from_spec(
                         from ..recovery.container_stage import stage_containers_and_surfaces
                         post_cont_dir = directory / tag / 'post-crop-containers-staged'
                         pc_ir, pc_ids = stage_containers_and_surfaces(
-                            cur_base, post_cont_dir, skip_ids=skip_ids, logo_ids=logo_ids
+                            cur_base, post_cont_dir, skip_ids=skip_ids, logo_ids=logo_ids, stable_ids=single_object_only
                         )
                         if pc_ids:
                             cur_base = pc_ir.parent
@@ -1593,16 +1618,20 @@ def restage_batch_candidate_subset(
         members=set(trial.get('region',{}).get('members',[]))
         if members & bad_ids:
             bad_ids.update(members)
+    variants = {oid:staged_graph.selected[oid]['variant_key'] for oid in bad_ids
+                if staged_graph.selected.get(oid, {}).get('variant_key')}
     bad_crop_ids = {oid for oid in bad_ids if staged_graph.selected.get(oid, {}).get('seed_ids')}
     bad_crop_seeds = {sid for oid in bad_crop_ids for sid in staged_graph.selected[oid]['seed_ids']}
-    excluded = set(candidate.get('excluded_source_ids', [])) | (bad_ids - bad_crop_ids) | bad_crop_seeds
+    excluded = set(candidate.get('excluded_source_ids', [])) | (bad_ids - bad_crop_ids - variants.keys()) | bad_crop_seeds
+    excluded_variants = set(candidate.get('excluded_variants', [])) | set(variants.values())
+    candidate['excluded_variants'] = sorted(excluded_variants)
     candidate['excluded_source_ids'] = sorted(excluded)
     candidate.setdefault('isolation_history', []).append({
-        'office_status': office_res.get('status'), 'failed_ids': sorted(bad_ids),
+        'office_status': office_res.get('status'), 'failed_ids': sorted(bad_ids), 'failed_variants':variants,
         'excluded_source_ids': sorted(excluded), 'resized_fields': sorted(frame_repairs),
         'residuals': [{'id': r['id'], 'status': r.get('residual_check_status'), 'reason': r.get('reason')}
                       for rows in office_res.get('residuals', []) for r in rows if r.get('id') in bad_ids]})
-    skip = excluded | set(spec.get('pass1_failed_ids', []))
+    skip = excluded | excluded_variants | set(spec.get('pass1_failed_ids', []))
     skip.update(i for r in spec.get('marked_routes', []) if r['route']=='preserve'
                 for i in [r['id'],*r['target_ids']])
     unrec_pass2 = set(spec.get('unrecoverable_text_ids', [])) - bad_crop_seeds
@@ -1621,6 +1650,7 @@ def restage_batch_candidate_subset(
         directory=directory,
         tag='stage-pass2',
         single_object_only=spec.get('single_object_only', False),
+        panel_regions=spec.get('panel_regions'),
         experiment_profile=spec.get('experiment_profile'),
         marked_routes=spec.get('marked_routes', ()),
         trials_spec=spec['trials'],
@@ -1675,7 +1705,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                            object_ids: list[str] | None = None, include_assets: bool = True,
                            include_containers: bool = True, include_region_crops: bool = False,
                            allow_move_unsafe: bool = False, use_inpaint: bool = True,
-                           verify_office: bool = True) -> dict:
+                           verify_office: bool = True, panel_regions=None) -> dict:
     """Parallel local text trials + sequential staging + batch validation candidate (requires commit_candidate)."""
     from ..recovery.adaptive_policy import AdaptiveBudget
     from ..recovery.product_pipeline import failure as classify_exc
@@ -1714,14 +1744,14 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     # Phase 1: Parallel local text candidate trials against initial_baseline.
     text_targets = [
         t for t in initial_graph.text.texts
-        if t.id not in initial_graph.selected
+        if panel_regions is None and t.id not in initial_graph.selected
         and initial_graph.ownership.get(t.id) == 'RESOLVED'
         and (wanted_filter is None or t.id in wanted_filter)
     ]
     priority_ids = {tid for r in routes if r['route'] in ('text', 'table') for tid in r['target_ids']}
     preserved_ids = {i for r in routes if r['route']=='preserve' for i in [r['id'],*r['target_ids']]}
     prepared_tables=None
-    table_fields=[r for r in routes if r['route']=='table' and (wanted_filter is None or r['id'] in wanted_filter)]
+    table_fields=[r for r in routes if panel_regions is None and r['route']=='table' and (wanted_filter is None or r['id'] in wanted_filter)]
     covered=set()
     if table_fields:
         from ..recovery.marked_tables import stage_tables
@@ -1897,6 +1927,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         tag='stage-pass1',
         prepared_tables=prepared_tables,
         single_object_only=request.get('object_scoped_delivery', False),
+        panel_regions=panel_regions,
         experiment_profile=request.get('experiment_profile'),
         marked_routes=routes,
         trials_spec=trials_spec,
@@ -1942,6 +1973,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         'batch_spec': {
             'initial_baseline': str(initial_baseline),
             'single_object_only': request.get('object_scoped_delivery', False),
+            'panel_regions': panel_regions,
             'experiment_profile':request.get('experiment_profile'),
             'marked_routes':routes,
             'cache_dir': str(directory),

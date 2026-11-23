@@ -184,7 +184,8 @@ def route_trace(routes, graph):
             k
             for k, rec in graph.selected.items()
             if rec['kind'] in expected
-            and (k in targets or rec.get('mark_id') == mark or mark in rec.get('seed_ids', []))
+            and (k in targets or rec.get('mark_id') == mark or mark in rec.get('seed_ids', [])
+                 or targets.intersection(rec.get('badge_evidence_ids', ())))
         ]
         trace.append(
             {

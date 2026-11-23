@@ -214,13 +214,13 @@ class RuntimeService(ExplorationTools):
 
     def batch_reconstruct_page(self, state, current, directory, *, page, object_ids=None,
                                include_assets=True, include_containers=True, include_region_crops=False,
-                               allow_move_unsafe=False, use_inpaint=True, verify_office=True):
+                               allow_move_unsafe=False, use_inpaint=True, verify_office=True, panel_regions=None):
         from .batch_backbone import batch_reconstruct_page
         return batch_reconstruct_page(self, state, current, directory, page=page, object_ids=object_ids,
                                       include_assets=include_assets, include_containers=include_containers,
                                       include_region_crops=include_region_crops,
                                       allow_move_unsafe=allow_move_unsafe,
-                                      use_inpaint=use_inpaint, verify_office=verify_office)
+                                      use_inpaint=use_inpaint, verify_office=verify_office, panel_regions=panel_regions)
 
     def plan_marked_page(self, state, current, directory, *, page, fields, append=False):
         from ..materialize import write
@@ -336,7 +336,7 @@ class RuntimeService(ExplorationTools):
             from ..recovery.container_stage import stage_containers_and_surfaces
             try:
                 cont_ir, cont_ids = stage_containers_and_surfaces(
-                    crop_ir.parent, directory / 'post-crop-containers', logo_ids=logo_ids
+                    crop_ir.parent, directory / 'post-crop-containers', logo_ids=logo_ids, stable_ids=scoped
                 )
                 if cont_ids:
                     crop_ir = cont_ir

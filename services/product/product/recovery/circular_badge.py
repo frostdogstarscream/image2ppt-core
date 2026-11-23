@@ -1,10 +1,10 @@
-"""Separate a sparse, single-colour symbol from a measured circular badge."""
+"""Measure a circular badge and separate its foreground symbol from the disc."""
 
 import cv2
 import numpy as np
 
 
-def circular_badge(source, plate, box):
+def _faces(source, box, *, allow_overhang=False):
     x, y, w, h = map(round, box)
     if not (12 <= min(w, h) and max(w, h) <= 2 * min(w, h)):
         return
@@ -26,10 +26,10 @@ def circular_badge(source, plate, box):
     for contour in sorted(contours, key=cv2.contourArea, reverse=True):
         bx, by, bw, bh = cv2.boundingRect(contour)
         if not (
-            0 < bx <= margin
-            and 0 < by <= margin
-            and bx + bw >= margin + w
-            and by + bh >= margin + h
+            0 < bx and (allow_overhang or bx <= margin)
+            and 0 < by and (allow_overhang or by <= margin)
+            and (allow_overhang or bx + bw >= margin + w)
+            and (allow_overhang or by + bh >= margin + h)
             and bx + bw < tile.shape[1]
             and by + bh < tile.shape[0]
             and 0.9 < bw / bh < 1.1
@@ -55,6 +55,13 @@ def circular_badge(source, plate, box):
             or abs(face - paper).max() < 6
         ):
             continue
+        yield left, top, [left + bx, top + by, bw, bh], radius, face, paper
+
+
+def circular_badge(source, plate, box):
+    x, y, w, h = map(round, box)
+    crop = source[y:y+h, x:x+w].astype(float)
+    for left, top, bounds, radius, face, paper in _faces(source, box):
         diff = crop - face
         strong = np.linalg.norm(diff, axis=2) > 65
         if not 0.025 < strong.mean() < 0.55:
@@ -71,7 +78,7 @@ def circular_badge(source, plate, box):
         rgba = np.empty((h, w, 4), "uint8")
         rgba[:, :, :3] = np.rint(ink)
         rgba[:, :, 3] = np.rint(alpha * 255)
-        patch = plate[top : y + h + margin, left : x + w + margin, :3]
+        patch = plate[top:top+radius.shape[0], left:left+radius.shape[1], :3]
         erase = radius <= 1.07
         if (
             np.minimum(abs(patch - face).max(2), abs(patch - paper).max(2))[erase].max()
@@ -79,11 +86,55 @@ def circular_badge(source, plate, box):
         ):
             continue
         return (
-            [left + bx, top + by, bw, bh],
+            bounds,
             bytes(np.rint(face).astype("uint8")).hex(),
             rgba,
             (left, top, erase, paper),
         )
+
+
+def measure_symbol(source, box):
+    """Find the complete symbol against its own disc, including enclosed holes.
+
+    The detector locates the object. The source silhouette determines where to
+    stop. Ink reaching the rim or another unaccounted-for mark prevents staging.
+    """
+    from .region_crop import _extract_rgba
+
+    for left, top, disc, radius, face, paper in _faces(source, box, allow_overhang=True):
+        x, y, w, h = disc
+        tile = source[y:y+h, x:x+w]
+        radial = radius[y-top:y-top+h, x-left:x-left+w]
+        edge = (radial > .80) & (radial < .94)
+        # Sample the same physical rim regardless of which detector located it.
+        face = np.median(tile[edge], axis=0)
+        delta = np.max(np.abs(tile - face), axis=2)
+        noise = float(np.percentile(delta[edge], 95))
+        if noise > 6 or np.any(delta[edge] > 15):
+            continue
+        inside = radial < .94
+        support = inside & (delta > max(4, noise + 2))
+        strong = inside & (delta > 30)
+        if not .015 < strong.sum() / inside.sum() < .5:
+            continue
+        # Only components visibly connected to source detail belong to the symbol.
+        _, labels = cv2.connectedComponents(support.astype('uint8'), connectivity=8)
+        ink = np.isin(labels, np.unique(labels[strong])) & support
+        if np.any(inside & ~ink & (delta > 12)):
+            continue
+        yy, xx = np.nonzero(ink)
+        if not xx.size:
+            continue
+        ix, iy, iw, ih = cv2.boundingRect(ink.astype('uint8'))
+        bx, by, bw, bh = box
+        contained = ((xx+x >= bx-1) & (xx+x < bx+bw+1)
+                     & (yy+y >= by-1) & (yy+y < by+bh+1))
+        if contained.mean() < .98:
+            continue
+        backing = np.broadcast_to(face, tile.shape)
+        rgba = _extract_rgba(tile, backing, ink)[iy:iy+ih, ix:ix+iw]
+        return {'disc':disc, 'bbox':[x+ix,y+iy,iw,ih], 'face':bytes(face.round().astype('uint8')).hex(),
+                'mask':ink[iy:iy+ih,ix:ix+iw], 'rgba':rgba}
 
 
 def bind_layer_foreground(directory, layers, source, source_sha):
@@ -110,7 +161,7 @@ def bind_layer_foreground(directory, layers, source, source_sha):
     )
 
 
-def select_badge_ink(pixels, face, measured, layer):
+def select_badge_ink(pixels, face, measured, layer, *, excluded=(), strict_holes=False):
     """Compare against source on the disc and check exposed holes/ink on a dark fill."""
     face = np.array(list(bytes.fromhex(face)), dtype=float)
     measured_alpha = measured[..., 3] / 255.0
@@ -121,6 +172,9 @@ def select_badge_ink(pixels, face, measured, layer):
     selected = "color-unmix"
     best_score = float("inf")
     for name, candidate in (("color-unmix", measured), ("LayerD", layer)):
+        if name in excluded:
+            trials.append({"method": name, "status": "excluded-by-office"})
+            continue
         if candidate is None:
             trials.append({"method": name, "status": "unavailable"})
             continue
@@ -132,6 +186,11 @@ def select_badge_ink(pixels, face, measured, layer):
         spill = float(np.abs(dark[holes] - 56).max(1).mean()) if holes.any() else 0.0
         coverage = float(alpha[..., 0][strokes].mean()) if strokes.any() else 0.0
         valid = coverage >= 0.55 and spill <= 6 and source_error <= 12
+        if strict_holes and holes.any():
+            for background in (48, 230):
+                contrast = rgb[holes] * alpha[holes] + background * (1 - alpha[holes])
+                valid = valid and np.percentile(abs(contrast-background).max(1), 95) <= 8
+            valid = valid and not np.any(alpha[..., 0][measured[..., 3] == 0] > .06)
         score = source_error + spill
         trials.append(
             {

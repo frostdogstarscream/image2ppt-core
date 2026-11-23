@@ -340,6 +340,8 @@ def stage_containers_and_surfaces(
     logo_ids: set[str] | None = None,
     wanted_ids: set[str] | None = None,
     marked_boxes: dict | None = None,
+    stable_ids: bool = False,
+    scope_boxes: list | None = None,
 ) -> tuple[Path, list[str]]:
     """Discover and stage native shapes (`s-*`) and structural frame/curve/line assets (`a-c*`)."""
     from reconstruction import extract_rgba
@@ -464,6 +466,10 @@ def stage_containers_and_surfaces(
         y = max(0, min(h_img - 2, y))
         w = max(2, min(w_img - x, w))
         h = max(2, min(h_img - y, h))
+        if scope_boxes is not None and not any(
+            intersection([x, y, w, h], scope) >= w * h for scope in scope_boxes
+        ):
+            continue
         rect_area = rectangle([x, y, w, h], size)
         mark = (marked_boxes or {}).get((x,y,w,h))
         if marked_boxes is not None and mark is None:
@@ -511,9 +517,9 @@ def stage_containers_and_surfaces(
                 s_seq += 1
             sid = f's-{s_seq:03d}'
             s_seq += 1
-            if mark:
-                if shape_fit.get('geometry') not in ('pentagon','chevron'):
-                    continue
+            if mark and shape_fit.get('geometry') not in ('pentagon','chevron'):
+                continue
+            if mark or stable_ids:
                 from ..parallel_store import key
                 sid = 's-' + key([graph.source_sha256, 'marked-surface', [x,y,w,h]])[:16]
             if sid in used_ids or sid in skip or (wanted_ids is not None and sid not in wanted_ids):
@@ -591,6 +597,9 @@ def stage_containers_and_surfaces(
                 'payload': shape_obj.model_dump(),
                 **({'arrow_adjustment':shape_fit['arrow_adjustment']} if 'arrow_adjustment' in shape_fit else {}),
                 'method': 'container-surface-v2-gradient-preset/1',
+                **({'contained_children':sorted(oid for oid in direct_oids
+                     if intersection([x,y,w,h], graph.selected[oid]['bbox']) >=
+                     graph.selected[oid]['bbox'][2]*graph.selected[oid]['bbox'][3])} if stable_ids else {}),
                 'state': 'STAGED',
                 'quality': 'REVIEW_REQUIRED',
                 'human_acceptance': False,
@@ -613,7 +622,10 @@ def stage_containers_and_surfaces(
                 c_seq += 1
             aid = f'a-c{c_seq:02d}'
             c_seq += 1
-            if marked_boxes is not None or aid in skip or (wanted_ids is not None and aid not in wanted_ids):
+            if stable_ids:
+                from ..parallel_store import key
+                aid = 'a-c' + key([graph.source_sha256, cand_kind, [x,y,w,h]])[:16]
+            if marked_boxes is not None or aid in used_ids or aid in skip or (wanted_ids is not None and aid not in wanted_ids):
                 continue
 
             hpad = 4 if cand_kind == 'box' else (0 if cand_kind == 'tick' else 2)
