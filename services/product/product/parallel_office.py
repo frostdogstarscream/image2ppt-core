@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import shutil
+import time
 import io,posixpath,zipfile,xml.etree.ElementTree as ET
 import numpy as np
 from PIL import Image
@@ -105,12 +106,43 @@ def open_probe_document(app, path, *, read_only, checked):
     raise OfficeProbeUnavailable('Office returned a different or empty presentation for the probe')
 
 
+def close_probe_document(app, document, path, *, checked):
+    if not checked:
+        document.Close()
+        return
+    # Close can report an automation error even after PowerPoint has closed the file.
+    # Look up only our exact copy before retrying. Never repeat Save or an edit.
+    error = None
+    for attempt in range(16):
+        if attempt:
+            time.sleep(.1)
+        try:
+            if document is not None:
+                document.Close()
+        except Exception as exc:
+            error = exc
+        document = None
+        try:
+            presentations = app.Presentations
+            for index in range(1, presentations.Count + 1):
+                item = presentations.Item(index)
+                if Path(item.FullName) == path:
+                    document = item
+                    break
+            if document is None:
+                return
+        except Exception as exc:
+            error = exc
+    raise OfficeProbeUnavailable('Office could not confirm that the test copy closed') from error
+
+
 def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_views=False,checked_open=False):
     import pythoncom
     import win32com.client
     pythoncom.CoInitialize()
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=False);pptx=Path(pptx).resolve();original=digest(pptx)
     app=win32com.client.Dispatch('PowerPoint.Application');deck=None;records=[];current_id=None
+    open_path = pptx
     def text_styles(s):
         if not (s.HasTextFrame and s.TextFrame.HasText):return ()
         tr=s.TextFrame.TextRange
@@ -141,12 +173,13 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
                     hidden_views[str(i)] = {'status': 'UNKNOWN', 'reason': type(exc).__name__}
         if text_hidden_views:
             deck.Saved = True
-        deck.Close();deck=None
+        close_probe_document(app,deck,open_path,checked=checked_open);deck=None
         for i,targets,sig in inventory:
             for name in targets:
                 current_id=name
                 for action in ('move-scale','delete'):
                     file=output/f'{i:02d}-{name}-{action}.pptx';shutil.copyfile(pptx,file)
+                    open_path = file
                     deck=open_probe_document(app,file,read_only=False,checked=checked_open)
                     slide=deck.Slides(i);s=next(s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name);old=sig[name];wanted=None
                     if action=='delete':s.Delete()
@@ -157,7 +190,8 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
                             # A scale probe includes glyphs, not just the frame.
                             scale_text(tr,.9)
                         wanted=signature(slide)[name]
-                    deck.Save();deck.Close();deck=None
+                    deck.Save()
+                    close_probe_document(app,deck,file,checked=checked_open);deck=None
                     verify_pictures(file,irs,(i,name) if action=='delete' else None)
                     deck=open_probe_document(app,file,read_only=True,checked=checked_open)
                     slide=deck.Slides(i);got=signature(slide)
@@ -174,7 +208,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
                     outside=int(((before!=after).any(2)&~allowed).sum())
                     if outside:raise ValueError('Office changed pixels outside transaction')
                     records.append({'page':i,'id':name,'action':action,'saved_reopened':True,'outside_pixels':outside})
-                    deck.Close();deck=None
+                    close_probe_document(app,deck,file,checked=checked_open);deck=None
         if digest(pptx)!=original:raise ValueError('Office modified original')
         result={'status':'PASS_APP_AUTOMATED','pptx_sha256':original,'records':records,'human_acceptance':False,
                 'edit_checked':not render_only,'embedded_alpha_and_visible_rgb_checked':True,'powerpoint_version':app.Version}
@@ -190,5 +224,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
             raise
         raise OfficeValidationError(current_id,str(exc)) from None
     finally:
-        if deck is not None:deck.Close()
-        pythoncom.CoUninitialize()
+        try:
+            if deck is not None:close_probe_document(app,deck,open_path,checked=checked_open)
+        finally:
+            pythoncom.CoUninitialize()

@@ -97,7 +97,7 @@ Tool outcomes, region commits, final QA and publication qualification have separ
 
 ## Office worker
 
-The OpenCode Office worker checks a presentation's full path before editing it and after reopening it. If PowerPoint returns an incomplete automation handle, the worker looks up the already-opened test copy by name and verifies the same full path. The returned packet contains measured results and previews. An Office lock on a disposable PPTX cannot suppress an already measured failure receipt.
+The OpenCode Office worker checks a presentation's full path before editing it and after reopening it. If PowerPoint returns an incomplete automation handle, the worker looks up the already-opened test copy by name and verifies the same full path. After closing, it confirms that the exact file has left the presentation collection. A transient close error retries only that close. The returned packet contains measured results and previews. An Office lock on a disposable PPTX cannot suppress an already measured failure receipt.
 
 The local mode runs pywin32/PowerPoint on the executing Windows host. Set `IMAGE2PPT_OFFICE_MODE=remote` and a separate `IMAGE2PPT_OFFICE_WORKER_TOKEN` on the business host to use an outbound worker.
 

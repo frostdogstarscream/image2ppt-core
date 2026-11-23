@@ -84,6 +84,36 @@ def test_worker_delivers_measured_unknown_with_locked_probe(tmp_path, monkeypatc
     assert not list(out.rglob('*.pptx'))
 
 
+@pytest.mark.parametrize('already_closed', [False, True])
+def test_close_recovers_uncertain_response_without_touching_another_file(tmp_path, monkeypatch, already_closed):
+    from types import SimpleNamespace
+    from product import parallel_office
+
+    path = tmp_path/'work'/'edited.pptx'
+    other = SimpleNamespace(FullName=str(tmp_path/'another'/'edited.pptx'))
+    other.Close = lambda: pytest.fail('another presentation was closed')
+    own = SimpleNamespace(FullName=str(path))
+    books = [other, own]
+    own.Close = lambda: books.remove(own)
+    class Collection:
+        @property
+        def Count(self):
+            return len(books)
+
+        def Item(self, index):
+            return books[index-1]
+
+    def uncertain_close():
+        if already_closed:
+            books.remove(own)
+        raise AttributeError('Open.Close')
+
+    monkeypatch.setattr(parallel_office.time, 'sleep', lambda _: None)
+    parallel_office.close_probe_document(SimpleNamespace(Presentations=Collection()),
+        SimpleNamespace(Close=uncertain_close), path, checked=True)
+    assert books == [other]
+
+
 @pytest.fixture
 def job(tmp_path, monkeypatch):
     monkeypatch.setenv('IMAGE2PPT_RESOURCE_ROOT', str(tmp_path/'leases'))

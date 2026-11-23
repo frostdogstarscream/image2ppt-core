@@ -23,7 +23,7 @@ def layout_result(frame, bounds, lines, original_lines):
 
 
 def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True, checked_open=False):
-    from .parallel_office import leaf_shapes, open_probe_document
+    from .parallel_office import close_probe_document, leaf_shapes, open_probe_document
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=False)
     pptx=Path(pptx).resolve();original=digest(pptx);records=[];deck=None;initialized=False
     result={'schema':'TextEditProbe/1','status':'UNKNOWN','pptx_sha256':original,'records':records,'human_acceptance':False}
@@ -49,7 +49,8 @@ def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True, check
                     count=int(s.TextFrame.TextRange.Lines().Count)
                     value=replacement(node['text'],longer,variant=='short').replace('\n','\r')
                     s.TextFrame.TextRange.Text=value
-                    deck.Save();deck.Close();deck=None
+                    deck.Save()
+                    close_probe_document(app,deck,file,checked=checked_open);deck=None
                     deck=open_probe_document(app,file,read_only=True,checked=checked_open)
                     slide=deck.Slides(page);got=signature(slide);s=next(s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name);tr=s.TextFrame.TextRange
                     layout=layout_result(got[name][:4],(float(tr.BoundLeft),float(tr.BoundTop),float(tr.BoundWidth),float(tr.BoundHeight)),int(tr.Lines().Count),count)
@@ -66,15 +67,17 @@ def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True, check
                          'outside_pixels':outside,'layout':layout,'pptx_sha256':digest(file),'preview_sha256':digest(png),
                          'expected_text':value,'probe_pptx':str(file),'preview':str(png)}
                     records.append(row);write(output/'report.json',result)
-                    deck.Close();deck=None
+                    close_probe_document(app,deck,file,checked=checked_open);deck=None
         required=[r for r in records if r['action'] in ('replace-equal','replace-short')]
         result.update(status='PASS' if required and all(r['status']=='PASS' for r in required) else 'FAIL',
                       powerpoint_version=app.Version,long_text_supported=(bool(records) and all(r['status']=='PASS' for r in records)) if include_long else None)
     except Exception as exc:
         result.update(status='UNKNOWN',reason=type(exc).__name__+': '+str(exc))
     finally:
-        if deck is not None:deck.Close()
-        if initialized:pythoncom.CoUninitialize()
+        try:
+            if deck is not None:close_probe_document(app,deck,file,checked=checked_open)
+        finally:
+            if initialized:pythoncom.CoUninitialize()
         if digest(pptx)!=original:result.update(status='FAIL',reason='original modified')
         write(output/'report.json',result)
     return result
