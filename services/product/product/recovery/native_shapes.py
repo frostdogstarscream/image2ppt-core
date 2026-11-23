@@ -645,8 +645,8 @@ def _detect_preset_geometry(
         if iou >= 0.87 and min(corners_bg) >= max(6, int(0.18 * cs_e * cs_e)):
             return 'ellipse', None, ~ell_in, None, None
 
-    # 2. Check right-pointing `homePlate` / `chevron` ribbons (e.g. `01 应用成效`, `平台架构`)
-    if w >= 52 and 20 <= h <= 110 and w >= 1.2 * h:
+    # 2. Check right-pointing `homePlate` / `chevron` ribbons (e.g. `01 应用成效`, `平台架构`) and pointed cards
+    if w >= 52 and 20 <= h <= 240 and w >= 1.2 * h:
         tip_w = min(h // 2 + 6, w // 2)
         if tip_w >= 10:
             fg_closed = cv2.morphologyEx(fg.astype('uint8'), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8)) > 0
@@ -660,7 +660,7 @@ def _detect_preset_geometry(
                     and abs(tr_bg - br_bg) <= max(24, int(0.58 * max(tr_bg, br_bg)))):
                 # Estimate tip start x from core foreground so outer AA does not inflate shoulder_x
                 diff_par = np.abs(crop - parent_patch).max(2)
-                core_thresh = max(16.0, 0.30 * min(200.0, float(np.percentile(diff_par, 90))))
+                core_thresh = max(5.5, 0.30 * min(200.0, float(np.percentile(diff_par, 90))))
                 core_fg = (diff_par > core_thresh) | direct_children_mask_local
                 top_fg = np.where(core_fg[min(2, h - 1), :])[0]
                 bot_fg = np.where(core_fg[max(0, h - 3), :])[0]
@@ -892,21 +892,29 @@ def try_fit_native_shape_v2(
 
     # Thin divider rules & short vertical/horizontal title accent bars (`line` / thin `rect` bar)
     is_short_accent = (3 <= min(w, h) <= 14 and 14 <= max(w, h) <= 48 and max(w, h) >= 1.9 * min(w, h))
-    if cand_kind == 'line' or is_short_accent or (min(w, h) <= 6 and max(w, h) >= 36):
+    is_thin_divider = (min(w, h) <= 6 and max(w, h) >= 32)
+    if cand_kind == 'line' or is_short_accent or is_thin_divider:
         if not is_short_accent and (min(w, h) < 2 or max(w, h) < 32):
             return None
         unclaimed = ~direct_children_mask_local
         if int(unclaimed.sum()) < 16:
             return None
-        fg = np.abs(crop - parent_f).max(2) > (18.0 if is_short_accent else 6.0)
-        if float(fg.mean()) < (0.40 if is_short_accent else 0.45):
+        fg_thresh = 18.0 if is_short_accent else (10.0 if is_thin_divider else 6.0)
+        fg = np.abs(crop - parent_f).max(2) > fg_thresh
+        if float(fg.mean()) < (0.40 if is_short_accent else (0.30 if is_thin_divider else 0.45)):
             return None
-        if is_short_accent:
-            # High-contrast compact accent bar (e.g. `|` before section heading)
-            med_rgb = np.rint(np.median(crop[fg & unclaimed], axis=0)).astype(int)
-            if float(np.abs(med_rgb.astype(np.float64) - parent_med).max()) < 35.0:
+        if is_short_accent or is_thin_divider:
+            # High-contrast compact accent bar or thin divider rule (e.g. header vertical divider)
+            deltas_u = np.abs(crop[fg & unclaimed] - parent_med).max(1)
+            hi_cut = float(np.percentile(deltas_u, 55)) if is_thin_divider else 0.0
+            core_px = crop[fg & unclaimed][deltas_u >= hi_cut] if is_thin_divider else crop[fg & unclaimed]
+            if len(core_px) < 8:
                 return None
-            if float(np.percentile(np.abs(crop[fg & unclaimed] - med_rgb.astype(np.float64)).max(1), 90)) > 22.0:
+            med_rgb = np.rint(np.median(core_px, axis=0)).astype(int)
+            min_contrast = 24.0 if is_short_accent else 18.0
+            if float(np.abs(med_rgb.astype(np.float64) - parent_med).max()) < min_contrast:
+                return None
+            if float(np.percentile(np.abs(core_px - med_rgb.astype(np.float64)).max(1), 90)) > 22.0:
                 return None
             pred_fill = np.broadcast_to(med_rgb.astype(np.float64), (h, w, 3)).copy()
             grad_obj = None

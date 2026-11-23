@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import base64
+import gc
 import hashlib
 from dataclasses import replace
 import json
@@ -112,12 +113,49 @@ def compiler_runtime():
     return compiler,selected or node
 
 
+_COMPILE_RETRY_PAUSE_S = 2.5
+
+
+def _release_compile_headroom() -> None:
+    """Release cached OCR/SAM models and CUDA/Python buffers before invoking child compiler processes."""
+    models_mod = sys.modules.get('image2ppt_vision.models')
+    if models_mod is not None:
+        for attr in ('ocr_engine', 'sam_model'):
+            fn = getattr(models_mod, attr, None)
+            clear = getattr(fn, 'cache_clear', None)
+            if callable(clear):
+                clear()
+    gc.collect()
+    torch_mod = sys.modules.get('torch')
+    if torch_mod is not None:
+        try:
+            if torch_mod.cuda.is_available():
+                torch_mod.cuda.empty_cache()
+        except Exception:
+            pass
+
+
+def _transient_compiler_failure(error: str) -> str | None:
+    if 'ETIMEDOUT' in error and 'verifyFirstPartyImport' in error and 'spawnSync' in error:
+        return 'first_party_import_timeout'
+    if 'AllocImageMemory' in error or 'Could not encode as png' in error:
+        return 'vulkan_image_memory'
+    if 'node::Realloc' in error or 'ret != nullptr' in error or (
+        "validator: 'first-party-import'" in error and 'exitCode: 134' in error
+    ):
+        return 'node_realloc_oom'
+    if 'Allocation failed' in error or 'bad allocation' in error or 'out of memory' in error.lower():
+        return 'subprocess_oom'
+    return None
+
+
 def compile_pages(irs, output, pages):
     compiler,node=compiler_runtime()
     output.mkdir(parents=True,exist_ok=False)
     write(output/'input-irs.json',[str(Path(p).resolve()) for p in irs])
     command=[str(node),str(ROOT/'services/product/compose_objects.mjs'),str((output/'input-irs.json').resolve()),str(output.resolve())]
-    for attempt in range(2):
+    _release_compile_headroom()
+    for attempt in range(3):
         with (output/'compiler.stdout').open('w',encoding='utf-8') as stdout, (output/'compiler.stderr').open('w',encoding='utf-8') as stderr:
             try:
                 result=subprocess.run(command,cwd=ROOT,stdin=subprocess.DEVNULL,stdout=stdout,stderr=stderr,timeout=1800,
@@ -126,11 +164,14 @@ def compile_pages(irs, output, pages):
                 raise PipelineError('compiler_timeout') from None
         if not result.returncode:break
         error=(output/'compiler.stderr').read_text(encoding='utf-8',errors='replace')
-        transient='ETIMEDOUT' in error and 'verifyFirstPartyImport' in error and 'spawnSync' in error
-        if attempt or not transient:break
-        for name in ('stdout','stderr'):shutil.copyfile(output/('compiler.'+name),output/('compiler-attempt-0.'+name))
-        write(output/'compile-retry-0.json',{'reason':'first_party_import_timeout','node':str(node),
-            'stderr_sha256':digest(output/'compiler-attempt-0.stderr')})
+        reason=_transient_compiler_failure(error)
+        if attempt>=2 or reason is None:break
+        for name in ('stdout','stderr'):shutil.copyfile(output/('compiler.'+name),output/(f'compiler-attempt-{attempt}.'+name))
+        write(output/f'compile-retry-{attempt}.json',{'reason':reason,'attempt':attempt,'node':str(node),
+            'stderr_sha256':digest(output/f'compiler-attempt-{attempt}.stderr')})
+        _release_compile_headroom()
+        if _COMPILE_RETRY_PAUSE_S > 0:
+            time.sleep(_COMPILE_RETRY_PAUSE_S)
     if result.returncode:
         raise PipelineError('fixed_compiler_failed')
     artifacts=_compiled_artifacts(_final_json((output/'compiler.stdout').read_bytes()),output,len(pages))

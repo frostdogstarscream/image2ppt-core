@@ -56,7 +56,7 @@ def verify_pictures(pptx,irs,deleted=None,*,cache=None):
                     if nid not in pictures:raise ValueError('final picture asset binding mismatch')
                     raw_bytes=z.read(pictures[nid])
                     if hashlib.sha256(raw_bytes).hexdigest()==cache['verified_media_sha'][(i,nid)]:continue
-                    wanted=cache['wanted'][(i,nid)]
+                    wanted=np.array(Image.open(cache['wanted'][(i,nid)]).convert('RGBA'))
                     got=np.array(Image.open(io.BytesIO(raw_bytes)).convert('RGBA'))
                     if got.shape!=wanted.shape or not np.array_equal(got[...,3],wanted[...,3]) or not np.array_equal(got[...,:3][wanted[...,3]>0],wanted[...,:3][wanted[...,3]>0]):
                         raise ValueError('embedded Alpha or visible RGB changed')
@@ -72,20 +72,20 @@ def verify_pictures(pptx,irs,deleted=None,*,cache=None):
                 if name in pictures:raise ValueError('duplicate final picture identity')
                 target=mapping[pic.find('.//a:blip',ns).get('{'+ns['r']+'}embed')]
                 media=target.lstrip('/') if target.startswith('/') else posixpath.normpath('ppt/slides/'+target)
-                raw_bytes=z.read(media)
-                media_sha[name]=hashlib.sha256(raw_bytes).hexdigest()
-                pictures[name]=np.array(Image.open(io.BytesIO(raw_bytes)).convert('RGBA'))
+                pictures[name]=media
             cache_ir_ids[i]=[node['id'] for node in ir['nodes'] if node['type']=='image']
             for node in ir['nodes']:
                 if node['type']!='image' or (i,node['id']) in deleted_set:continue
                 a=assets[node['asset_id']];file=(irfile.parent/a['path']).resolve()
                 if digest(file)!=a['sha256'] or node['id'] not in pictures:raise ValueError('final picture asset binding mismatch')
-                wanted=np.array(Image.open(file).convert('RGBA'));got=pictures[node['id']]
+                raw_bytes=z.read(pictures[node['id']])
+                media_sha[node['id']]=hashlib.sha256(raw_bytes).hexdigest()
+                wanted=np.array(Image.open(file).convert('RGBA'));got=np.array(Image.open(io.BytesIO(raw_bytes)).convert('RGBA'))
                 if got.shape!=wanted.shape or not np.array_equal(got[...,3],wanted[...,3]) or not np.array_equal(got[...,:3][wanted[...,3]>0],wanted[...,:3][wanted[...,3]>0]):
                     raise ValueError('embedded Alpha or visible RGB changed')
                 if cache is not None:
                     cache_media_sha[(i,node['id'])]=media_sha[node['id']]
-                    cache_wanted[(i,node['id'])]=wanted
+                    cache_wanted[(i,node['id'])]=str(file)
     if cache is not None and not deleted_set:
         cache['verified_media_sha']=cache_media_sha
         cache['wanted']=cache_wanted
@@ -155,7 +155,7 @@ def _node_bleed_margin_px(node: dict) -> int:
         blur = float(sh.get('blur_px', 0.0) or 0.0)
         dx = float(sh.get('offset_x_px', 0.0) or 0.0)
         dy = float(sh.get('offset_y_px', 0.0) or 0.0)
-        margin = max(margin, math.ceil(blur + math.hypot(dx, dy)) + 4)
+        margin = max(margin, math.ceil(blur * 2.5 + math.hypot(dx, dy)) + 6)
     ln = node.get('line')
     if isinstance(ln, dict):
         lw_px = float(ln.get('width_pt', 0.0) or 0.0) * 96.0 / 72.0

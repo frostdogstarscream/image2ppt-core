@@ -126,11 +126,16 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
         else:
             raise
     shared = graph.text.members.get(identifier)
-    if marked_fields and shared and any(k!=identifier and ids==shared for k,ids in graph.text.members.items()):
+    use_striped = (
+        fit.get('validation_p95_rgb', 99.0) > 3.0
+        or (marked_fields and shared and any(k != identifier and ids == shared for k, ids in graph.text.members.items()))
+    )
+    if use_striped:
         from .marked_fields import striped_backing
-        stripe = striped_backing(source, box, context_protected)
+        max_span = max(18.0, min(68.0, 0.45 * box[2])) if fit.get('validation_p95_rgb', 99.0) > 3.0 else 18.0
+        stripe = striped_backing(source, box, context_protected, max_span=max_span)
         if stripe and stripe[1]['validation_p95_rgb'] < fit['validation_p95_rgb']:
-            reference,fit = stripe
+            reference, fit = stripe
     completion = TextMaskCompletion.analyze(source,original,protected,box,reference,glyph_height=style.size_px)
     write(directory/'mask-completion.json',completion.report)
     np.savez_compressed(directory/'mask-evidence.npz',**completion.evidence,**completion.masks)

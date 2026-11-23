@@ -92,7 +92,7 @@ def split_items(source, items, preserved):
     return result
 
 
-def striped_backing(source, box, protected):
+def striped_backing(source, box, protected, *, max_span: float = 18.0):
     """Fit a horizontal ramp independently on each scanline, with held-out columns."""
     x, y, w, h = box
     margin = 7
@@ -105,7 +105,7 @@ def striped_backing(source, box, protected):
         return None
     a = np.median(left[:, ::2], axis=1)[:, None, :]
     b = np.median(right[:, ::2], axis=1)[:, None, :]
-    if np.max(np.abs(a - b)) > 18:
+    if np.max(np.abs(a - b)) > max_span:
         return None
     errors = np.concatenate((np.abs(left[:, 1::2] - a), np.abs(right[:, 1::2] - b)), axis=1).max(2)
     p95 = float(np.percentile(errors, 95))
@@ -114,9 +114,12 @@ def striped_backing(source, box, protected):
     ramp = (np.arange(w) + 4) / (w + 7)
     reference = source.copy()
     reference[y : y + h, x : x + w] = np.rint(a + (b - a) * ramp[None, :, None]).astype('uint8')
-    return reference, {
+    meta = {
         'method': 'scanline-lateral',
         'validation_p95_rgb': p95,
         'validation_pixels': int(errors.size),
         'margin': margin,
     }
+    if max_span != 18.0:
+        meta['max_span'] = float(max_span)
+    return reference, meta

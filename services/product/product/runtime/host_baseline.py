@@ -1,4 +1,6 @@
 """Host-owned preflight, immutable control deck and per-page non-regression gate."""
+import gc
+import sys
 from uuid import uuid4
 from pathlib import Path
 import shutil
@@ -144,6 +146,28 @@ def regressions(base, candidate):
     return reasons
 
 
+def _release_stage_caches(*, drop_ocr: bool = False, drop_sam: bool = False) -> None:
+    """Clear optional heavyweight vision model caches between host baseline stages."""
+    models_mod = sys.modules.get('image2ppt_vision.models')
+    if models_mod is not None:
+        if drop_ocr:
+            fn = getattr(models_mod, 'ocr_engine', None)
+            if callable(getattr(fn, 'cache_clear', None)):
+                fn.cache_clear()
+        if drop_sam:
+            fn = getattr(models_mod, 'sam_model', None)
+            if callable(getattr(fn, 'cache_clear', None)):
+                fn.cache_clear()
+    gc.collect()
+    if drop_sam and 'torch' in sys.modules:
+        try:
+            torch_mod = sys.modules['torch']
+            if torch_mod.cuda.is_available():
+                torch_mod.cuda.empty_cache()
+        except Exception:
+            pass
+
+
 def ensure_baseline(job):
     state = RuntimeState(job)
     svc = RuntimeService(job.parent)
@@ -172,6 +196,7 @@ def ensure_baseline(job):
         stage_timings[name] = round(time.perf_counter() - t_s, 2)
         return out
     step('prepare',lambda c,d:prepare_all(svc,state,c,d,sources=sources))
+    _release_stage_caches(drop_ocr=True)
     for page in range(1,len(sources)+1):
         def reconstruct(c,d):
             outcome = svc.batch_reconstruct_page(state,c,d,page=page,include_region_crops=False,verify_office=True)
@@ -192,6 +217,7 @@ def ensure_baseline(job):
                     svc.commit_region(state,c,d/'commit',candidate_id=candidate['candidate_id'])
             return {'page':page,'status':candidate['status']}
         step(f'finish-assets-{page}',finish_photos)
+        _release_stage_caches(drop_sam=True)
     step('compose',lambda c,d:svc.compose_delivery(state,c,d))
     step('office',lambda c,d:svc.validate_office(state,c,d))
     current = state.read()

@@ -7,12 +7,14 @@ hundreds of Agent tool turns to a single batch backbone pass plus targeted repai
 from __future__ import annotations
 
 from collections import Counter
+import gc
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import threading
 import time
@@ -37,6 +39,7 @@ def _merge_structural_ocr_items(
     raw_items: list[dict],
     asset_records: list[dict],
     extra_logo_boxes: list[list[float]] | None = None,
+    layout_regions: list[dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """Perform pre-scene structural grouping and relation analysis (Astra Step 2).
 
@@ -203,29 +206,116 @@ def _merge_structural_ocr_items(
     consumed = [False] * len(after_header)
     final_items: list[dict] = []
 
+    bullet_boxes = [
+        ar['bbox'] for ar in asset_records
+        if ar.get('kind') in ('icon', 'decoration', 'illustration')
+        and max(ar['bbox'][2], ar['bbox'][3]) <= 96.0
+    ] + [
+        r['bbox'] for r in (layout_regions or ())
+        if r.get('label') == 'image' and float(r.get('score', 0)) >= 0.5
+        and 10.0 <= r['bbox'][2] <= 96.0 and 10.0 <= r['bbox'][3] <= 96.0
+    ]
+    layout_text_boxes = [
+        r['bbox'] for r in (layout_regions or ())
+        if r.get('label') == 'text' and float(r.get('score', 0)) >= 0.72
+        and r['bbox'][3] >= 36.0
+    ]
+
+    def _left_bullet_index(lbox: list[float]) -> int | None:
+        ax0, ay0, _, ah0 = lbox
+        cy_l = ay0 + 0.5 * ah0
+        best_idx = None
+        best_gap = 1e9
+        for b_idx, bb in enumerate(bullet_boxes):
+            ix, iy, iw, ih = bb
+            gap = ax0 - (ix + iw)
+            if -6.0 <= gap <= 96.0 and abs(cy_l - (iy + 0.5 * ih)) <= max(10.0, 0.65 * max(ah0, ih)):
+                if abs(gap) < best_gap:
+                    best_gap = abs(gap)
+                    best_idx = b_idx
+        return best_idx
+
+    def _has_independent_left_markers(box_a: list[float], box_b: list[float]) -> bool:
+        b1, b2 = _left_bullet_index(box_a), _left_bullet_index(box_b)
+        if b1 is not None and b2 is not None and b1 != b2:
+            return True
+        x_right = int(round(min(box_a[0], box_b[0]))) - 3
+        x_left = max(0, x_right - 56)
+        if x_right - x_left < 14:
+            return False
+        ya0, ya1 = max(0, int(round(box_a[1]))), min(h_img, int(round(box_a[1] + box_a[3])))
+        yb0, yb1 = max(0, int(round(box_b[1]))), min(h_img, int(round(box_b[1] + box_b[3])))
+        if ya1 <= ya0 + 4 or yb1 <= yb0 + 4 or yb0 <= ya1 + 1:
+            return False
+        band_y0 = max(0, ya0 - 2)
+        band_y1 = min(h_img, yb1 + 2)
+        panel = source[band_y0:band_y1, max(0, x_left - 2):min(w_img, x_right + 2)].astype(np.float32)
+        if panel.size == 0:
+            return False
+        bg = np.median(np.concatenate([panel[0], panel[-1], panel[:, 0]], axis=0), axis=0)
+        fg_a = np.abs(source[ya0:ya1, x_left:x_right].astype(np.float32) - bg).max(2) > 18.0
+        fg_b = np.abs(source[yb0:yb1, x_left:x_right].astype(np.float32) - bg).max(2) > 18.0
+        if int(fg_a.sum()) < 8 or int(fg_b.sum()) < 8:
+            return False
+        fg_gap = np.abs(source[ya1:yb0, x_left:x_right].astype(np.float32) - bg).max(2) > 16.0
+        if float(fg_gap.mean()) > 0.08:
+            return False
+        # Require left marker blobs near a similar x-column
+        cols_a = np.nonzero(fg_a.any(0))[0]
+        cols_b = np.nonzero(fg_b.any(0))[0]
+        return len(cols_a) >= 3 and len(cols_b) >= 3 and abs(int(cols_a.min()) - int(cols_b.min())) <= 8
+
+    def _same_layout_paragraph(box_a: list[float], box_b: list[float]) -> bool:
+        a_area = max(1.0, box_a[2] * box_a[3])
+        b_area = max(1.0, box_b[2] * box_b[3])
+        for lb in layout_text_boxes:
+            if intersection(box_a, lb) >= 0.72 * a_area and intersection(box_b, lb) >= 0.72 * b_area:
+                return True
+        return False
+
     def _can_merge_vertical(cur_item: dict, cand: dict) -> tuple[bool, str]:
         if (cur_item['id'] in logo_ids or cand['id'] in logo_ids
                 or cur_item['id'] in dual_color_ids or cand['id'] in dual_color_ids
                 or cur_item.get('stripped_affix') or cand.get('stripped_affix')
                 or cur_item.get('is_header_merged') or cand.get('is_header_merged')):
             return False, 'left'
-        if cur_item['est_size_px'] > 23.0 or cand['est_size_px'] > 23.0:
-            return False, 'left'
         last_line = cur_item['lines'][-1]
-        size_diff = abs(last_line['est_size_px'] - cand['est_size_px'])
-        if size_diff > 3.5:
-            return False, 'left'
-        h_a, h_b = max(1.0, last_line['bbox'][3]), max(1.0, cand['bbox'][3])
-        if max(h_a, h_b) / min(h_a, h_b) > 1.45:
-            return False, 'left'
-        rgb_diff = max(abs(a - b) for a, b in zip(last_line['rgb'], cand['rgb']))
-        if rgb_diff > 26:
-            return False, 'left'
         ax, ay, aw, ah = last_line['bbox']
         bx, by, bw, bh = cand['bbox']
         gap_y = by - (ay + ah)
         avg_h = 0.5 * (ah + bh)
-        if not (-5.0 <= gap_y <= max(10.0, 0.62 * avg_h)):
+        rgb_diff = max(abs(a - b) for a, b in zip(last_line['rgb'], cand['rgb']))
+        max_sz = max(cur_item['est_size_px'], cand['est_size_px'])
+        stacked_short_header = (
+            23.0 < max_sz <= 28.5
+            and len(cur_item['lines']) == 1
+            and len(last_line['text'].strip()) <= 6
+            and len(cand['text'].strip()) <= 6
+            and max(aw, bw) <= 0.16 * w_img
+            and gap_y <= max(8.0, 0.48 * avg_h)
+            and rgb_diff <= 22
+        )
+        wrapped_body_prose = (
+            23.0 < max_sz <= 26.0
+            and aw >= 250.0
+            and len(last_line['text'].replace(' ', '')) >= 10
+            and abs(ax - bx) <= 10.0
+            and bw <= 1.05 * aw
+            and gap_y <= max(8.0, 0.45 * avg_h)
+            and rgb_diff <= 20
+        )
+        if max_sz > 23.0 and not (stacked_short_header or wrapped_body_prose):
+            return False, 'left'
+        in_layout_para = _same_layout_paragraph(last_line['bbox'], cand['bbox'])
+        size_diff = abs(last_line['est_size_px'] - cand['est_size_px'])
+        if size_diff > (4.8 if in_layout_para else 3.5):
+            return False, 'left'
+        h_a, h_b = max(1.0, ah), max(1.0, bh)
+        if max(h_a, h_b) / min(h_a, h_b) > 1.45:
+            return False, 'left'
+        if rgb_diff > 26:
+            return False, 'left'
+        if not (-5.0 <= gap_y <= (max(14.0, 0.78 * avg_h) if in_layout_para else max(10.0, 0.62 * avg_h))):
             return False, 'left'
         x_ov = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
         min_w = max(1.0, min(aw, bw))
@@ -237,7 +327,9 @@ def _merge_structural_ocr_items(
         center_aligned = abs(cx_a - cx_b) <= 14.0 and max(aw, bw) <= 0.32 * w_img
         if not (left_aligned or center_aligned):
             return False, 'left'
-        if size_diff > 2.8 and not (gap_y <= 4.0 and left_aligned and rgb_diff <= 20):
+        if not in_layout_para and size_diff > 2.8 and not (gap_y <= 4.0 and left_aligned and rgb_diff <= 20):
+            return False, 'left'
+        if _has_independent_left_markers(last_line['bbox'], cand['bbox']):
             return False, 'left'
         # Do not merge across an asset or horizontal divider line.
         x_min = max(0, int(round(min(ax, bx))))
@@ -252,7 +344,7 @@ def _merge_structural_ocr_items(
                 strip = source[sy0:sy1, x_min:x_max].astype(float)
                 med_col = np.median(strip.reshape(-1, 3), axis=0)
                 row_cov = (np.abs(strip - med_col).max(axis=2) > 16.0).mean(axis=1)
-                if float(row_cov.max()) > 0.48:
+                if float(row_cov.max()) > (0.62 if in_layout_para else 0.48):
                     return False, 'left'
         return True, ('center' if (center_aligned and not left_aligned) else 'left')
 
@@ -514,18 +606,341 @@ def _deoverlap_same_row_ocr_lines(source: np.ndarray, ocr: dict) -> bool:
     return changed
 
 
+def _split_pill_divider_ocr_lines(source: np.ndarray, ocr: dict) -> bool:
+    """Split single OCR lines that span multiple UI pill items separated by vertical `|` / `丨` divider strokes."""
+    lines = ocr.get('lines') or []
+    if not lines:
+        return False
+    h_img, w_img = source.shape[:2]
+    changed = False
+    rebuilt: list[dict] = []
+    for row in lines:
+        raw_text = str(row.get('text') or '').strip()
+        bbox = row.get('bbox') or []
+        if (
+            row.get('score', 0) < 0.85
+            or '\n' in raw_text
+            or len(bbox) != 4
+            or not any(ch in raw_text for ch in ('|', '丨', '｜'))
+        ):
+            rebuilt.append(row)
+            continue
+        segments = re.split(r'[|丨｜]', raw_text)
+        if len(segments) < 2 or any(len(seg.replace(' ', '')) < 2 for seg in segments):
+            rebuilt.append(row)
+            continue
+        bx, by, bw, bh = [int(round(float(v))) for v in bbox]
+        x0, y0 = max(0, bx), max(0, by)
+        x1, y1 = min(w_img, bx + bw), min(h_img, by + bh)
+        cw, ch = x1 - x0, y1 - y0
+        if cw < 24 or ch < 10:
+            rebuilt.append(row)
+            continue
+        crop = source[y0:y1, x0:x1].astype(np.float32)
+        border = np.concatenate([crop[0], crop[-1]], axis=0)
+        bg = np.median(border, axis=0)
+        if float(np.percentile(np.abs(border - bg).max(1), 80)) > 12.0:
+            rebuilt.append(row)
+            continue
+        delta = np.abs(crop - bg).max(2)
+        col_ink = (delta > 16.0).any(axis=0)
+        runs: list[tuple[int, int]] = []
+        col_i = 0
+        while col_i < cw:
+            if not col_ink[col_i]:
+                col_i += 1
+                continue
+            col_j = col_i
+            while col_j < cw and col_ink[col_j]:
+                col_j += 1
+            runs.append((col_i, col_j))
+            col_i = col_j
+        min_gap = max(4, int(round(0.20 * ch)))
+        max_div_w = max(4, int(round(0.14 * ch)))
+        valid_seps: list[tuple[int, int]] = []
+        for idx_r in range(1, len(runs) - 1):
+            c_left, c_right = runs[idx_r]
+            if c_right - c_left > max_div_w:
+                continue
+            l_gap = c_left - runs[idx_r - 1][1]
+            r_gap = runs[idx_r + 1][0] - c_right
+            vert_cov = float((delta[:, c_left:c_right] > 14.0).any(axis=1).mean())
+            if l_gap >= min_gap and r_gap >= min_gap and vert_cov >= 0.42:
+                valid_seps.append((c_left, c_right))
+        if len(valid_seps) != len(segments) - 1:
+            rebuilt.append(row)
+            continue
+        sep_peaks = [float(delta[:, s0:s1].max()) for s0, s1 in valid_seps]
+        sep_mask = np.zeros(cw, dtype=bool)
+        for s0, s1 in valid_seps:
+            sep_mask[max(0, s0 - 1):min(cw, s1 + 1)] = True
+        glyph_deltas = delta[:, col_ink & (~sep_mask)]
+        if glyph_deltas.size < 12:
+            rebuilt.append(row)
+            continue
+        glyph_p90 = float(np.percentile(glyph_deltas, 90))
+        if len(segments) == 2 and '|' in raw_text and '丨' not in raw_text and '｜' not in raw_text and max(sep_peaks) > max(120.0, 0.90 * glyph_p90):
+            rebuilt.append(row)
+            continue
+        bounds = [(0, valid_seps[0][0])]
+        for idx_s in range(len(valid_seps) - 1):
+            bounds.append((valid_seps[idx_s][1], valid_seps[idx_s + 1][0]))
+        bounds.append((valid_seps[-1][1], cw))
+        split_rows: list[dict] = []
+        for idx_s, (seg_txt, (rx0, rx1)) in enumerate(zip(segments, bounds), 1):
+            seg_clean = seg_txt.strip()
+            nz = np.nonzero((delta[:, rx0:rx1] > 18.0).any(axis=0))[0]
+            if not seg_clean or len(nz) < 4:
+                split_rows = []
+                break
+            sx0 = x0 + max(0, rx0 + int(nz[0]) - 2)
+            sx1 = min(w_img, x0 + rx0 + int(nz[-1]) + 3)
+            seg_box = [round(float(sx0), 2), round(float(y0), 2), round(float(max(4, sx1 - sx0)), 2), round(float(ch), 2)]
+            split_rows.append({
+                **row,
+                'id': f"{row['id']}__s{idx_s}",
+                'text': seg_clean,
+                'bbox': seg_box,
+                'polygon': None,
+            })
+        if split_rows:
+            rebuilt.extend(split_rows)
+            changed = True
+        else:
+            rebuilt.append(row)
+    if changed:
+        ocr['lines'] = rebuilt
+    return changed
+
+
+def _detect_embedded_ui_frames(
+    source: np.ndarray,
+    measured_items: list[dict],
+    layout_data: dict | None = None,
+) -> list[list[int]]:
+    """Detect embedded software UI screenshots / dark BI dashboards so they extract intact instead of fragmenting."""
+    h_img, w_img = source.shape[:2]
+    page_area = float(w_img * h_img)
+    if h_img < 120 or w_img < 200 or not measured_items:
+        return []
+    m_bdr = min(16, max(4, min(h_img, w_img) // 24))
+    border_px = np.concatenate([
+        source[:m_bdr, :].reshape(-1, 3),
+        source[-m_bdr:, :].reshape(-1, 3),
+        source[m_bdr:-m_bdr, :m_bdr].reshape(-1, 3),
+        source[m_bdr:-m_bdr, -m_bdr:].reshape(-1, 3),
+    ], axis=0)
+    border_luma = float(np.median(border_px))
+    frames: list[list[int]] = []
+
+    def _inside_count(box: list[float], items: list[dict], thresh: float = 0.75) -> int:
+        cnt = 0
+        for it in items:
+            ib = it['bbox']
+            if intersection(ib, box) >= thresh * max(1.0, ib[2] * ib[3]):
+                cnt += 1
+        return cnt
+
+    # Rule 1: Inset dark BI / supervisory dashboard on a bright presentation canvas
+    if border_luma >= 175.0:
+        dark_mask = (source.mean(axis=2) < 95.0).astype(np.uint8)
+        closed_d = cv2.morphologyEx(dark_mask, cv2.MORPH_CLOSE, np.ones((15, 15), np.uint8))
+        n_d, _, stats_d, _ = cv2.connectedComponentsWithStats(closed_d, 8)
+        for cid in range(1, n_d):
+            bx, by, bw, bh, area = [int(v) for v in stats_d[cid]]
+            box_area = float(bw * bh)
+            if not (0.15 * page_area <= box_area <= 0.62 * page_area):
+                continue
+            if bw < int(0.34 * w_img) or bh < int(0.34 * h_img) or by < int(0.10 * h_img):
+                continue
+            if area / max(1.0, box_area) < 0.76:
+                continue
+            cand = [bx, by, bw, bh]
+            if _inside_count(cand, measured_items) >= 5:
+                frames.append(cand)
+
+    # Rule 2: Inset light multi-pane application window mockup (micro UI chrome + tiny UI icons)
+    micro_texts = [
+        it for it in measured_items
+        if float(it.get('est_size_px', 99.0)) <= 16.8 and it['bbox'][1] >= 0.12 * h_img
+    ]
+    regions = (layout_data or {}).get('regions', [])
+    micro_layout = [
+        {'bbox': list(r['bbox']), 'kind': str(r.get('label'))}
+        for r in regions
+        if float(r.get('score', 0)) >= 0.45
+        and r['bbox'][1] >= 0.12 * h_img
+        and (
+            (r.get('label') == 'vision_footnote' and r['bbox'][2] <= 260)
+            or (r.get('label') == 'image' and 12.0 <= r['bbox'][2] <= 42.0 and 12.0 <= r['bbox'][3] <= 42.0)
+        )
+    ]
+    if len(micro_texts) >= 8 and len(micro_layout) >= 5:
+        pts = [*({'bbox': list(it['bbox']), 'is_text': True, 'is_icon': False} for it in micro_texts),
+               *({'bbox': m['bbox'], 'is_text': False, 'is_icon': m['kind'] == 'image'} for m in micro_layout)]
+        clusters: list[dict] = []
+        max_join_x = min(200.0, 0.12 * w_img)
+        max_join_y = min(120.0, 0.13 * h_img)
+        for pt in sorted(pts, key=lambda p: (p['bbox'][1], p['bbox'][0])):
+            pb = pt['bbox']
+            x0, y0, x1, y1 = pb[0], pb[1], pb[0] + pb[2], pb[1] + pb[3]
+            placed = None
+            for cl in clusters:
+                gap_x = max(0.0, max(x0, cl['x0']) - min(x1, cl['x1']))
+                gap_y = max(0.0, max(y0, cl['y0']) - min(y1, cl['y1']))
+                cand_w = max(x1, cl['x1']) - min(x0, cl['x0'])
+                if gap_x <= max_join_x and gap_y <= max_join_y and cand_w <= 0.60 * w_img:
+                    placed = cl
+                    break
+            if placed is None:
+                clusters.append({'x0': x0, 'y0': y0, 'x1': x1, 'y1': y1, 'pts': [pt]})
+            else:
+                placed['x0'] = min(placed['x0'], x0)
+                placed['y0'] = min(placed['y0'], y0)
+                placed['x1'] = max(placed['x1'], x1)
+                placed['y1'] = max(placed['y1'], y1)
+                placed['pts'].append(pt)
+        # Merge touching/overlapping clusters
+        merged_c = True
+        while merged_c:
+            merged_c = False
+            for i in range(len(clusters)):
+                if merged_c:
+                    break
+                for j in range(i + 1, len(clusters)):
+                    ca, cb = clusters[i], clusters[j]
+                    gx = max(0.0, max(ca['x0'], cb['x0']) - min(ca['x1'], cb['x1']))
+                    gy = max(0.0, max(ca['y0'], cb['y0']) - min(ca['y1'], cb['y1']))
+                    if gx <= max_join_x and gy <= max_join_y:
+                        cand_w = max(ca['x1'], cb['x1']) - min(ca['x0'], cb['x0'])
+                        cand_h = max(ca['y1'], cb['y1']) - min(ca['y0'], cb['y0'])
+                        if cand_w <= 0.60 * w_img and cand_h <= 0.65 * h_img:
+                            ca['x0'] = min(ca['x0'], cb['x0'])
+                            ca['y0'] = min(ca['y0'], cb['y0'])
+                            ca['x1'] = max(ca['x1'], cb['x1'])
+                            ca['y1'] = max(ca['y1'], cb['y1'])
+                            ca['pts'].extend(cb['pts'])
+                            clusters.pop(j)
+                            merged_c = True
+                            break
+
+        huge_texts = [it for it in measured_items if float(it.get('est_size_px', 0.0)) >= 28.0]
+        ext_headers = [it for it in measured_items if float(it.get('est_size_px', 0.0)) >= 18.0]
+        for cl in clusters:
+            cw0, ch0 = cl['x1'] - cl['x0'], cl['y1'] - cl['y0']
+            n_t = sum(1 for p in cl['pts'] if p['is_text'])
+            n_ic = sum(1 for p in cl['pts'] if p['is_icon'])
+            if cw0 < 0.28 * w_img or ch0 < 0.24 * h_img or cw0 > 0.62 * w_img or ch0 > 0.65 * h_img:
+                continue
+            if n_t < 8 or n_ic < 5:
+                continue
+            c_box = [cl['x0'], cl['y0'], cw0, ch0]
+            if any(intersection(bt['bbox'], c_box) > 0.3 * bt['bbox'][2] * bt['bbox'][3] for bt in huge_texts):
+                continue
+            in_items = [
+                it for it in measured_items
+                if intersection(it['bbox'], c_box) >= 0.75 * max(1.0, it['bbox'][2] * it['bbox'][3])
+            ]
+            if not in_items or sum(1 for it in in_items if float(it.get('est_size_px', 99.0)) <= 17.0) / len(in_items) < 0.65:
+                continue
+            out_items = [
+                it for it in measured_items
+                if intersection(it['bbox'], [cl['x0'] - 60, cl['y0'] - 60, cw0 + 120, ch0 + 120]) == 0
+            ]
+            if out_items and float(np.median([float(it['est_size_px']) for it in out_items])) < 16.5:
+                continue
+            # Expand cluster bounds to clean enclosing window border gutter without crossing external >=18px headers
+            min_top = max(0, int(round(cl['y0'])) - 90)
+            for bt in ext_headers:
+                bx_t, by_t, bw_t, bh_t = bt['bbox']
+                if min(bx_t + bw_t, cl['x1'] + 80) > max(bx_t, cl['x0'] - 80):
+                    if by_t + bh_t <= cl['y0'] + 4:
+                        min_top = max(min_top, int(math.ceil(by_t + bh_t)) + 6)
+            max_bot = min(h_img, int(round(cl['y1'])) + 90)
+            min_left = max(0, int(round(cl['x0'])) - 160)
+            max_right = min(w_img, int(round(cl['x1'])) + 160)
+            for it in ext_headers:
+                ib = it['bbox']
+                if intersection(ib, c_box) > 0:
+                    continue
+                if ib[1] + ib[3] > min_top and ib[1] < max_bot:
+                    if ib[0] + ib[2] <= cl['x0']:
+                        min_left = max(min_left, int(math.ceil(ib[0] + ib[2])) + 6)
+                    elif ib[0] >= cl['x1']:
+                        max_right = min(max_right, int(math.floor(ib[0])) - 6)
+                if ib[0] + ib[2] > min_left and ib[0] < max_right:
+                    if ib[1] >= cl['y1']:
+                        max_bot = min(max_bot, int(math.floor(ib[1])) - 6)
+
+            def _outer_clean_strip(axis: str, start: int, limit: int, step: int, span_a: int, span_b: int) -> int | None:
+                if span_b <= span_a + 16:
+                    return None
+                cur = start
+                first_hit = None
+                while (cur <= limit if step > 0 else cur >= limit):
+                    if axis == 'top':
+                        band = source[max(0, cur - 6):cur, span_a:span_b].astype(np.float32)
+                    elif axis == 'bot':
+                        band = source[cur:min(h_img, cur + 6), span_a:span_b].astype(np.float32)
+                    elif axis == 'left':
+                        band = source[span_a:span_b, max(0, cur - 6):cur].astype(np.float32)
+                    else:
+                        band = source[span_a:span_b, cur:min(w_img, cur + 6)].astype(np.float32)
+                    if band.size >= 48:
+                        med = np.median(band, axis=(0, 1))
+                        if float(np.percentile(np.abs(band - med).max(2), 85)) <= 4.5:
+                            if first_hit is None:
+                                first_hit = (cur, med)
+                            elif abs(cur - first_hit[0]) >= 32:
+                                break
+                            # Keep advancing up to 28px ONLY on bottom axis if an input bar still lies immediately ahead
+                            # (require >= 15% strip deviation so a 1px outer card border is never crossed).
+                            if axis == 'bot' and abs(cur - first_hit[0]) >= 8:
+                                ahead = source[min(h_img, cur + 4):min(h_img, cur + 28), span_a:span_b].astype(np.float32)
+                                if ahead.size >= 48 and float(np.percentile(np.abs(ahead - med).max(2), 85)) > 7.5:
+                                    first_hit = None
+                                else:
+                                    return cur
+                    cur += step
+                return first_hit[0] if first_hit is not None else None
+
+            ix0, ix1 = max(min_left, int(round(cl['x0']))), min(max_right, int(round(cl['x1'])))
+            iy0, iy1 = max(min_top, int(round(cl['y0']))), min(max_bot, int(round(cl['y1'])))
+            fy0 = _outer_clean_strip('top', int(round(cl['y0'])) - 4, min_top, -1, ix0, ix1)
+            fy1 = _outer_clean_strip('bot', int(round(cl['y1'])) + 4, max_bot, 1, ix0, ix1)
+            if None in (fy0, fy1):
+                continue
+            fx0 = _outer_clean_strip('left', int(round(cl['x0'])) - 4, min_left, -1, fy0 + 6, fy1 - 6)
+            fx1 = _outer_clean_strip('right', int(round(cl['x1'])) + 4, max_right, 1, fy0 + 6, fy1 - 6)
+            if None in (fx0, fx1):
+                continue
+            fy0_r = _outer_clean_strip('top', int(round(cl['y0'])) - 4, min_top, -1, fx0 + 6, fx1 - 6)
+            fy1_r = _outer_clean_strip('bot', int(round(cl['y1'])) + 4, max_bot, 1, fx0 + 6, fx1 - 6)
+            if fy0_r is not None:
+                fy0 = fy0_r
+            if fy1_r is not None:
+                fy1 = fy1_r
+            fw, fh = fx1 - fx0, fy1 - fy0
+            if 0.14 * page_area <= fw * fh <= 0.58 * page_area and fw >= int(0.32 * w_img) and fh >= int(0.30 * h_img):
+                win_box = [int(fx0), int(fy0), int(fw), int(fh)]
+                if not any(intersection(win_box, f) > 0.3 * min(win_box[2] * win_box[3], f[2] * f[3]) for f in frames):
+                    frames.append(win_box)
+    return frames
+
+
 def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list[float], str]:
-    """Strip purely non-alphanumeric leading/trailing affixes when a clean pixel gap exists."""
+    """Strip purely non-alphanumeric leading/trailing affixes or thin edge `|`/`丨` bars when a clean pixel gap exists."""
     raw_text = line.get('text', '').strip()
     bbox = [float(v) for v in line['bbox']]
     compact = raw_text.replace(' ', '').replace('\n', '')
     if len(compact) < 3 or not any(ch.isalnum() for ch in compact):
         return raw_text, bbox, ''
+    _edge_pipes = ('|', '丨', '｜')
     start = 0
-    while start < len(compact) and not compact[start].isalnum():
+    while start < len(compact) and (not compact[start].isalnum() or compact[start] in _edge_pipes):
         start += 1
     end = len(compact)
-    while end > start and not compact[end - 1].isalnum():
+    while end > start and (not compact[end - 1].isalnum() or compact[end - 1] in _edge_pipes):
         end -= 1
     core = compact[start:end]
     prefix, suffix = compact[:start], compact[end:]
@@ -535,11 +950,12 @@ def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list
         return raw_text, bbox, ''
     if any(ch in keep_marks for ch in (prefix + suffix)):
         return raw_text, bbox, ''
+    has_edge_cjk_pipe = any(ch in _edge_pipes for ch in (prefix + suffix))
     # Recover spaces inside the core text while stripping outer decorative marks.
     stripped = raw_text
-    while stripped and not stripped[0].isalnum() and stripped[0] not in keep_marks:
+    while stripped and (not stripped[0].isalnum() or stripped[0] in _edge_pipes) and stripped[0] not in keep_marks:
         stripped = stripped[1:].lstrip()
-    while stripped and not stripped[-1].isalnum() and stripped[-1] not in keep_marks:
+    while stripped and (not stripped[-1].isalnum() or stripped[-1] in _edge_pipes) and stripped[-1] not in keep_marks:
         stripped = stripped[:-1].rstrip()
     if len(stripped.replace(' ', '')) < 2 or stripped == raw_text:
         return raw_text, bbox, ''
@@ -550,7 +966,7 @@ def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list
     crop = source[ly:ly + lh, lx:lx + lw].astype(float)
     border = np.concatenate([crop[0], crop[-1]], axis=0)
     bg = np.median(border, axis=0)
-    col_ink = (np.abs(crop - bg).max(2) > 30.0).sum(axis=0) > 0
+    col_ink = (np.abs(crop - bg).max(2) > 22.0 if has_edge_cjk_pipe else np.abs(crop - bg).max(2) > 30.0).sum(axis=0) > 0
     runs: list[tuple[int, int]] = []
     idx = 0
     while idx < lw:
@@ -567,6 +983,11 @@ def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list
         idx = j
     if len(runs) < 2:
         return raw_text, bbox, ''
+    if has_edge_cjk_pipe:
+        if prefix and (runs[0][1] - runs[0][0] > max(4, round(0.14 * lh)) or runs[1][0] - runs[0][1] < 3):
+            return raw_text, bbox, ''
+        if suffix and (runs[-1][1] - runs[-1][0] > max(4, round(0.14 * lh)) or runs[-1][0] - runs[-2][1] < 3):
+            return raw_text, bbox, ''
     sub_left, sub_right = 0, lw
     if prefix and not suffix:
         # Drop leading decorative run(s) up to proportional prefix fraction.
@@ -784,15 +1205,23 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     if str(page) not in current.get('ocr', {}):
         ocr_dir = directory / 'ocr'
         ocr_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            service.run_ocr(state, current, ocr_dir, page=page)
-        except (OSError, RuntimeError, KeyError, ValueError, subprocess.SubprocessError) as exc:
-            if not json.loads((state.job/'request.json').read_text('utf8')).get('host_stage0'):
-                raise
-            file = ocr_dir/'ocr-unavailable.json'
-            write(file,{'source_sha256':digest(source_path),'status':'UNAVAILABLE',
-                        'error_type':type(exc).__name__,'lines':[]})
-            current.setdefault('ocr',{})[str(page)]=str(file)
+        for _ocr_try in range(2):
+            try:
+                service.run_ocr(state, current, ocr_dir, page=page)
+                break
+            except (MemoryError, OSError, RuntimeError, KeyError, ValueError, subprocess.SubprocessError) as exc:
+                msg_exc = str(exc).lower()
+                if _ocr_try == 0 and (isinstance(exc, MemoryError) or 'bad allocation' in msg_exc or 'unable to allocate' in msg_exc):
+                    gc.collect()
+                    time.sleep(2.0)
+                    continue
+                if not json.loads((state.job/'request.json').read_text('utf8')).get('host_stage0'):
+                    raise
+                file = ocr_dir/'ocr-unavailable.json'
+                write(file,{'source_sha256':digest(source_path),'status':'UNAVAILABLE',
+                            'error_type':type(exc).__name__,'lines':[]})
+                current.setdefault('ocr',{})[str(page)]=str(file)
+                break
     ocr = json.loads(Path(current['ocr'][str(page)]).read_text('utf8'))
     if 'fonts' not in current:
         font_dir = directory / 'fonts'
@@ -889,7 +1318,8 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         state, source_path, ocr, layout=layout_data, assets=[], fonts=fonts, use_vlm=do_vlm_structure
     )
     deoverlapped = _deoverlap_same_row_ocr_lines(source, ocr)
-    if structure_info.get('applied_ocr_corrections') or deoverlapped:
+    pill_split = _split_pill_divider_ocr_lines(source, ocr)
+    if structure_info.get('applied_ocr_corrections') or deoverlapped or pill_split:
         proof_ocr_file = directory / 'ocr-proofread.json'
         write(proof_ocr_file, ocr)
         current.setdefault('ocr', {})[str(page)] = str(proof_ocr_file)
@@ -954,7 +1384,10 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     ]
 
     measured_items, scene_relations = _merge_structural_ocr_items(
-        source, raw_items, [*immediate_assets, *deferred_assets], extra_logo_boxes=extra_logo_boxes)
+        source, raw_items, [*immediate_assets, *deferred_assets],
+        extra_logo_boxes=extra_logo_boxes,
+        layout_regions=(layout_data or {}).get('regions', []),
+    )
     if preflight or (profile and profile != 'baseline'):
         from ..recovery.marked_fields import split_items
         retained_fields = scene_relations.setdefault('source_retained_fields', [])
@@ -962,8 +1395,17 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     for item in measured_items:
         est_px = item['est_size_px']
         item['role'] = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
+    ui_frames = _detect_embedded_ui_frames(source, measured_items, layout_data)
+    if ui_frames:
+        scene_relations['embedded_ui_frames'] = ui_frames
     merged_text_boxes = [it['bbox'] for it in measured_items]
-    all_assets = [*immediate_assets, *deferred_assets]
+    all_assets = [
+        a_obj for a_obj in [*immediate_assets, *deferred_assets]
+        if not any(
+            intersection(a_obj['bbox'], uf) >= 0.70 * max(1.0, a_obj['bbox'][2] * a_obj['bbox'][3])
+            for uf in ui_frames
+        )
+    ]
     immediate_assets, deferred_assets = [], []
     for a_obj in all_assets:
         bx, by, bw, bh = a_obj['bbox']
@@ -1050,6 +1492,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
             row['ir'] = str(ir)
             row['scene'] = str(ir.parent / 'scene.json')
         shutil.copyfile(structure_file, Path(row['ir']).parent / 'page-structure.json')
+        write(Path(row['ir']).parent / 'embedded-ui-frames.json', ui_frames)
         if deferred_assets and (directory / 'deferred-assets.json').is_file():
             shutil.copyfile(directory / 'deferred-assets.json', Path(row['ir']).parent / 'deferred-assets.json')
         scene_initialized = True
@@ -1273,6 +1716,7 @@ def _chain_stage_from_spec(
     marked_routes: tuple | list = (),
     prepared_tables=None,
     post_text_checkpoint: dict | None = None,
+    embedded_ui_frames: list[list[int]] | None = None,
 ) -> tuple[Path, list[str], list[dict]]:
     from .. import layout_evidence, matting
     from ..object_stage import infer_sam
@@ -1305,6 +1749,21 @@ def _chain_stage_from_spec(
             cur_base, tables, covered = prepared_tables or stage_tables(cur_base, directory/tag/'marked-tables', table_fields, skip_ids)
             covered_texts.update(covered)
             staged_ids.extend(tables)
+        elif include_containers and wanted_filter is None and layout_path and Path(layout_path).is_file():
+            _layout_tbl = json.loads(Path(layout_path).read_text(encoding='utf8'))
+            auto_tables = [
+                {'id': f'auto-tbl-{t_idx}', 'route': 'table', 'bbox': list(r['bbox'])}
+                for t_idx, r in enumerate(_layout_tbl.get('regions', []), 1)
+                if r.get('label') == 'table' and float(r.get('score', 0)) >= 0.65
+            ]
+            if auto_tables:
+                from ..recovery.marked_tables import stage_tables
+                try:
+                    cur_base, tables, covered = stage_tables(cur_base, directory / tag / 'auto-tables', auto_tables, skip_ids)
+                    covered_texts.update(covered)
+                    staged_ids.extend(tables)
+                except Exception:
+                    pass
         if include_containers and wanted_filter is None and layout_path:
             from ..recovery.chart_stage import stage_native_charts
             layout = json.loads(Path(layout_path).read_text(encoding='utf8'))
@@ -1356,6 +1815,26 @@ def _chain_stage_from_spec(
 
     if include_assets:
         from ..recovery.region_crop import stage_region_crops
+        for ui_idx, uframe in enumerate(embedded_ui_frames or (), 1):
+            ui_id = f'ui-frame-{ui_idx}'
+            if ui_id in skip_ids or (wanted_filter is not None and ui_id not in wanted_filter):
+                continue
+            if any(intersection(f.get('picture_frame', [0, 0, 0, 0]), uframe) >= 0.70 * max(1.0, uframe[2] * uframe[3])
+                   for f in marked_routes if f.get('picture_frame')):
+                continue
+            ui_seed = {'id': ui_id, 'bbox': uframe, 'kind': 'asset', 'picture_frame': uframe}
+            ui_ir, ui_ids, _ = stage_region_crops(
+                cur_base,
+                directory / tag / f'ui-frame-{ui_idx}',
+                seeds=[ui_seed],
+                allow_transparent_upgrade=False,
+                max_area_fraction=0.65,
+                protected_text_ids=set(),
+                skip_seed_ids=skip_ids,
+            )
+            if ui_ids:
+                cur_base = ui_ir.parent
+                staged_ids.extend(ui_ids)
         for field in marked_routes:
             frame = field.get('picture_frame')
             if not frame or field['id'] in skip_ids or (wanted_filter is not None and field['id'] not in wanted_filter):
@@ -1848,6 +2327,7 @@ def restage_batch_candidate_subset(
             wanted_filter=wanted_filter,
             sam_enabled=bool(spec.get('sam_enabled', False)),
             post_text_checkpoint=spec.get('post_text_checkpoint'),
+            embedded_ui_frames=spec.get('embedded_ui_frames'),
         )
         fp_key = {'batch': repaired_ids}
 
@@ -1938,9 +2418,18 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     failed_regions: list[dict] = []
 
     # Phase 1: Parallel local text candidate trials against initial_baseline.
+    ui_frames = current.get('scene_relations', {}).get(str(page), {}).get('embedded_ui_frames')
+    if ui_frames is None:
+        ui_f_path = initial_baseline / 'embedded-ui-frames.json'
+        ui_frames = json.loads(ui_f_path.read_text('utf8')) if ui_f_path.is_file() else []
+    ui_text_ids = {
+        t.id for t in initial_graph.text.texts
+        if any(intersection(t.bbox, uf) >= 0.75 * max(1.0, t.bbox[2] * t.bbox[3]) for uf in ui_frames)
+    }
     text_targets = [
         t for t in initial_graph.text.texts
         if t.id not in initial_graph.selected
+        and t.id not in ui_text_ids
         and initial_graph.ownership.get(t.id) == 'RESOLVED'
         and (wanted_filter is None or t.id in wanted_filter)
     ]
@@ -2003,7 +2492,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
 
     passed_trials = []
     if text_targets:
-        workers = min(6, max(1, len(text_targets)))
+        workers = min(3, max(1, len(text_targets)))
         # Capture only masks that survived ownership and text-mask completion.
         # Sharing a model call does not share pixel ownership or commit decisions.
         from ..parallel_rebuild import array_sha
@@ -2104,6 +2593,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         {fr['object_id'] for fr in failed_regions
          if fr.get('kind') == 'text'
          and _classify_failed_region(fr, initial_graph, logo_ids, [])['max_repair_attempts'] == 0}
+        | ui_text_ids
         | {t.id for t in initial_graph.text.texts
            if t.id not in initial_graph.selected and (t.id in logo_ids or initial_graph.ownership.get(t.id) != 'RESOLVED')}
     )
@@ -2123,6 +2613,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
 
     t_stage_start = time.perf_counter()
     timings['text_probe_s'] = round(t_stage_start - t_batch_start, 2)
+    gc.collect()
 
     post_text_ckpt: dict = {}
     final_base, staged_ids, stage_errors = _chain_stage_from_spec(
@@ -2151,6 +2642,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         wanted_filter=wanted_filter,
         sam_enabled=sam_enabled,
         post_text_checkpoint=post_text_ckpt,
+        embedded_ui_frames=ui_frames,
     )
     timings['stage_pass1_s'] = round(time.perf_counter() - t_stage_start, 2)
     failed_regions.extend(stage_errors)
@@ -2197,6 +2689,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'wanted_filter': sorted(wanted_filter) if wanted_filter is not None else None,
             'sam_enabled': bool(sam_enabled),
             'post_text_checkpoint': post_text_ckpt,
+            'embedded_ui_frames': ui_frames,
         },
         'auto_repaired_frame_ids': [],
         'isolated_bad_ids': [],

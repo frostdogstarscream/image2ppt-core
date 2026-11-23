@@ -492,8 +492,10 @@ def adapt(graph,directory):
         elif c['kind']=='text':
             t=next(t for t in graph.text.texts if t.id==c['id']);s=styles[t.style];ev='ev-'+t.id
             ir['evidence'].append({'id':ev,'kind':'text','bbox':t.bbox,'text':t.text})
+            max_ln_chars=max((len(ln) for ln in t.text.split('\n')), default=0)
+            allow_wrap=('\n' in t.text) and (float(t.bbox[2]) >= max_ln_chars * float(s.size_px) + 8.0)
             node={'id':t.id,'type':'text','bbox':t.bbox,'z':z,'evidence_ids':[ev],'text':t.text,**attrs(s),
-                  'align':t.align,'wrap':False,'insets':[0,0,0,0],'vertical_anchor':'top','paragraphs':[]}
+                  'align':t.align,'wrap':allow_wrap,'insets':[0,0,0,0],'vertical_anchor':'top','paragraphs':[]}
             lines=[[]]
             for content,style in ([(x.text,styles[x.style]) for x in t.spans] or [(t.text,s)]):
                 for i,part in enumerate(content.split('\n')):

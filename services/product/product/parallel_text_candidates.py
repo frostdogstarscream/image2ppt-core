@@ -24,10 +24,18 @@ def peer_protection(text, graph, source, blocked, *, baseline_directory=None, di
             if evidence['source_sha256']!=graph.source_sha256:
                 raise ValueError('retained OCR protection source hash mismatch')
             own=set(graph.text.members.get(text.id,[])) if graph.ownership.get(text.id)=='RESOLVED' else set()
+            active_peer_ids = {
+                t.id for t in getattr(getattr(graph, 'text', None), 'texts', ())
+                if t.id != text.id and graph.ownership.get(t.id) == 'RESOLVED'
+            }
+            resolved_peer_lines = {
+                lid for tid in active_peer_ids for lid in graph.text.members.get(tid, ())
+            }
             blocked=blocked.copy()
             for line in evidence['lines']:
                 if line['id'] not in own:
-                    blocked |= rectangle(line['bbox'],source.shape[1::-1],pad=1)
+                    if line['id'] not in resolved_peer_lines:
+                        blocked |= rectangle(line['bbox'],source.shape[1::-1],pad=1)
                 elif 'text' in line and hasattr(text, 'text') and hasattr(text, 'bbox') and is_decorative_subspan(text, line):
                     rem_scope = (rectangle(line['bbox'], source.shape[1::-1], pad=1)
                                  & ~rectangle(text.bbox, source.shape[1::-1], pad=1))

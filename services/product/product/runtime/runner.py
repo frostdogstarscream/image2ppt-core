@@ -220,10 +220,20 @@ def _run(job, client):
             cur_status = state.read()['status']
             if cur_status not in ('SUCCEEDED', 'REVIEW_REQUIRED') and not nudged and (deadline - time.monotonic()) > 60:
                 nudged = True
-                client.request('POST', '/api/session/'+session['id']+'/message', json={
-                    'text': 'Session paused before finalization. Complete compile_pptx -> validate_office -> get_evidence (for all required_evidence IDs) -> record_visual_review -> finalize_job now.'
-                })
-                continue
+                nudge_text = (
+                    'Session paused before finalization. Complete compose_delivery -> audit_delivery -> finalize_job now.'
+                    if request.get('host_stage0')
+                    else 'Session paused before finalization. Complete compile_pptx -> validate_office -> get_evidence (for all required_evidence IDs) -> record_visual_review -> finalize_job now.'
+                )
+                try:
+                    client.request('POST', '/api/session/'+session['id']+'/prompt', json={
+                        'id': 'msg_' + key(str(job) + ':nudge')[:26],
+                        'text': nudge_text,
+                        'files': [],
+                    })
+                    continue
+                except httpx.HTTPError as exc:
+                    state.event({'nudge_error': type(exc).__name__})
             break
         except httpx.ReadTimeout:
             continue

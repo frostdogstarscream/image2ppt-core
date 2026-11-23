@@ -7,5 +7,5 @@ if (!manifest || !output) throw new Error('Expected IR manifest and new output r
 const files = JSON.parse(await fs.readFile(manifest, 'utf8'));
 if (!Array.isArray(files) || files.length < 1 || files.some(x => typeof x !== 'string')) throw new Error('Invalid IR manifest');
 const irs = await Promise.all(files.map(async f => JSON.parse(await fs.readFile(f, 'utf8'))));
-const needsFullExport = irs.some(ir => ir.background?.asset_id || ir.nodes?.some(n => !['text', 'shape', 'image'].includes(n.type)));
+const needsFullExport = irs.some(ir => ir.background?.asset_id || ir.nodes?.some(n => !['text', 'shape', 'image'].includes(n.type) || String(n.geometry || '').includes('Connector')));
 console.log(JSON.stringify(await compose(files, output, {exportBatchSize: needsFullExport ? 0 : 1}), null, 2));

@@ -1,5 +1,6 @@
 """Authenticated outbound Office worker with hash-verified portable packets."""
 import argparse
+import gc
 import io
 import json
 import os
@@ -28,7 +29,8 @@ def pack(folder, target):
 def unpack(data, target):
     target = Path(target).resolve()
     target.mkdir(parents=True, exist_ok=False)
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+    source = io.BytesIO(data) if isinstance(data, (bytes, bytearray, memoryview)) else Path(data)
+    with zipfile.ZipFile(source) as archive:
         if sum(p.file_size for p in archive.infolist()) > 1024*1024*1024:
             raise ValueError('Office packet exceeds limit')
         names = archive.namelist()
@@ -42,7 +44,8 @@ def unpack(data, target):
             if not path.is_relative_to(target) or ':' in name or '\\' in name:
                 raise ValueError('unsafe Office packet path')
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(archive.read(name))
+            with archive.open(name) as src, path.open('wb') as dst:
+                shutil.copyfileobj(src, dst)
             if digest(path) != sha:
                 raise ValueError('Office packet hash mismatch')
 
@@ -66,7 +69,8 @@ def submit(job, pptx, irs, directory, timeout=1800, *, target_ids=None):
         if (Path(job)/'cancel.requested').exists():
             return {'status': 'UNKNOWN', 'failure': 'CANCELLED'}
         if (directory/'output.zip').is_file():
-            unpack((directory/'output.zip').read_bytes(), directory/'worker-result')
+            gc.collect()
+            unpack(directory/'output.zip', directory/'worker-result')
             result = json.loads((directory/'worker-result/result.json').read_text('utf8'))
             if result.get('input_sha256') != digest(directory/'input.zip'):
                 raise ValueError('Office result belongs to another input')

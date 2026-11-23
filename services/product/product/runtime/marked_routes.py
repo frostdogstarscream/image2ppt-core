@@ -32,7 +32,27 @@ def apply_move_groups(ir, movement):
         ):
             continue
         children = [n for n, _ in candidates]
-        ordered = [*ordered[:first], *children, *[n for n in ordered[first:] if n['id'] not in members]]
+        last = candidates[-1][1]
+        pre_children = []
+        post_nonmembers = []
+        for n in ordered[first:last]:
+            if n['id'] in members:
+                continue
+            is_lower_layer = (
+                n.get('type') == 'shape'
+                or (n.get('type') == 'image' and (n['id'] == 'source-plate' or n['id'].startswith(('a-c', 'r-'))))
+            )
+            if (
+                is_lower_layer
+                and n['id'] not in used
+                and all(intersection(n['bbox'], c['bbox']) == 0 for c in children)
+                and all(intersection(n['bbox'], p['bbox']) == 0 for p in post_nonmembers)
+            ):
+                pre_children.append(n)
+            else:
+                post_nonmembers.append(n)
+        tail = [n for n in ordered[last + 1:] if n['id'] not in members]
+        ordered = [*ordered[:first], *pre_children, *children, *post_nonmembers, *tail]
         ir['groups'].append({'id': 'g-' + key(sorted(ids))[:16], 'member_ids': [n['id'] for n in children]})
         used.update(members)
     if used:

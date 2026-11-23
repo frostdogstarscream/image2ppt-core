@@ -984,6 +984,8 @@ class RuntimeService(ExplorationTools):
         budget=AdaptiveBudget(Store(state.job/'state'),request.get('adaptive_budget'),page_count=page_count)
         budget.reserve('office_validations',identity)
         write(receipt,{'identity':identity,'status':'UNKNOWN','operation':str(directory)})
+        from ..pipeline import _release_compile_headroom
+        _release_compile_headroom()
         if os.environ.get('IMAGE2PPT_OFFICE_MODE', 'local') == 'remote':
             from .office_bridge import submit
             result=submit(state.job, pptx, irs, directory, **({'target_ids': scoped} if scoped is not None else {}))

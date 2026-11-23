@@ -152,12 +152,21 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
             source_size, protected, minimum_size)
         # An OCR box begins at visible ink. The native font also needs top bearing.
         # Move only that transparent frame, leaving the source mask and peer masks fixed.
-        if clamped is None and fit_origin and len(lines) == 1:
-            for dy in range(1, min(bearing, math.ceil(max_font_px * .25)) + 1):
-                for proposed in ([left, top - dy, width, height], [left, top - dy, width, height + dy]):
-                    clamped = _find_non_colliding_frame(
-                        text, proposed, spacing, max_font_px, max_glyph_bottom, max_line_len,
-                        source_size, protected, minimum_size)
+        if clamped is None and fit_origin:
+            max_dy = min(bearing, math.ceil(max_font_px * .25))
+            max_dx = min(8, math.ceil(max_font_px * .16)) if len(lines) == 1 else 0
+            for dx in range(0, max_dx + 1):
+                if left - dx < 0:
+                    break
+                for dy in range(0 if dx > 0 else 1, max_dy + 1):
+                    if top - dy < 0:
+                        break
+                    for proposed in ([left - dx, top - dy, width, height], [left - dx, top - dy, width, height + dy]):
+                        clamped = _find_non_colliding_frame(
+                            text, proposed, spacing, max_font_px, max_glyph_bottom, max_line_len,
+                            source_size, protected, minimum_size)
+                        if clamped is not None:
+                            break
                     if clamped is not None:
                         break
                 if clamped is not None:
@@ -226,10 +235,11 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
             reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx)
         except RecoveryBlocked:
             reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx, allow_vertical=True)
-    if (((saved.get('provenance') or {}).get('fit') or {}).get('method') == 'scanline-lateral'
-            or (saved.get('reference_context') or {}).get('method') == 'scanline-lateral'):
+    fit_meta = ((saved.get('provenance') or {}).get('fit') or saved.get('reference_context') or {})
+    if fit_meta.get('method') == 'scanline-lateral':
         from .marked_fields import striped_backing
-        stripe = striped_backing(source,box,context_protected)
+        max_span = float(fit_meta.get('max_span', 18.0))
+        stripe = striped_backing(source, box, context_protected, max_span=max_span)
         if stripe is None:
             raise ValueError('scanline backing no longer corroborated')
         reference, fit_report = stripe

@@ -67,8 +67,14 @@ def _clean_skip_seed_ids(skip_seed_ids: set[str] | None) -> set[str]:
 def _content(plate: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(plate, cv2.COLOR_RGB2GRAY).astype(np.float32)
     mean = cv2.blur(gray, (5, 5))
-    var = cv2.blur(gray * gray, (5, 5)) - mean * mean
-    return np.sqrt(np.maximum(var, 0)) > 6.0
+    sq = np.square(gray)
+    del gray
+    var = cv2.blur(sq, (5, 5))
+    del sq
+    np.subtract(var, np.square(mean), out=var)
+    np.maximum(var, 0, out=var)
+    np.sqrt(var, out=var)
+    return var > 6.0
 
 
 def _clip(box, size):
@@ -202,6 +208,93 @@ def grow_seed(content: np.ndarray, seed, size, *, max_grow=MAX_GROW_PX):
         if not cuts2 and box2[2] <= int(0.28 * size[0]) and box2[3] <= int(0.32 * size[1]):
             return box2, False
     return box, cuts
+
+
+def _detect_flush_card_photo(
+    appearance: np.ndarray,
+    lower_comp: np.ndarray,
+    seed_box: list[int],
+    fit_protected: np.ndarray,
+) -> tuple[list[int], np.ndarray, float] | None:
+    """Detect a rectangular card-inset photo flush with thin 1-2px borders and fit its card-body backing."""
+    h_img, w_img = appearance.shape[:2]
+    bx, by, bw, bh = _clip(seed_box, (w_img, h_img))
+    if bw < 90 or bh < 70:
+        return None
+    sub0 = appearance[by:by + bh, bx:bx + bw].astype(np.float32)
+
+    def _is_border_line(vals: np.ndarray) -> bool:
+        med = np.median(vals, axis=0)
+        return float(np.percentile(np.abs(vals - med).max(1), 85)) <= 6.5
+
+    tx0, ty0, tx1, ty1 = bx, by, bx + bw, by + bh
+    for _ in range(3):
+        if tx1 - tx0 > 76 and _is_border_line(appearance[ty0:ty1, tx0]):
+            tx0 += 1
+        else:
+            break
+    for _ in range(3):
+        if tx1 - tx0 > 76 and _is_border_line(appearance[ty0:ty1, tx1 - 1]):
+            tx1 -= 1
+        else:
+            break
+    for _ in range(3):
+        if ty1 - ty0 > 56 and _is_border_line(appearance[ty0, tx0:tx1]):
+            ty0 += 1
+        else:
+            break
+    for _ in range(3):
+        if ty1 - ty0 > 56 and _is_border_line(appearance[ty1 - 1, tx0:tx1]):
+            ty1 -= 1
+        else:
+            break
+
+    tw, th = tx1 - tx0, ty1 - ty0
+    if tw < 76 or th < 56:
+        return None
+    sub = appearance[ty0:ty1, tx0:tx1]
+    gray_std = float(cv2.cvtColor(sub, cv2.COLOR_RGB2GRAY).std())
+    if gray_std < 16.0 or float(_content(sub).mean()) < 0.42:
+        return None
+
+    margin_x = max(2, min(10, tw // 16))
+    sx0, sx1 = tx0 + margin_x, tx1 - margin_x
+    if sx1 - sx0 < 24:
+        return None
+
+    strip_candidates: list[tuple[int, int]] = []
+    if ty1 + 14 <= h_img:
+        strip_candidates.append((ty1 + 2, min(h_img, ty1 + 14)))
+    if ty0 - 14 >= 0:
+        strip_candidates.append((max(0, ty0 - 14), ty0 - 2))
+
+    for sy0, sy1 in strip_candidates:
+        if sy1 - sy0 < 4:
+            continue
+        allow = ~fit_protected[sy0:sy1, sx0:sx1]
+        if int(allow.sum()) < 40:
+            continue
+        vals = lower_comp[sy0:sy1, sx0:sx1][allow].astype(np.float32)
+        med = np.median(vals, axis=0)
+        err = float(np.percentile(np.abs(vals - med).max(1), 80))
+        if err > 4.0:
+            continue
+        photo_contrast = float(np.abs(sub.astype(np.float32) - med).max(2).mean())
+        if photo_contrast < 14.0:
+            continue
+        # Corroborate flat card interior or surrounding 1-2px card frame at left/right edges
+        has_card_side_walls = False
+        if tx0 >= 5 and tx1 + 5 <= w_img:
+            l_outer = lower_comp[ty0 + 8:ty1 - 8, tx0 - 5:tx0 + 1].astype(np.float32)
+            r_outer = lower_comp[ty0 + 8:ty1 - 8, tx1 - 1:tx1 + 5].astype(np.float32)
+            l_edge_diff = float(np.abs(l_outer - med).max())
+            r_edge_diff = float(np.abs(r_outer - med).max())
+            has_card_side_walls = (l_edge_diff >= 6.0 and r_edge_diff >= 6.0)
+        if not has_card_side_walls and float(med.mean()) < 220.0:
+            continue
+        backing = np.broadcast_to(np.rint(med).astype(np.uint8), (th, tw, 3)).copy()
+        return [tx0, ty0, tw, th], backing, err
+    return None
 
 
 def _shrink_box_away_from_protected(
@@ -393,7 +486,13 @@ def plan_region_crops(
     report: list[dict] = []
     for seed in active_seeds:
         sb = _clip(seed['bbox'], size)
-        box, cuts = grow_seed(content, seed['bbox'], size)
+        if seed.get('picture_frame'):
+            box = _clip(seed['picture_frame'], size)
+            cuts = False
+            fixed_frame = True
+        else:
+            box, cuts = grow_seed(content, seed['bbox'], size)
+            fixed_frame = False
         shrunk_box, _ = _shrink_box_away_from_protected(box, [sb], protected_boxes, size)
         if shrunk_box is None:
             report.append({'seed_ids': [seed['id']], 'bbox': box, 'state': 'SKIPPED',
@@ -406,6 +505,7 @@ def plan_region_crops(
             'kinds': [str(seed.get('kind') or 'asset')],
             'seed_boxes': [sb],
             'cuts': cuts,
+            'fixed_frame': fixed_frame,
         })
 
     changed = True
@@ -413,6 +513,8 @@ def plan_region_crops(
         changed = False
         # Absorb only unrecoverable text seeds when partially overlapped; never swallow protected texts.
         for crop in crops:
+            if crop.get('fixed_frame'):
+                continue
             for t in absorbable_texts:
                 tb = _clip(t['bbox'], size)
                 if tb[2] <= 0 or tb[3] <= 0:
@@ -432,13 +534,14 @@ def plan_region_crops(
         merged: list[dict] = []
         for crop in crops:
             target = None
-            for m in merged:
-                if not _intersects(m['box'], crop['box'], gap=2):
-                    continue
-                cand = _union(m['box'], crop['box'])
-                if cand[2] * cand[3] <= max_area and not any(_intersects(cand, pb) for pb in protected_boxes):
-                    target = m
-                    break
+            if not crop.get('fixed_frame'):
+                for m in merged:
+                    if m.get('fixed_frame') or not _intersects(m['box'], crop['box'], gap=2):
+                        continue
+                    cand = _union(m['box'], crop['box'])
+                    if cand[2] * cand[3] <= max_area and not any(_intersects(cand, pb) for pb in protected_boxes):
+                        target = m
+                        break
             if target is None:
                 merged.append(crop)
                 continue
@@ -854,6 +957,17 @@ def _try_transparent_upgrade(
     return None
 
 
+def _submask_any(entry: tuple[int, int, int, int, np.ndarray], box: list[int]) -> bool:
+    """Return True if any True pixel inside a tight sub-mask intersects `box`."""
+    mx0, my0, mw0, mh0, sub_m = entry
+    bx0, by0, bw0, bh0 = box
+    ix0, iy0 = max(bx0, mx0), max(by0, my0)
+    ix1, iy1 = min(bx0 + bw0, mx0 + mw0), min(by0 + bh0, my0 + mh0)
+    if ix0 >= ix1 or iy0 >= iy1:
+        return False
+    return bool(sub_m[iy0 - my0:iy1 - my0, ix0 - mx0:ix1 - mx0].any())
+
+
 def stage_region_crops(
     baseline: str | Path,
     output: str | Path,
@@ -880,13 +994,15 @@ def stage_region_crops(
         raise ValueError('region crop source-plate binding mismatch')
     plate_rgba = np.array(Image.open(plate_file).convert('RGBA'))
     plate = plate_rgba[..., :3].copy()
+    plate_alpha = plate_rgba[..., 3].copy()
+    del plate_rgba
     source = np.array(Image.open(baseline / 'source.png').convert('RGB'))
     if digest(baseline / 'source.png') != graph.source_sha256 or source.shape != plate.shape:
         raise ValueError('region crop source snapshot mismatch')
     size = (plate.shape[1], plate.shape[0])
 
     foreground = np.zeros(plate.shape[:2], bool)
-    fg_masks_by_id: dict[str, np.ndarray] = {}
+    fg_tight_masks: dict[str, tuple[int, int, int, int, np.ndarray]] = {}
     for record in graph.selected.values():
         ref = record.get('owner_evidence')
         if not ref or record.get('region_crop') or record.get('container_layer'):
@@ -898,8 +1014,13 @@ def stage_region_crops(
             raise ValueError('region crop owner evidence binding mismatch')
         with np.load(proof, allow_pickle=False) as data:
             m = data['mask'].astype(bool)
-            fg_masks_by_id[record['id']] = m
             foreground |= m
+            ys_m, xs_m = np.nonzero(m)
+            if ys_m.size:
+                mx0, my0 = int(xs_m.min()), int(ys_m.min())
+                mw0, mh0 = int(xs_m.max()) - mx0 + 1, int(ys_m.max()) - my0 + 1
+                fg_tight_masks[record['id']] = (mx0, my0, mw0, mh0, m[my0:my0 + mh0, mx0:mx0 + mw0].copy())
+            del m
 
     lower_comp, lower_covered = _render_lower_composite(plate, graph, baseline)
     appearance = np.where(foreground[..., None], lower_comp, source)
@@ -964,24 +1085,22 @@ def stage_region_crops(
                 blocked_by_upper = True
                 break
             if _contains(crop_box_cur, [float(v) for v in rb_box]):
-                if rid_up and rid_up in fg_masks_by_id:
-                    contained_fg |= fg_masks_by_id[rid_up]
+                if rid_up and rid_up in fg_tight_masks:
+                    mx0, my0, mw0, mh0, sub_m = fg_tight_masks[rid_up]
+                    contained_fg[my0:my0 + mh0, mx0:mx0 + mw0] |= sub_m
                 continue
-            if rec.get('kind') == 'text' and rid_up and rid_up in fg_masks_by_id:
-                up_mask = fg_masks_by_id[rid_up]
-                cx0, cy0, cw0, ch0 = crop_box_cur
-                if not up_mask[cy0:cy0 + ch0, cx0:cx0 + cw0].any():
+            if rec.get('kind') == 'text' and rid_up and rid_up in fg_tight_masks:
+                up_entry = fg_tight_masks[rid_up]
+                if not _submask_any(up_entry, crop_box_cur):
                     # Only padded whitespace margin touched; actual glyph pixels are disjoint!
                     continue
-                ys_u, xs_u = np.nonzero(up_mask)
-                tight_u = [int(xs_u.min()) - 1, int(ys_u.min()) - 1,
-                           int(xs_u.max() - xs_u.min() + 3), int(ys_u.max() - ys_u.min() + 3)]
+                mx0, my0, mw0, mh0, _ = up_entry
+                tight_u = [mx0 - 1, my0 - 1, mw0 + 2, mh0 + 2]
                 shrunk_box, _ = _shrink_box_away_from_protected(
                     crop_box_cur, crop.get('seed_boxes', [crop_box_cur]), [_clip(tight_u, size)], size
                 )
                 if shrunk_box is not None and shrunk_box[2] >= 6 and shrunk_box[3] >= 6:
-                    sx0, sy0, sw0, sh0 = shrunk_box
-                    if not up_mask[sy0:sy0 + sh0, sx0:sx0 + sw0].any():
+                    if not _submask_any(up_entry, shrunk_box):
                         crop_box_cur = shrunk_box
                         continue
             blocked_by_upper = True
@@ -1013,28 +1132,57 @@ def stage_region_crops(
 
         pixels = appearance[y:y + h, x:x + w].copy()
         safety, backing_meta, backing = 'MOVE_UNSAFE', {'reason': 'not attempted'}, None
+        flush_photo_used = False
         if not allow_movable:
             backing_meta = {'reason': 'movable crops disabled'}
         elif not isolated:
             backing_meta = {'reason': 'overlaps committed editable object'}
-        elif crop['cuts']:
-            backing_meta = {'reason': 'crop boundary cuts continuing content'}
         else:
-            try:
-                other_planned = np.zeros(plate.shape[:2], bool)
-                for j_c, cand_c in enumerate(crops):
-                    if j_c == idx_c or any(sid in skip for sid in cand_c['seed_ids']):
-                        continue
-                    other_planned |= planned_rects[j_c]
-                fit_protected = movable_mask | upgraded_mask | foreground | other_planned
-                backing, error, evidence = backing_from_evidence(lower_comp, [x, y, w, h], fit_protected, graph.surface)
-                if np.isfinite(error) and error <= MOVABLE_RING_ERROR:
-                    safety = 'MOVABLE'
-                    backing_meta = {'ring_error': float(error), 'background_evidence': evidence}
-                else:
-                    backing_meta = {'reason': 'surrounding backing not independently fitted', 'ring_error': float(error)}
-            except ValueError as exc:
-                backing_meta = {'reason': f'backing unavailable: {exc}'}
+            other_planned = np.zeros(plate.shape[:2], bool)
+            for j_c, cand_c in enumerate(crops):
+                if j_c == idx_c or any(sid in skip for sid in cand_c['seed_ids']):
+                    continue
+                other_planned |= planned_rects[j_c]
+            fit_protected = movable_mask | upgraded_mask | foreground | other_planned
+            if crop['cuts']:
+                backing_meta = {'reason': 'crop boundary cuts continuing content'}
+            else:
+                try:
+                    backing, error, evidence = backing_from_evidence(lower_comp, [x, y, w, h], fit_protected, graph.surface)
+                    if np.isfinite(error) and error <= MOVABLE_RING_ERROR:
+                        safety = 'MOVABLE'
+                        backing_meta = {'ring_error': float(error), 'background_evidence': evidence}
+                    else:
+                        backing_meta = {'reason': 'surrounding backing not independently fitted', 'ring_error': float(error)}
+                except ValueError as exc:
+                    backing_meta = {'reason': f'backing unavailable: {exc}'}
+
+            if safety != 'MOVABLE' and not crop.get('fixed_frame') and w >= 90 and h >= 70 and (set(crop.get('kinds', ())) & {'layout:image', 'asset', 'layout'}):
+                flush = _detect_flush_card_photo(appearance, lower_comp, [x, y, w, h], fit_protected)
+                if flush is not None:
+                    f_box, f_backing, f_err = flush
+                    if f_box != [x, y, w, h]:
+                        fx, fy, fw, fh = f_box
+                        f_obj = ClosedObject(
+                            id=rid, kind='illustration', bbox=[fx, fy, fw, fh], layers=['source-plate.png'],
+                            components=['whole'], parts=[{'name': 'whole', 'bbox': [fx, fy, fw, fh], 'layers': ['source-plate.png']}],
+                            exclusions=[], replaces=[], required_owners=[],
+                            text_policy='intrinsic_label' if intrinsic else 'exclude_independent_text', intrinsic_text=intrinsic,
+                            description='opaque flush card photo crop (no semantic claim)', prompt_en='opaque flush card photo crop',
+                        )
+                        f_try = fuse_incremental_scene(baseline, base_graph=graph, added_assets=[f_obj])
+                        if f_try.ownership.get(rid) == 'RESOLVED':
+                            fused_try = f_try
+                            x, y, w, h = fx, fy, fw, fh
+                            crop_box_cur = [fx, fy, fw, fh]
+                            pixels = appearance[y:y + h, x:x + w].copy()
+                        else:
+                            flush = None
+                    if flush is not None:
+                        safety = 'MOVABLE'
+                        backing = f_backing
+                        backing_meta = {'ring_error': float(f_err), 'background_evidence': {'method': 'flush-card-body-backing/1'}}
+                        flush_photo_used = True
 
         if safety == 'MOVE_UNSAFE' and not allow_move_unsafe:
             report.append({
@@ -1051,7 +1199,7 @@ def stage_region_crops(
 
         png = output / f'{rid}.png'
         upgraded = None
-        if safety == 'MOVABLE' and allow_transparent_upgrade:
+        if safety == 'MOVABLE' and allow_transparent_upgrade and not flush_photo_used and not crop.get('fixed_frame'):
             badge_inner = _detect_icon_in_tinted_circle(
                 pixels, backing, foreground[y:y + h, x:x + w], crop.get('kinds', []),
             )
@@ -1162,7 +1310,7 @@ def stage_region_crops(
 
     any_erased = (movable_mask | upgraded_mask).any()
     if any_erased:
-        Image.fromarray(np.dstack([plate, plate_rgba[..., 3]])).save(output / plate_file.name)
+        Image.fromarray(np.dstack([plate, plate_alpha])).save(output / plate_file.name)
         graph.raster_backing = {**rb, 'sha256': digest(output / plate_file.name)}
         if (output / 'ownership.npz').is_file() and (output / 'ownership.json').is_file():
             with np.load(output / 'ownership.npz', allow_pickle=False) as data:

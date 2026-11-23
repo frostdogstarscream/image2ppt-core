@@ -824,7 +824,7 @@ def test_prepare_page_evidence_and_batch_reconstruct_page_with_auto_frame_repair
         (out / 'deck.pptx').write_bytes(b'pptx:' + Path(irs[0]).read_bytes())
         return {'pptx': str(out / 'deck.pptx')}
     office_calls = []
-    def fake_office(state, pptx, irs, out):
+    def fake_office(state, pptx, irs, out, *, target_ids=None):
         office_calls.append(len(office_calls) + 1)
         out = Path(out); out.mkdir(parents=True, exist_ok=True)
         if len(office_calls) == 1:
@@ -1607,7 +1607,7 @@ def test_deferred_assets_derive_host_ownership_and_batch_enforces_unified_commit
         return {'pptx': str(out / 'deck.pptx')}
 
     office_calls = []
-    def fake_office(state, pptx, irs, out):
+    def fake_office(state, pptx, irs, out, *, target_ids=None):
         office_calls.append(len(office_calls) + 1)
         out = Path(out); out.mkdir(parents=True, exist_ok=True)
         if len(office_calls) == 1:
