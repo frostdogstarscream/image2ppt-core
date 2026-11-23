@@ -1,6 +1,7 @@
 """Transfer source-supported text strokes from bound card artwork on a private stage copy."""
 
 import os
+from subprocess import SubprocessError
 import numpy as np
 from PIL import Image
 
@@ -45,7 +46,11 @@ def read_decoration_carriers(graph, group, baseline, directory, cache, lines):
         folder.mkdir(parents=True, exist_ok=True)
         crop = folder/'reading.png'
         sample.convert('RGB').resize((sample.width*2, sample.height*2), Image.Resampling.LANCZOS).save(crop)
-        evidence = local_ocr(snapshot(crop, folder/'snapshots'), cache, manifest)
+        try:
+            evidence = local_ocr(snapshot(crop, folder/'snapshots'), cache, manifest)
+        except (OSError, RuntimeError, SubprocessError):
+            # Missing secondary OCR cannot authorize removal of an existing picture.
+            continue
         rows = evidence['lines']
         if len(rows) == 1:
             reading = ''.join(rows[0]['text'].split())

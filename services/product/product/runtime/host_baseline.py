@@ -11,7 +11,7 @@ from PIL import Image
 from ..materialize import digest, write
 from ..tolerance_config import load_tolerance_config
 from ..scorecard import fidelity, score_page, _native_fields, _overlap
-from .plate_audit import audit as audit_plate, bind_native_paragraphs, native_line_fields
+from .plate_audit import audit as audit_plate, bind_native_paragraphs, bind_separate_symbols, native_line_fields
 from .host_evidence import prepare_all, questions, read
 from .state import RuntimeState, RuntimeConflict
 from .service import RuntimeService
@@ -52,7 +52,8 @@ def assess(job, current):
         preview = Path(office.get('office_directory',''))/f'page-{page:02d}-before.png'
         measures = score_page(source, deck, slide=page, render_path=preview if preview.is_file() else None,
                               checks=office if verified else None)
-        fields = _native_fields(measures.pop('objects'))
+        objects = measures.pop('objects')
+        fields = _native_fields(objects)
         lines = read(current.get('source_ocr', {}).get(k, current['ocr'][k]))['lines']
         scene = read(row['scene'])
         selected = scene['selected']
@@ -75,15 +76,19 @@ def assess(job, current):
         adopted = {v['ocr_id']:v['after'] for v in readings.values() if v.get('after')}
         members = scene['text']['members']
         fields = bind_native_paragraphs(lines, fields, members, adopted)
-        hits = [line['id'] for line in lines
-                if native_line_fields({**line, 'text': adopted.get(line['id'], line['text'])}, fields)]
-        updated.update(pending.intersection(hits))
         actions = {}
         for action in office.get('office',{}).get('records',[]):
             if action.get('page')==page and action.get('saved_reopened') and action.get('outside_pixels')==0:
                 actions.setdefault(action['id'],set()).add(action.get('action'))
         editables = sorted(i for i,r in selected.items() if r.get('move_safety')!='MOVE_UNSAFE'
                            and {'move-scale','delete'} <= actions.get(i,set()))
+        graphics = [o for o in objects if verified and o['name'] in editables
+                    and o['class'] in ('asset','shape','opaque_picture')]
+        source_fields = current.get('scene_relations', {}).get(k, {}).get('source_fields', {})
+        fields = bind_separate_symbols(fields, members, source_fields, graphics)
+        hits = [line['id'] for line in lines
+                if native_line_fields({**line, 'text': adopted.get(line['id'], line['text'])}, fields)]
+        updated.update(pending.intersection(hits))
         marks = read(current['experiment_marks'][k])['rows']
         local = local_fidelity(source, preview, marks) if preview.is_file() else {}
         limits = load_tolerance_config()['fidelity']

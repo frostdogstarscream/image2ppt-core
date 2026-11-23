@@ -442,7 +442,7 @@ def _classify_failed_region(
 
 
 def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list[float], str]:
-    """Separate one isolated edge symbol. Ordinary punctuation is source wording."""
+    """Separate a visually isolated bullet or chevron. Keep ordinary punctuation in the field."""
     raw_text = line.get('text', '').strip()
     bbox = [float(v) for v in line['bbox']]
     compact = raw_text.replace(' ', '').replace('\n', '')
@@ -457,9 +457,13 @@ def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list
     core = compact[start:end]
     prefix, suffix = compact[:start], compact[end:]
     symbol = prefix or suffix
-    if (prefix and suffix) or len(core) < 2 or len(symbol) != 1 or symbol not in '•●○▪■◆◇▶►▸→➜➤':
+    angle = (prefix in ('<', '<<') or suffix in ('>', '>>')) and core.isalpha()
+    bullet = len(symbol) == 1 and symbol in '•●○▪■◆◇▶►▸→➜➤'
+    if (prefix and suffix) or len(core) < 2 or not (angle or bullet):
         return raw_text, bbox, ''
-    stripped = (raw_text[1:] if prefix else raw_text[:-1]).strip()
+    if (prefix and not raw_text.startswith(prefix)) or (suffix and not raw_text.endswith(suffix)):
+        return raw_text, bbox, ''
+    stripped = (raw_text[len(prefix):] if prefix else raw_text[:-len(suffix)]).strip()
     lx, ly, lw, lh = [round(v) for v in bbox]
     h_img, w_img = source.shape[:2]
     if min(lw, lh) <= 4 or lx < 0 or ly < 0 or lx + lw > w_img or ly + lh > h_img:
@@ -467,8 +471,10 @@ def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list
     crop = source[ly:ly + lh, lx:lx + lw].astype(float)
     border = np.concatenate([crop[0], crop[-1]], axis=0)
     bg = np.median(border, axis=0)
-    col_ink = (np.abs(crop - bg).max(2) > 30.0).sum(axis=0) > 0
+    ink = np.abs(crop - bg).max(2) > 30.0
+    col_ink = ink.any(axis=0)
     runs: list[tuple[int, int]] = []
+    components: list[tuple[int, int]] = []
     idx = 0
     while idx < lw:
         if not col_ink[idx]:
@@ -477,6 +483,7 @@ def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list
         j = idx
         while j < lw and col_ink[j]:
             j += 1
+        components.append((idx, j))
         if runs and idx - runs[-1][1] <= 2:
             runs[-1] = (runs[-1][0], j)
         else:
@@ -489,8 +496,27 @@ def split_decorative_ocr_line(source: np.ndarray, line: dict) -> tuple[str, list
     gaps = [right[0] - left[1] for left, right in zip(runs, runs[1:])]
     gutter = gaps[0] if prefix else gaps[-1]
     inner = gaps[1:] if prefix else gaps[:-1]
-    if (edge[1] - edge[0] > lh or gutter < max(2, .2 * lh)
+    edge_glyphs = components[:len(symbol)] if prefix else components[-len(symbol):]
+    if (max(b-a for a,b in edge_glyphs) > lh or gutter < max(2, .2 * lh)
             or (inner and gutter < 1.3 * np.median(inner))):
+        return raw_text, bbox, ''
+    if angle:
+        # Require both arms of each chevron in the isolated group.
+        if (edge_glyphs[0][0], edge_glyphs[-1][1]) != edge:
+            return raw_text, bbox, ''
+        for left, right in edge_glyphs:
+            ys, xs = np.nonzero(ink[:, left:right])
+            phase = (ys - ys.min()) / (np.ptp(ys) + 1)
+            top = xs[phase <= .25]
+            middle = xs[(phase >= .4) & (phase <= .6)]
+            bottom = xs[phase >= .73]
+            if not all(part.size for part in (top, middle, bottom)):
+                return raw_text, bbox, ''
+            direction = 1 if suffix else -1
+            bend = min(direction * (middle.mean() - arm.mean()) for arm in (top, bottom))
+            if bend < .23 * (right - left):
+                return raw_text, bbox, ''
+    elif edge[1] - edge[0] > lh:
         return raw_text, bbox, ''
     if prefix:
         sub_left = runs[1][0]

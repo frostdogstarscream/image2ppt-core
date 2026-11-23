@@ -8,7 +8,7 @@ import pytest
 from product.materialize import digest
 from product.recovery.region_artwork import verify_text_cutout
 from product.runtime.batch_backbone import split_decorative_ocr_line, _text_stage_failure, _classify_failed_region
-from product.runtime.plate_audit import bind_native_paragraphs, native_line_fields, reconcile
+from product.runtime.plate_audit import bind_native_paragraphs, bind_separate_symbols, native_line_fields, reconcile
 from product.runtime.host_baseline import delivery_defects
 
 
@@ -43,6 +43,34 @@ def test_numbered_fields_and_retry_share_the_original_failed_geometry():
         result = _classify_failed_region(row,graph)
         assert result['max_repair_attempts'] and result['conflicting_peer_ids']==['possible-peer']
         assert result['failure']=='FONT_LAYOUT_FAILED' and result['group_members']==members
+
+
+def test_measured_ui_chevron_survives_beside_a_label_but_math_operator_stays_native():
+    image = np.full((30, 100, 3), 248, 'uint8')
+    for x in (7,20,33):
+        image[7:21,x:x+10] = 30
+    for dy in range(13):
+        x = 58 + min(dy,12-dy)
+        image[7+dy,x:x+2] = 30
+    row = {'text':'更多信息>', 'bbox':[5,4,64,22]}
+    assert split_decorative_ocr_line(image,row)[2] == '>'
+    assert split_decorative_ocr_line(image,{**row,'text':'<tag>'})[2] == ''
+    assert split_decorative_ocr_line(image,{**row,'text':'预算 26>'})[2] == ''
+
+
+def test_label_needs_the_delivered_symbol_and_native_wording_to_count():
+    row = {'id':'line', 'text':'查看更多>', 'bbox':[10,10,88,22]}
+    label = {'name':'label','text':'查看更多','bbox':[10,10,69,22]}
+    icon = {'name':'arrow','bbox':[85,14,10,13]}
+    record = {**row, 'render_text':label['text'], 'render_bbox':label['bbox'], 'separate_symbol':'>'}
+    def audit(graphics):
+        fields = bind_separate_symbols([label], {'label':['line']}, {'line':record}, graphics)
+        return reconcile([row],[{'text':'>','bbox':icon['bbox']}],fields,[],{})
+    assert audit([])[0]['status'] == 'unresolved'
+    assert audit([dict(icon,bbox=[12,12,9,9])])[0]['status'] == 'unresolved'
+    results = audit([icon])
+    assert len(results) == 1 and results[0]['native_form'] == 'label_with_separate_symbol'
+    assert results[0]['status'] == 'native' and results[0]['symbol_object'] == 'arrow'
 
 
 def test_paragraph_match_needs_source_membership_exact_wording_and_order():

@@ -62,6 +62,38 @@ def bind_native_paragraphs(lines, fields, members, readings):
     return result
 
 
+def bind_separate_symbols(fields, members, source_fields, graphics):
+    """Credit a split label only when its isolated symbol also exists in the edited deck."""
+    result = []
+    for field in fields:
+        ids = members.get(field.get('name'), ())
+        entry = source_fields.get(ids[0], {}) if len(ids) == 1 else {}
+        symbol = entry.get('separate_symbol')
+        if not symbol or _norm(field['text']) != _norm(entry['render_text']):
+            result.append(field)
+            continue
+        original = _norm(entry['text'])
+        body = _norm(entry['render_text'])
+        x, y, w, h = entry['bbox']
+        fx, _, fw, _ = entry['render_bbox']
+        if original == body + symbol:
+            left, right = fx + fw, x + w
+        elif original == symbol + body:
+            left, right = x, fx
+        else:
+            result.append(field)
+            continue
+        slot = [left, y, right-left, h]
+        if (slot[2] > 0 and _overlap(field['bbox'], entry['render_bbox']) >= .5 * fw * h):
+            drawn = [g for g in graphics if _overlap(slot, g['bbox']) >=
+                     max(.8*g['bbox'][2]*g['bbox'][3], .15*slot[2]*h)]
+            if len(drawn) == 1:
+                field = {**field, 'separate_symbol': {'ocr_id':ids[0], 'source_text':original,
+                         'symbol':symbol, 'object':drawn[0]['name'], 'bbox':drawn[0]['bbox']}}
+        result.append(field)
+    return result
+
+
 def native_line_fields(line, fields):
     """Return the physical native fields spelling one horizontal OCR line, in order."""
     text = _norm(line['text'])
@@ -71,6 +103,9 @@ def native_line_fields(line, fields):
     pieces = []
     for field in fields:
         if field.get('source_rows', {}).get(line.get('id')) == text:
+            return [field]
+        symbol = field.get('separate_symbol', {})
+        if symbol.get('ocr_id') == line.get('id') and symbol.get('source_text') == text:
             return [field]
         fx, fy, fw, fh = field['bbox']
         value = _norm(field['text'])
@@ -123,13 +158,21 @@ def reconcile(lines, detected, fields, marks, readings):
         exact = native_line_fields(expected, fields)
         has_field = bool(exact)
         seen.update(recognized)
+        symbol = exact[0].get('separate_symbol') if exact else None
+        if symbol:
+            expected_marks = {i for i,item in enumerate(detected) if _norm(item['text']) == symbol['symbol']
+                              and _overlap(symbol['bbox'], item['bbox']) >= .7*item['bbox'][2]*item['bbox'][3]}
+            seen.update(expected_marks)
+            recognized = [i for i in recognized if i not in expected_marks]
         status = ('intrinsic' if line.get('is_logo') or line.get('intrinsic') else
                   'residual' if has_field and recognized else
                   'native' if has_field else
                   'retained' if recognized else 'unresolved')
         rows.append({'ocr_id':oid,'bbox':line['bbox'],'text':line['text'],'status':status,
                      'mark_ids':owners, 'exact_native_fields':[f['name'] for f in exact if 'name' in f],
-                     'native_form': ('paragraph_member' if exact and exact[0].get('source_rows') else
+                     'symbol_object':symbol['object'] if symbol else None,
+                     'native_form': ('label_with_separate_symbol' if symbol else
+                                     'paragraph_member' if exact and exact[0].get('source_rows') else
                                      'split_fields' if len(exact) > 1 else 'own_field' if exact else None),
                      'plate_reading':' '.join(detected[i]['text'] for i in recognized) or None})
     for index, item in enumerate(detected):
