@@ -9,7 +9,7 @@ from ..parallel_store import key
 from .native_shapes import _fit_linear_gradient, estimate_canvas_field
 
 
-def geometry_marks(source, text_rows):
+def geometry_marks(source, text_rows, *, icon_boxes=()):
     from .container_stage import _discover_candidates
 
     rgb = np.asarray(Image.open(source).convert('RGB'))
@@ -25,7 +25,9 @@ def geometry_marks(source, text_rows):
             if row.get('ocr_line_ids')
             and intersection(box, row['bbox']) >= 0.98 * row['bbox'][2] * row['bbox'][3]
         ]
-        if len(children) < 2:
+        has_icon = any(icon[2]*icon[3] < .25*box[2]*box[3] and
+                       intersection(box, icon) >= icon[2]*icon[3] for icon in icon_boxes)
+        if len(children) < 2 and not (children and has_icon):
             continue
         rows.append(
             {

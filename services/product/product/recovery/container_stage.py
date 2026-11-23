@@ -342,6 +342,7 @@ def stage_containers_and_surfaces(
     marked_boxes: dict | None = None,
     stable_ids: bool = False,
     scope_boxes: list | None = None,
+    native_only: bool = False,
 ) -> tuple[Path, list[str]]:
     """Discover and stage native shapes (`s-*`) and structural frame/curve/line assets (`a-c*`)."""
     from reconstruction import extract_rgba
@@ -616,7 +617,7 @@ def stage_containers_and_surfaces(
             graph.transactions.append(record)
             graph.selected[sid] = record
             staged_new_ids.append(sid)
-        else:
+        elif not native_only:
             # Clean Container Frame, Detached Curve/Arrow, or Structural Divider Asset PNG
             while f'a-c{c_seq:02d}' in used_ids:
                 c_seq += 1

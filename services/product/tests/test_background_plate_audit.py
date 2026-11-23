@@ -1,6 +1,21 @@
 from PIL import Image, ImageDraw
 from product.runtime.plate_audit import reconcile
+from product.runtime.plate_audit import native_line_fields
 from product.experiment import diagram_marks
+
+
+def test_split_native_line_requires_same_row_order_and_complete_text():
+    line = {'id':'footer', 'bbox':[10,90,160,16], 'text':'AB 2026年 03'}
+    fields = [{'name':name,'bbox':box,'text':text} for name,box,text in [
+        ('left',[12,90,26,17],'AB'),('center',[48,89,84,18],'2026年'),('right',[146,89,24,17],'03')]]
+    assert native_line_fields(line, fields[::-1]) == fields
+    for bad in ({'text':'04'},{'bbox':[146,106,24,17]},{'name':'tab[1,2]'}):
+        assert not native_line_fields(line,[*fields[:-1],{**fields[-1],**bad}])
+    assert not native_line_fields(line, [fields[0],fields[1]])
+    assert not native_line_fields(line, [{**fields[0],'text':'03'}, fields[1],{**fields[2],'text':'AB'}])
+    assert reconcile([line], [line], fields, [], {})[0]['status'] == 'residual'
+    result = reconcile([line], [], fields, [], {})[0]
+    assert result['status']=='native' and result['exact_native_fields']==['left','center','right']
 
 
 def test_numbered_title_band_preserves_neighbor_and_abstains_on_unexplained_ink():

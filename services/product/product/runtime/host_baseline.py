@@ -10,8 +10,8 @@ from PIL import Image
 
 from ..materialize import digest, write
 from ..tolerance_config import load_tolerance_config
-from ..scorecard import fidelity, score_page, _native_fields, _norm, _overlap
-from .plate_audit import audit as audit_plate
+from ..scorecard import fidelity, score_page, _native_fields, _overlap
+from .plate_audit import audit as audit_plate, native_line_fields
 from .host_evidence import prepare_all, questions, read
 from .state import RuntimeState, RuntimeConflict
 from .service import RuntimeService
@@ -54,9 +54,7 @@ def assess(job, current):
                               checks=office if verified else None)
         fields = _native_fields(measures.pop('objects'))
         lines = read(current['ocr'][k])['lines']
-        hits = [line['id'] for line in lines if _norm(line['text']) and any(
-            _norm(line['text']) == _norm(obj['text']) and _overlap(line['bbox'],obj['bbox']) >
-            .5*line['bbox'][2]*line['bbox'][3] for obj in fields)]
+        hits = [line['id'] for line in lines if native_line_fields(line, fields)]
         selected = read(row['scene'])['selected']
         readings = {i:r['source_reading'] for i,r in selected.items() if r.get('source_reading')}
         updated = {v['ocr_id'] for v in readings.values()}

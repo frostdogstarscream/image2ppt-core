@@ -137,6 +137,44 @@ def measure_symbol(source, box):
                 'mask':ink[iy:iy+ih,ix:ix+iw], 'rgba':rgba}
 
 
+def measure_flat_symbol(source, box):
+    """Measure a sparse graphic on continuous paper. A detector box alone owns no pixels."""
+    from .region_crop import _extract_rgba
+
+    x, y, w, h = map(round, box)
+    pad = max(2, round(min(w, h) * .12))
+    if min(w, h) < 5 or min(x, y) < pad or x+w+pad > source.shape[1] or y+h+pad > source.shape[0]:
+        return None
+    tile = source[y-pad:y+h+pad, x-pad:x+w+pad]
+    ring = np.ones(tile.shape[:2], bool)
+    ring[pad:-pad, pad:-pad] = False
+    face = np.rint(np.median(tile[ring], axis=0))
+    delta = abs(tile - face).max(2)
+    noise = float(np.percentile(delta[ring], 95))
+    if noise > 5 or delta[ring].max() > 12:
+        return None
+    delta = delta[pad:-pad, pad:-pad]
+    strong = delta > 30
+    if not .015 < strong.mean() < .55:
+        return None
+    _, labels = cv2.connectedComponents((delta > max(3, noise+2)).astype('uint8'), connectivity=8)
+    ink = (labels != 0) & np.isin(labels, np.unique(labels[strong]))
+    if np.any(~ink & (delta > 12)):
+        return None
+    crop = tile[pad:-pad, pad:-pad]
+    # A retained label, screenshot or photo is not a line icon. Require simple
+    # source colours on the strong strokes, allowing antialiasing towards paper.
+    strokes = crop[strong].astype(float) - face
+    directions = strokes / np.linalg.norm(strokes, axis=1, keepdims=True)
+    direction = np.median(directions, axis=0)
+    if np.percentile(np.linalg.norm(directions - direction, axis=1), 95) > .22:
+        return None
+    ix, iy, iw, ih = cv2.boundingRect(ink.astype('uint8'))
+    rgba = _extract_rgba(crop, np.broadcast_to(face, crop.shape), ink)
+    return {'bbox':[x+ix, y+iy, iw, ih], 'face':bytes(face.astype('uint8')).hex(),
+            'mask':ink[iy:iy+ih, ix:ix+iw], 'rgba':rgba[iy:iy+ih, ix:ix+iw]}
+
+
 def bind_layer_foreground(directory, layers, source, source_sha):
     """Carry a verified two-layer page's foreground through incremental scene copies."""
     from pathlib import Path

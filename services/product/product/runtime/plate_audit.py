@@ -45,6 +45,39 @@ def match(line, candidates):
     return max(matches)[1] if matches else None
 
 
+def native_line_fields(line, fields):
+    """Return the physical native fields spelling one horizontal OCR line, in order."""
+    text = _norm(line['text'])
+    x, y, w, h = line['bbox']
+    if not text or w <= 0 or h <= 0:
+        return []
+    pieces = []
+    for field in fields:
+        fx, fy, fw, fh = field['bbox']
+        value = _norm(field['text'])
+        overlap = _overlap(line['bbox'], field['bbox'])
+        if value == text and overlap > .5 * w * h:
+            return [field]
+        if (not value or fw <= 0 or fh <= 0 or overlap < .5 * fw * fh
+                or abs((fy + fh/2) - (y + h/2)) > .45 * h
+                or not x <= fx + fw/2 <= x + w):
+            continue
+        # Table cells are independent fields; do not join adjacent cells or rows.
+        pieces.append((fx, fx + fw, field))
+    if len(pieces) < 2:
+        return []
+    pieces.sort(key=lambda item: item[0])
+    if any('class' not in field and field.get('name', '').endswith(']') for _, _, field in pieces):
+        return []
+    if any(left < prev_right - .3*h or left > prev_right + 2*h
+           for (_, prev_right, _), (left, _, _) in zip(pieces, pieces[1:])):
+        return []
+    if pieces[0][0] > x + h or pieces[-1][1] < x + w - h:
+        return []
+    ordered = [field for _, _, field in pieces]
+    return ordered if ''.join(_norm(f['text']) for f in ordered) == text else []
+
+
 def reconcile(lines, detected, fields, marks, readings):
     rows = []
     seen = set()
@@ -52,15 +85,18 @@ def reconcile(lines, detected, fields, marks, readings):
         oid = line['id']
         owners = [m['id'] for m in marks if m.get('label') == 'text' and oid in m.get('ocr_ids', ())]
         recognized = match(line, detected)
-        field = match({**line, 'text':readings.get(oid, line['text'])}, fields)
+        expected = {**line, 'text':readings.get(oid, line['text'])}
+        exact = native_line_fields(expected, fields)
+        has_field = bool(exact) or match(expected, fields) is not None
         if recognized is not None:
             seen.add(recognized)
         status = ('intrinsic' if line.get('is_logo') or line.get('intrinsic') else
-                  'residual' if field is not None and recognized is not None else
-                  'native' if field is not None else
+                  'residual' if has_field and recognized is not None else
+                  'native' if has_field else
                   'retained' if recognized is not None else 'unresolved')
         rows.append({'ocr_id':oid,'bbox':line['bbox'],'text':line['text'],'status':status,
-                     'mark_ids':owners,'plate_reading':detected[recognized]['text'] if recognized is not None else None})
+                     'mark_ids':owners, 'exact_native_fields':[f['name'] for f in exact if 'name' in f],
+                     'plate_reading':detected[recognized]['text'] if recognized is not None else None})
     for index, item in enumerate(detected):
         if index not in seen:
             box = item['bbox']

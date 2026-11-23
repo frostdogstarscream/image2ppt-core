@@ -86,3 +86,94 @@ def test_faint_antialias_is_foreground_and_open_holes_remain_transparent():
     dirty[7,8] = [240,240,240,255]
     _, rejected = select_badge_ink(source,'f0f0f0',measured,dirty,strict_holes=True)
     assert rejected['candidates'][1]['status']=='rejected'
+
+
+def flat_card_scene(root, *, extra_art=False):
+    image = np.full((250, 460, 3), 255, np.uint8)
+    cv2.rectangle(image,(40,42),(355,155),(94,131,173),-1)
+    cv2.rectangle(image,(43,45),(352,152),(228,239,250),-1)
+    cv2.circle(image,(99,97),15,(39,72,153),4)
+    if extra_art:
+        cv2.line(image,(233,85),(256,110),(43,90,160),3)
+    source = root/'source.png'
+    Image.fromarray(image).save(source)
+    snap, evidence = branches(source)
+    box = [79,77,41,41]
+    evidence['asset'].objects.append(_icon(('cloud',box)).model_copy(update={'kind':'icon'}))
+    base = root/'baseline'
+    build(fuse(snap,evidence,{'lines':[]}),snap,{'fonts':[]},base,strategy='off',text_candidates=False)
+    return base, [40,42,316,114]
+
+
+def test_scoped_panel_can_be_native_without_a_badge_or_any_asset_request(tmp_path):
+    from product.runtime.batch_backbone import _chain_stage_from_spec
+    base, box = flat_card_scene(tmp_path)
+    # The same card without the uncommitted foreground has directly measurable paper.
+    img = np.array(Image.open(base/'source.png').convert('RGB'))
+    img[75:118,77:121] = [228,239,250]
+    path = tmp_path/'no-icon.png'
+    Image.fromarray(img).save(path)
+    snap, ev = branches(path)
+    plain = tmp_path/'plain'
+    graph = fuse(snap,ev,{'lines':[]})
+    build(graph,snap,{'fonts':[]},plain,strategy='off',text_candidates=False)
+    out, ids, _ = _chain_stage_from_spec(initial_graph=graph, initial_baseline=plain, fonts={'fonts':[]},
+        source_path=plain/'source.png', layers_dir=None, deferred_path=None, page_cache_dir=tmp_path,
+        directory=tmp_path, tag='scoped', trials_spec=[], frame_overrides={}, skip_ids=set(), include_assets=False,
+        include_containers=True, wanted_filter=None, sam_enabled=False, single_object_only=True, panel_regions=[box])
+    result = SceneGraph.model_validate_json((out/'scene.json').read_text('utf8'))
+    assert any(result.selected[i]['kind']=='surface' and result.selected[i]['bbox']==box for i in ids)
+
+
+def test_flat_icon_before_or_after_its_card_keeps_one_symbol_and_clean_paper(tmp_path):
+    from product.recovery.marked_surfaces import stage_marked_surfaces
+    base, box = flat_card_scene(tmp_path, extra_art=True)
+    first, ids = stage_badge_symbols(base,tmp_path/'symbol-first',None)
+    assert len(ids) == 1
+    ir, shapes = stage_containers_and_surfaces(first,tmp_path/'children-then-card',stable_ids=True)
+    # Unidentified artwork keeps the native-only fitter from flattening the card.
+    assert not any(r.get('bbox')==box for r in json.loads(ir.read_text('utf8'))['nodes'] if r['id'] in shapes)
+    parent, pids = stage_marked_surfaces(base,tmp_path/'parent-first',[{'id':'panel','bbox':box}],set())
+    assert len(pids)==2
+    graph = SceneGraph.model_validate_json((parent.parent/'scene.json').read_text('utf8'))
+    old_art = next(r for r in graph.selected.values() if r['kind']=='asset')
+    png = np.array(Image.open(parent.parent/old_art['asset_reference']['path']))
+    after, changed = stage_badge_symbols(parent.parent,tmp_path/'peeled',None)
+    final = SceneGraph.model_validate_json((after/'scene.json').read_text('utf8'))
+    assert set(changed)=={ids[0], old_art['id']}
+    separated = final.selected[ids[0]]
+    assert separated['payload']['background_parent_id'] in pids
+    assert separated['asset_reference']['sha256'] == json.loads((first/'scene.json').read_text('utf8'))['selected'][ids[0]]['asset_reference']['sha256']
+    assert (after/'source-plate.png').read_bytes()==(parent.parent/'source-plate.png').read_bytes()
+    remaining = np.array(Image.open(after/final.selected[old_art['id']]['asset_reference']['path']))
+    assert np.array_equal(remaining[:,-30:],png[:,-30:]) and not remaining[:,:38,3].any()
+    assert not stage_badge_symbols(after,tmp_path/'repeat',None)[1]
+
+
+def test_plain_card_keeps_the_same_editable_layers_in_both_orders(tmp_path):
+    from product.recovery.marked_surfaces import stage_marked_surfaces
+    base, box = flat_card_scene(tmp_path)
+    child, first_ids = stage_badge_symbols(base,tmp_path/'icon-first',None)
+    deck, _ = stage_containers_and_surfaces(child,tmp_path/'after-icon',stable_ids=True,native_only=True)
+    first = SceneGraph.model_validate_json((deck.parent/'scene.json').read_text('utf8'))
+    frame = next(r for r in first.selected.values() if r['kind']=='surface' and r['bbox']==box)
+    assert first_ids[0] in frame['contained_children']
+
+    deck, _ = stage_marked_surfaces(base,tmp_path/'frame-first',[{'id':'measured','bbox':box}],set())
+    updated, ids = stage_badge_symbols(deck.parent,tmp_path/'after-frame',None)
+    second = SceneGraph.model_validate_json((updated/'scene.json').read_text('utf8'))
+    assert len(ids)==1 and set(first.selected[i]['kind'] for i in first.selected)=={'asset','surface'}
+    assert len(second.selected)==len(first.selected)==2
+    assert second.selected[ids[0]]['asset_reference']['sha256']==first.selected[first_ids[0]]['asset_reference']['sha256']
+    assert second.selected[ids[0]]['payload']['background_parent_id']==frame['id']
+    assert np.asarray(Image.open(updated/'source-plate.png'))[97,113,:3].tolist()==[255,255,255]
+
+
+def test_flat_icon_touching_neighbor_or_resembling_a_photo_is_not_claimed(tmp_path):
+    from product.recovery.circular_badge import measure_flat_symbol
+    base, _ = flat_card_scene(tmp_path)
+    image = np.array(Image.open(base/'source.png').convert('RGB'))
+    image[75:118,79:83]=[40,70,155]
+    assert measure_flat_symbol(image,[79,77,41,41]) is None
+    image[77:118,79:120]=np.random.default_rng(72).integers(0,255,(41,41,3),dtype='uint8')
+    assert measure_flat_symbol(image,[79,77,41,41]) is None

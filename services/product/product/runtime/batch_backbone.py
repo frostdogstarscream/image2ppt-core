@@ -1025,7 +1025,8 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         low_confidence = [{'id':'ocr-review-'+str(line['id']), 'kind':'uncertain_ocr',
                            'text':line['text'], 'bbox':line['bbox'], 'ocr_line_ids':[line['id']]}
                           for line in ocr.get('lines', []) if preflight and line.get('text') and line.get('score',0)<0.85]
-        marks = mark_page(source_path, layout, [*measured_items,*asset_summaries,*low_confidence], directory)
+        marks = mark_page(source_path, layout, [*measured_items,*asset_summaries,*low_confidence], directory,
+                          single_label_panels=request.get('object_scoped_delivery', False))
         current.setdefault('experiment_marks',{})[str(page)] = str(directory/'marks.json')
         payload['marked_image']=state.register(directory/'marks.png','numbered_layout')
         payload['mark_inventory']=state.register(directory/'marks.json','numbered_inventory')
@@ -1234,25 +1235,34 @@ def _chain_stage_from_spec(
 
     grouped_boxes = []
     badge_aliases = set()
+    surface_scopes = [r['bbox'] for r in marked_routes if single_object_only and include_containers
+                      and wanted_filter is not None and r['id'] in wanted_filter and r['route'] == 'surface']
     if include_assets and single_object_only:
         from ..recovery.badge_stage import represented_badge_evidence, stage_badge_symbols
         layout = json.loads(Path(layout_path).read_text('utf8')) if layout_path and Path(layout_path).is_file() else None
+        symbol_targets = wanted_filter
+        if surface_scopes:
+            symbol_targets = set(wanted_filter)
+            locators = [(a.id, a.bbox) for a in initial_graph.asset.objects if a.kind == 'icon']
+            locators.extend(('layout:' + r['id'].removeprefix('layout:'), r['bbox'])
+                            for r in (layout or {}).get('regions', ()) if r.get('label') == 'icon')
+            symbol_targets.update(oid for oid, box in locators if any(
+                intersection(box, scope) >= box[2]*box[3] for scope in surface_scopes))
         cur_base, badge_ids = stage_badge_symbols(cur_base, directory/tag/'badge-symbols', layout,
-                                                  wanted=wanted_filter, skip=skip_ids, panel_regions=panel_regions)
+                                                  wanted=symbol_targets, skip=skip_ids, panel_regions=panel_regions)
         staged_ids.extend(badge_ids)
         badge_graph = SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
         badge_aliases = represented_badge_evidence(badge_graph)
-        if panel_regions is not None:
-            from ..recovery.container_stage import stage_containers_and_surfaces
-            discs = [badge_graph.selected[i]['disc_bbox'] for i in badge_ids]
-            targets = [box for box in panel_regions if any(intersection(box,d) >= d[2]*d[3] for d in discs)]
-            if targets:
-                ir, shape_ids = stage_containers_and_surfaces(cur_base, directory/tag/'badge-panels',
-                    skip_ids=skip_ids, logo_ids=logo_ids, stable_ids=True, scope_boxes=targets)
-                if shape_ids:
-                    cur_base = ir.parent
-                    staged_ids.extend(shape_ids)
-            return cur_base, staged_ids, stage_errors
+    scopes = panel_regions if panel_regions is not None else surface_scopes
+    if scopes and include_containers and single_object_only:
+        from ..recovery.container_stage import stage_containers_and_surfaces
+        ir, shape_ids = stage_containers_and_surfaces(cur_base, directory/tag/'panel-surfaces',
+            skip_ids=skip_ids, logo_ids=logo_ids, stable_ids=True, scope_boxes=scopes, native_only=True)
+        if shape_ids:
+            cur_base = ir.parent
+            staged_ids.extend(shape_ids)
+    if panel_regions is not None:
+        return cur_base, staged_ids, stage_errors
     if include_assets:
         from ..recovery.region_crop import stage_region_crops
         for field in sorted(marked_routes, key=lambda item: not item.get('diagram_members')):

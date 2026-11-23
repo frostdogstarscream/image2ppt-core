@@ -172,9 +172,13 @@ def diagram_marks(source, rows, objects):
     return groups
 
 
-def mark_page(source, layout, objects, directory):
+def mark_page(source, layout, objects, directory, *, single_label_panels=False):
     from .recovery.layered_card import geometry_marks
-    rows=list(layout['regions']) + geometry_marks(source, objects)
+    icon_boxes = []
+    if single_label_panels:
+        icon_boxes = [r['bbox'] for r in layout['regions'] if r['label'] == 'icon']
+        icon_boxes.extend(o['bbox'] for o in objects if o.get('kind') == 'icon')
+    rows=list(layout['regions']) + geometry_marks(source, objects, icon_boxes=icon_boxes)
     for obj in objects:
         rows.append({'id':obj['id'],'label':obj.get('kind','text'),'bbox':list(obj['bbox']),
                      'text':obj.get('text',''),'ocr_ids':obj.get('ocr_line_ids',[])})
