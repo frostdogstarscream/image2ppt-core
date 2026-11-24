@@ -168,6 +168,21 @@ def stage_badge_symbols(baseline, output, layout, *, wanted=None, skip=(), panel
             bounds = tuple(result.get('disc', result['bbox']))
             group = groups.setdefault((family, bounds), (result, set()))
             group[1].add(alias)
+            if family == 'flat-icon' and alias in detached:
+                # An OCR-edge witness and an asset detector can describe the
+                # same ink with slightly different antialias margins. Absorb
+                # only one complete, tightly bounded match. Other icons
+                # remain independent neighbours and still veto overlap below.
+                x, y, w, h = bounds
+                yy, xx = np.nonzero(result['mask'])
+                ink_edges = (x+xx.min(), y+yy.min(), x+xx.max()+1, y+yy.max()+1)
+                fringe = max(1, int(np.ceil(min(w,h)*.05)))
+                matches = []
+                for name, (ix,iy,iw,ih) in icons.items():
+                    if max(abs(a-b) for a,b in zip(ink_edges,(ix,iy,ix+iw,iy+ih))) <= fringe:
+                        matches.append(name)
+                if len(matches) == 1:
+                    group[1].add(matches[0])
     layer = _layer_image(baseline, graph) if groups else None
     staged = []
     decisions = []

@@ -136,9 +136,9 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
     return payload
 
 
-def _fit_measured_line(text, styles, fonts, source_size, protected, mask, scope, frame_options):
+def _fit_measured_line(text, styles, fonts, source_size, protected, mask, scope, frame_options, *, office_style=None):
     """Fit the transparent Office frame around owned ink without altering the erase mask."""
-    if text.spans or '\n' in text.text or text.align != 'left':
+    if text.spans or '\n' in text.text or text.align != 'left' or not mask.any() or (mask & protected).any():
         raise NativeFrameConflict('native font frame allowance conflicts with canvas or protected peers')
     style = styles[text.style]
     family = style.ea if any(ord(c) > 255 for c in text.text) else style.latin
@@ -155,13 +155,21 @@ def _fit_measured_line(text, styles, fonts, source_size, protected, mask, scope,
     sizes = [original_size]
     if .72*original_size <= measured_size < original_size:
         sizes.append(measured_size)
-    for size in sizes:
+    minimum = frame_options.get('minimum_size')
+    reference_size = 0
+    if minimum and office_style and all(office_style.get(k) == getattr(style,k) for k in ('ea','latin','bold')):
+        reference_size = office_style.get('size_px', 0)
+    safe_scale = 0
+
+    def fit_at_size(size, options, *, measure_room=False):
+        nonlocal safe_scale
         fitted = text.model_copy(deep=True)
         definition = None
+        fitted_styles = styles
         if size != original_size:
             definition = style.model_copy(update={'size_px':size})
             definition.id = style.id[:40]+'-ink-'+key(definition.model_dump())[:12]
-            styles = {**styles, definition.id:definition}
+            fitted_styles = {**styles, definition.id:definition}
             fitted.style = definition.id
         face = ImageFont.truetype(record['file'], max(1,round(size)), index=record['index'])
         l, t, r, b = face.getbbox(text.text)
@@ -171,10 +179,33 @@ def _fit_measured_line(text, styles, fonts, source_size, protected, mask, scope,
             for top in dict.fromkeys([round(text.bbox[1]), ink_top-t]):
                 fitted.bbox = [left, top, max(1,ink_right-left), max(1,ink_bottom-top)]
                 try:
-                    payload = native_frame(fitted, styles, fonts, source_size, protected, scope, **frame_options)
+                    payload = native_frame(fitted, fitted_styles, fonts, source_size, protected, scope, **options)
                     return fitted, payload, definition
                 except NativeFrameConflict:
+                    if not measure_room:
+                        continue
+                try:
+                    room = native_frame(fitted, fitted_styles, fonts, source_size, protected, scope,
+                                        **{**options, 'minimum_size':None})['bbox'][2:]
+                except NativeFrameConflict:
                     continue
+                ratio = min((a-1)/max(1,b-1) for a,b in zip(room,minimum))
+                safe_scale = max(safe_scale, ratio)
+
+    for size in sizes:
+        result = fit_at_size(size, frame_options, measure_room=reference_size == size)
+        if result:
+            return result
+    # Office measured the previous typeface on the replacement string. A
+    # smaller font can use a proportionally smaller transparent frame, but
+    # it must still fit the source strokes and pass the next real edit probe.
+    adjusted = math.floor(reference_size * min(1, safe_scale))
+    lower_limit = max(.72*reference_size, .8*min(original_size, measured_size))
+    if reference_size and lower_limit <= adjusted < reference_size:
+        scaled = [math.ceil((v-1)*adjusted/reference_size)+1 for v in minimum]
+        result = fit_at_size(adjusted, {**frame_options, 'minimum_size':scaled})
+        if result:
+            return result
     raise NativeFrameConflict('native font frame allowance conflicts with canvas or protected peers')
 
 
@@ -312,7 +343,8 @@ def stage_text_pixels(graph, baseline_directory, fonts, output, *, text, region,
             if not fit_ink_frame:
                 raise
             proposed, text_payload, measured_style = _fit_measured_line(
-                proposed, styles, fonts, source.shape[1::-1], protected, wanted, box, frame_options)
+                proposed, styles, fonts, source.shape[1::-1], protected, wanted, box, frame_options,
+                office_style=(frame_minimum or {}).get('measured_style'))
             if measured_style is not None:
                 styles[measured_style.id] = measured_style
                 definitions.append(measured_style.model_dump())

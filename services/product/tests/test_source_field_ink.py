@@ -99,6 +99,25 @@ def test_loose_ocr_margin_can_fit_without_covering_unit_or_shrinking_below_measu
     assert fitted.text == '9.8' and payload['bbox'][0]+payload['bbox'][2] <= 70
     with pytest.raises(NativeFrameConflict):
         _fit_measured_line(t,{'base':style},fonts,source_size,guard|mask,mask,t.bbox,{'fit_origin':True})
+    # A real Office overflow on the tested face can resize its own field once.
+    edge = int(payload['bbox'][0] + payload['bbox'][2]) + 1
+    narrow = np.zeros_like(mask)
+    narrow[:,edge:] = True
+    minimum = [round(payload['bbox'][2]*1.17),int(payload['bbox'][3])]
+    options = {'fit_origin':True,'minimum_size':minimum}
+    for foreign_style in (None,{**style.model_dump(),'bold':True}):
+        with pytest.raises(NativeFrameConflict):
+            _fit_measured_line(t,{'base':style},fonts,source_size,narrow,mask,t.bbox,options,
+                               office_style=foreign_style)
+    saved_mask = mask.copy()
+    adjusted, frame, definition = _fit_measured_line(
+        t,{'base':style},fonts,source_size,narrow,mask,t.bbox,options,office_style=style.model_dump())
+    assert adjusted.text == t.text and .72*style.size_px <= definition.size_px < style.size_px
+    assert frame['bbox'][0]+frame['bbox'][2] <= edge
+    np.testing.assert_array_equal(saved_mask, mask)
+    with pytest.raises(NativeFrameConflict):
+        _fit_measured_line(t,{'base':style},fonts,source_size,narrow,mask,t.bbox,
+                           {**options,'minimum_size':[2*minimum[0],minimum[1]]},office_style=style.model_dump())
 
 
 def test_reopen_restores_only_an_independently_owned_text_frame(monkeypatch,tmp_path):

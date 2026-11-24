@@ -444,11 +444,9 @@ def stage_region(group, graph, baseline, output, fonts, frame_overrides, source,
             text = next(t for t in graph.text.texts if t.id == oid)
             mask = full[oid]
             field_guard = guard | (union & ~mask)
-            fb = (
-                {"size": frame_overrides[oid], "method": "office_batch_auto_frame_repair/1"}
-                if oid in frame_overrides
-                else None
-            )
+            fb = frame_overrides.get(oid)
+            if fb is not None and not isinstance(fb, dict):
+                fb = {"size": fb, "method": "office_batch_auto_frame_repair/1"}
             out = root / f"field-{index}"
             stage_text_pixels(
                 graph,

@@ -1297,10 +1297,9 @@ def _chain_stage_from_spec(
         if oid in skip_ids or oid in covered_texts:
             continue
         step_out = directory / tag / f'step-{idx:03d}-{oid}'
-        frame_opt = (
-            {'size': frame_overrides[oid], 'method': 'office_batch_auto_frame_repair/1'}
-            if oid in frame_overrides else None
-        )
+        frame_opt = frame_overrides.get(oid)
+        if frame_opt is not None and not isinstance(frame_opt, dict):
+            frame_opt = {'size': frame_opt, 'method': 'office_batch_auto_frame_repair/1'}
         try:
             ir = stage_background(
                 Path(tr['trial_dir']),
@@ -1709,6 +1708,16 @@ def restage_batch_candidate_subset(
     initial_graph = SceneGraph.model_validate_json((initial_baseline / 'scene.json').read_text('utf8'))
     fonts = json.loads(Path(current['fonts']).read_text('utf8'))
     overrides = {oid: fb['measured_frame_minimum_px'] for oid, fb in frame_repairs.items()}
+    if spec.get('single_object_only') and frame_repairs:
+        styles = {s.id: s for s in staged_graph.text.styles}
+        for t in staged_graph.text.texts:
+            if t.id not in frame_repairs or t.spans or '\n' in t.text:
+                continue
+            measured = frame_repairs[t.id]
+            if measured['previous_edit_outside_pixels'] and not any(measured['previous_edit_outside_pixels']):
+                overrides[t.id] = {'size': measured['measured_frame_minimum_px'],
+                                   'method': 'office_batch_auto_frame_repair/1',
+                                   'measured_style': styles[t.style].model_dump()}
     overrides={**candidate.get('frame_overrides',{}),**overrides}
     candidate['frame_overrides']=overrides
     for trial in spec['trials']:

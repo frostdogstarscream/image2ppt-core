@@ -3,6 +3,7 @@ import json
 
 import cv2
 import numpy as np
+import pytest
 from PIL import Image
 
 from product.parallel_contracts import SceneGraph
@@ -177,3 +178,30 @@ def test_flat_icon_touching_neighbor_or_resembling_a_photo_is_not_claimed(tmp_pa
     assert measure_flat_symbol(image,[79,77,41,41]) is None
     image[77:118,79:120]=np.random.default_rng(72).integers(0,255,(41,41,3),dtype='uint8')
     assert measure_flat_symbol(image,[79,77,41,41]) is None
+
+
+@pytest.mark.parametrize('same_ink', [True,False])
+def test_detached_layout_and_tight_asset_boxes_agree_only_on_the_whole_symbol(tmp_path, same_ink):
+    source = np.full((250,400,3),246,np.uint8)
+    cv2.rectangle(source,(47,41),(79,77),(30,75,180),2)
+    cv2.line(source,(55,56),(70,56),(30,75,180),2)
+    file = tmp_path/'source.png'
+    Image.fromarray(source).save(file)
+    snap, evidence = branches(file)
+    icon = [47,41,33,37] if same_ink else [47,41,15,18]
+    evidence['asset'].objects.append(_icon(('piece',icon)).model_copy(update={'kind':'icon'}))
+    base = tmp_path/'baseline'
+    build(fuse(snap,evidence,{'lines':[]}),snap,{'fonts':[]},base,strategy='off',text_candidates=False)
+    box = [43,37,41,45]
+    source_hash = json.loads((base/'scene.json').read_text('utf8'))['source_sha256']
+    line = {'id':'line','text':'字段','bbox':[100,50,40,19],'score':.99,
+            'detached_graphic':{'id':'mark','bbox':box}}
+    (base/'runtime-ocr-protection.json').write_text(json.dumps({'source_sha256':source_hash,'lines':[line]}),'utf8')
+    layout = {'source_sha256':source_hash,'regions':[{'id':'mark','bbox':box,'label':'icon','score':.98}]}
+    out, ids = stage_badge_symbols(base,tmp_path/'symbols',layout,wanted={'layout:mark'})
+    if same_ink:
+        item, = ids
+        rec = json.loads((out/'scene.json').read_text('utf8'))['selected'][item]
+        assert rec['badge_evidence_ids'] == ['layout:mark','piece']
+    else:
+        assert ids == [] and out == base
