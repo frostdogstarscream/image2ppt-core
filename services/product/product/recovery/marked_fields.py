@@ -12,7 +12,7 @@ class FieldWidthMismatch(ValueError):
     """A uniform-width title field occupies a different number of source glyphs."""
 
 
-def separated_fields(source, text, bbox):
+def separated_fields(source, text, bbox, fallback_color=None):
     parts = re.fullmatch(r'([^|丨｜\n]+)([|丨｜])([^|丨｜\n]+)', text)
     if not parts or min(len(parts[1].strip()), len(parts[3].strip())) < 2:
         return []
@@ -49,18 +49,19 @@ def separated_fields(source, text, bbox):
     fields = []
     for value, box in zip((parts[1] + parts[2], parts[3]), boxes):
         appearance = measure_text_appearance(source, box)
-        if not appearance:
+        color = appearance['color_hex'] if appearance else fallback_color
+        if not color:
             return []
-        fields.append((value, box, appearance['color_hex']))
+        fields.append((value, box, color))
     return fields
 
 
-def split_items(source, items, preserved):
+def split_items(source, items, preserved, *, inherit_colour=False):
     result = []
     for item in items:
         try:
             fields = (
-                separated_fields(source, item['text'], item['bbox'])
+                separated_fields(source, item['text'], item['bbox'], item.get('color_hex') if inherit_colour else None)
                 if len(item['ocr_line_ids']) == 1
                 else []
             )

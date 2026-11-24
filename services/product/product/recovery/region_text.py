@@ -231,9 +231,22 @@ def measure_group(graph, group, source, baseline, lines):
     styles = {s.id: s for s in graph.text.styles}
     measured = {}
     for t in members:
-        if graph.ownership.get(t.id) != "RESOLVED" or t.spans:
+        if graph.ownership.get(t.id) != "RESOLVED" or (t.spans and not group.get('source_field_ink')):
             raise ValueError("field ownership/style is not isolated")
         fg = np.frombuffer(bytes.fromhex(styles[t.style].color), dtype=np.uint8).astype(float)
+        if group.get('source_field_ink'):
+            from .field_ink import colour_runs
+            runs = colour_runs(source, t.text, t.bbox)
+            if t.spans and ([(s.text, styles[s.style].color.upper()) for s in t.spans] !=
+                            [(value, color) for value, _, _, color in runs]):
+                raise ValueError("source glyph runs do not corroborate emphasis spans")
+            if runs:
+                # Only switch ink colour at a measured blank gutter between characters.
+                boundaries = [0, *(max(0, min(w, (last[2]+nxt[1])//2-x))
+                                   for last,nxt in zip(runs,runs[1:])), w]
+                fg = np.empty((1,w,3), dtype=float)
+                for (_, _, _, color), left, right in zip(runs, boundaries, boundaries[1:]):
+                    fg[:,left:right] = np.frombuffer(bytes.fromhex(color), dtype=np.uint8)
         direction = fg - field.astype(float)
         deviation = tile.astype(float) - field
         den = (direction * direction).sum(2)
@@ -456,6 +469,7 @@ def stage_region(group, graph, baseline, output, fonts, frame_overrides, source,
                 hashes={evidence_name: digest(root / "group.json")},
                 frame_minimum=fb,
                 fit_origin=True,
+                fit_ink_frame=group.get('source_field_ink', False),
                 source_artwork=parents.get(oid),
                 text_cutouts={i: cutouts[i] for i in parents.get(oid, ()) if i in cutouts},
             )

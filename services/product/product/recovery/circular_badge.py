@@ -137,7 +137,7 @@ def measure_symbol(source, box):
                 'mask':ink[iy:iy+ih,ix:ix+iw], 'rgba':rgba}
 
 
-def measure_flat_symbol(source, box):
+def measure_flat_symbol(source, box, *, allow_gradient=False):
     """Measure a sparse graphic on continuous paper. A detector box alone owns no pixels."""
     from .region_crop import _extract_rgba
 
@@ -149,10 +149,23 @@ def measure_flat_symbol(source, box):
     ring = np.ones(tile.shape[:2], bool)
     ring[pad:-pad, pad:-pad] = False
     face = np.rint(np.median(tile[ring], axis=0))
-    delta = abs(tile - face).max(2)
+    paper = np.broadcast_to(face, tile.shape)
+    delta = abs(tile - paper).max(2)
     noise = float(np.percentile(delta[ring], 95))
     if noise > 5 or delta[ring].max() > 12:
-        return None
+        if not allow_gradient:
+            return None
+        from .background_adapter import RecoveryBlocked
+        from .gradient_backing import fit_gradient
+        try:
+            paper, _ = fit_gradient(tile, [pad,pad,w,h], np.zeros_like(ring), context=pad, allow_vertical=True)
+        except RecoveryBlocked:
+            return None
+        delta = abs(tile.astype(float)-paper).max(2)
+        noise = float(np.percentile(delta[ring], 95))
+        if noise > 5 or delta[ring].max() > 12:
+            return None
+    paper = paper[pad:-pad, pad:-pad].astype('uint8')
     delta = delta[pad:-pad, pad:-pad]
     strong = delta > 30
     if not .015 < strong.mean() < .55:
@@ -164,14 +177,15 @@ def measure_flat_symbol(source, box):
     crop = tile[pad:-pad, pad:-pad]
     # A retained label, screenshot or photo is not a line icon. Require simple
     # source colours on the strong strokes, allowing antialiasing towards paper.
-    strokes = crop[strong].astype(float) - face
+    strokes = crop[strong].astype(float) - paper[strong]
     directions = strokes / np.linalg.norm(strokes, axis=1, keepdims=True)
     direction = np.median(directions, axis=0)
     if np.percentile(np.linalg.norm(directions - direction, axis=1), 95) > .22:
         return None
     ix, iy, iw, ih = cv2.boundingRect(ink.astype('uint8'))
-    rgba = _extract_rgba(crop, np.broadcast_to(face, crop.shape), ink)
+    rgba = _extract_rgba(crop, paper, ink)
     return {'bbox':[x+ix, y+iy, iw, ih], 'face':bytes(face.astype('uint8')).hex(),
+            'backing':paper[iy:iy+ih, ix:ix+iw],
             'mask':ink[iy:iy+ih, ix:ix+iw], 'rgba':rgba[iy:iy+ih, ix:ix+iw]}
 
 
@@ -201,7 +215,7 @@ def bind_layer_foreground(directory, layers, source, source_sha):
 
 def select_badge_ink(pixels, face, measured, layer, *, excluded=(), strict_holes=False):
     """Compare against source on the disc and check exposed holes/ink on a dark fill."""
-    face = np.array(list(bytes.fromhex(face)), dtype=float)
+    face = np.array(list(bytes.fromhex(face)), dtype=float) if isinstance(face, str) else np.asarray(face, dtype=float)
     measured_alpha = measured[..., 3] / 255.0
     holes = measured_alpha < 0.06
     strokes = measured_alpha > 0.65

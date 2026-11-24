@@ -19,6 +19,34 @@ from .service import RuntimeService
 ORIGIN = 'deterministic-baseline'
 
 
+def _reopen_residual_fields(service, trial, page, ids, directory):
+    """Withdraw only independently owned text on the trial copy, so the batch can restage it."""
+    from ..contracts import Text
+    from ..recovery.region_state import closure, rollback
+    row = service.page(trial, page)
+    graph = service.graph(row)
+    eligible = set()
+    skipped = {}
+    for oid in ids & graph.selected.keys():
+        record = graph.selected[oid]
+        if (record.get('kind') != 'text' or record.get('source_owners') != ['source-plate']
+                or not record.get('source_text_definition')):
+            skipped[oid] = 'SHARED_OR_UNPROVEN_SOURCE'
+        elif closure(graph, {oid}) & graph.selected.keys() != {oid}:
+            skipped[oid] = 'DEPENDENT_COMMITTED_OBJECT'
+        else:
+            eligible.add(oid)
+    if eligible:
+        for i, text in enumerate(graph.text.texts):
+            if text.id in eligible:
+                graph.text.texts[i] = Text.model_validate(graph.selected[text.id]['source_text_definition'])
+        ir = rollback(graph, Path(row['ir']).parent, eligible, directory, 'RETRY_VISIBLE_SOURCE_TEXT')
+        row.update(ir=str(ir), scene=str(ir.parent/'scene.json'))
+        trial.pop('composition', None)
+        trial.pop('visual_review', None)
+    return sorted(eligible), skipped
+
+
 def local_fidelity(source, preview, marks):
     with Image.open(source) as image:
         original = np.asarray(image.convert('RGB'))
@@ -35,6 +63,51 @@ def local_fidelity(source, preview, marks):
             measured = fidelity(original[region], rendered[region], max_pixels=6000)
             metrics[name] = {key: measured[key] for key in ('mae_rgb', 'ssim', 'delta_e2000_p95')}
     return metrics
+
+
+def _text_in_retained_artwork(record, rows, directory, source_sha):
+    """Match text visible with Office text hidden to verified glyph pixels owned by card artwork."""
+    ref = record.get('asset_reference', {})
+    owner = record.get('owner_evidence', {})
+    if not record.get('retained_card_artwork') or ref.get('source_sha256') != source_sha:
+        return []
+    ax, ay, aw, ah = map(round, record['bbox'])
+    candidates = [r for r in rows if r.get('status') == 'retained' and r.get('raster_reading')
+                  and not r.get('plate_reading') and _overlap(record['bbox'], r['bbox']) >= .7*r['bbox'][2]*r['bbox'][3]]
+    if not candidates:
+        return []
+    for info, field in ((ref,'path'), (owner,'file')):
+        path = (directory / info.get(field, '')).resolve()
+        if not path.is_relative_to(directory.resolve()) or not path.is_file() or digest(path) != info.get('sha256'):
+            return []
+    with Image.open(directory/ref['path']) as image:
+        alpha = np.asarray(image.convert('RGBA'))[..., 3]
+    if alpha.shape != (ah,aw):
+        return []
+    with np.load(directory/owner['file'], allow_pickle=False) as proof:
+        owned = proof['mask'].astype(bool)
+    source = directory/'source.png'
+    if digest(source) != source_sha:
+        raise RuntimeConflict('retained artwork source changed')
+    hits = []
+    with Image.open(source) as original:
+        for row in candidates:
+            x,y,w,h = map(round, row['bbox'])
+            if min(w,h) <= 0 or min(x,y) < 0 or x+w > original.width or y+h > original.height:
+                continue
+            tile = np.asarray(original.crop((x,y,x+w,y+h)).convert('RGB')).astype(float)
+            paper = np.median(tile.reshape(-1,3), axis=0)
+            strokes = abs(tile-paper).max(2) > 55
+            yy, xx = np.where(strokes)
+            if len(xx) < 3 or np.ptp(xx) < .48*w or np.ptp(yy) < .30*h:
+                continue
+            xx, yy = xx+x, yy+y
+            inside = (xx>=ax) & (xx<ax+aw) & (yy>=ay) & (yy<ay+ah)
+            sx, sy = xx[inside], yy[inside]
+            supported = owned[sy,sx] & (alpha[sy-ay,sx-ax] >= 128)
+            if supported.sum() / len(xx) >= .85:
+                hits.append(row['ocr_id'])
+    return hits
 
 
 def assess(job, current):
@@ -98,6 +171,7 @@ def assess(job, current):
                             office_view=preview.with_name(f'page-{page:02d}-text-hidden.png'),
                             view_receipt=office.get('office', {}).get('text_hidden_views', {}).get(k, {}) if verified else {})
         unscoped = []
+        artwork_text = {}
         page_width, page_height = row['snapshot']['image_size']
         for oid, record in selected.items():
             if record.get('kind') != 'asset':
@@ -108,13 +182,18 @@ def assess(job, current):
             is_crop = record.get('region_crop') or record.get('payload', {}).get('upgraded_from_region_crop')
             trapped_text = any(item['status'] == 'unresolved' and _overlap(box, item['bbox']) >
                                .8 * item['bbox'][2] * item['bbox'][3] for item in plate['rows'])
-            if covers_page or (is_crop and (len(seeds) != 1 or oid not in editables or
+            trapped_art = _text_in_retained_artwork(record, plate['rows'], Path(row['scene']).parent,
+                                                   row['snapshot']['source_sha256'])
+            if trapped_art:
+                artwork_text[oid] = trapped_art
+            if covers_page or trapped_art or (is_crop and (len(seeds) != 1 or oid not in editables or
                                             record.get('move_safety') != 'MOVABLE' or trapped_text)):
                 unscoped.append(oid)
         replaced = {aid: {'field':tid, 'asset_sha256':proof['asset_sha256']}
                     for tid in editables for aid, proof in selected[tid].get('text_cutouts', {}).items()}
         pictures = {oid:r['asset_reference']['sha256'] for oid,r in selected.items() if r.get('asset_reference')}
-        pages.append({'unscoped_crops':unscoped, 'plate_audit':plate,'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
+        pages.append({'unscoped_crops':unscoped, 'raster_text_in_artwork':artwork_text,
+                      'plate_audit':plate,'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
                       'replaced_text_cutouts':replaced, 'picture_hashes':pictures,
                       'passed_edits':sorted(f'{oid}/{action}' for oid in editables for action in actions[oid]),
                       'editable_count':len(editables) if verified else None, 'selected_editables':editables,
@@ -287,15 +366,22 @@ def ensure_baseline(job):
     # compiled candidate removes an observed finding and keeps prior edits.
     for page_score in score['pages']:
         page = page_score['page']
-        retained = [r for r in page_score['plate_audit']['rows'] if r['status'] in ('retained','unresolved')]
-        ids = sorted({oid for r in retained for oid in r['mark_ids']})
+        statuses = ('retained','unresolved','residual') if request.get('object_scoped_delivery') else ('retained','unresolved')
+        retained = [r for r in page_score['plate_audit']['rows'] if r['status'] in statuses]
+        residual_ids = {oid for r in retained if r['status'] == 'residual' for oid in r.get('exact_native_fields', ())}
+        ids = [*sorted(residual_ids), *sorted({oid for r in retained for oid in r['mark_ids']}-residual_ids)]
         if not ids or not score['verified']:
             continue
         def retry_plate(c, d):
             trial = deepcopy(c)
+            reopened, skipped = _reopen_residual_fields(svc, trial, page, residual_ids.intersection(batch), d/'reopened') if residual_ids.intersection(batch) else ([], {})
+            target_ids = [i for i in batch if i not in skipped]
+            write(d/'retry-fields.json', {'requested':batch,'reopened':reopened,'skipped':skipped})
+            if not target_ids:
+                return {'status':'KEPT_BASELINE', 'reasons':skipped}
             (d/'stage').mkdir(parents=True,exist_ok=True)
             attempt = svc.batch_reconstruct_page(state, trial, d/'stage', page=page,
-                object_ids=ids[:30], include_assets=False, include_containers=False,
+                object_ids=target_ids, include_assets=False, include_containers=False,
                 include_region_crops=False, verify_office=True)
             if attempt['status'] != 'VALIDATED':
                 return {'status':attempt['status']}
@@ -304,8 +390,10 @@ def ensure_baseline(job):
             svc.validate_office(state, trial, d/'office')
             measured = assess(job, trial)
             audit = measured['pages'][page-1]['plate_audit']
-            recovered = {r['ocr_id'] for r in audit['rows'] if r['status'] == 'native'}
-            recovered.intersection_update(r['ocr_id'] for r in retained)
+            recovered = {r['ocr_id'] for r in audit['rows'] if r['status'] == 'native' and r.get('exact_native_fields')}
+            before = score['pages'][page-1]['plate_audit']['rows']
+            recovered.intersection_update(r['ocr_id'] for r in before if r['status'] in statuses
+                and set(r['mark_ids'] + r.get('exact_native_fields', [])) & set(target_ids))
             failures = regressions(score, measured)
             if not recovered or failures:
                 return {'status':'KEPT_BASELINE','recovered_fields':sorted(recovered),
@@ -317,10 +405,13 @@ def ensure_baseline(job):
                 return retry_plate(c, d)
             except (ValueError, RuntimeError, OSError) as exc:
                 return {'status':'KEPT_BASELINE','error_type':type(exc).__name__}
-        outcome = step(f'plate-text-retry-{page}', safe_retry)
-        current = state.read()
-        if outcome['status'] == 'ADOPTED':
-            score = assess(job,current)
+        for offset in range(0,len(ids),30):
+            batch = ids[offset:offset+30]
+            name = f'plate-text-retry-{page}' + (f'-{offset//30+1}' if offset else '')
+            outcome = step(name, safe_retry)
+            current = state.read()
+            if outcome['status'] == 'ADOPTED':
+                score = assess(job,current)
     def expose_plate_findings(c, d):
         for page_score in score['pages']:
             page = page_score['page']

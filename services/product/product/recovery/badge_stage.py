@@ -128,12 +128,20 @@ def stage_badge_symbols(baseline, output, layout, *, wanted=None, skip=(), panel
                 if region['label'] == 'icon':
                     explicit_icons.add(alias)
     protected = [t.bbox for t in graph.text.texts]
+    detached = set()
     ledger = baseline / 'runtime-ocr-protection.json'
     if ledger.is_file():
         ocr = json.loads(ledger.read_text('utf8'))
         if ocr.get('source_sha256', graph.source_sha256) != graph.source_sha256:
             raise ValueError('badge OCR protection source changed')
         protected.extend(line['bbox'] for line in ocr['lines'])
+        for line in ocr['lines']:
+            graphic = line.get('detached_graphic')
+            if graphic:
+                alias = 'layout:' + graphic['id'].removeprefix('layout:')
+                if alias in locators and list(locators[alias]) == graphic['bbox']:
+                    detached.add(alias)
+        explicit_icons.update(detached)
     protected.extend(a.bbox for a in graph.asset.objects if graph.ownership.get(a.id) != 'RESOLVED'
                      and a.kind == 'icon')
     protected.extend(obj.bbox for obj in graph.asset.objects
@@ -144,7 +152,17 @@ def stage_badge_symbols(baseline, output, layout, *, wanted=None, skip=(), panel
             continue
         result = measure_symbol(source, box)
         if result is None and alias in explicit_icons:
-            result = measure_flat_symbol(source, box)
+            if alias in detached:
+                result = measure_flat_symbol(source, box, allow_gradient=True)
+                if result is None:
+                    # A detector commonly ends on the antialiased perimeter. Remeasure
+                    # with that fringe inside; the new outer ring must still prove paper.
+                    x, y, w, h = box
+                    fringe = max(1, round(min(w,h)*.03))
+                    result = measure_flat_symbol(source, [x-fringe,y-fringe,w+2*fringe,h+2*fringe],
+                                                 allow_gradient=True)
+            else:
+                result = measure_flat_symbol(source, box)
         if result:
             family = 'badge-ink' if 'disc' in result else 'flat-icon'
             bounds = tuple(result.get('disc', result['bbox']))
@@ -177,13 +195,13 @@ def stage_badge_symbols(baseline, output, layout, *, wanted=None, skip=(), panel
         if len(artwork) > 1 or np.any(claimed[tile] & mask):
             continue
         face = np.array(list(bytes.fromhex(candidate['face'])), dtype='uint8')
-        backing = np.broadcast_to(face, (h,w,3))
+        backing = candidate.get('backing', np.broadcast_to(face, (h,w,3)))
         physical = backing
         parent_id = None
         retained = None
         current_dir = output if staged else baseline
         if artwork:
-            retained = _retained_symbol(current_dir, artwork[0], box, mask, face, source[tile], parents)
+            retained = _retained_symbol(current_dir, artwork[0], box, mask, backing, source[tile], parents)
             if retained is None:
                 continue
         reuse_artwork = retained is not None and not np.any(retained[1]['mask'])
@@ -201,14 +219,14 @@ def stage_badge_symbols(baseline, output, layout, *, wanted=None, skip=(), panel
                 if lower is None:
                     lower = _render_lower_composite(plate, graph, current_dir)
                 visible_face = lower
-            result = _parent_backing(current_dir, graph, parents, visible_face, box, face, mask, plate[tile][..., :3], source[tile])
+            result = _parent_backing(current_dir, graph, parents, visible_face, box, backing, mask, plate[tile][..., :3], source[tile])
             if result is None:
                 continue
             physical, parent_id = result
         elif not np.array_equal(source[tile][mask], plate[tile][..., :3][mask]):
             continue
         excluded = {name for name in ('LayerD','color-unmix') if oid+'-'+name in skip}
-        rgba, decision = select_badge_ink(source[tile], candidate['face'], candidate['rgba'],
+        rgba, decision = select_badge_ink(source[tile], backing, candidate['rgba'],
                                          layer[tile] if layer is not None else None, excluded=excluded, strict_holes=True)
         decisions.append({'object_id':oid, 'disc':candidate.get('disc'), 'bbox':box, 'evidence_ids':sorted(aliases), **decision})
         if rgba is None:

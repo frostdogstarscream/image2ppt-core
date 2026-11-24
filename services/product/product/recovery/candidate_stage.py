@@ -25,6 +25,10 @@ from .gradient_backing import fit_gradient
 from .text_mask_completion import TextMaskCompletion
 
 
+class NativeFrameConflict(ValueError):
+    """The measured frame has no room between the canvas and neighboring objects."""
+
+
 def font_line_height(record, size):
     with TTFont(record['file'], fontNumber=record['index'], lazy=True) as face:
         hhea, os2 = face['hhea'], face['OS/2']
@@ -127,9 +131,51 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
                 if clamped is not None:
                     break
         if clamped is None:
-            raise ValueError('native font frame allowance conflicts with canvas or protected peers')
+            raise NativeFrameConflict('native font frame allowance conflicts with canvas or protected peers')
         payload['bbox'] = clamped
     return payload
+
+
+def _fit_measured_line(text, styles, fonts, source_size, protected, mask, scope, frame_options):
+    """Fit the transparent Office frame around owned ink without altering the erase mask."""
+    if text.spans or '\n' in text.text or text.align != 'left':
+        raise NativeFrameConflict('native font frame allowance conflicts with canvas or protected peers')
+    style = styles[text.style]
+    family = style.ea if any(ord(c) > 255 for c in text.text) else style.latin
+    record = next(f for f in fonts['fonts'] if (f['family'],f['bold']) == (family,style.bold))
+    yy, xx = np.where(mask)
+    ink_left, ink_top, ink_right, ink_bottom = int(xx.min()), int(yy.min()), int(xx.max())+1, int(yy.max())+1
+    original_size = style.size_px
+    face = ImageFont.truetype(record['file'], max(1,round(original_size)), index=record['index'])
+    l, t, r, b = face.getbbox(text.text)
+    # Only try sizes corroborated by the observed strokes. Never shrink to an
+    # arbitrary size just to squeeze a long label past a neighbour.
+    scale = min((ink_right-ink_left)/max(1,r-l), (ink_bottom-ink_top)/max(1,b-t))
+    measured_size = max(4, round(original_size * min(1.0,scale)))
+    sizes = [original_size]
+    if .72*original_size <= measured_size < original_size:
+        sizes.append(measured_size)
+    for size in sizes:
+        fitted = text.model_copy(deep=True)
+        definition = None
+        if size != original_size:
+            definition = style.model_copy(update={'size_px':size})
+            definition.id = style.id[:40]+'-ink-'+key(definition.model_dump())[:12]
+            styles = {**styles, definition.id:definition}
+            fitted.style = definition.id
+        face = ImageFont.truetype(record['file'], max(1,round(size)), index=record['index'])
+        l, t, r, b = face.getbbox(text.text)
+        for left in dict.fromkeys([round(text.bbox[0]), ink_left-l, ink_right-r]):
+            if abs(left+l-ink_left) > .22*size:
+                continue
+            for top in dict.fromkeys([round(text.bbox[1]), ink_top-t]):
+                fitted.bbox = [left, top, max(1,ink_right-left), max(1,ink_bottom-top)]
+                try:
+                    payload = native_frame(fitted, styles, fonts, source_size, protected, scope, **frame_options)
+                    return fitted, payload, definition
+                except NativeFrameConflict:
+                    continue
+    raise NativeFrameConflict('native font frame allowance conflicts with canvas or protected peers')
 
 
 def stage_background(trial_directory, graph, baseline_directory, fonts, output, *, typography=None, frame_minimum=None, fit_origin=False):
@@ -220,13 +266,14 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
 
 def stage_text_pixels(graph, baseline_directory, fonts, output, *, text, region, source, box, wanted,
                       written, protected, method, report, completion_report, trial_directory, hashes,
-                      typography=None, frame_minimum=None, fit_origin=False, source_artwork=None, text_cutouts=None):
+                      typography=None, frame_minimum=None, fit_origin=False, fit_ink_frame=False,
+                      source_artwork=None, text_cutouts=None):
     """Stage a checked source-owner mask and corresponding editable field as one transaction."""
     styles = {s.id: s for s in graph.text.styles}
     bx, by, bw, bh = box
     output.parent.mkdir(parents=True, exist_ok=True)
     identity = {'source': graph.source_sha256, 'scene': key(graph.model_dump()), 'text': text.id,
-                'typography':typography,'frame_minimum':frame_minimum,'fit_origin':fit_origin,
+                'typography':typography,'frame_minimum':frame_minimum,'fit_origin':fit_origin,'fit_ink_frame':fit_ink_frame,
                 'trial_hashes': hashes, 'fonts': key(fonts), 'font_files': font_bindings(graph, fonts),
                 'implementation_sha256': digest(__file__)}
     cid = 'c-'+key(identity)
@@ -259,7 +306,16 @@ def stage_text_pixels(graph, baseline_directory, fonts, output, *, text, region,
         frame_options={'minimum_size':frame_minimum['size']} if frame_minimum else {}
         if fit_origin:
             frame_options['fit_origin'] = True
-        text_payload = native_frame(proposed, styles, fonts, source.shape[1::-1], protected, box, **frame_options)
+        try:
+            text_payload = native_frame(proposed, styles, fonts, source.shape[1::-1], protected, box, **frame_options)
+        except NativeFrameConflict:
+            if not fit_ink_frame:
+                raise
+            proposed, text_payload, measured_style = _fit_measured_line(
+                proposed, styles, fonts, source.shape[1::-1], protected, wanted, box, frame_options)
+            if measured_style is not None:
+                styles[measured_style.id] = measured_style
+                definitions.append(measured_style.model_dump())
         if fit_origin and proposed.align == 'left' and any(k!=text.id and ids==graph.text.members[text.id]
                                                          for k,ids in graph.text.members.items()):
             # Reserve transparent editing room only along a measured blank run.

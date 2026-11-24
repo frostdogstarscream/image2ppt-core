@@ -837,6 +837,27 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     write(structure_file, structure_info)
     current.setdefault('page_structure', {})[str(page)] = str(structure_file)
 
+    separate_ink = bool(preflight and request.get('region_text') and request.get('object_scoped_delivery'))
+    if separate_ink and layout_data and layout_data.get('source_sha256') == digest(source_path):
+        from ..recovery.field_ink import separate_edge_graphic
+        graphic_proposals = [r for r in layout_data.get('regions', ())
+                             if r.get('label') in ('icon','image','figure') and r.get('score', 0) >= .5]
+        changed = False
+        for line in ocr.get('lines', []):
+            if line.get('detached_graphic') or line.get('score', 0) < .85:
+                continue
+            witness = separate_edge_graphic(source, line, graphic_proposals)
+            if witness:
+                line['source_bbox'] = list(line['bbox'])
+                line['detached_graphic'] = witness['graphic']
+                line['bbox'] = witness['bbox']
+                x, y, w, h = line['bbox']
+                line['polygon'] = [[x,y],[x+w,y],[x+w,y+h],[x,y+h]]
+                changed = True
+        if changed:
+            derived_ocr = directory/'field-geometry-ocr.json'
+            write(derived_ocr, ocr)
+            current['ocr'][str(page)] = str(derived_ocr)
     valid_lines = [row for row in ocr.get('lines', []) if row.get('score', 0) >= 0.85 and row.get('text', '').strip()]
     line_rects = [rectangle(row['bbox'], (w_img, h_img), pad=1) for row in valid_lines]
 
@@ -906,7 +927,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     if preflight or (profile and profile != 'baseline'):
         from ..recovery.marked_fields import split_items
         retained_fields = scene_relations.setdefault('source_retained_fields', [])
-        measured_items = split_items(source, measured_items, retained_fields)
+        measured_items = split_items(source, measured_items, retained_fields, inherit_colour=separate_ink)
     for item in measured_items:
         est_px = item['est_size_px']
         item['role'] = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
@@ -960,6 +981,17 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         item['size_px'] = st['size_px']
         text_entry = {'id': item['id'], 'bbox': item['bbox'], 'z': int(z_idx),
                       'style': item['style'], 'text': item['text'], 'align': item.get('align', 'left')}
+        if separate_ink and len(item['ocr_line_ids']) == 1:
+            from ..recovery.field_ink import colour_runs
+            runs = colour_runs(source, item['text'], item['bbox'])
+            run_styles = {color: {**st, 'id':st['id']+'-ink-'+color, 'color':color}
+                          for _, _, _, color in runs}
+            new_styles = [s for s in run_styles.values() if s['id'] not in style_lookup]
+            if runs and len(styles) + len(new_styles) <= 100:
+                styles.extend(new_styles)
+                style_lookup.update((s['id'], s) for s in new_styles)
+                text_entry['spans'] = [{'text':value, 'style':run_styles[color]['id']}
+                                       for value, _, _, color in runs]
         if item.get('line_spacing_px') is not None:
             text_entry['line_spacing_px'] = item['line_spacing_px']
         texts.append(text_entry)
@@ -1878,6 +1910,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         rejected = []
         for group in plan_regions(initial_graph, text_targets, inventory, image):
             try:
+                if request.get('object_scoped_delivery'):
+                    group['source_field_ink'] = True
                 from ..recovery.region_artwork import read_decoration_carriers
                 group['text_cutouts'] = read_decoration_carriers(initial_graph, group, initial_baseline,
                     directory/'source-carriers', state.job/'cache', lines)
