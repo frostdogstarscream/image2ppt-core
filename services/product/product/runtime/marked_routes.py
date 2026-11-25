@@ -8,55 +8,245 @@ import numpy as np
 from PIL import Image
 
 from ..contracts import intersection
-from ..materialize import digest
+from ..materialize import digest, write
 from ..parallel_store import key
 
 
 def apply_move_groups(ir, movement):
     """Bring members together only when all crossed nonmembers are disjoint."""
     ordered = sorted(ir['nodes'], key=lambda n: n['z'])
-    used = set()
+    used = {oid for group in ir.get('groups', []) for oid in group['member_ids']}
+    original_group_count = len(ir.get('groups', []))
+    issues = []
     for ids in movement:
         members = set(ids)
         if len(members) < 2 or members & used:
+            issues.append({'members': ids, 'failure':'GROUP_MEMBER_ALREADY_ASSIGNED',
+                           'conflict_ids': sorted(members & used)})
             continue
         candidates = [(n, i) for i, n in enumerate(ordered) if n['id'] in members]
         if len(candidates) != len(members):
+            issues.append({'members':ids, 'failure':'GROUP_MEMBER_MISSING',
+                           'conflict_ids':sorted(members - {node['id'] for node, _ in candidates})})
             continue
         first = candidates[0][1]
-        if any(
-            intersection(n['bbox'], other['bbox']) > 0
+        blockers = sorted({
+            other['id']
             for n, idx in candidates
             for other in ordered[first:idx]
-            if other['id'] not in members
-        ):
+            if other['id'] not in members and intersection(n['bbox'], other['bbox']) > 0
+        })
+        if blockers:
+            issues.append({'members':ids, 'failure':'GROUP_Z_ORDER_CONFLICT', 'conflict_ids':blockers})
             continue
         children = [n for n, _ in candidates]
         ordered = [*ordered[:first], *children, *[n for n in ordered[first:] if n['id'] not in members]]
         ir['groups'].append({'id': 'g-' + key(sorted(ids))[:16], 'member_ids': [n['id'] for n in children]})
         used.update(members)
-    if used:
+    if len(ir.get('groups', [])) > original_group_count:
         for z, node in enumerate(ordered):
             node['z'] = z
+    return issues
 
 
-def plan_move_groups(routes, graph):
+def plan_move_groups(routes, graph, *, issues=None, sources=None):
     resolved = {k: [k] for k in graph.selected}
+    for oid, record in graph.selected.items():
+        for alias in record.get('badge_evidence_ids', ()):
+            resolved.setdefault(alias.removeprefix('layout:'), []).append(oid)
     for row in route_trace(routes, graph):
-        resolved[row['mark_id']] = row['selected_ids']
+        if row['selected_ids']:
+            resolved[row['mark_id']] = row['selected_ids']
     groups = []
     for r in routes:
         ids = [r['id'], *r.get('move_with', [])]
-        if len(ids) > 1 and all(resolved.get(i) for i in ids):
-            group = sorted({oid for i in ids for oid in resolved[i]})
-            if len(group) > 1 and group not in groups:
-                groups.append(group)
+        owned = set()
+        face_ids = resolved.get(r['id'], [])
+        if r['route']=='surface' and len(face_ids)==1:
+            face = face_ids[0]
+            if graph.selected[face]['kind']=='surface':
+                owned.update(graph.selected[face].get('contained_children', ()))
+                linked = {k for k,rec in graph.selected.items() if rec.get('payload',{}).get('background_parent_id')==face}
+                owned.update(linked)
+                if linked and r.get('group_owned_children'):
+                    # A measured card may have several candidate child frames in its
+                    # inventory. Use its committed photo/overlay ownership and confirmed
+                    # text relations once that card has actually been reconstructed.
+                    owned.update(rel.target for rel in graph.relations if rel.source==face
+                                 and rel.kind=='contains' and rel.status=='RESOLVED' and rel.target in graph.selected)
+        if len(ids) < 2 and not (owned and r.get('group_owned_children')):
+            continue
+        missing = [i for i in ids if not resolved.get(i)]
+        if missing:
+            if issues is not None:
+                issues.append({'object_id':r['id'], 'kind':'group', 'bbox':r['bbox'],
+                               'failure':'GROUP_MEMBER_MISSING', 'conflict_ids':missing})
+            continue
+        members = owned | {oid for i in ids for oid in resolved[i]}
+        group = sorted(members)
+        if len(group) > 1 and group not in groups:
+            groups.append(group)
+            if sources is not None:
+                sources[tuple(group)] = r
     return groups
+
+
+def stage_planned_groups(routes, graph, baseline, output, skip_ids):
+    """Group only independently accepted layers. Failed grouping cannot alter their scene or IR."""
+    import shutil
+    from ..parallel_rebuild import adapt
+    issues, sources, proposals = [], {}, []
+    existing = {oid:rec['move_members'] for oid,rec in graph.selected.items() if rec.get('move_members')}
+    replaced = {}
+    planned = plan_move_groups(routes, graph, issues=issues, sources=sources)
+    owners = {}
+    for group in planned:
+        for oid in group:
+            owners.setdefault(oid, []).append(sources[tuple(group)]['id'])
+    for group in planned:
+        members = set(group)
+        if any(members <= set(old) for old in existing.values()):
+            continue
+        route = sources[tuple(group)]
+        shared = [oid for oid in group if len(owners[oid])>1]
+        if shared:
+            issues.append({'object_id':route['id'],'kind':'group','bbox':route['bbox'],
+                           'failure':'GROUP_AMBIGUOUS_OWNER','conflict_ids':shared})
+            continue
+        blockers = members & skip_ids
+        reason = 'GROUP_MEMBER_EXCLUDED'
+        overlaps = [oid for oid,other in existing.items() if members.intersection(other)]
+        if not blockers:
+            reason = 'GROUP_MEMBER_ALREADY_ASSIGNED'
+            # A photo verified later can extend its own card group. Keep previous
+            # membership available until the expanded group survives Z-order checks.
+            own_face = [oid for oid in members if oid in graph.selected and graph.selected[oid]['kind']=='surface']
+            extend = (route['route']=='surface' and len(overlaps)==1
+                      and set(existing[overlaps[0]]) < members
+                      and any(face in existing[overlaps[0]] and
+                              iou(route.get('measured_label_face') or route['bbox'],graph.selected[face]['bbox']) >= .92
+                              for face in own_face))
+            if not extend:
+                blockers.update(i for oid in overlaps for i in existing[oid] if i in members)
+        if blockers:
+            issues.append({'object_id':route['id'], 'kind':'group', 'bbox':route['bbox'],
+                           'failure':reason, 'conflict_ids':sorted(blockers)})
+            continue
+        if overlaps:
+            replaced[tuple(group)] = overlaps[0]
+        proposals.append(group)
+    if not proposals:
+        return baseline, [], issues
+
+    # adapt also materializes image assets. Keep every trial in its own directory,
+    # including trials where layering conflicts eventually reject all proposed groups.
+    shutil.copytree(baseline, output)
+    for group in proposals:
+        old_owner = replaced.get(tuple(group))
+        if old_owner is not None:
+            graph.selected[old_owner].pop('move_members')
+        graph.selected[group[0]]['move_members'] = group
+    conflicts = []
+    ir = adapt(graph, output, group_issues=conflicts)
+    written = {frozenset(g['member_ids']) for g in ir.get('groups', [])}
+    accepted = []
+    for group in proposals:
+        if frozenset(group) in written:
+            accepted.extend(group)
+            continue
+        graph.selected[group[0]].pop('move_members',None)
+        old_owner = replaced.get(tuple(group))
+        if old_owner is not None:
+            graph.selected[old_owner]['move_members'] = existing[old_owner]
+        route = sources[tuple(group)]
+        issue = next((c for c in conflicts if set(c['members'])==set(group)), {})
+        issues.append({'object_id':route['id'], 'kind':'group','bbox':route['bbox'],
+                       'failure':issue.get('failure','GROUP_NOT_EMITTED'), 'conflict_ids':issue.get('conflict_ids',[])})
+    if not accepted:
+        return baseline, [], issues
+    if len(accepted) < sum(map(len,proposals)):
+        ir = adapt(graph, output)
+    write(output/'scene.json', graph.model_dump())
+    write(output/'slideir.json', ir)
+    return output, accepted, issues
 
 
 def iou(a, b):
     shared = intersection(a, b)
     return shared / max(1, a[2] * a[3] + b[2] * b[3] - shared)
+
+
+def card_move_members(rows, *, source_path=None):
+    """Select independent text and graphics inside the innermost numbered face."""
+    text_rows = [r for r in rows if r.get('ocr_ids') and r['label'] == 'text']
+    text_ids = {r['id'] for r in text_rows}
+    source = None
+    if source_path is not None:
+        with Image.open(source_path) as image:
+            source = np.array(image.convert('RGB'))
+    cards = {}
+    for row in rows:
+        box = row['bbox']
+        if row['label'] == 'card_frame' or (
+            row['label'] == 'icon' and row.get('sources') and row.get('intersecting_ocr_ids')
+            and any(t['bbox'][2]*t['bbox'][3] <= .65*box[2]*box[3] and
+                    intersection(t['bbox'], box) >= .98*t['bbox'][2]*t['bbox'][3] for t in text_rows)
+            and (source is None or measured_label_face(source,box) is not None)
+        ):
+            cards[row['id']] = row
+    # A detector can name the same face as an icon; use its independently measured frame.
+    frames = [r['bbox'] for r in cards.values() if r['label']=='card_frame']
+    cards = {oid:r for oid,r in cards.items() if r['label']=='card_frame' or
+             not any(iou(r['bbox'], box)>=.85 for box in frames)}
+    leaf = {}
+    for oid, row in cards.items():
+        box = row['bbox']
+        if any(other['id'] != oid and other['bbox'][2]*other['bbox'][3] < .8*box[2]*box[3]
+               and intersection(box,other['bbox']) >= .95*other['bbox'][2]*other['bbox'][3]
+               for other in cards.values()):
+            continue
+        candidates = []
+        for child in rows:
+            cb = child['bbox']
+            if child['id'] in cards or cb[2]*cb[3] >= .90*box[2]*box[3]:
+                continue
+            if intersection(box,cb) < .98*cb[2]*cb[3]:
+                continue
+            if child['id'] in text_ids or child['label'] in ('image','icon','illustration','decoration','photo'):
+                candidates.append(child)
+        # Explicit scene or asset records take precedence over duplicating detector windows.
+        chosen = []
+        for child in sorted(candidates, key=lambda c:(c['id'] not in text_ids,
+                                                       not c['id'].startswith('a-'), c['id'])):
+            if child['id'] not in text_ids and any(iou(child['bbox'], other['bbox']) >= .7 for other in chosen):
+                continue
+            chosen.append(child)
+        if any(c['id'] in text_ids for c in chosen):
+            leaf[oid] = [c['id'] for c in chosen]
+    return leaf
+
+
+def measured_label_face(source, hint):
+    """Return a bounded, nearly rectangular connected fill. The shape fitter owns final admission."""
+    x,y,w,h = map(round,hint)
+    reach = max(2, round(min(w,h)*.12))
+    left,top = max(0,x-reach), max(0,y-reach)
+    tile = source[top:min(source.shape[0], y+h+reach), left:min(source.shape[1], x+w+reach)]
+    roi = source[y:y+h,x:x+w]
+    if min(w,h)<4 or roi.shape[:2] != (h,w):
+        return None
+    face = np.median(roi.reshape(-1,3),axis=0)
+    spread = np.quantile(np.abs(roi-face).max(2),.65)
+    tolerance = np.clip(2*spread+12,14,64)
+    mask = (np.abs(tile-face).max(2)<tolerance).astype('uint8')
+    _, _, components, _ = cv2.connectedComponentsWithStats(mask,8)
+    for bx,by,bw,bh,area in components[1:]:
+        box = [int(left+bx),int(top+by),int(bw),int(bh)]
+        if (min(bx,by)<=0 or bx+bw>=tile.shape[1] or by+bh>=tile.shape[0] or
+                area < .72*bw*bh or iou(box,hint)<.80):
+            continue
+        return box
+    return None
 
 
 def picture_frame(source, box):
@@ -99,6 +289,10 @@ def bind_plan(fields, inventory_path, graph, source_path, *, separate_cards=Fals
         mark = marks[field['id']]
         route, box = field['route'], mark['bbox']
         row = {**field, 'bbox': box, 'label': mark['label'], 'target_ids': []}
+        if separate_cards and route=='surface' and field.get('origin')=='host':
+            row['group_owned_children'] = True
+        if separate_cards and route == 'surface' and mark['label'] == 'icon':
+            row['measured_label_face'] = measured_label_face(source, box)
         row.pop('required_card_frames', None)
         if route == 'surface' and mark.get('required_card_frames'):
             row['required_card_frames'] = mark['required_card_frames']
@@ -185,6 +379,7 @@ def route_trace(routes, graph):
         expected = {
             'surface': {'surface'},
             'table': {'table'},
+            'chart': {'chart'},
             'asset': {'asset'},
             'text': {'text'},
             'preserve': set(),
@@ -196,6 +391,11 @@ def route_trace(routes, graph):
             and (k in targets or rec.get('mark_id') == mark or mark in rec.get('seed_ids', [])
                  or targets.intersection(rec.get('badge_evidence_ids', ())))
         ]
+        if not ids and route['route']=='surface':
+            box = route.get('measured_label_face') or route['bbox']
+            same = [oid for oid,rec in graph.selected.items() if rec['kind']=='surface' and iou(box,rec['bbox'])>=.92]
+            if len(same)==1:
+                ids = same
         trace.append(
             {
                 'mark_id': mark,

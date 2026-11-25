@@ -28,6 +28,7 @@ from ..parallel_fusion import fuse_incremental_scene, is_decorative_subspan
 from ..parallel_store import Store, key
 from ..parallel_typography import calibrate, snap_ooxml_size_px, measure_text_appearance
 from ..resource_lease import lease
+from . import sam_evidence
 
 
 def _merge_structural_ocr_items(
@@ -396,7 +397,11 @@ def _classify_failed_region(
             for a in graph.asset.objects))
     )
 
-    if kind == 'asset' or kind == 'surface':
+    if kind == 'group':
+        category, action, cap = failure, 'inspect_group_members_and_conflicts', 1
+    elif kind in ('table', 'chart'):
+        category, action, cap = failure, 'inspect_structured_region_and_ownership', 1
+    elif kind == 'asset' or kind == 'surface':
         category, action, cap = 'UNVERIFIED_ASSET_CLOSURE', 'retain_in_source_plate', 0
     elif in_top_right_logo:
         category, action, cap = 'LOGO_OR_INTRINSIC_TEXT', 'retain_in_source_plate', 0
@@ -927,7 +932,20 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     if preflight or (profile and profile != 'baseline'):
         from ..recovery.marked_fields import split_items
         retained_fields = scene_relations.setdefault('source_retained_fields', [])
-        measured_items = split_items(source, measured_items, retained_fields, inherit_colour=separate_ink)
+        dividers = {} if separate_ink else None
+        measured_items = split_items(source, measured_items, retained_fields, inherit_colour=separate_ink,
+                                     source_dividers=dividers)
+        if dividers:
+            for line in ocr['lines']:
+                divider = dividers.get(line['id'])
+                if divider and divider['source_text'] == line['text']:
+                    left, right = divider['span']
+                    line['text'] = line['text'][:left] + line['text'][right:]
+                    line['source_divider'] = divider
+                    scene_relations['source_fields'][line['id']]['source_divider'] = divider
+            derived = directory/'field-divider-ocr.json'
+            write(derived, ocr)
+            current['ocr'][str(page)] = str(derived)
     for item in measured_items:
         est_px = item['est_size_px']
         item['role'] = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
@@ -1060,6 +1078,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         + [{'id': a['id'], 'kind': a['kind'], 'bbox': a['bbox'], 'layers': a['layers'], 'mode': 'deferred_after_text'}
            for a in deferred_assets]
     )
+    sam_configured = sam_evidence.configured()
     payload = {
         'status': 'PREPARED',
         'page': page,
@@ -1075,7 +1094,9 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
             r for r in (layout_data or {}).get('regions', [])
             if r.get('label') in layout_evidence.CROP_LABELS and float(r.get('score', 0)) >= 0.5
         ],
-        'sam_available': bool(os.environ.get('IMAGE2PPT_SAM_URL') or os.environ.get('SAM_URL')),
+        'sam_available': None if sam_configured else False,
+        'sam_configured': sam_configured,
+        'sam_status': 'CONFIGURED_UNPROBED' if sam_configured else 'NOT_CONFIGURED',
         'text_count': len(measured_items),
         'resolved_text_count': resolved_count,
         'unresolved_text_count': len(measured_items) - resolved_count,
@@ -1095,9 +1116,14 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     if preflight or (profile and profile!='baseline'):
         from ..experiment import mark_page,mark_blocks
         layout = layout_data or {'regions':[]}
+        width_conflicts = {lid for field in scene_relations.get('source_retained_fields',[])
+                           for lid in field['ocr_ids']} if separate_ink else set()
+        if width_conflicts:
+            scene_relations['source_width_conflicts']=sorted(width_conflicts)
         low_confidence = [{'id':'ocr-review-'+str(line['id']), 'kind':'uncertain_ocr',
                            'text':line['text'], 'bbox':line['bbox'], 'ocr_line_ids':[line['id']]}
-                          for line in ocr.get('lines', []) if preflight and line.get('text') and line.get('score',0)<0.85]
+                          for line in ocr.get('lines', []) if preflight and line.get('text')
+                          and (line.get('score',0)<0.85 or line['id'] in width_conflicts)]
         marks = mark_page(source_path, layout, [*measured_items,*asset_summaries,*low_confidence], directory,
                           single_label_panels=request.get('object_scoped_delivery', False))
         current.setdefault('experiment_marks',{})[str(page)] = str(directory/'marks.json')
@@ -1242,7 +1268,6 @@ def _chain_stage_from_spec(
     verified_assets=None,
 ) -> tuple[Path, list[str], list[dict]]:
     from .. import layout_evidence, matting
-    from ..object_stage import infer_sam
     from ..recovery.agent_asset_stage import stage_asset_candidate
     from ..recovery.asset_retry import retry_asset_extraction
     from ..recovery.candidate_stage import stage_background
@@ -1259,17 +1284,35 @@ def _chain_stage_from_spec(
         cur_base, tables, covered = prepared_tables or stage_tables(cur_base, directory/tag/'marked-tables', table_fields, skip_ids)
         covered_texts.update(covered)
         staged_ids.extend(tables)
-    if panel_regions is None and include_containers and wanted_filter is None and layout_path:
+    chart_fields = {r['id'] for r in marked_routes if r['route'] == 'chart'
+                    and (wanted_filter is None or r['id'] in wanted_filter)}
+    if panel_regions is None and (chart_fields or layout_path and include_containers and wanted_filter is None):
         from ..recovery.chart_stage import stage_native_charts
-        layout = json.loads(Path(layout_path).read_text(encoding='utf8'))
+        layout = json.loads(Path(layout_path).read_text(encoding='utf8')) if layout_path else {}
+        scoped = wanted_filter is not None or not include_containers
         chart_ir, chart_ids = stage_native_charts(cur_base, directory/tag/'charts-staged', layout=layout,
-                                                  fonts=fonts, skip_ids=skip_ids)
+                                                  fonts=fonts, skip_ids=skip_ids,
+                                                  region_ids=chart_fields if scoped else None,
+                                                  marked_regions=[r for r in marked_routes if r['id'] in chart_fields])
         if chart_ids:
             cur_base = chart_ir.parent
             staged_ids.extend(chart_ids)
             chart_scene = json.loads((cur_base/'scene.json').read_text(encoding='utf8'))
             for cid in chart_ids:
                 covered_texts.update(chart_scene['selected'][cid]['covered_text_ids'])
+    if panel_regions is None and (table_fields or chart_fields):
+        graph = SceneGraph.model_validate_json((cur_base/'scene.json').read_text(encoding='utf8'))
+        structured_marks = {r['id'] for r in table_fields} | chart_fields
+        realized = {(r['kind'],r.get('mark_id')) for r in graph.selected.values()}
+        for field in marked_routes:
+            kind = field['route']
+            if field['id'] not in structured_marks - skip_ids or (kind,field['id']) in realized:
+                continue
+            conflicts = [oid for oid, rec in graph.selected.items() if intersection(rec['bbox'], field['bbox'])]
+            reason = 'overlapping_committed_objects' if conflicts else 'unverified_structure'
+            stage_errors.append({'object_id':field['id'], 'bbox':field['bbox'], 'kind':kind,
+                                 'failure':kind.upper()+'_NOT_VERIFIED', 'reason':reason,
+                                 'conflicting_object_ids':conflicts})
     text_by_id = {t.id: t for t in initial_graph.text.texts}
     grouped_ids=set()
     group_specs=[tr['region'] for tr in trials_spec if 'region' in tr]
@@ -1338,8 +1381,11 @@ def _chain_stage_from_spec(
     scopes = panel_regions if panel_regions is not None else surface_scopes
     if scopes and include_containers and single_object_only:
         from ..recovery.container_stage import stage_containers_and_surfaces
+        measured_faces = {tuple(r['measured_label_face']):r['id'] for r in marked_routes
+                          if r.get('measured_label_face') and (wanted_filter is None or r['id'] in wanted_filter)}
         ir, shape_ids = stage_containers_and_surfaces(cur_base, directory/tag/'panel-surfaces',
-            skip_ids=skip_ids, logo_ids=logo_ids, stable_ids=True, scope_boxes=scopes, native_only=True)
+            skip_ids=skip_ids, logo_ids=logo_ids, stable_ids=True, scope_boxes=scopes, native_only=True,
+            measured_faces=measured_faces)
         if shape_ids:
             cur_base = ir.parent
             staged_ids.extend(shape_ids)
@@ -1431,6 +1477,7 @@ def _chain_stage_from_spec(
             and not any(intersection(a.bbox, box) for box in grouped_boxes)
             and (wanted_filter is None or a.id in wanted_filter)
         ]
+        sam_offline = False
         for idx, asset in enumerate(asset_targets):
             step_dir = directory / tag / f'asset-{idx:03d}-{key(asset.id)[:12]}'
             step_dir.mkdir(parents=True, exist_ok=True)
@@ -1442,35 +1489,24 @@ def _chain_stage_from_spec(
                 )
                 choices = [('verified-backing', res)]
                 compare = asset.kind in ('icon', 'logo', 'decoration')
-                if (compare or res.get('status') != 'CANDIDATE_READY') and sam_enabled:
-                    sam_root = page_cache_dir / 'sam-cache' / key(asset.id)[:12]
-                    plan_file = sam_root / 'sam-plan.json'
-                    sam_out = sam_root / 'sam'
-                    if not (sam_out / 'manifest.json').is_file() and not any(sam_out.glob('*.png')) if sam_out.exists() else True:
-                        sam_root.mkdir(parents=True, exist_ok=True)
-                        write(plan_file, {
-                            'schema': 'LogicalObjects/2',
-                            'source_sha256': active_graph.source_sha256,
-                            'image_size': active_graph.image_size,
-                            'objects': [a.model_dump() for a in active_graph.asset.objects],
-                            'limitations': [],
-                        })
-                        try:
-                            infer_sam(source_path, plan_file, sam_out, 'sam3', [asset.id])
-                        except Exception:
-                            pass
-                    if plan_file.is_file() and sam_out.is_dir():
+                if compare or res.get('status') != 'CANDIDATE_READY':
+                    sam = {'status':'NOT_CONFIGURED', 'via':'none'}
+                    if sam_enabled:
+                        plan_file, sam_out, sam = sam_evidence.prepare_mask(
+                            source_path, active_graph, asset, page_cache_dir/'sam-cache', offline=sam_offline)
+                        sam_offline |= sam['status'] == 'SERVICE_OFFLINE'
+                    if sam['status'] == 'MASK_READY':
                         try:
                             res_sam = retry_asset_extraction(
                                 active_graph, asset.id, source_path, layers_dir,
                                 cur_base, step_dir / 'extract-sam', strategy='sam',
                                 sam_plan=plan_file, sam_directory=sam_out,
                             )
-                            choices.append(('sam',res_sam))
-                            if res_sam.get('status') == 'CANDIDATE_READY':
-                                res = res_sam
+                            choices.append(('sam',{**res_sam,'mask':sam}))
                         except (ValueError,OSError,RuntimeError) as exc:
-                            choices.append(('sam',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
+                            choices.append(('sam',{'status':'EXTRACTION_FAILED','reason':type(exc).__name__, 'mask':sam}))
+                    else:
+                        choices.append(('sam',sam))
                 if compare and matting.available():
                     try:
                         res_matte = retry_asset_extraction(
@@ -1480,8 +1516,12 @@ def _chain_stage_from_spec(
                         choices.append(('rmbg2',res_matte))
                     except Exception as exc:
                         choices.append(('rmbg2',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
+                elif compare:
+                    choices.append(('rmbg2',{'status':'NOT_CONFIGURED'}))
                 for op in ('vitmatte','local-layerd'):
-                    if experiment_profile not in (op,'combined'):
+                    rescue = (op == 'local-layerd' and compare and single_object_only
+                              and experiment_profile in (None, 'marks') and os.environ.get('IMAGE2PPT_EXPERIMENT_CONFIG'))
+                    if experiment_profile not in (op,'combined') and not rescue:
                         continue
                     if op=='vitmatte' and not compare:
                         continue
@@ -1504,10 +1544,19 @@ def _chain_stage_from_spec(
                         contrast = Image.new('RGBA',graphic.size,'#70368C')
                         contrast.alpha_composite(graphic)
                         contrast.convert('RGB').save(step_dir/(strategy+'-contrast.png'))
+                        if compare:
+                            proof = Image.new('RGB', (2*graphic.width,graphic.height))
+                            for idx_bg, color in enumerate(('#202020','#F5F5F5')):
+                                bg = Image.new('RGBA',graphic.size,color)
+                                bg.alpha_composite(graphic)
+                                proof.paste(bg.convert('RGB'),(idx_bg*graphic.width,0))
+                            proof.save(step_dir/(strategy+'-dark-light.png'))
                     from ..experiment_assets import contrast_edge_score
-                    edge = contrast_edge_score(graphic) if compare and experiment_profile not in (None,'baseline') else None
+                    compare_edges = single_object_only or experiment_profile not in (None, 'baseline')
+                    edge = contrast_edge_score(graphic) if compare and compare_edges and experiment_profile != 'baseline' else None
                     scored.append({'strategy':strategy,'recomposition_p95':attempt['source_recomposition_p95'],
                                    'background_error':attempt['background_error'],'contrast_edge_proxy':edge,
+                                   'contrast_preview':strategy+'-dark-light.png' if compare else None,
                                    'candidate':candidate})
                 edges = [r['contrast_edge_proxy'] for r in scored]
                 comparable = bool(edges and all(edges)) and all(
@@ -1515,10 +1564,14 @@ def _chain_stage_from_spec(
                 for r in scored:
                     r['rank_score'] = r['recomposition_p95'] + (r['contrast_edge_proxy']['p90'] if comparable else 0)
                 scored.sort(key=lambda r:(r['rank_score'],r['background_error'],r['strategy']))
-                write(step_dir/'strategy-comparison.json',{
-                    'attempts':[{'strategy':name,'status':c.get('status'),'reason':c.get('reason')} for name,c in choices],
+                comparison = {'object_id':asset.id,'bbox':asset.bbox,'source_sha256':active_graph.source_sha256,
+                    'staged_strategy':None, 'attempts':[{'strategy':name, **{k:c[k] for k in
+                        ('status','reason','via','mask','rmbg2_failure','sam_source_failure') if k in c},
+                        'candidates':[{'method':a['seed_method'],'status':a['status'],'reason':a.get('reason')}
+                                      for a in c.get('attempts',[])]} for name,c in choices],
                     'comparable_edge_support':comparable,
-                    'ranked':[{k:v for k,v in r.items() if k!='candidate'} for r in scored]})
+                    'ranked':[{k:v for k,v in r.items() if k!='candidate'} for r in scored]}
+                write(step_dir/'strategy-comparison.json',comparison)
                 if scored:
                     res = scored[0]['candidate']
                 if res.get('status') == 'CANDIDATE_READY':
@@ -1528,6 +1581,8 @@ def _chain_stage_from_spec(
                     )
                     cur_base = ir.parent
                     staged_ids.append(asset.id)
+                    comparison['staged_strategy'] = scored[0]['strategy']
+                    write(step_dir/'strategy-comparison.json', comparison)
                     if compare and experiment_profile in ('vtracer','combined'):
                         from ..experiment_assets import trace_asset
                         try:
@@ -1538,6 +1593,8 @@ def _chain_stage_from_spec(
                     stage_errors.append({
                         'object_id': asset.id, 'kind': 'asset', 'bbox': list(asset.bbox),
                         'failure': 'ASSET_EXTRACTION_UNCERTAIN', 'reason': res.get('reason', 'unverified'),
+                        'strategy_evidence':str(step_dir/'strategy-comparison.json'),
+                        'strategy_outcomes':{name:c.get('status') for name,c in choices},
                     })
             except Exception as exc:
                 stage_errors.append({
@@ -1650,31 +1707,16 @@ def _chain_stage_from_spec(
                 })
 
     if marked_routes:
-        from .marked_routes import route_trace,plan_move_groups
+        from .marked_routes import route_trace,stage_planned_groups
         graph=SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
-        movement_routes = [r if wanted_filter is None or r['id'] in wanted_filter
-                           else {**r,'move_with':[]} for r in marked_routes]
-        groups = [g for g in plan_move_groups(movement_routes,graph)
-                  if not graph.selected[g[0]].get('move_members') and not set(g).intersection(skip_ids)]
-        if groups:
-            from ..parallel_rebuild import adapt
-            for group in groups:
-                graph.selected[group[0]]['move_members']=group
-            ir = adapt(graph,cur_base)
-            written = {frozenset(g['member_ids']) for g in ir.get('groups',[])}
-            accepted = [g for g in groups if frozenset(g) in written]
-            if accepted:
-                for group in groups:
-                    if group not in accepted:
-                        graph.selected[group[0]].pop('move_members',None)
-                if cur_base == initial_baseline:
-                    grouped = directory/tag/'movement'
-                    shutil.copytree(cur_base,grouped)
-                    cur_base = grouped
-                write(cur_base/'scene.json',graph.model_dump())
-                write(cur_base/'slideir.json',ir)
-                # A group-only change must go through the same compile and Office commit.
-                staged_ids.extend(i for g in accepted for i in g if i not in staged_ids)
+        # A newly accepted member can complete an existing card during a child-only retry.
+        movement_routes = [r if wanted_filter is None or r['id'] in wanted_filter or
+                           set(r.get('move_with', ())).intersection(staged_ids)
+                           else {**r,'move_with':[],'group_owned_children':False} for r in marked_routes]
+        cur_base, grouped_ids, group_issues = stage_planned_groups(
+            movement_routes, graph, cur_base, directory/tag/'movement', skip_ids)
+        staged_ids.extend(i for i in grouped_ids if i not in staged_ids)
+        stage_errors.extend(group_issues)
         write(directory/tag/'route-trace.json',route_trace(marked_routes,graph))
     return cur_base, staged_ids, stage_errors
 
@@ -1843,7 +1885,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                 if field['id'] in wanted_filter:
                     wanted_filter.update(field['target_ids'])
         write(directory/'plan-bindings.json', routes)
-    sam_enabled = bool(os.environ.get('IMAGE2PPT_SAM_URL') or os.environ.get('SAM_URL'))
+    sam_enabled = sam_evidence.configured()
 
     failed_regions: list[dict] = []
 

@@ -66,7 +66,7 @@ def schemas():
                 'properties':{'mark':{'type':'integer','minimum':1},'role':string,
                               'shape':{'type':'string','enum':['roundRect','homePlate','chevron'], 'description':'Optional surface outline hint; measured by host.'},
                               'move_with':{'type':'array','items':{'type':'integer','minimum':1}},
-                              'route':{'enum':['text','surface','asset','table','preserve']}}}
+                              'route':{'enum':['text','surface','asset','table','chart','preserve']}}}
     fields = {
         'plan_marked_page':{'page':page,'fields':{'type':'array','items':plan_field,'maxItems':150},'append':{'type':'boolean'}},
         'inspect_marked_region':{'page':page,'bbox':{'type':'array','items':{'type':'integer'},'minItems':4,'maxItems':4}},
@@ -216,10 +216,15 @@ def create_server(root, bound_job=None):
                     props['fields']['maxItems']=30
                     props['fields']['items']['properties']['role']={'enum':ROLES}
                 if t.name=='batch_reconstruct_page':
+                    t.description = ('Rebuild up to 30 issue objects in one block. Inspect repair_attempt, group_issues '
+                                     'and office_attempts. A second attempt requires changed evidence or strategy for '
+                                     'that same object. Commit the returned validated candidate.')
                     for n in ('include_assets','include_containers','include_region_crops','use_inpaint','verify_office'):
                         props.pop(n,None)
                     props['block']={'type':'integer','minimum':1}
                     t.inputSchema['anyOf']=[{'required':['block']},{'required':['object_ids']}]
+                if t.name=='validate_office':
+                    t.description += ' For the final composition inspect review_routing, marked defects and unresolved locations.'
                 if t.name=='prepare_page_evidence':
                     for n in ('auto_create_scene','run_layers','run_layout'):
                         props.pop(n,None)

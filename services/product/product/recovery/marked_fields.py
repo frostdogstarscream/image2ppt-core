@@ -12,7 +12,7 @@ class FieldWidthMismatch(ValueError):
     """A uniform-width title field occupies a different number of source glyphs."""
 
 
-def separated_fields(source, text, bbox, fallback_color=None):
+def separated_fields(source, text, bbox, fallback_color=None, *, dividers=None):
     parts = re.fullmatch(r'([^|丨｜\n]+)([|丨｜])([^|丨｜\n]+)', text)
     if not parts or min(len(parts[1].strip()), len(parts[3].strip())) < 2:
         return []
@@ -31,37 +31,52 @@ def separated_fields(source, text, bbox, fallback_color=None):
             and ink[:, left:right].sum(0).max() >= 0.52 * h
             and min(left - previous[1], following[0] - right) >= max(3, 0.20 * h)
         ):
-            matches.append((int(right), int(following[0])))
+            matches.append((int(previous[1]), int(left), int(right), int(following[0])))
     if len(matches) != 1:
         return []
-    end, start = matches[0]
+    body_end, divider_start, end, start = matches[0]
     left_text, right_text = parts[1].strip(), parts[3].strip()
     if min(len(left_text), len(right_text)) >= 3 and all(
         unicodedata.east_asian_width(ch) in ('W', 'F') for ch in left_text + right_text
     ):
-        left_ink = np.flatnonzero(ink[:, : end - 3].any(0))
+        left_ink = np.flatnonzero(ink[:, : divider_start].any(0))
         right_ink = np.flatnonzero(ink[:, start:].any(0))
         if left_ink.size and right_ink.size:
             pitch = (np.ptp(left_ink) + 1) / len(left_text)
             if abs((np.ptp(right_ink) + 1) / pitch - len(right_text)) > 0.65:
                 raise FieldWidthMismatch('OCR character count and source field width disagree')
-    boxes = [[x, y, end + 1, h], [x + start - 1, y, w - start + 1, h]]
+    # An inline pipe may be real wording. Detach only a measured, isolated rule
+    # that also differs from the adjacent glyphs in colour or vertical extent.
+    solid = ink[:, divider_start:end]
+    side = ink[:, :body_end]
+    divider_rgb = np.median(patch[:, divider_start:end][solid], axis=0)
+    body_rgb = np.median(patch[:, :body_end][side], axis=0)
+    rule_height = np.count_nonzero(solid.any(axis=1))
+    body_height = np.count_nonzero(side.any(axis=1))
+    detached = dividers is not None and (np.max(np.abs(divider_rgb-body_rgb)) >= 34
+                                         or rule_height > body_height * 1.18)
+    boxes = [[x, y, (body_end if detached else end) + 1, h], [x + start - 1, y, w - start + 1, h]]
     fields = []
-    for value, box in zip((parts[1] + parts[2], parts[3]), boxes):
+    for value, box in zip((parts[1] if detached else parts[1] + parts[2], parts[3]), boxes):
         appearance = measure_text_appearance(source, box)
         color = appearance['color_hex'] if appearance else fallback_color
         if not color:
             return []
         fields.append((value, box, color))
+    if detached:
+        dividers.append({'glyph':parts[2], 'bbox':[x+divider_start, y, end-divider_start, h],
+                         'span':[len(parts[1]), len(parts[1])+1]})
     return fields
 
 
-def split_items(source, items, preserved, *, inherit_colour=False):
+def split_items(source, items, preserved, *, inherit_colour=False, source_dividers=None):
     result = []
     for item in items:
         try:
+            dividers = [] if source_dividers is not None and not item.get('stripped_affix') else None
             fields = (
-                separated_fields(source, item['text'], item['bbox'], item.get('color_hex') if inherit_colour else None)
+                separated_fields(source, item['text'], item['bbox'], item.get('color_hex') if inherit_colour else None,
+                                 dividers=dividers)
                 if len(item['ocr_line_ids']) == 1
                 else []
             )
@@ -78,6 +93,9 @@ def split_items(source, items, preserved, *, inherit_colour=False):
         if not fields:
             result.append(item)
             continue
+        if dividers:
+            source_dividers[item['ocr_line_ids'][0]] = {**dividers[0], 'source_text':item['text'],
+                                                        'fields':[item['id'], item['id']+'-detail']}
         for index, (value, box, color) in enumerate(fields):
             rgb = list(bytes.fromhex(color))
             result.append(

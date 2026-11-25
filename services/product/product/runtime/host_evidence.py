@@ -37,16 +37,21 @@ def prepare_all(service, state, current, directory, *, sources):
                 'inventory_sha256': digest(current['experiment_marks'][k]),
                 'ocr_status':read(local['ocr'][k]).get('status','READY'),
                 'layerd_status': result['layerd_status'], 'layout_status': result['layout_status'],
+                'sam_status': result.get('sam_status','UNKNOWN'),
             }
             rows = read(current['experiment_marks'][k])['rows']
-            fields = deterministic_plan(rows, current['scene_relations'][k])
+            card_edits=read(state.job/'request.json').get('object_scoped_delivery',False)
+            fields = deterministic_plan(rows,current['scene_relations'][k],card_edits=card_edits,
+                                        source_path=local['pages'][page-1]['snapshot']['path'] if card_edits else None)
             current.setdefault('marked_plans', {})[k] = fields
     return {'sources': sources, 'pages': len(sources)}
 
 
-def deterministic_plan(rows, relations):
+def deterministic_plan(rows, relations, *, card_edits=False, source_path=None):
     """Only assign backed OCR, detected table/image and logo routes. Other marks remain proposals."""
     logos = {r['id'] for r in relations.get('logo_lockup_candidates', [])}
+    from .marked_routes import card_move_members
+    movement = card_move_members(rows,source_path=source_path) if card_edits else {}
     result = []
     for r in rows:
         label = r['label']
@@ -54,16 +59,17 @@ def deterministic_plan(rows, relations):
             route, role = 'preserve', 'brand'
         elif r.get('ocr_ids') and label == 'text':
             route, role = 'text', 'field'
-        elif label == 'card_frame':
+        elif label == 'card_frame' or r['id'] in movement:
             route, role = 'surface', 'card'
-        elif label == 'table':
-            route, role = 'table', 'table'
+        elif label in ('table', 'chart'):
+            route, role = label, label
         elif label in ('image','connected_diagram'):
             route, role = 'asset', 'image'
         else:
             continue
         result.append({'id':r['id'], 'bbox':r['bbox'], 'role':role, 'route':route,
-                       'source_text':r.get('text',''), 'origin':'host', 'move_with':[]})
+                       'source_text':r.get('text',''), 'origin':'host', 'move_with':movement.get(r['id'], [])
+                       if route == 'surface' else []})
     return result
 
 
@@ -75,6 +81,8 @@ def questions(state, current, page, failures, directory):
     by_id = {r['id']: r for r in rows}
     uncertain = {r['id'] for r in read(current['ocr'][k])['lines'] if r.get('score', 1) < .94 and not r.get('proofread_verified')}
     choices = {r['id']:r['route'] for r in current['marked_plans'][k]}
+    partners = {r['id']:[by_id[i]['mark'] for i in r.get('move_with',[]) if i in by_id]
+                for r in current['marked_plans'][k] if r.get('move_with')}
     graph = read(current['pages'][page-1]['scene'])
     selected = graph['selected']
     owners = set(selected)
@@ -82,8 +90,11 @@ def questions(state, current, page, failures, directory):
         owners.update(obj.get('seed_ids', []))
         owners.add(obj.get('mark_id'))
     failed = {f['object_id']: f.get('diagnostic_category') or f.get('failure','unverified') for f in failures}
+    group_issues = {f['object_id']:f for f in failures if f.get('kind') == 'group'}
     detected = [r for r in rows if r.get('sources')]
     children = {r['parent'] for r in rows if r.get('parent')}
+    field_sources=current.get('scene_relations',{}).get(k,{}).get('source_fields',{})
+    width_conflicts=set(current.get('scene_relations',{}).get(k,{}).get('source_width_conflicts',[]))
     blocks = []
     for index, block in enumerate(current['host_evidence'][k]['blocks'], 1):
         info, _ = state.evidence(block['inventory']['id'])
@@ -93,12 +104,22 @@ def questions(state, current, page, failures, directory):
             oid = r['id']
             finding = current.get("plate_issues", {}).get(k, {}).get(oid)
             reasons = ["plate_" + finding] if finding else []
-            if oid in failed and oid not in owners:
+            review = current.get('review_issues', {}).get(k, {}).get(oid, [])
+            reasons.extend('review_' + category for category in sorted({v['category'] for v in review}))
+            if oid in failed and (oid not in owners or oid in group_issues):
                 reasons.append(failed[oid])
-            if r['label'] == 'uncertain_ocr' or (r['label']=='text' and uncertain.intersection(r.get('ocr_ids', []))):
+            if width_conflicts.intersection(r.get('ocr_ids',[])):
+                reasons.append('source_glyph_count_disagreement')
+            elif r['label'] == 'uncertain_ocr' or (r['label']=='text' and uncertain.intersection(r.get('ocr_ids', []))):
                 reasons.append('low_confidence_ocr')
             elif oid not in choices and oid not in owners:
                 reasons.append('undecided_route')
+            if not selected.get(oid,{}).get('source_reading') and any(
+                    field_sources.get(lid,{}).get('source_divider') for lid in r.get('ocr_ids',[])):
+                reasons.append('review_split_source_field')
+            late=current.get('late_fields',{}).get(k,{}).get(oid)
+            if late and late['status']=='pending':
+                reasons.append(late['reason'])
             if oid in children and r['label'] == 'icon' and r.get('intersecting_ocr_ids'):
                 reasons.append('possible_card_or_group')
             conflicts = [s['mark'] for s in detected if r.get('sources') and
@@ -107,9 +128,13 @@ def questions(state, current, page, failures, directory):
                 reasons.append('detector_conflict')
             if reasons:
                 items.append({'mark':r['mark'], 'id':oid, 'label':r['label'], 'issues':reasons,
-                              'route':choices.get(oid), 'committed':oid in owners,
+                              'route':choices.get(oid), 'committed':oid in owners, 'review_findings':review,
                               'parent_mark':by_id[r['parent']]['mark'] if r.get('parent') else None,
-                              'conflicting_marks':conflicts[:12],'source_text':r.get('text','')[:120]})
+                              'conflicting_marks':conflicts[:12],'source_text':r.get('text','')[:120],
+                              **({'move_with_marks':partners[oid]} if oid in partners else {}),
+                              **({'group_conflict_ids':group_issues[oid].get('conflict_ids',[]),
+                                  'group_conflict_marks':[by_id[i]['mark'] for i in group_issues[oid].get('conflict_ids',[])
+                                                          if i in by_id]} if oid in group_issues else {})})
         if items:
             file = directory / f'questions-{page}-{index}.json'
             write(file, {'source_sha256':inventory['source_sha256'], 'page':page, 'block':index, 'items':items})
@@ -138,7 +163,7 @@ def scoped_ids(state, current, page, block, object_ids):
     return sorted(ids)
 
 
-ROLES = ['field','title','label','caption','body','number','project','industry','table','card',
+ROLES = ['field','title','label','caption','body','number','project','industry','table','chart','card',
          'role_box','screenshot','dashboard','image','icon','decoration','brand','group','other']
 
 
@@ -150,16 +175,19 @@ def normalize_arguments(state,current,tool,arguments):
             raise ValueError('select 1 to 30 numbered object IDs on this page')
         return {'page':args['page'], 'object_ids':list(dict.fromkeys(ids)), 'explicit':True}
     if tool=='batch_reconstruct_page':
+        from .review_targets import repair_inputs
         page = str(args['page'])
         rounds = current.setdefault('repair_rounds', {}).get(page, [])
         ids = scoped_ids(state,current,args['page'],args.get('block'),args.get('object_ids'))
+        inputs = repair_inputs(current, args['page'], ids)
         available = []
         for identifier in ids:
             attempts = [r for r in rounds if identifier in r.get('object_ids', ids)]
-            if len(attempts) < 2 and (not attempts or attempts[-1]['progress']):
+            previous = attempts[-1].get('inputs', {}).get(identifier) if attempts else None
+            if not attempts or (len(attempts) < 2 and previous is not None and inputs[identifier] != previous):
                 available.append(identifier)
         if not available:
-            raise ValueError('local repair limit reached for the selected objects')
+            raise ValueError('local repair limit reached or unchanged evidence for: '+', '.join(sorted(ids)))
         return {'page':args['page'],'object_ids':available,'verify_office':True,'include_region_crops':False}
     if tool=='plan_marked_page':
         page = args['page']
@@ -172,7 +200,7 @@ def normalize_arguments(state,current,tool,arguments):
             raise ValueError('select 1 to 30 numbered questions')
         for f in fields:
             if (set(f)-{'shape'}!={'mark','move_with','role','route'} or ('shape' in f and (f['route'] != 'surface' or f['shape'] not in ('roundRect','homePlate','chevron'))) or f['role'] not in ROLES or
-                    f['route'] not in ('text','asset','surface','table','preserve') or
+                    f['route'] not in ('text','asset','surface','table','chart','preserve') or
                     any(n not in by_mark for n in [f['mark'],*f['move_with']])):
                 raise ValueError('use only numbered marks, existing partners, a role and a route')
             if by_mark[f['mark']] in body_fields and f['route'] != 'text':
@@ -187,11 +215,13 @@ def compact(tool,result):
         return {'page':result['page'],'planned_count':result['planned_count'],
                 'object_ids':[r['id'] for r in result['fields']]}
     if tool=='batch_reconstruct_page':
-        return {**{k:result[k] for k in ('page','status','candidate_id','failed_count','staged_count','office_attempts','isolation_history') if k in result},
-                'failures':dict(Counter(r.get('diagnostic_category','UNKNOWN') for r in result.get('failed_regions',[])))}
+        return {**{k:result[k] for k in ('page','status','candidate_id','failed_count','staged_count','office_attempts','isolation_history','repair_attempt') if k in result},
+                'failures':dict(Counter(r.get('diagnostic_category','UNKNOWN') for r in result.get('failed_regions',[]))),
+                'group_issues':[{'id':r['object_id'],'reason':r['failure'],'conflicts':r.get('conflict_ids',[])}
+                                for r in result.get('failed_regions',[]) if r.get('kind')=='group'][:30]}
     if tool=='validate_office':
         audit = result.get('scorecard_audit', {})
-        return {**{k:result[k] for k in ('status','required_evidence','failure','pptx_sha256') if k in result},
+        return {**{k:result[k] for k in ('status','required_evidence','failure','pptx_sha256','review_routing') if k in result},
                 'audit_passed': audit.get('passed'), 'defects': audit.get('critical_defects',[])[:30],
                 'missing_objects': [{'page':p['page'],'items':p['summary'].get('missing_inventory_items',[])[:30]}
                                     for p in audit.get('pages',[])]}
@@ -223,6 +253,7 @@ def context(state,request):
                       'issue_blocks':[{k:v for k,v in b.items() if k!='marks'} for b in blocks],
                       'source':state.register(state.job/'inputs'/request['sources'][i-1],'source')['id']})
     return {'version':c['version'],'pages':pages,'tool_catalog':sorted(AGENT_TOOLS),'goal':request.get('goal'),
+            'repair_history':c.get('repair_history_evidence'),
             'baseline':{'origin':'deterministic-baseline','pptx_sha256':base['pptx_sha256'],
                         'office_status':base['office_status'],'pages':summary(base)},
             'remaining_seconds':state.remaining_seconds()}

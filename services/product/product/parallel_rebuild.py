@@ -396,7 +396,7 @@ def build(graph,snap,fonts,directory,*,layers=None,stable=(),strategy='auto',sam
     return directory/'slideir.json',report
 
 
-def adapt(graph,directory):
+def adapt(graph,directory, *, group_issues=None):
     """The sole r10 SceneGraph-to-existing-SlideIR conversion."""
     directory=Path(directory).resolve();chosen=list(graph.selected.values())
     if digest(directory/'source.png')!=graph.source_sha256:raise ValueError('SceneGraph source snapshot mismatch')
@@ -595,5 +595,7 @@ def adapt(graph,directory):
                 ir['nodes'].append(node)
     if movement:
         from .runtime.marked_routes import apply_move_groups
-        apply_move_groups(ir,movement)
+        issues = apply_move_groups(ir,movement)
+        if group_issues is not None:
+            group_issues.extend(issues)
     return ir

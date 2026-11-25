@@ -120,14 +120,15 @@ def table_from_mark(image, mark, lines, fonts):
     )
 
 
-def stage_tables(baseline, output, fields, skip):
+def native_structure_supported(kind):
+    capability = {'table':'native_tables', 'chart':'native_charts'}[kind]
     _, node = compiler_runtime()
     check = subprocess.run(
         [
             str(node),
             '--input-type=module',
             '-e',
-            "import {COMPILER} from './scripts/capabilities.mjs';console.log(COMPILER.native_tables)",
+            f"import {{COMPILER}} from './scripts/capabilities.mjs';console.log(COMPILER.{capability})",
         ],
         cwd=ROOT,
         capture_output=True,
@@ -135,7 +136,11 @@ def stage_tables(baseline, output, fields, skip):
         timeout=20,
         check=True,
     )
-    if check.stdout.strip() != 'true':
+    return check.stdout.strip() == 'true'
+
+
+def stage_tables(baseline, output, fields, skip):
+    if not native_structure_supported('table'):
         return baseline, [], set()
     graph = SceneGraph.model_validate_json((baseline / 'scene.json').read_text(encoding='utf8'))
     inv = json.loads((baseline / 'runtime-ocr-protection.json').read_text(encoding='utf8'))

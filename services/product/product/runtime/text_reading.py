@@ -171,6 +171,18 @@ def stage_readings(service, state, current, directory, *, page, object_ids, expl
 
     if targets is None:
         targets = {}
+        relations = current.get('scene_relations',{}).get(str(page),{})
+        split = [oid for r in relations.get('source_fields',{}).values()
+                 for oid in r.get('source_divider',{}).get('fields',[]) if oid in object_ids]
+        if split:
+            from .host_evidence import read
+            from .reading_targets import resolve_targets
+            inventory=read(current['experiment_marks'][str(page)])
+            if inventory['source_sha256']!=scene.source_sha256:
+                raise ValueError('split inventory source changed')
+            targets,_=resolve_targets(scene,lines,{r['id']:r for r in inventory['rows']},split,
+                                      current.get('marked_plans',{}).get(str(page),[]),
+                                      [r['id'] for r in relations.get('logo_lockup_candidates',[])])
         for obj in scene.text.texts:
             members = scene.text.members.get(obj.id, [])
             if (obj.id not in object_ids or len(members) != 1 or obj.spans
@@ -178,6 +190,7 @@ def stage_readings(service, state, current, directory, *, page, object_ids, expl
                 continue
             line = lines.get(members[0], {})
             flagged = any(intersection(obj.bbox, box) >= .5 * obj.bbox[2] * obj.bbox[3] for box in flagged_boxes)
+            flagged |= current.get('plate_issues',{}).get(str(page),{}).get(obj.id)=='source_reading_disagreement'
             if line.get('text') == obj.text and not line.get('reading_status') and (line.get('score', 1) < .94 or flagged):
                 targets[obj.id] = (line, True)
     for oid, (line, writable) in targets.items():

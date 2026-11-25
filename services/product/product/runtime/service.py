@@ -141,26 +141,47 @@ class RuntimeService(ExplorationTools):
         def execute(current,directory):
             if not host:
                 return method(state,current,directory,**arguments)
-            from .host_evidence import compact, refresh
+            from .host_evidence import compact, questions, refresh, scoped_ids
             if tool=='prepare_page_evidence':
                 return refresh(self,state,current,directory,arguments['page'])
             args = normalize_arguments(state,current,tool,arguments)
+            if tool=='batch_reconstruct_page':
+                from .review_targets import repair_inputs
+                requested = scoped_ids(state,current,args['page'],arguments.get('block'),arguments.get('object_ids'))
+                inputs = repair_inputs(current,args['page'],args['object_ids'])
             outcome = method(state,current,directory,**args)
             if tool=='batch_reconstruct_page':
                 k = str(args['page'])
                 old = current.setdefault('regional_failures',{}).get(k,[])
-                current.setdefault('repair_rounds', {}).setdefault(k, []).append({
-                    'progress': False, 'candidate_id': outcome.get('candidate_id'), 'object_ids':args['object_ids']})
+                attempt = {'inputs':inputs, 'candidate_id':outcome.get('candidate_id'), 'object_ids':args['object_ids'],
+                           'skipped_unchanged_or_exhausted': sorted(set(requested)-set(args['object_ids'])),
+                           'finding_ids':{oid:[f['finding_id'] for f in current.get('review_issues',{}).get(k,{}).get(oid,[])]
+                                          for oid in args['object_ids']}, 'committed_ids':[],
+                           'office_attempts':outcome.get('office_attempts'), 'status':outcome.get('status')}
+                current.setdefault('repair_rounds', {}).setdefault(k, []).append(attempt)
+                outcome['repair_attempt'] = attempt.copy()
                 touched = set(args['object_ids'])
                 current['regional_failures'][k] = [r for r in old if r['object_id'] not in touched]+outcome.get('failed_regions',[])
             if tool=='commit_candidate' and outcome.get('status')=='COMMITTED':
-                from .host_evidence import questions
                 page = current['candidates'][args['candidate_id']]['page']
+                graph = self.graph(self.page(current,page))
+                from .marked_routes import route_trace
+                committed = set(outcome.get('object_ids', []))
+                bindings = {r['mark_id']:set(r['selected_ids']) for r in
+                            route_trace(current.get('marked_plans',{}).get(str(page),[]),graph)}
                 for attempt in current.get('repair_rounds',{}).get(str(page),[]):
                     if attempt['candidate_id'] == args['candidate_id']:
-                        attempt['progress'] = bool(outcome.get('object_ids') or outcome.get('committed_count'))
+                        attempt['committed_ids'] = [i for i in attempt['object_ids'] if i in committed
+                                                    or bindings.get(i,set()) & committed]
+                        attempt['status'] = 'COMMITTED'
                 failures = current.get('regional_failures',{}).get(str(page),[])
                 current['questions'][str(page)] = questions(state,current,page,failures,directory)
+            if tool=='validate_office' and not args.get('candidate_id') and outcome.get('scorecard_audit'):
+                from .review_targets import expose_review
+                outcome['review_routing'] = expose_review(self,state,current,directory,outcome['scorecard_audit'])
+            if tool in ('commit_candidate','batch_reconstruct_page') and current.get('repair_rounds'):
+                write(directory/'repair-history.json',current['repair_rounds'])
+                current['repair_history_evidence'] = state.register(directory/'repair-history.json','repair_history')['id']
             return compact(tool,outcome)
         return state.mutate(tool, arguments, expected_version, idempotency_key,execute)
 
@@ -710,13 +731,8 @@ class RuntimeService(ExplorationTools):
             ocr = json.loads(Path(current['ocr'][k]).read_text('utf8'))
             lines = {ln['id']:ln for ln in ocr['lines']}
             receipt = json.loads(Path(candidate['reading_receipt']).read_text('utf8'))
-            for change in receipt['changes']:
-                line = lines[change['ocr_id']]
-                if line['text'] != change['before']:
-                    raise RuntimeConflict('source OCR changed before commit')
-                pending = change.get('status')=='pending_confirmation'
-                line.update(ocr_raw_text=change['before'], text=change['after'], proofread_verified=not pending,
-                            reading_status=change.get('status','source_supported'))
+            from .reading_targets import commit_readings
+            commit_readings(lines,receipt['changes'])
             write(directory/'verified-ocr.json', ocr)
             current['ocr'][k] = str(directory/'verified-ocr.json')
         row.update(ir=str(ir), scene=str(ir.parent/'scene.json'))

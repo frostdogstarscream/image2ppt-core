@@ -140,12 +140,9 @@ def test_native_chart_stage_compiles_valid_chart_node(tmp_path):
     draw.rectangle((190, 130, 230, 220), fill=(40, 130, 240))
     draw.rectangle((290, 90, 330, 220), fill=(40, 130, 240))
     src_path = tmp_path / 'chart.png'
-    img.save(src_path)
-
     manifest = fonts.font_manifest([])
     rec = next(r for r in manifest['fonts'] if r['family'] == 'Arial' and not r['bold'])
     font_data = {'schema': 'FontManifest/1', 'fonts': [rec]}
-    snap = snapshot(src_path, tmp_path / 'snap')
     texts = [
         {'id': 't1', 'text': 'Q1', 'bbox': [95.0, 228.0, 30.0, 18.0], 'style': 'st', 'z': 1},
         {'id': 't2', 'text': 'Q2', 'bbox': [195.0, 228.0, 30.0, 18.0], 'style': 'st', 'z': 2},
@@ -154,6 +151,11 @@ def test_native_chart_stage_compiles_valid_chart_node(tmp_path):
         {'id': 'v2', 'text': '90', 'bbox': [195.0, 108.0, 28.0, 16.0], 'style': 'st', 'z': 5},
         {'id': 'v3', 'text': '130', 'bbox': [295.0, 68.0, 32.0, 16.0], 'style': 'st', 'z': 6},
     ]
+    for t in texts:
+        draw.text(t['bbox'][:2], t['text'], fill=(30, 40, 60),
+                  font=ImageFont.truetype(rec['file'], 12, index=rec['index']))
+    img.save(src_path)
+    snap = snapshot(src_path, tmp_path / 'snap')
     graph = SceneGraph.model_validate({
         'schema': 'SceneGraph/1', 'source_sha256': snap['source_sha256'], 'image_size': [w, h], 'transform': [1, 0, 0, 1, 0, 0],
         'method_version': 'test',
@@ -165,13 +167,81 @@ def test_native_chart_stage_compiles_valid_chart_node(tmp_path):
         'ownership': {t['id']: 'RESOLVED' for t in texts}, 'relations': [],
     })
     base_ir, _ = build(graph, snap, font_data, tmp_path / 'base', strategy='off', text_candidates=False, surface_candidates=False)
-    layout = {'regions': [{'label': 'chart', 'bbox': [60.0, 60.0, 310.0, 195.0], 'score': 0.91}]}
-    ch_ir, ch_ids = stage_native_charts(base_ir.parent, tmp_path / 'chart-staged', layout=layout, fonts=font_data)
-    assert ch_ids == ['ch-01']
+    layout = {'source_sha256': snap['source_sha256'], 'regions': [
+        {'id':'m-chart', 'label': 'image', 'bbox': [60.0, 60.0, 310.0, 195.0], 'score': 0.91},
+        {'id':'m-blank', 'label': 'image', 'bbox': [0, 0, 146, 95], 'score': 0.98}]}
+    assert stage_native_charts(base_ir.parent, tmp_path/'wrong-chart', layout=layout, region_ids={'m-other'}) == (base_ir, [])
+    field = {**layout['regions'][0], 'route':'chart'}
+    write(tmp_path/'layout.json', layout)
+    original, ids, issues = scoped_structure(tmp_path, base_ir, font_data,
+                                             {**layout['regions'][1], 'route':'chart'}, 'false-chart')
+    assert original == base_ir.parent and not ids and issues[0]['failure'] == 'CHART_NOT_VERIFIED'
+    output, ch_ids, failures = scoped_structure(tmp_path, base_ir, font_data, field, 'chart-staged')
+    assert failures == []
+    ch_ir = output/'slideir.json'
+    assert len(ch_ids) == 1
     ch_graph = SceneGraph.model_validate_json((ch_ir.parent / 'scene.json').read_text('utf8'))
+    chart = ch_graph.selected[ch_ids[0]]
+    assert chart['mark_id'] == 'm-chart' and ch_graph.ownership[ch_ids[0]] == 'RESOLVED'
+    assert chart['payload']['series'][0]['values'] == [50, 90, 130]
+    assert set(chart['covered_text_ids']) == {t['id'] for t in texts}
     compiled = compile_local([ch_ir], tmp_path / 'compiled', [effective_texts(ch_graph, ch_ir)])
     sc = scorecard.score_page(src_path, compiled['pptx'])
     assert sc['object_counts'].get('chart', 0) == 1
+
+
+def scoped_structure(root, baseline_ir, font_data, field, tag):
+    from product.runtime.batch_backbone import _chain_stage_from_spec
+    graph = SceneGraph.model_validate_json((baseline_ir.parent/'scene.json').read_text('utf8'))
+    return _chain_stage_from_spec(initial_graph=graph,initial_baseline=baseline_ir.parent,
+        fonts=font_data,source_path=str(baseline_ir.parent/'source.png'), layers_dir=None, deferred_path=None,
+        page_cache_dir=root, directory=root, tag=tag, trials_spec=[], frame_overrides={}, skip_ids=set(),
+        include_assets=False, include_containers=False, layout_path=str(root/'layout.json'),
+        wanted_filter={field['id']}, sam_enabled=False, marked_routes=[field])
+
+
+def test_scoped_table_preserves_previously_selected_cell_text(tmp_path):
+    src = Image.new('RGB',(270,180), 'white')
+    draw = ImageDraw.Draw(src)
+    for x in (40,120,200):
+        draw.line((x,30,x,100),fill='black')
+    for y in (30,64,100):
+        draw.line((40,y,200,y),fill='black')
+    lines = []
+    for i,(x,y) in enumerate(((58,40),(140,40),(58,76),(140,76))):
+        value = str(i+1)
+        draw.text((x,y),value,fill='black')
+        lines.append({'id':f't-{i}', 'text':value, 'bbox':[x,y,15,14], 'score':1})
+    source = tmp_path/'source.png'
+    src.save(source)
+    snap = snapshot(source,tmp_path/'snap')
+    binding = {'source_sha256':snap['source_sha256'],'image_size':[270,180],'method_version':'test'}
+    style = {'id':'st','role':'body','ea':'Arial','latin':'Arial','size_px':12,'bold':False,'color':'000000'}
+    graph = SceneGraph.model_validate({'schema':'SceneGraph/1',**binding,'transform':[1,0,0,1,0,0],
+        'text':{'schema':'TextEvidence/1',**binding,'styles':[style],
+                'texts':[{k:l[k] for k in ('id','text','bbox')} | {'z':i+1,'style':'st'} for i,l in enumerate(lines)],
+                'members':{l['id']:[l['id']] for l in lines}},
+        'asset':{'schema':'AssetEvidence/1',**binding,'objects':[]},
+        'surface':{'schema':'SurfaceEvidence/1',**binding,'background':'FFFFFF','shapes':[]},
+        'ownership':{l['id']:'RESOLVED' for l in lines}})
+    font_data = fonts.font_manifest([])
+    base_ir, _ = build(graph,snap,font_data,tmp_path/'base',strategy='off',text_candidates=False,surface_candidates=False)
+    write(base_ir.parent/'runtime-ocr-protection.json',{'source_sha256':snap['source_sha256'],'lines':lines})
+    field = {'id':'m-table','route':'table','bbox':[39,29,163,73]}
+    output, ids, issues = scoped_structure(tmp_path,base_ir,font_data,field,'scoped-table')
+    assert len(ids)==1 and not issues
+    graph = SceneGraph.model_validate_json((output/'scene.json').read_text('utf8'))
+    assert graph.selected[ids[0]]['payload']['rows'] == [['1','2'],['3','4']]
+    assert graph.ownership[ids[0]] == 'RESOLVED'
+    compile_local([output/'slideir.json'],tmp_path/'compiled-table',[effective_texts(graph,output/'slideir.json')])
+    # Exercise the old-job conflict without modifying the independently staged table.
+    old = SceneGraph.model_validate_json((base_ir.parent/'scene.json').read_text('utf8'))
+    old.selected['t-0'] = {'kind':'text','id':'t-0','bbox':lines[0]['bbox']}
+    write(base_ir.parent/'scene.json',old.model_dump())
+    retained, ids, issues = scoped_structure(tmp_path,base_ir,font_data,field,'occupied-cell')
+    assert retained == base_ir.parent and ids == []
+    assert issues[0]['reason'] == 'overlapping_committed_objects'
+    assert issues[0]['conflicting_object_ids'] == ['t-0']
 
 
 def test_verified_ocr_proofreading_accepts_single_char_typo_and_rejects_hallucination():

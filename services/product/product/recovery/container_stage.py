@@ -340,6 +340,7 @@ def stage_containers_and_surfaces(
     logo_ids: set[str] | None = None,
     wanted_ids: set[str] | None = None,
     marked_boxes: dict | None = None,
+    measured_faces: dict | None = None,
     stable_ids: bool = False,
     scope_boxes: list | None = None,
     native_only: bool = False,
@@ -447,6 +448,11 @@ def stage_containers_and_surfaces(
     candidates = _discover_candidates(
         work_plate, canvas_field, scenery_guard, is_flat_canvas=is_flat_canvas, bar_series=bar_series
     )
+    if measured_faces:
+        # A detector may see just the label within a connected row. Fit the measured
+        # colour component independently of the proposals made by the full-page scan.
+        candidates = [('box', list(bounds)) for bounds in measured_faces] + [
+            item for item in candidates if tuple(item[1]) not in measured_faces]
     if not candidates:
         return baseline / 'slideir.json', []
 
@@ -473,7 +479,12 @@ def stage_containers_and_surfaces(
             continue
         rect_area = rectangle([x, y, w, h], size)
         mark = (marked_boxes or {}).get((x,y,w,h))
-        if marked_boxes is not None and mark is None:
+        face_mark = (measured_faces or {}).get((x,y,w,h))
+        if marked_boxes is not None and mark is None and face_mark is None:
+            continue
+        if face_mark and any(intersection(raw_box, rec['bbox']) > 0 and
+                             intersection(raw_box, rec['bbox']) < rec['bbox'][2]*rec['bbox'][3]
+                             for rec in graph.selected.values()):
             continue
         if (rect_area & unresolved_guard).any():
             continue
@@ -518,9 +529,9 @@ def stage_containers_and_surfaces(
                 s_seq += 1
             sid = f's-{s_seq:03d}'
             s_seq += 1
-            if mark and shape_fit.get('geometry') not in ('pentagon','chevron'):
+            if mark and not face_mark and shape_fit.get('geometry') not in ('pentagon','chevron'):
                 continue
-            if mark or stable_ids:
+            if mark or face_mark or stable_ids:
                 from ..parallel_store import key
                 sid = 's-' + key([graph.source_sha256, 'marked-surface', [x,y,w,h]])[:16]
             if sid in used_ids or sid in skip or (wanted_ids is not None and sid not in wanted_ids):
@@ -530,7 +541,7 @@ def stage_containers_and_surfaces(
 
             # Optional soft drop-shadow cleanup outside top-level cards on sky/canvas
             halo_mask = None
-            if not is_flat_canvas and w >= 120 and h >= 60:
+            if not face_mark and not is_flat_canvas and w >= 120 and h >= 60:
                 halo_mask = soft_shadow_halo_mask(
                     work_plate, canvas_field, [x, y, w, h], already_claimed, unresolved_guard
                 )
@@ -598,9 +609,10 @@ def stage_containers_and_surfaces(
                 'payload': shape_obj.model_dump(),
                 **({'arrow_adjustment':shape_fit['arrow_adjustment']} if 'arrow_adjustment' in shape_fit else {}),
                 'method': 'container-surface-v2-gradient-preset/1',
+                **({'mark_id':face_mark} if face_mark else {}),
                 **({'contained_children':sorted(oid for oid in direct_oids
                      if intersection([x,y,w,h], graph.selected[oid]['bbox']) >=
-                     graph.selected[oid]['bbox'][2]*graph.selected[oid]['bbox'][3])} if stable_ids else {}),
+                     graph.selected[oid]['bbox'][2]*graph.selected[oid]['bbox'][3])} if stable_ids or face_mark else {}),
                 'state': 'STAGED',
                 'quality': 'REVIEW_REQUIRED',
                 'human_acceptance': False,

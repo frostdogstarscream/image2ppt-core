@@ -61,7 +61,7 @@ def visible_rgba(layers,masks):
     return np.dstack([np.rint(rgb).clip(0,255).astype('uint8'),np.rint(alpha*255).clip(0,255).astype('uint8')])
 
 
-def load_sam(directory,obj,source_hash,plan_hash,size,version,*,individual=False):
+def load_sam(directory,obj,source_hash,plan_hash,size,version,*,individual=False,distinguish_empty=False):
     """Only consume source/plan/version-bound, finite, full-canvas masks."""
     if directory is None:return None,'sam_not_configured'
     root=Path(directory).resolve();receipt=root/(obj.id+'.json')
@@ -81,7 +81,9 @@ def load_sam(directory,obj,source_hash,plan_hash,size,version,*,individual=False
         if not area:continue
         overlap=int((mask & roi).sum())
         if overlap:candidates.append({'mask':mask,'score':float(score),'index':index,'localization_fraction':overlap/area})
-    if not candidates:return None,'sam_no_owned_candidate'
+    if not candidates:
+        if distinguish_empty and not (masks>.5).any():return None,'sam_empty_mask'
+        return None,'sam_no_owned_candidate'
     candidates.sort(key=lambda c:-c['score'])
     # Legacy callers receive ONE hypothesis; model masks are never blindly unioned.
     return (candidates if individual else candidates[0]['mask']),None

@@ -20,9 +20,13 @@ from PIL import Image
 
 from ..contracts import intersection
 from ..materialize import digest, write
-from ..object_extract import rectangle
+from ..object_contracts import ClosedObject
 from ..parallel_contracts import SceneGraph
+from ..parallel_fusion import fuse_incremental_scene, glyph_evidence
 from ..parallel_rebuild import adapt, array_sha
+from ..parallel_store import key
+from .marked_tables import native_structure_supported
+from .marked_ownership import record_claims
 
 _NUM_RE = re.compile(r'^[-+]?\d+(?:\.\d+)?%?$')
 
@@ -43,22 +47,34 @@ def stage_native_charts(
     layout: dict | None = None,
     fonts: dict | None = None,
     skip_ids: set[str] | None = None,
+    region_ids: set[str] | None = None,
+    marked_regions=(),
 ) -> tuple[Path, list[str]]:
     """Detect and stage data-bearing bar charts with real category labels as native `chart` nodes."""
     skip = skip_ids or set()
     baseline = Path(baseline_directory).resolve()
     output = Path(output_directory).resolve()
-    if not layout or not layout.get('regions'):
-        return baseline / 'slideir.json', []
-
+    layout = layout or {}
     chart_regions = [
         r for r in layout.get('regions', [])
         if r.get('label') == 'chart' and float(r.get('score', 0.0)) >= 0.55 and len(r.get('bbox', [])) == 4
+        and (region_ids is None or r.get('id') in region_ids) and r.get('id') not in skip
     ]
-    if not chart_regions:
+    included = {r.get('id') for r in chart_regions}
+    for field in marked_regions:
+        identifier = field['id']
+        if identifier in included or identifier in skip or (region_ids is not None and identifier not in region_ids):
+            continue
+        # A source-bound mark can nominate a mislabeled region for inspection.
+        # Neither the mark nor the planner supplies chart data or a pixel mask.
+        chart_regions.append({'id':identifier, 'bbox':field['bbox']})
+        included.add(identifier)
+    if not chart_regions or not native_structure_supported('chart'):
         return baseline / 'slideir.json', []
 
     graph = SceneGraph.model_validate_json((baseline / 'scene.json').read_text('utf8'))
+    if layout.get('source_sha256', graph.source_sha256) != graph.source_sha256:
+        raise ValueError('chart layout source mismatch')
     rb = graph.raster_backing or {}
     plate_in = (baseline / rb.get('path', 'source-plate.png')).resolve()
     if not plate_in.is_file() or digest(plate_in) != rb.get('sha256'):
@@ -168,15 +184,17 @@ def stage_native_charts(
         if len(categories) != len(cat_texts) or len(matched_bars) != len(bars):
             continue
 
-        while f'ch-{ch_seq:02d}' in used_ids:
+        if reg.get('id'):
+            cid_str = 'ch-' + key([graph.source_sha256, reg['id']])[:16]
+        else:
+            while f'ch-{ch_seq:02d}' in used_ids:
+                ch_seq += 1
+            cid_str = f'ch-{ch_seq:02d}'
             ch_seq += 1
-        cid_str = f'ch-{ch_seq:02d}'
-        ch_seq += 1
-        if cid_str in skip:
+        if cid_str in skip or cid_str in used_ids:
             continue
 
         full_mask = np.zeros((h_img, w_img), bool)
-        from ..parallel_fusion import glyph_evidence
         styles = {style.id:style for style in graph.text.styles}
         if {t.id for t in inside_texts} != label_ids:
             continue
@@ -189,7 +207,7 @@ def stage_native_charts(
                 break
             backing = np.broadcast_to(bg_med, (h,w,3))
             ink, uncertain = glyph_evidence(work_plate, [x,y,w,h], styles[t.style].color, backing)
-            if uncertain.any():
+            if uncertain.any() or not ink.any():
                 break
             chart_mask[y-ry:y-ry+h, x-rx:x-rx+w] |= ink
             pending_labels.remove(t.id)
@@ -204,8 +222,18 @@ def stage_native_charts(
         if int(full_mask.sum()) < 60:
             continue
 
+        bbox = [rx, ry, rw, rh]
+        obj = ClosedObject(id=cid_str, kind='illustration', bbox=bbox, layers=['source-plate.png'],
+                           components=['chart'], parts=[{'name':'chart', 'bbox':bbox, 'layers':['source-plate.png']}],
+                           text_policy='exclude_independent_text', description='Source-verified data chart',
+                           prompt_en='independent native chart')
+        fused = fuse_incremental_scene(baseline, base_graph=graph, added_assets=[obj])
+        if fused.ownership.get(cid_str) != 'RESOLVED':
+            continue
+        graph = fused
         staged_charts.append({
             'id': cid_str,
+            'mark_id': reg.get('id'),
             'bbox': [float(rx), float(ry), float(rw), float(rh)],
             'restore_bbox': [rx, ry, rw, rh],
             'bg_uint8': np.clip(np.rint(bg_med), 0, 255).astype(np.uint8),
@@ -237,6 +265,7 @@ def stage_native_charts(
         np.savez_compressed(proof_file, mask=ch['mask'], restore_bbox=[rx, ry, rw, rh], backing_patch=backing_patch)
         record = {
             'id': ch['id'],
+            'mark_id': ch['mark_id'],
             'kind': 'chart',
             'bbox': ch['bbox'],
             'restore_bbox': [rx, ry, rw, rh],
@@ -268,6 +297,8 @@ def stage_native_charts(
         'bbox': [0, 0, *graph.image_size],
     }
     ir = adapt(graph, output)
+    record_claims(output, [graph.selected[oid] for oid in new_ids])
+    write(output / 'transactions.json', graph.transactions)
     write(output / 'scene.json', graph.model_dump())
     write(output / 'slideir.json', ir)
     return output / 'slideir.json', new_ids

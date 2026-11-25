@@ -1,5 +1,6 @@
 """Explicit numbered reading uses synthetic sources and providers in these tests."""
 import json
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import pytest
@@ -109,6 +110,29 @@ def test_explicit_high_score_split_and_uncommitted_readings(page, monkeypatch):
     assert proof['changes'] == []
 
 
+def test_host_page_reading_rechecks_suspicious_split_at_high_confidence(page,monkeypatch):
+    service,state,current,directory=page
+    current['scene_relations']={'1':{'source_fields':{'l1':{'source_divider':{'fields':['detail']}}}}}
+    write(state.job/'request.json',{'sources':['source.png'],'page_reading':True})
+    monkeypatch.setenv('IMAGE2PPT_MOMA_READING_MODEL','fixture')
+    calls=[]
+    class Reader:
+        def __init__(self,model):
+            self.session=str(len(calls)+1)
+            self.last_usage={}
+        def ask(self,prompt,context,images,contract):
+            ids=context['field_numbers']
+            calls.append((prompt,ids))
+            return {'fields':[{'number':i,'legible':True,'kind':'ordinary','text':{1:'Body',2:'30%',3:'Alone'}[i]}
+                              for i in ids]}
+    monkeypatch.setattr(page_reading,'MomaReviewer',Reader)
+    text_reading.stage_readings(service,state,current,directory,page=1,object_ids=None)
+    result=json.loads((directory/'readings.json').read_text('utf8'))
+    detail=next(r for r in result['observations'] if r['object_id']=='detail')
+    assert detail['before']=='Body' and detail['source_span']==[6,10] and detail['delivery']=='native_field'
+    assert 'crop' in detail['views'] and calls[1][1]==[1,3]
+
+
 def test_skip_ambiguous_geometry_and_unavailable_provider(page,monkeypatch):
     service,state,current,_ = page
     data = json.loads(current['experiment_marks']['1'].read_text('utf8'))
@@ -158,6 +182,16 @@ def test_verified_split_stages_just_native_child_and_binds_crop(page,monkeypatch
     assert scene.text.texts[1].text == original.text.texts[1].text
     proof = json.loads((directory/'readings.json').read_text('utf8'))
     text_reading.authorize_readings(original, scene, proof)
+    # The source line is larger than the staged field. Exercise the production
+    # commit transition after supplying a synthetic validation receipt.
+    from product.runtime.service import RuntimeService
+    candidate.update(status='VALIDATED',validation={'status':'PASS'})
+    service._verify_staged_candidate_graph = lambda c,cd:(Path(cd['ir']),scene,row,original)
+    result = RuntimeService.commit_region(service,state,current,directory/'commit',candidate_id=candidate['id'])
+    assert result['status']=='COMMITTED'
+    committed=json.loads(Path(current['ocr']['1']).read_text('utf8'))['lines'][0]
+    assert committed['text']=='Title|Bode' and committed['ocr_raw_text']=='Title|Body'
+    assert 'reading_status' not in committed and committed['field_readings']['detail']['source_span']==[6,10]
 
 
 def test_two_view_split_is_not_interpreted_as_whole_line(page,monkeypatch):

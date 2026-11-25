@@ -207,6 +207,30 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
     target_ids = list(targets or {})
     numbered = ([(i, targets[oid][0]) for i, oid in enumerate(target_ids, 1)] if targets is not None else
                 [(i,line) for i,line in enumerate(lines.values(),1) if min(line['bbox'][2:])>0])
+    split_targets = {}
+    relations = current.get('scene_relations',{}).get(str(page),{})
+    split_ids = [oid for field in relations.get('source_fields',{}).values()
+                 for oid in field.get('source_divider',{}).get('fields',[])]
+    if targets is None and split_ids:
+        from .host_evidence import read
+        from .reading_targets import resolve_targets
+        inventory=read(current['experiment_marks'][str(page)])
+        if inventory['source_sha256']!=scene.source_sha256:
+            raise ValueError('split inventory source changed')
+        marks={r['id']:r for r in inventory['rows']}
+        fields,_=resolve_targets(scene,lines,marks,split_ids,current.get('marked_plans',{}).get(str(page),[]),
+                                 [r['id'] for r in relations.get('logo_lockup_candidates',[])])
+        units=[]
+        for _,line in numbered:
+            children=[(oid,value) for oid,value in fields.items() if value[0]['id']==line['id']]
+            if children:
+                for oid,value in children:
+                    units.append((len(units)+1,value[0]))
+                    split_targets[len(units)]=(oid,value[1])
+            expected=relations['source_fields'].get(line['id'],{}).get('source_divider',{}).get('fields',[])
+            if not children or set(expected)-{oid for oid,_ in children}:
+                units.append((len(units)+1,line))
+        numbered=units
     page_views = {}
     batches = []
     for start in range(0,len(numbered),16):
@@ -220,6 +244,10 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
     flagged = [d['bbox'] for p in current.get('independent_audit',{}).get('pages',[]) if p['page']==page
                for d in p.get('vlm_audit',{}).get('critical_defects',[])
                if d.get('category')=='text_corruption' and len(d.get('bbox') or [])==4]
+    doubtful_ids=set(relations.get('source_width_conflicts',[]))
+    for oid,reason in current.get('plate_issues',{}).get(str(page),{}).items():
+        if reason=='source_reading_disagreement':
+            doubtful_ids.update(scene.text.members.get(oid,[]))
     field_images, crop_paths, disputed = {}, {}, []
     for n,line in numbered:
         path = work/f'field-{n}.png'
@@ -230,7 +258,8 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
         if not first:
             continue
         raw = line.get('ocr_raw_text',line['text'])
-        if (targets is not None or line.get('score',1)<.94 or not first.get('legible') or normalized(first.get('text',''))!=normalized(raw)
+        if (targets is not None or n in split_targets or line['id'] in doubtful_ids
+                or line.get('score',1)<.94 or not first.get('legible') or normalized(first.get('text',''))!=normalized(raw)
                 or any(intersection(line['bbox'],b)>=.5*line['bbox'][2]*line['bbox'][3] for b in flagged)):
             disputed.append((n,line))
             field_images[n] = crop
@@ -254,7 +283,6 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
     project_boxes = [r['bbox'] for r in plans if r.get('role')=='project']
     failures = {v['object_id']:v for v in current.get('regional_failures',{}).get(str(page),[])}
     observations, changes = [], []
-    line_numbers = {line['id']:n for n,line in numbered}
     for n,line in numbered:
         candidates = by_ocr.get(line['id'],[])
         raw = line.get('ocr_raw_text',line['text'])
@@ -264,6 +292,11 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
         if targets is not None:
             primary = target_ids[n-1]
             obj = next((o for o in candidates if o.id == primary), None)
+        elif n in split_targets:
+            primary,writable=split_targets[n]
+            if object_ids is not None and primary not in object_ids:
+                continue
+            obj = next((o for o in candidates if o.id == primary and writable), None)
         elif object_ids is not None and primary not in object_ids and not any(o.id in object_ids for o in candidates):
             continue
         record = {'protocol':'two-blind-views/1','object_id':primary,'ocr_id':line['id'],
@@ -285,7 +318,7 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
             if targets is None and word and (project_name or protected_reading(raw,word,[full,local])):
                 witness = witness_for(word,line,numbered,page_views)
             if witness:
-                witness['crop_sha256'] = digest(crop_paths[line_numbers[witness['ocr_id']]])
+                witness['crop_sha256'] = digest(crop_paths[witness['page_view']['number']])
                 record['witness'] = witness
             record['after'],record['status'],record['reason'] = decide(raw,full,local,witness,project_name=project_name)
         native = (targets[primary][1] if targets is not None else

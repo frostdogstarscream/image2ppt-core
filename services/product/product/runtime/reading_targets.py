@@ -57,7 +57,7 @@ def resolve_targets(scene, lines, marks, requested, plans, logo_ids):
             if members[owner.id] == [lid] and owner.text == line['text']:
                 obj = owner
         box = line['bbox']
-        word = line['text']
+        word = line.get('ocr_raw_text', line['text']) if line.get('field_readings') else line['text']
         span = None
         if obj and obj.text != word:
             source_mark = marks.get(obj.id, {})
@@ -87,7 +87,8 @@ def resolve_targets(scene, lines, marks, requested, plans, logo_ids):
                 or any(intersection(box, b) >= .95*width*height for b in picture_boxes)):
             item['reason'] = 'intrinsic_image_text'
             continue
-        if line.get('reading_status') or (obj and scene.selected.get(obj.id, {}).get('source_reading')):
+        if (line.get('reading_status') or (not span and line.get('field_readings'))
+                or (obj and scene.selected.get(obj.id, {}).get('source_reading'))):
             item['reason'] = 'already_reviewed_field'
             continue
         target_id = obj.id if obj else lid
@@ -128,3 +129,39 @@ def revised_lines(lines, readings):
         else:
             adopted[line['id']] = ''.join(parts) + original[end:]
     return adopted
+
+
+def commit_readings(lines, changes):
+    """Apply source spans together; sibling fields keep their wording and independent status."""
+    from .state import RuntimeConflict
+    grouped = defaultdict(list)
+    for change in changes:
+        grouped[change['ocr_id']].append(change)
+    updates = {}
+    for lid, edits in grouped.items():
+        line = lines[lid]
+        if len(edits)==1 and 'source_span' not in edits[0]:
+            edit=edits[0]
+            if line['text']!=edit['before'] or line.get('field_readings'):
+                raise RuntimeConflict('source OCR changed before commit')
+            status=edit.get('status','source_supported')
+            updates[lid]={'ocr_raw_text':edit['before'],'text':edit['after'],
+                          'proofread_verified':status!='pending_confirmation','reading_status':status}
+            continue
+        original=line.get('ocr_raw_text',line['text'])
+        history=dict(line.get('field_readings',{}))
+        if history:
+            previous=revised_lines([{'id':lid,'text':original}],history).get(lid)
+            if previous!=line['text']:
+                raise RuntimeConflict('source OCR changed before split commit')
+        for edit in edits:
+            oid=edit['object_id']
+            if 'source_span' not in edit or oid in history or line.get('reading_status'):
+                raise RuntimeConflict('conflicting source reading spans')
+            history[oid]={k:edit[k] for k in ('ocr_id','source_span','before','after','status') if k in edit}
+        text=revised_lines([{'id':lid,'text':original}],history).get(lid)
+        if text is None:
+            raise RuntimeConflict('source OCR span changed before commit')
+        updates[lid]={'text':text,'ocr_raw_text':original,'field_readings':history}
+    for lid, changes in updates.items():
+        lines[lid].update(changes)

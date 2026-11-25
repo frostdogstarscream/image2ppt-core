@@ -30,10 +30,13 @@ class AuditDefect(BaseModel):
     severity: Literal['critical', 'minor']
     category: Literal[
         'missing_content', 'duplicate_ghosting', 'text_corruption',
-        'uneditable_title_or_card', 'font_or_shade_deviation', 'other',
+        'uneditable_title_or_card', 'font_or_shade_deviation', 'missing_text', 'incorrect_group', 'other',
     ]
     description: str = Field(min_length=1, max_length=1000)
     bbox: list[float] | None = None
+    bbox_space: Literal['source_px_xywh','normalized_xywh'] | None = None
+    mark_numbers: list[int] = Field(default_factory=list, max_length=30)
+    edit_action: Literal['replace_text','move_group','recolor','delete','edit_cell','edit_chart','inspect'] = 'inspect'
 
 
 class VLMIndependentAuditReply(BaseModel):
@@ -99,7 +102,7 @@ def _stateless_vlm_audit(
     render_path: Path,
     owner_preview_path: Path,
     sc_summary: dict,
-    *, deck_path: Path, edit_panels: list[Path],
+    *, deck_path: Path, edit_panels: list[Path], numbered_image: Path | None = None,
 ) -> dict:
     """Call VLM in a fresh stateless session (separate from Agent conversation) to audit visual fidelity."""
     from ..recovery.adaptive_policy import AdaptiveBudget
@@ -115,15 +118,16 @@ def _stateless_vlm_audit(
     review_model = GO_MODEL_ALIASES.get(requested, requested) if provider == 'opencode_go' else requested
     session_file = state.job/'runtime/session.json'
     builder_session = json.loads(session_file.read_text('utf8'))['id'] if session_file.is_file() else None
-    from . import provider as model_provider, review_control
+    from . import provider as model_provider, review_control, review_targets
     audit_key = key({
-        'schema': 'StatelessVisualAudit/4', 'provider':provider, 'model': review_model,
+        'schema': 'StatelessVisualAudit/5', 'provider':provider, 'model': review_model,
         'builder':[builder_provider,builder_model,builder_session],
         'policy': key(load_tolerance_config()),
         'review_code':digest(__file__), 'model_policy':digest(model_provider.__file__),
-        'controls':digest(review_control.__file__), 'scorecard':key(sc_summary), 'deck':digest(deck_path),
+        'controls':digest(review_control.__file__), 'target_policy':digest(review_targets.__file__),
+        'scorecard':key(sc_summary), 'deck':digest(deck_path),
         'edit_panels': [digest(p) for p in edit_panels],
-        'source_sha256': digest(source_path),
+        'source_sha256': digest(source_path), 'numbered_image':digest(numbered_image) if numbered_image else None,
         'render_sha256': digest(render_path),
         'owner_sha256': digest(owner_preview_path),
     })
@@ -159,6 +163,15 @@ def _stateless_vlm_audit(
             'are `severity="minor"` (`font_or_shade_deviation`) and MUST NOT fail the audit (`passed=true`). '
             'Set `passed=false` ONLY when a `severity="critical"` defect exists.'
         )
+        if numbered_image:
+            system_prompt += (
+                ' The fourth image shows numbered marks on the same source. Other panels are Office edit evidence. '
+                'For each defect give mark_numbers from this page and the intended edit_action. '
+                'Use incorrect_group when edit evidence shows members left behind. '
+                'An unmatched new business word is missing_text. For an unnumbered finding give its bbox '
+                'as [left,top,width,height] and bbox_space=source_px_xywh in the original source dimensions. '
+                'Report unknown locations without a box. Do not infer a successful edit from an unedited image.'
+            )
         control = review_control.verify_reviewer(reviewer,cache_dir/'controls'/provider,budget)
         verify_model = provider == 'moma' and builder_provider in ('deepseek', 'moma')
         if not control['passed'] or (verify_model and
@@ -167,8 +180,10 @@ def _stateless_vlm_audit(
                     'critical_defects':[],'minor_deviations':[]}
         if not budget.reserve('model_calls', {'tool':'audit_delivery','key':audit_key}):
             raise RuntimeError('previous independent audit response unknown')
-        raw = reviewer.ask(system_prompt, {'scorecard': sc_summary},
-                           [source_path, render_path, owner_preview_path, *edit_panels], VLMIndependentAuditReply)
+        inputs = [source_path, render_path, owner_preview_path]
+        if numbered_image:
+            inputs.append(numbered_image)
+        raw = reviewer.ask(system_prompt, {'scorecard': sc_summary}, [*inputs, *edit_panels], VLMIndependentAuditReply)
         reported = getattr(reviewer, 'reported_model', None)
         actual_id = model_identity(reported)
         if actual_id == model_identity(builder_model) or (verify_model
@@ -218,6 +233,7 @@ def run_delivery_audit(
 
     composition = service.composition(current)
     pptx_path = Path(composition['artifacts']['pptx'])
+    deck_hash = digest(pptx_path)
     office = composition.get('office') or {}
     office_dir = Path(office['office_directory']) if office.get('office_directory') else None
 
@@ -294,12 +310,39 @@ def run_delivery_audit(
 
         edit_panels = [state.evidence(r['id'])[0] for r in composition.get('required_evidence', [])
                        if r['role'] == 'edit_panel' and Path(state.evidence(r['id'])[0]).parent.name == f'panels-{idx:02d}']
+        numbered_image = None
+        rows = []
+        size = page_row['snapshot'].get('image_size')
+        inventory_file = current.get('experiment_marks', {}).get(str(idx))
+        if use_vlm and render_path is not None and inventory_file:
+            from PIL import Image
+            from .page_reading import mark_page
+            inventory = json.loads(Path(inventory_file).read_text('utf8'))
+            if inventory.get('source_sha256') != digest(src_path):
+                raise ValueError('review inventory belongs to a different source')
+            rows = inventory['rows']
+            with Image.open(src_path) as original:
+                size = list(original.size)
+                numbered_image = directory/f'review-marks-{idx:02d}.png'
+                mark_page(original.convert('RGB'), [(r['mark'],r) for r in rows]).save(numbered_image)
+            compact_sc.update(source_size=size, numbered_inventory_sha256=digest(inventory_file))
         vlm_verdict = (
-            _stateless_vlm_audit(state, src_path, render_path, owner_png, compact_sc, deck_path=pptx_path, edit_panels=edit_panels)
+            _stateless_vlm_audit(state, src_path, render_path, owner_png, compact_sc, deck_path=pptx_path,
+                                 edit_panels=edit_panels, numbered_image=numbered_image)
             if (use_vlm and render_path is not None) else {
                 'status': 'SKIPPED', 'passed': False, 'critical_defects': [], 'minor_deviations': [], 'summary': '',
             }
         )
+        if numbered_image:
+            from .review_targets import locate
+            structured = []
+            for defect in vlm_verdict.get('critical_defects', []):
+                bound = locate(defect, rows, size)
+                fingerprint = key([idx,inventory['source_sha256'],bound['category'],bound.get('edit_action'),
+                                   sorted(bound['mark_ids']),bound['bbox'],bound.get('candidate_ids')])
+                structured.append({**bound, 'page':idx, 'finding_id':fingerprint[:24],
+                                   'source_sha256':inventory['source_sha256'], 'deck_sha256':deck_hash})
+            vlm_verdict = {**vlm_verdict, 'critical_defects':structured}
         for cd in vlm_verdict.get('critical_defects', []):
             all_critical.append({'page': idx, **cd})
 

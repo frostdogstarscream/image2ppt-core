@@ -409,7 +409,8 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
             np.savez_compressed(folder/'pixels.npz',mask=mask,patch=patch,bbox=restore_box,
                                 rgba=crop,rgba_bbox=[bx,by,bw,bh],seed_rgba=seed,protected=protected)
             payload={'id':object_id,'kind':'asset','bbox':[bx,by,bw,bh],'restore_bbox':restore_box,
-                'payload':{**metadata,**proof,'method':'source-halo-completion','segmentation':segmentation},
+                'payload':{**metadata,**proof,'method':'source-halo-completion','seed_method':metadata['method'],
+                           'segmentation':segmentation},
                 'protection_strategy':strategy,'protection_evidence':protection,'sam_evidence':sam_binding,
                 'background_selection':background_selection,
                 'source_asset_definition':obj.model_dump(),'proposed_asset_definition':obj.model_dump(),
@@ -448,7 +449,7 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
         arrays=[np.array(Image.open(layer.path).convert('RGBA')) for layer in layers.layers]
         assembled,ambiguous,missing=assemble(obj,arrays,[layer.file for layer in layers.layers],tuple(graph.image_size))
         result['seed_diagnostics']={'alpha_ambiguities':ambiguous,'missing_parts':missing,
-            'alpha_visible_pixels':int((assembled[...,3]>0).sum()),'sam':'NOT_SUPPLIED'}
+            'alpha_visible_pixels':int((assembled[...,3]>0).sum()),'sam':'BOUND_MASK_REJECTED' if sam else 'NOT_SUPPLIED'}
         try:candidate_from_evidence(obj,work_source,protected,surface=surface)
         except ValueError as exc:result['seed_diagnostics']['source_unmix_failure']=str(exc)
     if key(graph.model_dump())!=original_scene or digest(source_file)!=graph.source_sha256:

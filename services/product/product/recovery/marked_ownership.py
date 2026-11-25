@@ -22,7 +22,7 @@ def record_claims(directory, records):
         with np.load(proof, allow_pickle=False) as data:
             mask = data['mask'].astype(bool)
         claimed |= mask
-        maps['ownership'][mask] = 2 if record['kind'] in ('surface', 'table') else 0
+        maps['ownership'][mask] = 2 if record['kind'] in ('surface', 'table', 'chart') else 0
         maps['uncertain_text'][mask] = False
     np.savez_compressed(editable, mask=claimed)
     np.savez_compressed(path, **maps)

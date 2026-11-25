@@ -52,8 +52,11 @@ def stage_marked_surfaces(baseline, output, routes, skip_ids, *, verified_assets
                     if field['id'] not in skip_ids and not field.get('required_card_frames')}
     ribbon_ids = []
     if marked_boxes:
+        measured_faces = {tuple(field['measured_label_face']):field['id'] for field in routes
+                          if field.get('measured_label_face') and field['id'] not in skip_ids}
         ribbon_ir, ribbon_ids = stage_containers_and_surfaces(
-            baseline, output.with_name(output.name+'-ribbons'), skip_ids=skip_ids, marked_boxes=marked_boxes)
+            baseline, output.with_name(output.name+'-ribbons'), skip_ids=skip_ids,
+            marked_boxes=marked_boxes, measured_faces=measured_faces)
         baseline = ribbon_ir.parent
     graph = SceneGraph.model_validate_json((baseline / 'scene.json').read_text('utf8'))
     plate_ref = graph.raster_backing

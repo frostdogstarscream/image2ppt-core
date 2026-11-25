@@ -6,6 +6,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 
+import numpy as np
 from PIL import Image
 
 from ..materialize import digest
@@ -43,6 +44,36 @@ def match(line, candidates):
         if value and reading and overlap >= .45 and similarity >= .65:
             matches.append((overlap * similarity, index))
     return max(matches)[1] if matches else None
+
+
+def visible_divider_lines(lines, source_fields, source, hidden, receipt):
+    """Treat a separator as graphical only if its original stroke survives the hidden-text view."""
+    dividers={lid:r['source_divider'] for lid,r in source_fields.items() if r.get('source_divider')}
+    if not dividers or not hidden.is_file() or digest(hidden)!=receipt.get('sha256'):
+        return lines
+    with Image.open(source) as src, Image.open(hidden) as view:
+        if src.size!=view.size:
+            return lines
+        result=[]
+        for line in lines:
+            info=dividers.get(line['id'])
+            if info and info['source_text']==line['text']:
+                x,y,w,h=map(round,info['bbox'])
+                if x>=2 and x+w+2<=src.width:
+                    def stroke(image):
+                        patch=np.asarray(image.crop((x-2,y,x+w+2,y+h)).convert('RGB'),dtype=float)
+                        sides=np.concatenate((patch[:,:2],patch[:,-2:]),axis=1)
+                        return (patch[:,2:-2]-np.median(sides,axis=1)[:,None,:]).mean(axis=1)
+                    reference, actual=stroke(src),stroke(view)
+                    strength=abs(reference).max(axis=1)
+                    ink=strength>=24
+                    agrees=(abs(actual-reference).max(axis=1)<=np.maximum(18,strength*.55))
+                    if ink.sum()>=h*.45 and agrees[ink].mean()>=.70:
+                        start,end=info['span']
+                        line={**line,'source_text':line['text'],'text':line['text'][:start]+line['text'][end:],
+                              'visible_divider':info}
+            result.append(line)
+        return result
 
 
 def bind_native_paragraphs(lines, fields, members, readings):
@@ -158,6 +189,11 @@ def reconcile(lines, detected, fields, marks, readings):
         exact = native_line_fields(expected, fields)
         has_field = bool(exact)
         seen.update(recognized)
+        divider=line.get('visible_divider')
+        if divider:
+            seen.update(i for i,reading in enumerate(detected)
+                        if reading['text'].strip() in ('|','丨','｜') and
+                        _overlap(divider['bbox'],reading['bbox'])>=.5*divider['bbox'][2]*divider['bbox'][3])
         symbol = exact[0].get('separate_symbol') if exact else None
         if symbol:
             expected_marks = {i for i,item in enumerate(detected) if _norm(item['text']) == symbol['symbol']
@@ -169,11 +205,15 @@ def reconcile(lines, detected, fields, marks, readings):
                   'native' if has_field else
                   'retained' if recognized else 'unresolved')
         rows.append({'ocr_id':oid,'bbox':line['bbox'],'text':line['text'],'status':status,
+                     **({'source_text':line['source_text'],'visible_divider':divider} if divider else {}),
                      'mark_ids':owners, 'exact_native_fields':[f['name'] for f in exact if 'name' in f],
                      'symbol_object':symbol['object'] if symbol else None,
                      'native_form': ('label_with_separate_symbol' if symbol else
                                      'paragraph_member' if exact and exact[0].get('source_rows') else
                                      'split_fields' if len(exact) > 1 else 'own_field' if exact else None),
+                     'source_reading_disagrees': any(_norm(detected[i]['text'])!=_norm(line['text'])
+                        and _overlap(detected[i]['bbox'],line['bbox'])>=.7*line['bbox'][2]*line['bbox'][3]
+                        for i in recognized),
                      'plate_reading':' '.join(detected[i]['text'] for i in recognized) or None})
     for index, item in enumerate(detected):
         if index not in seen:

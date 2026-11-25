@@ -11,7 +11,7 @@ from PIL import Image
 from ..materialize import digest, write
 from ..tolerance_config import load_tolerance_config
 from ..scorecard import fidelity, score_page, _native_fields, _overlap
-from .plate_audit import audit as audit_plate, bind_native_paragraphs, bind_separate_symbols, native_line_fields
+from .plate_audit import audit as audit_plate, bind_native_paragraphs, bind_separate_symbols, native_line_fields, visible_divider_lines
 from .host_evidence import prepare_all, questions, read
 from .reading_targets import revised_lines
 from .state import RuntimeState, RuntimeConflict
@@ -129,6 +129,14 @@ def assess(job, current):
         objects = measures.pop('objects')
         fields = _native_fields(objects)
         lines = read(current.get('source_ocr', {}).get(k, current['ocr'][k]))['lines']
+        source_fields = current.get('scene_relations', {}).get(k, {}).get('source_fields', {})
+        hidden = preview.with_name(f'page-{page:02d}-text-hidden.png')
+        receipt = office.get('office', {}).get('text_hidden_views', {}).get(k, {}) if verified else {}
+        lines = visible_divider_lines(lines,source_fields,source,hidden,receipt)
+        late_fields = current.get('late_fields',{}).get(k,{})
+        known_lines = {line['id'] for line in lines}
+        lines += [item['line'] for item in late_fields.values()
+                  if item['status']=='ready' and item['line']['id'] not in known_lines]
         scene = read(row['scene'])
         selected = scene['selected']
         readings = {i:r['source_reading'] for i,r in selected.items() if r.get('source_reading')}
@@ -158,7 +166,6 @@ def assess(job, current):
                            and {'move-scale','delete'} <= actions.get(i,set()))
         graphics = [o for o in objects if verified and o['name'] in editables
                     and o['class'] in ('asset','shape','opaque_picture')]
-        source_fields = current.get('scene_relations', {}).get(k, {}).get('source_fields', {})
         fields = bind_separate_symbols(fields, members, source_fields, graphics)
         hits = [line['id'] for line in lines
                 if native_line_fields({**line, 'text': adopted.get(line['id'], line['text'])}, fields)]
@@ -170,8 +177,10 @@ def assess(job, current):
         minor = [key for key, val in local.items()
                  if val['ssim'] < limits['min_ssim'] or val['delta_e2000_p95'] > limits['max_delta_e2000_p95']]
         plate = audit_plate(job, deck, sha, page, row['snapshot'], lines, fields, marks, adopted,
-                            office_view=preview.with_name(f'page-{page:02d}-text-hidden.png'),
-                            view_receipt=office.get('office', {}).get('text_hidden_views', {}).get(k, {}) if verified else {})
+                            office_view=hidden, view_receipt=receipt)
+        for item in plate['rows']:
+            if item['status']=='plate_only':
+                item['mark_ids']=[oid for oid,r in late_fields.items() if r['bbox']==item['bbox']]
         unscoped = []
         artwork_text = {}
         page_width, page_height = row['snapshot']['image_size']
@@ -295,6 +304,10 @@ def ensure_baseline(job):
             def preserve_text(c, d):
                 graph = svc.graph(svc.page(c, page))
                 targets = [line.id for line in graph.text.texts if line.id not in graph.selected]
+                # Reserve the table/chart as a unit before its labels become committed text.
+                # If the structured candidate is not verified, the ordinary text trials still run.
+                targets.extend(field['id'] for field in c.get('marked_plans', {}).get(str(page), ())
+                               if field['route'] in ('table', 'chart'))
                 if not targets:
                     return {'status':'NO_TEXT_TARGETS'}
                 outcome = svc.batch_reconstruct_page(state,c,d,page=page,object_ids=targets,
@@ -311,7 +324,9 @@ def ensure_baseline(job):
                     inventory = read(inventory_path)
                     if inventory['source_sha256'] != sources[page-1]:
                         raise RuntimeConflict('panel inventory source changed')
-                    boxes = [r['bbox'] for r in inventory['rows'] if r['label']=='card_frame']
+                    card_ids = {r['id'] for r in c.get('marked_plans',{}).get(str(page),[])
+                                if r['route']=='surface' and r.get('move_with')}
+                    boxes = [r['bbox'] for r in inventory['rows'] if r['label']=='card_frame' or r['id'] in card_ids]
                     if not boxes:
                         return {'status':'NO_PANEL_TARGETS'}
                     outcome = svc.batch_reconstruct_page(state,c,d,page=page,panel_regions=boxes,verify_office=True)
@@ -360,10 +375,50 @@ def ensure_baseline(job):
                         return {'status': checked['status'], 'frame': frame['id']}
                     return staged
                 step(f"photo-frame-{page}-{frame['id']}", finish_frame)
+        if inventory_path and request.get('object_scoped_delivery') and request.get('native_variant') != 'joint-only':
+            def finish_groups(c, d):
+                from .marked_routes import bind_plan, plan_move_groups
+                row = svc.page(c, page)
+                graph = svc.graph(row)
+                plans = c.get('marked_plans', {}).get(str(page), [])
+                routes = bind_plan(plans, inventory_path, graph, row['snapshot']['path'], separate_cards=True)
+                sources = {}
+                groups = plan_move_groups(routes, graph, sources=sources)
+                existing = [set(r['move_members']) for r in graph.selected.values() if r.get('move_members')]
+                ids = [sources[tuple(g)]['id'] for g in groups if not any(set(g) <= old for old in existing)]
+                if not ids:
+                    return {'status':'NO_NEW_MOVEMENT_GROUPS'}
+                staged = svc.batch_reconstruct_page(state,c,d,page=page,object_ids=ids,
+                    include_assets=False,include_containers=False,include_region_crops=False,verify_office=True)
+                if staged['status']=='VALIDATED':
+                    svc.commit_region(state,c,d/'commit',candidate_id=staged['candidate_id'])
+                old = c.get('regional_failures',{}).get(str(page), [])
+                failures = [f for f in old if f.get('kind')!='group' or f['object_id'] not in ids]
+                failures.extend(staged.get('failed_regions', []))
+                c.setdefault('regional_failures',{})[str(page)] = failures
+                c.setdefault('questions',{})[str(page)] = questions(state,c,page,failures,d)
+                return {'status':staged['status'],'objects':ids}
+            step(f'finish-groups-{page}', finish_groups)
     step('compose',lambda c,d:svc.compose_delivery(state,c,d))
     step('office',lambda c,d:svc.validate_office(state,c,d))
     current = state.read()
     score = assess(job,current)
+    if request.get('object_scoped_delivery') and score['verified']:
+        from .late_fields import register
+        evidence_added=False
+        for measured in score['pages']:
+            findings=[r for r in measured['plate_audit']['rows'] if r['status']=='plate_only' or
+                      (r['status'] in ('retained','unresolved') and not r['mark_ids'])]
+            if findings and measured['plate_audit']['status']=='MEASURED':
+                number=measured['page']
+                def discover(c,d):
+                    records=register(svc,state,c,d,page=number,findings=findings)
+                    return {'ready':[r['id'] for r in records if r['status']=='ready'], 'observed':len(records),
+                            'numbered':sum('mark' in r for r in records)}
+                evidence_added |= bool(step(f'discover-plate-fields-{number}',discover).get('numbered'))
+        if evidence_added:
+            current = state.read()
+            score = assess(job,current)
     # Trial against an isolated state. Only adopt a new page after the real
     # compiled candidate removes an observed finding and keeps prior edits.
     for page_score in score['pages']:
@@ -419,7 +474,10 @@ def ensure_baseline(job):
             page = page_score['page']
             k = str(page)
             issues = {oid:r['status'] for r in page_score['plate_audit']['rows']
-                      if r['status'] in ('residual','retained','unresolved') for oid in r['mark_ids']}
+                      if r['status'] in ('residual','retained','unresolved','plate_only') for oid in r['mark_ids']}
+            if request.get('object_scoped_delivery'):
+                issues.update((oid,'source_reading_disagreement') for r in page_score['plate_audit']['rows']
+                              if r.get('source_reading_disagrees') for oid in r['mark_ids'])
             c.setdefault('plate_issues', {})[k] = issues
             c['questions'][k] = questions(state, c, page, c['regional_failures'][k], d)
         return {'pages':len(score['pages'])}
