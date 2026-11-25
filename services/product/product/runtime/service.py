@@ -365,7 +365,8 @@ class RuntimeService(ExplorationTools):
             from ..recovery.container_stage import stage_containers_and_surfaces
             try:
                 cont_ir, cont_ids = stage_containers_and_surfaces(
-                    crop_ir.parent, directory / 'post-crop-containers', logo_ids=logo_ids, stable_ids=scoped
+                    crop_ir.parent, directory / 'post-crop-containers', logo_ids=logo_ids, stable_ids=scoped,
+                    shared_parent_backing=scoped, layer_directory=row.get('layers')
                 )
                 if cont_ids:
                     crop_ir = cont_ir
@@ -653,22 +654,26 @@ class RuntimeService(ExplorationTools):
                     'failure':candidate.get('failure','CANDIDATE_NOT_STAGED'),
                     'failed_checks':candidate.get('failed_checks',[]),'evidence':candidate.get('evidence',[])}
         ir, graph, _, _ = self._verify_staged_candidate_graph(current, candidate)
+        scoped = json.loads((state.job/'request.json').read_bytes()).get('object_scoped_delivery', False)
         from .compiler import compile_local as compile_pages
         from .card_edit_preservation import previous_edits_lost
+        from .object_recovery import remember_edits
         from ..parallel_pipeline import effective_texts
         def reject_regression(issues, attempts):
             result = {'status':'REVIEW_REQUIRED','failure':'PREVIOUS_NATIVE_EDIT_LOST',
                       'office_status':'NOT_RUN_FOR_REGRESSING_CANDIDATE','office_attempts':attempts,
-                      'failed_regions':issues, 'card_repair_targets':candidate['card_repair_targets'],
+                      'failed_regions':issues, 'card_repair_targets':candidate.get('card_repair_targets', []),
                       'parent_ir_sha256':candidate['parent_ir_sha256']}
             candidate.update(status='REVIEW_REQUIRED', validation=result)
             return {'candidate_id':candidate_id, **result}
-        issues = previous_edits_lost(state, current, candidate, ir)
+        issues = previous_edits_lost(state, current, candidate, ir, all_edits=scoped, graph=graph)
         if issues:
             return reject_regression(issues, 0)
         with lease('compiler'):
             artifacts = compile_pages([ir], directory/'compiled', [effective_texts(graph, ir)])
         result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check')
+        if scoped and result.get('pptx_sha256') == digest(artifacts['pptx']):
+            remember_edits(state, current, candidate, ir, graph, result)
         attempts = result.get('office_attempts', 0)
         if candidate.get('kind') == 'batch' and candidate.get('isolation_allowed', candidate.get('strategy') != 'photo_frame'):
             from .batch_backbone import restage_batch_candidate_subset
@@ -678,12 +683,14 @@ class RuntimeService(ExplorationTools):
                 if not restage_batch_candidate_subset(self, state, current, directory/f'isolate-{attempt}', candidate, result):
                     break
                 ir, graph, _, _ = self._verify_staged_candidate_graph(current, candidate)
-                issues = previous_edits_lost(state, current, candidate, ir)
+                issues = previous_edits_lost(state, current, candidate, ir, all_edits=scoped, graph=graph)
                 if issues:
                     return reject_regression(issues, attempts)
                 with lease('compiler'):
                     artifacts = compile_pages([ir], directory/f'compiled-repair-{attempt}', [effective_texts(graph, ir)])
                 result = self.office_check(state, artifacts['pptx'], [ir], directory/f'office-repair-{attempt}')
+                if scoped and result.get('pptx_sha256') == digest(artifacts['pptx']):
+                    remember_edits(state, current, candidate, ir, graph, result)
                 attempts += result.get('office_attempts', 0)
         result = {**result, 'office_attempts': attempts}
         if candidate.get('kind')=='text':
@@ -764,19 +771,27 @@ class RuntimeService(ExplorationTools):
             current.pop('last_verified_bundle', None)
         current.pop('composition', None)
         current.pop('visual_review', None)
+        current.pop('independent_audit', None)
         obj_ids = candidate.get('object_ids') or [candidate['object_id']]
         return {'status': 'COMMITTED', 'candidate_id': candidate_id, 'object_id': candidate['object_id'],
                 'object_ids': obj_ids, 'committed_count': len(obj_ids)}
 
     commit_candidate = commit_region
 
-    def compose_delivery(self, state, current, directory):
+    def compose_delivery(self, state, current, directory, *, recover_objects=True):
         request = json.loads((state.job/'request.json').read_text('utf8'))
         for index in range(1, len(request['sources'])+1):
             if len(current['pages']) < index or not current['pages'][index-1]:
                 self.create_scene(state, current, directory/f'raster-page-{index}', page=index, evidence={})
         if not current['pages']:
             raise ValueError('perception is required')
+        recovered = {}
+        if recover_objects and request.get('object_scoped_delivery') and (state.root/'object-recovery').is_dir():
+            from .object_recovery import recover_page
+            for page in range(1, len(current['pages']) + 1):
+                restored = recover_page(self, state, current, directory/'recover'/str(page), page)
+                if restored:
+                    recovered[str(page)] = restored
         if current.get('composition'):
             composition=self.composition(current)
             return {'status':'COMPOSED','pptx_sha256':digest(composition['artifacts']['pptx']),'cache_hit':True}
@@ -819,7 +834,8 @@ class RuntimeService(ExplorationTools):
             binding[str(directory/'delivery-route-trace.json')]=digest(directory/'delivery-route-trace.json')
         current['composition'] = {'artifacts': artifacts, 'files': binding, 'office': {'status': 'NOT_RUN'}}
         current.pop('visual_review', None)
-        return {'status': 'COMPOSED', 'pptx_sha256': digest(artifacts['pptx'])}
+        return {'status': 'COMPOSED', 'pptx_sha256': digest(artifacts['pptx']),
+                **({'restored_edits':recovered} if recovered else {})}
 
     def compile_pptx(self, state, current, directory, *, candidate_id=None):
         if candidate_id is None:
@@ -865,6 +881,10 @@ class RuntimeService(ExplorationTools):
             write(Path(directory)/'checks.json',result)
             return {**result,'cache_hit':True,'office_attempts':0}
         budget=AdaptiveBudget(Store(state.job/'state'),request.get('adaptive_budget'))
+        if getattr(state, 'reserve_final_office_check', False):
+            # Optional retries share the durable counter and leave one check for the complete deck.
+            budget.limits['office_validations'] = max(0,budget.limits['office_validations']-1)
+            budget.limits['cost_units'] = max(0,budget.limits['cost_units']-1)
         budget.reserve('office_validations',identity)
         write(receipt,{'identity':identity,'status':'UNKNOWN','operation':str(directory)})
         provisional = receipt

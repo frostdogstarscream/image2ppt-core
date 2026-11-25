@@ -275,6 +275,65 @@ def picture_frame(source, box):
     return max(matches)[1] if matches else None
 
 
+def measured_picture_frame(source, box, peer_boxes):
+    """Find one picture without following ink into a neighbouring picture or panel."""
+    from ..recovery.region_crop import MAX_MEASURED_PICTURE_FRACTION
+    height, width = source.shape[:2]
+    x, y, w, h = map(round, box)
+    if min(w, h) < 14 or x < 0 or y < 0 or x+w > width or y+h > height:
+        return None, 'INVALID_PICTURE_BOUNDS'
+    if w*h > MAX_MEASURED_PICTURE_FRACTION*width*height:
+        return None, 'PICTURE_BOUNDARY_NOT_OBJECT_SCOPED'
+    peers = [other for other in peer_boxes if iou(box, other) < .80]
+    if any(intersection(box, p) > .65*p[2]*p[3] for p in peers):
+        return None, 'MARK_CONTAINS_ANOTHER_PICTURE'
+
+    # A detected rectangle can end inside the last row of a photo. Locate its
+    # actual transition into the surrounding card. A gap shared with a peer is
+    # divided at its midpoint, so the stronger edge of that peer cannot win.
+    limits = [0, width, 0, height]
+    for px, py, pw, ph in peers:
+        if min(y+h, py+ph)-max(y,py) > .45*min(h,ph):
+            if px+pw <= x:
+                limits[0] = max(limits[0], round((px+pw+x)/2))
+            if px >= x+w:
+                limits[1] = min(limits[1], round((px+x+w)/2))
+        if min(x+w, px+pw)-max(x,px) > .45*min(w,pw):
+            if py+ph <= y:
+                limits[2] = max(limits[2], round((py+ph+y)/2))
+            if py >= y+h:
+                limits[3] = min(limits[3], round((py+y+h)/2))
+    radius = max(4, round(.11*min(w,h)))
+    edges = []
+    for side, (axis, position, start, span, direction) in enumerate((
+        (source, x, y, h, 1), (source, x+w, y, h, -1),
+        (source.swapaxes(0,1), y, x, w, 1), (source.swapaxes(0,1), y+h, x, w, -1),
+    )):
+        inset = max(1, round(span*.12))
+        band = axis[start+inset:start+span-inset]
+        low = max(3, position-radius, limits[side] if direction==1 else 0)
+        high = min(axis.shape[1]-3, position+radius, limits[side] if direction==-1 else axis.shape[1])
+        scores = []
+        for edge in range(low, high+1):
+            before = np.median(band[:, edge-3:edge], axis=1)
+            after = np.median(band[:, edge:edge+3], axis=1)
+            outside = before if direction==1 else after
+            # Looking into the page background should see a smooth gutter,
+            # even if the interior contains rules, text or a sharp horizon.
+            spread = np.percentile(abs(outside-np.median(outside,axis=0)).max(1), 75)
+            contrast = np.percentile(abs(before-after).max(1), 35)
+            if contrast >= 8 and spread <= max(8, .5*contrast):
+                scores.append((min(contrast,48)/(1+spread/12)/(1+abs(edge-position)/radius),edge))
+        if not scores:
+            return None, 'NO_MEASURED_' + ('LEFT','RIGHT','TOP','BOTTOM')[side] + '_EDGE'
+        edges.append(max(scores)[1])
+    left, right, top, bottom = edges
+    frame = [left,top,right-left,bottom-top]
+    if iou(frame,box) < .65 or any(intersection(frame,p) for p in peers):
+        return None, 'PICTURE_EDGE_CONFLICT'
+    return frame, 'FOUR_MEASURED_EDGES'
+
+
 def bind_plan(fields, inventory_path, graph, source_path, *, separate_cards=False):
     inventory = json.loads(Path(inventory_path).read_text(encoding='utf8'))
     if inventory['source_sha256'] != graph.source_sha256 or digest(source_path) != graph.source_sha256:
@@ -313,7 +372,15 @@ def bind_plan(fields, inventory_path, graph, source_path, *, separate_cards=Fals
             row['anchor_boxes'] = [marks[i]['bbox'] for i in mark['member_ids']]
         elif route == 'asset':
             if mark['label'] == 'image':
-                row['picture_frame'] = picture_frame(source, box)
+                if separate_cards:
+                    peers = [r['bbox'] for r in marks.values() if r['label']=='image' and r['id']!=mark['id']]
+                    row['picture_frame'], row['picture_boundary'] = measured_picture_frame(source, box, peers)
+                    if not row['picture_frame'] and row['picture_boundary'].startswith('NO_MEASURED_'):
+                        component = picture_frame(source, box)
+                        if component and not any(intersection(component,p) for p in peers if iou(box,p)<.80):
+                            row['picture_frame'], row['picture_boundary'] = component, 'CLOSED_COMPONENT'
+                else:
+                    row['picture_frame'] = picture_frame(source, box)
                 row['intrinsic_ui'] = any(
                     word in field.get('role', '').casefold()
                     for word in ('screenshot', 'dashboard', '截图', '工作台')
@@ -325,6 +392,7 @@ def bind_plan(fields, inventory_path, graph, source_path, *, separate_cards=Fals
                 mark['id'].startswith('m-')
                 and not row['target_ids']
                 and not row.get('picture_frame')
+                and not row.get('picture_boundary')
                 and not mark.get('intersecting_ocr_ids')
             ):
                 kind = 'icon' if mark['label'] == 'icon' else 'illustration'

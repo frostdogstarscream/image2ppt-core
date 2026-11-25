@@ -36,6 +36,8 @@ from ..parallel_contracts import SceneGraph
 METHOD = 'source-plate-region-crop/1'
 MAX_GROW_PX = 48
 MAX_AREA_FRACTION = 0.25
+# A single four-edge measurement supports a large picture inside a page.
+MAX_MEASURED_PICTURE_FRACTION = 0.75
 MIN_CONTENT_FRACTION = 0.01
 MOVABLE_RING_ERROR = 4.0
 TRANSPARENT_MIN_TIGHT_RATIO = 0.12
@@ -775,14 +777,33 @@ def stage_region_crops(
 
     lower_comp, lower_covered = _render_lower_composite(plate, graph, baseline)
     appearance = np.where(foreground[..., None], lower_comp, source)
-    crops, report = plan_region_crops(
-        graph,
-        appearance,
-        seeds,
-        max_area_fraction=max_area_fraction,
-        protected_text_ids=protected_text_ids,
-        skip_seed_ids=skip,
-    )
+    framed = (single_object_only and seeds and len(seeds) == 1
+              and seeds[0].get('measured_frame') in ('FOUR_MEASURED_EDGES', 'CLOSED_COMPONENT'))
+    if framed:
+        seed = seeds[0]
+        # The source edges have already been measured. Growing again can cross
+        # the gutter into a neighbour or swallow a separate caption.
+        box = _clip(seed['bbox'], size)
+        crop = {'box':box,'seed_boxes':[box], 'seed_ids':[seed['id']], 'kinds':[seed['kind']],
+                'texts':[''], 'cuts':False, 'measured_frame':seed['measured_frame']}
+        crop = _separate_photo_caption(source, crop, graph.text.texts)
+        conflicts = [t.id for t in graph.text.texts if t.id not in graph.selected
+                     and _intersects(crop['box'],t.bbox)]
+        reason = None
+        if seed['id'] in skip:
+            reason = 'SEED_EXCLUDED'
+        elif min(box[2:]) < 2 or box[2]*box[3] > max_area_fraction*size[0]*size[1]:
+            reason = 'OBJECT_FRAME_SIZE_OUT_OF_RANGE'
+        elif conflicts:
+            reason = 'UNRESOLVED_TEXT_IN_PICTURE'
+        crops = [] if reason else [crop]
+        report = [{'seed_ids':[seed['id']], 'bbox':box, 'state':'SKIPPED',
+                   'reason':reason, 'text_ids':conflicts}] if reason else []
+    else:
+        crops, report = plan_region_crops(
+            graph, appearance, seeds, max_area_fraction=max_area_fraction,
+            protected_text_ids=protected_text_ids, skip_seed_ids=skip,
+        )
     if not crops:
         return baseline / 'slideir.json', [], report
     if output.exists():
@@ -809,7 +830,8 @@ def stage_region_crops(
         rid = f'r-{seq:03d}'
         seq += 1
         used.add(rid)
-        crop = _separate_photo_caption(source, crop, graph.text.texts)
+        if not framed:
+            crop = _separate_photo_caption(source, crop, graph.text.texts)
         x, y, w, h = crop['box']
         intrinsic = ' / '.join(t.strip() for t in crop['texts'] if t and t.strip())[:200]
         crop_obj = ClosedObject(
@@ -866,6 +888,12 @@ def stage_region_crops(
             except ValueError as exc:
                 backing_meta = {'reason': f'backing unavailable: {exc}'}
 
+        if framed:
+            backing_meta['picture_boundary'] = crop['measured_frame']
+            backing_meta['source_frame'] = crop['seed_boxes'][0]
+            if 'caption_boundary' in crop:
+                backing_meta['caption_boundary'] = crop['caption_boundary']
+
         if safety == 'MOVE_UNSAFE' and not allow_move_unsafe:
             report.append({
                 'id': rid,
@@ -881,7 +909,7 @@ def stage_region_crops(
 
         png = output / f'{rid}.png'
         upgraded = None
-        if safety == 'MOVABLE' and allow_transparent_upgrade:
+        if safety == 'MOVABLE' and allow_transparent_upgrade and crop.get('measured_frame') != 'FOUR_MEASURED_EDGES':
             upgraded = _try_transparent_upgrade(
                 pixels, backing, float(backing_meta['ring_error']), foreground[y:y + h, x:x + w], crop.get('kinds', []),
             )

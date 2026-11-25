@@ -1,4 +1,4 @@
-"""Keep independently verified edits when rebuilding a card around existing content."""
+"""Keep independently verified edits when replacing source-owned content."""
 import json
 from pathlib import Path
 
@@ -6,17 +6,24 @@ from ..materialize import digest
 from ..parallel_store import key
 
 
-def previous_edits_lost(state, current, candidate, candidate_ir):
-    if not candidate.get('card_repair_targets'):
+def previous_edits_lost(state, current, candidate, candidate_ir, *, all_edits=False, graph=None):
+    if not all_edits and not candidate.get('card_repair_targets'):
         return []
     page = candidate['page']
     parent_ir = Path(current['pages'][page - 1]['ir'])
     before = json.loads(parent_ir.read_bytes())
     after = json.loads(Path(candidate_ir).read_bytes())
     kinds = {node['id']:node['type'] for node in after['nodes']}
+    protected = {'shape','text','table','chart'}
+    if all_edits:
+        protected.add('image')
+    # The graph verifier separately proves ownership when a raster word becomes native text.
+    converted = {aid for oid, record in (graph.selected.items() if graph is not None else ())
+                 if kinds.get(oid) == 'text' for aid in record.get('text_cutouts', ())}
     lost = {
         node['id']:node['type'] for node in before['nodes']
-        if node['type'] in {'shape','text','table','chart'} and kinds.get(node['id']) != node['type']
+        if node['type'] in protected and node['id'] != 'source-plate' and node['id'] not in converted
+        and kinds.get(node['id']) != node['type']
     }
     # Identical membership preserves a group's selection even if its generated name changes.
     new_groups = {frozenset(group['member_ids']) for group in after.get('groups', [])}
@@ -58,7 +65,7 @@ def previous_edits_lost(state, current, candidate, candidate_ir):
             if {'move-scale','delete'} <= completed:
                 confirmed[oid] = {'object_id':oid, 'kind':lost.get(oid, 'group'),
                                   'failure':'PREVIOUS_NATIVE_EDIT_LOST', 'parent_pptx_sha256':identity['pptx'],
-                                  'card_repair_targets':candidate['card_repair_targets'],
+                                  'card_repair_targets':candidate.get('card_repair_targets', []),
                                   'conflict_ids':sorted(lost_groups.get(oid, ())),
-                                  'reason':'Card repair would remove this Office-verified independent edit. Keep the parent and retry the affected card.'}
+                                  'reason':'Reconstruction would remove an Office-verified independent edit on the current page.'}
     return [confirmed[oid] for oid in sorted(confirmed)]

@@ -1387,14 +1387,14 @@ def _chain_stage_from_spec(
                           if r.get('measured_label_face') and (wanted_filter is None or r['id'] in wanted_filter)}
         ir, shape_ids = stage_containers_and_surfaces(cur_base, directory/tag/'panel-surfaces',
             skip_ids=skip_ids, logo_ids=logo_ids, stable_ids=True, scope_boxes=scopes, native_only=True,
-            measured_faces=measured_faces)
+            measured_faces=measured_faces, shared_parent_backing=single_object_only, layer_directory=layers_dir)
         if shape_ids:
             cur_base = ir.parent
             staged_ids.extend(shape_ids)
     if panel_regions is not None:
         return cur_base, staged_ids, stage_errors
     if include_assets:
-        from ..recovery.region_crop import stage_region_crops
+        from ..recovery.region_crop import MAX_AREA_FRACTION, MAX_MEASURED_PICTURE_FRACTION, stage_region_crops
         for field in sorted(marked_routes, key=lambda item: not item.get('diagram_members')):
             if field['id'] in badge_aliases or set(field.get('target_ids', ())).intersection(badge_aliases):
                 continue
@@ -1412,14 +1412,26 @@ def _chain_stage_from_spec(
                                          'failure':'DIAGRAM_NOT_ISOLATED','reason':str(exc)})
                 continue
             frame = field.get('picture_frame')
-            if frame and any(intersection(frame, box) for box in grouped_boxes):
+            if field['id'] in skip_ids or (wanted_filter is not None and field['id'] not in wanted_filter):
                 continue
-            if not frame or field['id'] in skip_ids or (wanted_filter is not None and field['id'] not in wanted_filter):
+            if field.get('picture_boundary') and any(
+                field['id'] in rec.get('seed_ids', ()) for rec in initial_graph.selected.values()
+            ):
+                continue
+            grouped = frame and any(intersection(frame, box) for box in grouped_boxes)
+            if not frame or grouped:
+                if field.get('picture_boundary'):
+                    stage_errors.append({'object_id':field['id'], 'kind':'asset','bbox':field['bbox'],
+                                         'failure':'PICTURE_BOUNDARY_UNAVAILABLE',
+                                         'reason':'CLAIMED_BY_DIAGRAM' if grouped else field['picture_boundary']})
                 continue
             seed = {'id': field['id'], 'bbox': frame, 'kind': 'asset' if field.get('intrinsic_ui') else 'layout:image',
-                    'picture_frame': frame if field.get('intrinsic_ui') else None}
+                    'measured_frame': field.get('picture_boundary')}
             pic_ir, pic_ids, evidence = stage_region_crops(
-                cur_base, directory/tag/('picture-'+key(field['id'])[:12]), seeds=[seed], single_object_only=single_object_only, skip_seed_ids=skip_ids)
+                cur_base, directory/tag/('picture-'+key(field['id'])[:12]), seeds=[seed],
+                max_area_fraction=(MAX_MEASURED_PICTURE_FRACTION if single_object_only and
+                                   field.get('picture_boundary')=='FOUR_MEASURED_EDGES' else MAX_AREA_FRACTION),
+                single_object_only=single_object_only, skip_seed_ids=skip_ids)
             if pic_ids:
                 cur_base = pic_ir.parent
                 staged_ids.extend(pic_ids)
@@ -1625,7 +1637,7 @@ def _chain_stage_from_spec(
         try:
             cont_ir, cont_ids = stage_containers_and_surfaces(
                 cur_base, cont_dir, skip_ids=skip_ids, logo_ids=logo_ids, wanted_ids=wanted_filter,
-                stable_ids=single_object_only
+                stable_ids=single_object_only, shared_parent_backing=single_object_only, layer_directory=layers_dir
             )
             if cont_ids:
                 cur_base = cont_ir.parent
@@ -1673,12 +1685,16 @@ def _chain_stage_from_spec(
                     'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
                 })
                 layout_data = None
+        # A crop refused by the marked photo stage must not be reintroduced as
+        # a larger rectangle by the generic layout-seed fallback.
+        picture_seeds = {f"layout:{r['id'].removeprefix('layout:')}" for r in marked_routes
+                         if single_object_only and r.get('picture_boundary')}
         crop_seeds, protected_text_ids = collect_crop_seeds(
             cur_graph,
             unrecoverable_text_ids=set(unrecoverable_text_ids or ()),
             layout=layout_data,
             logo_ids=logo_ids,
-            skip_seed_ids=skip_ids,
+            skip_seed_ids=skip_ids | picture_seeds,
         )
         if crop_seeds:
             crop_dir = directory / tag / 'region-crops-staged'
@@ -1697,7 +1713,8 @@ def _chain_stage_from_spec(
                         from ..recovery.container_stage import stage_containers_and_surfaces
                         post_cont_dir = directory / tag / 'post-crop-containers-staged'
                         pc_ir, pc_ids = stage_containers_and_surfaces(
-                            cur_base, post_cont_dir, skip_ids=skip_ids, logo_ids=logo_ids, stable_ids=single_object_only
+                            cur_base, post_cont_dir, skip_ids=skip_ids, logo_ids=logo_ids, stable_ids=single_object_only,
+                            shared_parent_backing=single_object_only, layer_directory=layers_dir
                         )
                         if pc_ids:
                             cur_base = pc_ir.parent

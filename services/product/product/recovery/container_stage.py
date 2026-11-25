@@ -344,6 +344,8 @@ def stage_containers_and_surfaces(
     stable_ids: bool = False,
     scope_boxes: list | None = None,
     native_only: bool = False,
+    shared_parent_backing: bool = False,
+    layer_directory: Path | str | None = None,
 ) -> tuple[Path, list[str]]:
     """Discover and stage native shapes (`s-*`) and structural frame/curve/line assets (`a-c*`)."""
     from reconstruction import extract_rgba
@@ -456,6 +458,21 @@ def stage_containers_and_surfaces(
     if not candidates:
         return baseline / 'slideir.json', []
 
+    shared_patches = {}
+    series_members = {tuple(b) for series in bar_series for b in series}
+    if shared_parent_backing:
+        from .shared_surface_backing import bar_edge_backing, shared_face_patches
+
+        source = np.asarray(Image.open(baseline / 'source.png').convert('RGB')) if layer_directory else None
+        active_boxes = {tuple(bounds) for _, bounds in candidates
+                        if (marked_boxes is None or tuple(bounds) in marked_boxes or tuple(bounds) in (measured_faces or {}))
+                        and (scope_boxes is None or any(intersection(bounds, scope) >= bounds[2]*bounds[3]
+                                                        for scope in scope_boxes))}
+        shared_patches = shared_face_patches(
+            work_plate, candidates, bar_series, unresolved_guard | already_claimed | higher_crop_vis | higher_asset_vis,
+            source=source, layer_directory=layer_directory, active_boxes=active_boxes,
+        )
+
     shutil.copytree(baseline, output)
     graph.surface.background = canvas_hex
 
@@ -490,18 +507,31 @@ def stage_containers_and_surfaces(
             continue
 
         ring_res = _ring_parent_patch(work_plate, canvas_field, [x, y, w, h], pad=5)
-        if ring_res is None:
-            continue
-        parent_patch, parent_bg, parent_err = ring_res
-        if parent_err > 7.5:
-            continue
+        shared = shared_patches.get((x, y, w, h))
+        unresolved_parent = shared is None and (x, y, w, h) in shared_patches
+        if shared is not None:
+            parent_patch, backing_info = shared
+            parent_bg = np.median(parent_patch.reshape(-1, 3), axis=0)
+            if backing_info['method'] == 'shared-parent-samples/1' and (ring_res is None or ring_res[2] > 7.5):
+                continue
+        else:
+            if ring_res is None:
+                continue
+            parent_patch, parent_bg, parent_err = ring_res
+            if parent_err > 7.5:
+                continue
         crop_cur = work_plate[y:y + h, x:x + w]
-        if float(np.abs(crop_cur.astype(float) - parent_patch).max()) < 5.5:
+        # Recognition remains independent of the proposed replacement. A nicer
+        # extrapolated backing cannot by itself turn a prior OCR repair into a shape.
+        recognition_patch = ring_res[0] if ring_res is not None and ring_res[2] <= 7.5 else parent_patch
+        if float(np.abs(crop_cur.astype(float) - recognition_patch).max()) < 5.5:
             continue
 
         # Collect direct staged children sitting inside this container
         direct_patches: list[np.ndarray] = []
         direct_oids: list[str] = []
+        backing_child_ids = []
+        child_backing = np.zeros((h,w), bool) if shared_parent_backing else None
         for oid, pinfo in existing_proofs.items():
             if oid in claimed_child_ids:
                 continue
@@ -514,17 +544,22 @@ def stage_containers_and_surfaces(
                 if cmask.any():
                     direct_patches.append(pinfo['backing_patch'][cmask])
                 direct_oids.append(oid)
+                if child_backing is not None and x <= rx and y <= ry and rx+rw <= x+w and ry+rh <= y+h:
+                    child_backing |= pinfo['mask'][y:y+h, x:x+w]
+                    backing_child_ids.append(oid)
 
         direct_children_mask_local = already_claimed[y:y + h, x:x + w].copy()
         shape_fit = (
             try_fit_native_shape_v2(
-                work_plate, [x, y, w, h], parent_patch, direct_patches,
+                work_plate, [x, y, w, h], recognition_patch, direct_patches,
                 direct_children_mask_local, cand_kind=cand_kind, measured_label=face_mark is not None,
             )
             if cand_kind in ('box', 'line') else None
         )
 
         if shape_fit is not None:
+            if unresolved_parent:
+                continue
             while f's-{s_seq:03d}' in used_ids:
                 s_seq += 1
             sid = f's-{s_seq:03d}'
@@ -541,7 +576,7 @@ def stage_containers_and_surfaces(
 
             # Optional soft drop-shadow cleanup outside top-level cards on sky/canvas
             halo_mask = None
-            if not face_mark and not is_flat_canvas and w >= 120 and h >= 60:
+            if shared is None and not face_mark and not is_flat_canvas and w >= 120 and h >= 60:
                 halo_mask = soft_shadow_halo_mask(
                     work_plate, canvas_field, [x, y, w, h], already_claimed, unresolved_guard
                 )
@@ -572,9 +607,20 @@ def stage_containers_and_surfaces(
 
             parent_u8 = np.clip(np.rint(parent_patch), 0, 255).astype(np.uint8)
             erase_loc = shape_fit['erase_mask_local']
+            if child_backing is not None:
+                erase_loc = erase_loc & (s_mask[y:y+h, x:x+w] | child_backing)
             work_plate[y:y + h, x:x + w][erase_loc] = parent_u8[erase_loc]
             restore_box = [x, y, w, h]
             backing_save = parent_u8
+
+            if shared is not None and (x,y,w,h) in series_members:
+                extra = bar_edge_backing(work_plate, (x,y,w,h), parent_u8,
+                                         unresolved_guard | already_claimed | higher_asset_vis | higher_crop_vis)
+                if extra is not None:
+                    restore_box, border, backing_save = extra
+                    bx, by, bw, bh = restore_box
+                    work_plate[by:by+bh, bx:bx+bw][border] = backing_save[border]
+                    s_mask[by:by+bh, bx:bx+bw] |= border
 
             if halo_mask is not None and halo_mask.any():
                 halo_clean = halo_mask & ~already_claimed
@@ -611,6 +657,8 @@ def stage_containers_and_surfaces(
                    if 'geometry_approximation' in shape_fit else {}),
                 **({'arrow_adjustment':shape_fit['arrow_adjustment']} if 'arrow_adjustment' in shape_fit else {}),
                 'method': 'container-surface-v2-gradient-preset/1',
+                **({'parent_backing':backing_info} if shared is not None else {}),
+                **({'backing_child_ids':sorted(backing_child_ids)} if backing_child_ids else {}),
                 **({'mark_id':face_mark} if face_mark else {}),
                 **({'contained_children':sorted(oid for oid in direct_oids
                      if intersection([x,y,w,h], graph.selected[oid]['bbox']) >=
@@ -625,7 +673,7 @@ def stage_containers_and_surfaces(
                 'owner_evidence': {
                     'file': proof_file.name,
                     'sha256': digest(proof_file),
-                    'method': 'source-sampled-parent-backing/1',
+                    'method': backing_info['method'] if shared is not None else 'source-sampled-parent-backing/1',
                 },
             }
             graph.transactions.append(record)
@@ -654,6 +702,9 @@ def stage_containers_and_surfaces(
             acrop = work_plate[ay:ay + ah, ax:ax + aw]
             parent_uint8 = np.clip(np.rint(parent_bg), 0, 255).astype(np.uint8)
             parent_patch_a = np.broadcast_to(parent_uint8.astype(float), (ah, aw, 3))
+            if shared is not None:
+                parent_patch_a = np.pad(parent_patch,
+                    ((y-ay, ay+ah-y-h), (x-ax, ax+aw-x-w), (0,0)), mode='edge')
 
             fg_local = np.abs(acrop.astype(float) - parent_patch_a).max(2) > 3.0
             if not fg_local.any():
@@ -760,7 +811,13 @@ def stage_containers_and_surfaces(
             if fused_try.ownership.get(aid) != 'RESOLVED':
                 continue
 
-            work_plate[ay:ay + ah, ax:ax + aw][vis_local] = parent_uint8
+            bpatch_a = np.clip(np.rint(parent_patch_a), 0, 255).astype('uint8')
+            writes = vis_local
+            if child_backing is not None:
+                permitted = a_mask[ay:ay+ah, ax:ax+aw].copy()
+                permitted[y-ay:y-ay+h, x-ax:x-ax+w] |= child_backing
+                writes = vis_local & permitted
+            work_plate[ay:ay + ah, ax:ax + aw][writes] = bpatch_a[writes]
             already_claimed |= a_mask
             container_asset_mask |= a_mask
             claimed_child_ids.update(direct_oids)
@@ -769,7 +826,6 @@ def stage_containers_and_surfaces(
             png_file = output / f'{aid}.png'
             Image.fromarray(rgba).save(png_file)
             proof_file = output / f'{aid}-owner.npz'
-            bpatch_a = np.broadcast_to(parent_uint8, (ah, aw, 3)).copy()
             np.savez_compressed(
                 proof_file,
                 mask=a_mask,
@@ -789,6 +845,8 @@ def stage_containers_and_surfaces(
                 'bbox': [ax, ay, aw, ah],
                 'restore_bbox': [ax, ay, aw, ah],
                 'payload': {'method': 'cleaned-plate-container-unmix/1'},
+                **({'parent_backing':backing_info} if shared is not None else {}),
+                **({'backing_child_ids':sorted(backing_child_ids)} if backing_child_ids else {}),
                 'state': 'STAGED',
                 'quality': 'REVIEW_REQUIRED',
                 'human_acceptance': False,

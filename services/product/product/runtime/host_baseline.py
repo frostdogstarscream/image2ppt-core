@@ -13,6 +13,7 @@ from ..tolerance_config import load_tolerance_config
 from ..scorecard import fidelity, score_page, _native_fields, _overlap
 from .plate_audit import audit as audit_plate, bind_native_paragraphs, bind_separate_symbols, native_line_fields, visible_divider_lines
 from .host_evidence import prepare_all, questions, read
+from .graphic_plate import measure as measure_graphic_plate
 from .reading_targets import revised_lines
 from .state import RuntimeState, RuntimeConflict
 from .service import RuntimeService
@@ -120,7 +121,8 @@ def assess(job, current):
                 and office.get('office',{}).get('pptx_sha256')==sha
                 and office.get('office',{}).get('status')=='PASS_APP_AUTOMATED')
     request_file = Path(job) / 'request.json'
-    checked_icons = (verified and request_file.is_file() and read(request_file).get('object_scoped_delivery')
+    scoped = request_file.is_file() and read(request_file).get('object_scoped_delivery')
+    checked_icons = (verified and scoped
                      and office['office'].get('embedded_alpha_and_visible_rgb_checked'))
     pages = []
     for page,row in enumerate(current['pages'],1):
@@ -181,6 +183,9 @@ def assess(job, current):
                  if val['ssim'] < limits['min_ssim'] or val['delta_e2000_p95'] > limits['max_delta_e2000_p95']]
         plate = audit_plate(job, deck, sha, page, row['snapshot'], lines, fields, marks, adopted,
                             office_view=hidden, view_receipt=receipt, check_icon_fragments=checked_icons)
+        graphic_plate = measure_graphic_plate(
+            deck, page, row['snapshot'], marks, current.get('marked_plans',{}).get(k,[]),
+            lines, selected, {obj['name'] for obj in objects}, sha) if scoped else None
         residual_pages = office.get('residuals', [])
         if checked_icons and len(residual_pages) >= page:
             from .graphic_readings import bind_graphic_readings
@@ -213,6 +218,7 @@ def assess(job, current):
                     for tid in editables for aid, proof in selected[tid].get('text_cutouts', {}).items()}
         pictures = {oid:r['asset_reference']['sha256'] for oid,r in selected.items() if r.get('asset_reference')}
         pages.append({'unscoped_crops':unscoped, 'raster_text_in_artwork':artwork_text,
+                      **({'graphic_plate':graphic_plate} if scoped else {}),
                       'plate_audit':plate,'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
                       'replaced_text_cutouts':replaced, 'picture_hashes':pictures,
                       'passed_edits':sorted(f'{oid}/{action}' for oid in editables for action in actions[oid]),
@@ -236,6 +242,15 @@ def regressions(base, candidate, *, reviewed_reading_draft=False):
         prefix = f"p{a['page']}:"
         old_plate = a.get('plate_audit', {})
         new_plate = b.get('plate_audit', {})
+        old_graphics = a.get('graphic_plate', {})
+        if old_graphics.get('status') == 'MEASURED':
+            new_graphics = b.get('graphic_plate', {})
+            if new_graphics.get('status') != 'MEASURED':
+                reasons.append(prefix+'GRAPHIC_PLATE_AUDIT_MISSING')
+            else:
+                cleared = {r['id'] for r in old_graphics['rows'] if r['status']=='source_edges_removed'}
+                if any(r['id'] in cleared and r['status']=='retained' for r in new_graphics['rows']):
+                    reasons.append(prefix+'GRAPHIC_RETURNED_TO_PLATE')
         if old_plate.get('status') == 'MEASURED':
             if new_plate.get('status') != 'MEASURED':
                 reasons.append(prefix+'PLATE_AUDIT_MISSING')
@@ -489,6 +504,8 @@ def ensure_baseline(job):
             if request.get('object_scoped_delivery'):
                 issues.update((oid,'source_reading_disagreement') for r in page_score['plate_audit']['rows']
                               if r.get('source_reading_disagrees') for oid in r['mark_ids'])
+                issues.update((r['id'],'graphic_retained') for r in page_score.get('graphic_plate',{}).get('rows',[])
+                              if r['status']=='retained')
             c.setdefault('plate_issues', {})[k] = issues
             c['questions'][k] = questions(state, c, page, c['regional_failures'][k], d)
         return {'pages':len(score['pages'])}
@@ -618,21 +635,32 @@ def delivery_defects(score):
             reasons.append('SOURCE_TEXT_WITHOUT_NATIVE_FIELD')
         if page.get('unscoped_crops'):
             reasons.append('IMAGE_WITHOUT_SINGLE_OBJECT_OWNER')
+        graphic_plate = page.get('graphic_plate', {})
+        remaining = [r for r in graphic_plate.get('rows', []) if r['status']=='retained']
+        if graphic_plate and graphic_plate.get('status') != 'MEASURED':
+            reasons.append('GRAPHIC_PLATE_UNVERIFIED')
+        if remaining:
+            reasons.append('GRAPHIC_STILL_ON_BACKGROUND')
         if reasons:
             defects.append({'page': page['page'], 'reasons': reasons, 'retained_fields': retained + unresolved,
+                            **({'retained_graphics':remaining} if remaining else {}),
                             'unscoped_crops': page.get('unscoped_crops', [])})
     return defects
 
 
 def _verified_partial_copy(score, deck_sha, sources, defects):
-    """Allow an explicitly incomplete review copy only for measured, source-bound wording gaps."""
-    wording = {'TEXT_STILL_ON_BACKGROUND', 'SOURCE_TEXT_WITHOUT_NATIVE_FIELD'}
+    """Allow partial copies with measured text or graphic gaps and verified editable objects."""
+    reviewable = {'TEXT_STILL_ON_BACKGROUND', 'SOURCE_TEXT_WITHOUT_NATIVE_FIELD','GRAPHIC_STILL_ON_BACKGROUND'}
     if (not defects or not sources or not score.get('verified') or score.get('office_status') != 'PASS'
             or score.get('pptx_sha256') != deck_sha or len(score['pages']) != len(sources)
-            or any(set(item['reasons']) - wording for item in defects)):
+            or any(set(item['reasons']) - reviewable for item in defects)):
         return False
     for index, (page, source_sha) in enumerate(zip(score['pages'], sources), 1):
         audit = page.get('plate_audit', {})
+        graphic = page.get('graphic_plate', {})
+        if graphic and (graphic.get('pptx_sha256') != deck_sha or graphic.get('source_sha256') != source_sha
+                        or graphic.get('status') != 'MEASURED'):
+            return False
         editable = page.get('selected_editables', [])
         edits = set(page.get('passed_edits', []))
         if (not editable or page['page'] != index or page.get('source_sha256') != source_sha
@@ -646,7 +674,10 @@ def _preserves_partial_edits(baseline_defects, candidate_defects):
     """Avoid trading one unresolved field for another when selecting a review copy."""
     from .marked_routes import iou
     baseline = {page['page']:page['retained_fields'] for page in baseline_defects}
+    old_graphics = {page['page']:{r['id'] for r in page.get('retained_graphics',[])} for page in baseline_defects}
     for page in candidate_defects:
+        if {r['id'] for r in page.get('retained_graphics',[])} - old_graphics.get(page['page'],set()):
+            return False
         remaining = list(baseline.get(page['page'], []))
         for field in page['retained_fields']:
             original_id = field.get('ocr_id')
@@ -695,9 +726,45 @@ def _publish(job, agent, reasons, candidate):
             else:
                 reasons = ['AGENT_FAILED_OBJECT_SCOPE_GATE']
     fallback = bool(reasons)
+    recovered_copy = None
+    if fallback and strict and base['verified'] and (state.root/'object-recovery').is_dir() and state.remaining_seconds() != 0:
+        # The frozen comparison stays immutable. Give individually useful edits one
+        # source-bound reconstruction on that parent before selecting the review copy.
+        from ..parallel_store import BudgetExceeded
+        from ..pipeline import PipelineError
+        from .object_recovery import recover_page
+        service = RuntimeService(job.parent)
+        rebuilt = read(root/'state.json')
+        recovery_dir = state.root/'delivery-recovery'/uuid4().hex
+        try:
+            edits = {}
+            for page in range(1,len(rebuilt['pages'])+1):
+                restored = recover_page(service,state,rebuilt,recovery_dir/str(page),page)
+                if restored:
+                    edits[str(page)] = restored
+            if edits:
+                service.compose_delivery(state,rebuilt,recovery_dir/'compose',recover_objects=False)
+                composition = service.composition(rebuilt)
+                office = service.office_check(state,composition['artifacts']['pptx'],
+                    [Path(row['ir']) for row in rebuilt['pages']],recovery_dir/'office')
+                composition['office'] = office
+                if office.get('status') != 'PASS':
+                    raise ValueError('Office check for reconstructed objects: '+str(office.get('status', 'UNKNOWN')))
+                measured = assess(job,rebuilt)
+                issues = delivery_defects(measured)
+                regress = regressions(base,measured)
+                qualifies = (not issues or _verified_partial_copy(measured,measured['pptx_sha256'],manifest['sources'],issues))
+                if not regress and qualifies and _preserves_partial_edits(base_defects,issues):
+                    recovered_copy = (rebuilt, measured, issues, edits)
+                write(recovery_dir/'selection.json',{'accepted':bool(recovered_copy),'restored_edits':edits,
+                      'regressions':regress,'remaining_defects':issues,'source_sha256':manifest['sources']})
+        except RuntimeConflict:
+            raise
+        except (BudgetExceeded,PipelineError,OSError,ValueError) as error:
+            write(recovery_dir/'selection.json',{'accepted':False,'reason':str(error)})
     if fallback and partial_baseline:
         partial_defects = base_defects
-    if fallback and base_defects and not partial_defects:
+    if fallback and base_defects and not partial_defects and not recovered_copy:
         result = {'status':'REVIEW_REQUIRED', 'completion':'RECONSTRUCTION_INCOMPLETE',
                   'reason':'No verified object-scoped presentation', 'origin': ORIGIN,
                   'failed_pages':base_defects, 'fallback_reasons':reasons,
@@ -718,19 +785,22 @@ def _publish(job, agent, reasons, candidate):
               'selected_sha256':None,'origin':ORIGIN})
         return result
     if fallback:
-        frozen = read(root/'state.json')
+        frozen, selected_score = (recovered_copy[:2] if recovered_copy else (read(root/'state.json'),base))
+        if recovered_copy:
+            partial_defects = recovered_copy[2]
         if current['version']!=frozen['version'] and current['status']!='REVIEW_REQUIRED':
             write(state.root/'agent-attempt/state.json',current)
-        install_file(root/'baseline.pptx',delivery/'result.pptx')
+        install_file(Path(frozen['composition']['artifacts']['pptx']) if recovered_copy else root/'baseline.pptx',
+                     delivery/'result.pptx')
         office_dir = Path(frozen['composition']['office'].get('office_directory',''))
-        for p in base['pages']:
+        for p in selected_score['pages']:
             n = p['page']
             preview = office_dir/f'page-{n:02d}-before.png'
-            if preview.name in manifest['files']:
+            if not recovered_copy and preview.name in manifest['files']:
                 preview = root/preview.name
             if preview.is_file():
                 install_file(preview,delivery/f'page-{n:02d}.png')
-        editable = [p['selected_editables'] if base['verified'] else [] for p in base['pages']]
+        editable = [p['selected_editables'] if selected_score['verified'] else [] for p in selected_score['pages']]
         result = {'status':'REVIEW_REQUIRED','completion':'PARTIAL_EDITABLE' if any(editable) else 'RASTER_ONLY',
                   'office_pass':base['verified'],'editable_objects':editable,'pages':len(editable),
                   'human_acceptance':False,'automatic_publication':False,'final_qa':'UNKNOWN',
@@ -763,6 +833,9 @@ def _publish(job, agent, reasons, candidate):
                                          and all(p.get('vlm_audit',{}).get('provider','opencode_go')=='opencode_go'
                                                  for p in agent['independent_audit'].get('pages',[])) else 'UNKNOWN'),
                   wps_acceptance='UNKNOWN', baseline_pages=summary(base))
+    if recovered_copy:
+        result.update(origin='object-incremental', restored_edits=recovered_copy[3])
+        write(delivery/'recovered-scorecard.json',recovered_copy[1])
     shutil.copyfile(root/'baseline.pptx',delivery/'deterministic-baseline.pptx')
     shutil.copyfile(root/'scorecard.json',delivery/'baseline-scorecard.json')
     result['text_profile'] = manifest.get('text_profile', {'region_text':False, 'page_reading':False})
@@ -785,6 +858,8 @@ def _publish(job, agent, reasons, candidate):
     result.pop('artifacts',None)
     write(delivery/'summary.json',result)
     names = {'result.pptx','deterministic-baseline.pptx','baseline-scorecard.json','summary.json'}
+    if recovered_copy:
+        names.add('recovered-scorecard.json')
     names.update(f"page-{p['page']:02d}.png" for p in base['pages'])
     if reading_reports:
         names.add('reading-decisions.json')
