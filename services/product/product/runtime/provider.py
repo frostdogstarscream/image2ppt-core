@@ -302,6 +302,13 @@ class OpenAICompatReviewer:
 
 def resolve_review_config(job=None, *, mutate_env: bool = False) -> tuple[str, str, list[str], str]:
     """Select independent reviewer (provider, base_url, api_keys, model) distinct from the builder Agent."""
+    if job and (Path(job)/'request.json').is_file():
+        request=json.loads((Path(job)/'request.json').read_text('utf8'))
+        if request.get('orchestrator')=='editable_reconstruction':
+            provider,base_url,keys,model=inspect_agent_spec(job)
+            if provider!='moma' or not keys:
+                raise ValueError('direct visual review requires configured MoMA')
+            return provider,base_url,keys,model
     if mutate_env:
         agent_provider, cfg = configure_model(job)
         agent_model = cfg.model

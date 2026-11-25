@@ -27,7 +27,7 @@ README = r"""# image2PPT 技能源码包与 Claude Code 入口
 本包导出 image2PPT v0.1 的项目自有源码，并提供 Claude Code 的项目级技能入口。
 它是源码及接入包；没有包含 PPT 编译、渲染引擎，不能当作独立安装包。
 
-Codex 主 Skill 已面向 r10 三分支自动产品；本包仍仅导出固定核心，
+Codex 开发 Skill 说明 OpenCode、MoMA 直连与 r10/R12 冻结基线的适用范围。本包仅导出固定核心和开发技能，
 不包含 services/product 后台、模型或完整自动产品部署。运行自动任务须回到
 具有 parallel_pipeline 的完整项目工作区。手工流程仅为历史参考。
 

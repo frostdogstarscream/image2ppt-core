@@ -38,7 +38,7 @@ Basic computation now returns exploratory artifacts. `create_candidate` uses the
 
 Agent local findings use `record_observation`, which has no Office prerequisite. Final delivery review remains hash-bound through `record_visual_review`. Existing formal submission thresholds are retained in the submission path. This revision removes their effect on exploratory generation and preview; it does not establish new real-slide visual acceptance.
 
-The runtime Skill is `skills/image2ppt-runtime/SKILL.md`. A job receives a private MCP context, source attachments and the delivery goal. Each tool records its input, implementation/candidate bindings and output artifacts. Candidates may combine separately generated masks and backgrounds. The source mask, private staging adapter and actual Office checks validate submissions.
+The runtime installs `skills/image2ppt-runtime/SKILL.md` together with the text of `skills/image2ppt-runtime/reconstruction-policy.md` in the job's Skill and system prompt. The explicit `editable_reconstruction` route reads the same policy and uses MoMA with in-process tools. OpenCode jobs receive a private MCP context, source evidence and the delivery goal. Each tool records its inputs and evidence. Candidates may combine separately generated masks and backgrounds. The ownership checks, staging adapter and actual Office checks validate submissions.
 
 `tool_profile=basic` in a task request exposes the basic tool catalog for autonomous-composition acceptance. It omits `run_perception`, `run_parallel_pipeline`, `rebuild_region` and `repair_region`. It does not select an object or prescribe a tool sequence.
 

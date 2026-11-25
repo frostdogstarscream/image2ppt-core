@@ -16,35 +16,50 @@ STAGED 是提交前正常阶段；human_acceptance=false 始终由用户决定�
 '''
 
 
-def panels(source,preview,irfile,office_dir,page,output):
+def panels(source,preview,irfile,office_dir,page,output,*,site_review=None):
     irpath=Path(irfile)
     ir=json.loads(irpath.read_text(encoding='utf-8'));source=Image.open(source).convert('RGB');actual=Image.open(preview).convert('RGB')
     scene_file=irpath.parent/'scene.json'
     selected=json.loads(scene_file.read_text(encoding='utf-8')).get('selected',{}) if scene_file.is_file() else {}
     output=Path(output);output.mkdir(parents=True,exist_ok=True);rows=[];files=[];refs=[]
+    def save_panel():
+        file=output/f'panel-{len(files):02d}.png';canvas=Image.new('RGB',(1220,sum(r.height for r in rows)),'white');y0=0
+        for r in rows:canvas.paste(r,(0,y0));y0+=r.height
+        canvas.save(file);files.append(str(file));rows.clear()
+
+    def append_observation(label,crops):
+        factor=min(2,400/max(1,crops[0].width),180/max(1,crops[0].height));cw,ch=[max(1,round(v*factor)) for v in crops[0].size]
+        row=Image.new('RGB',(1220,ch+30),'#eeeeee');draw=ImageDraw.Draw(row)
+        draw.text((5,4),label,fill='black')
+        for index,crop in enumerate(crops):row.paste(crop.resize((cw,ch)),(index*405,26))
+        rows.append(row)
+        if len(rows)==8:save_panel()
+
     for node in ir['nodes']:
         if node['id']=='source-plate':continue
         deleted=Path(office_dir)/f"{page:02d}-{node['id']}-delete.png"
         if not deleted.exists():raise ValueError('missing actual delete evidence: '+node['id'])
         x,y,w,h=node['bbox'];pad=12;box=(max(0,int(x)-pad),max(0,int(y)-pad),min(source.width,int(x+w)+pad),min(source.height,int(y+h)+pad))
         crops=[im.crop(box) for im in (source,actual,Image.open(deleted).convert('RGB'))]
-        factor=min(2,400/max(1,crops[0].width),180/max(1,crops[0].height));cw,ch=[max(1,round(v*factor)) for v in crops[0].size]
         rec=selected.get(node['id'],{})
         is_in_place=bool(rec.get('region_crop') and rec.get('move_safety')=='MOVE_UNSAFE')
         label=f"{node['id']} [MOVE_UNSAFE IN-PLACE CROP] : SOURCE / FINAL / DELETED" if is_in_place else f"{node['id']} : SOURCE / FINAL / DELETED"
-        row=Image.new('RGB',(1220,ch+30),'#eeeeee');draw=ImageDraw.Draw(row)
-        draw.text((5,4),label,fill='black')
-        for i,crop in enumerate(crops):row.paste(crop.resize((cw,ch)),(i*405,26))
+        append_observation(label,crops)
         ref={'id':node['id'],'kind':node['type'],'delete_preview_sha256':digest(deleted)}
         if is_in_place:
             ref['region_crop']=True;ref['move_safety']='MOVE_UNSAFE'
-        rows.append(row);refs.append(ref)
-        if len(rows)==8:
-            file=output/f'panel-{len(files):02d}.png';canvas=Image.new('RGB',(1220,sum(r.height for r in rows)),'white');y0=0
-            for r in rows:canvas.paste(r,(0,y0));y0+=r.height
-            canvas.save(file);files.append(str(file));rows=[]
-    if rows:
-        file=output/f'panel-{len(files):02d}.png';canvas=Image.new('RGB',(1220,sum(r.height for r in rows)),'white');y0=0
-        for r in rows:canvas.paste(r,(0,y0));y0+=r.height
-        canvas.save(file);files.append(str(file))
+        refs.append(ref)
+    if site_review is not None:
+        from .office_sites import checked_sites
+        office_scale_source = source if source.size == actual.size else source.resize(actual.size, Image.Resampling.LANCZOS)
+        for rec in checked_sites(office_dir,site_review,irpath,page):
+            box=rec['window']
+            with Image.open(Path(office_dir)/rec['crop']) as edited:
+                crops=[office_scale_source.crop(box),actual.crop(box),edited.convert('RGB')]
+            if crops[0].size!=crops[2].size:raise ValueError('original-site crop size mismatch')
+            action='MOVED CLEAR' if rec['action']=='move-clear' else 'BOTH LAYERS DELETED'
+            label=f"{' + '.join(rec['members'])} : SOURCE / FINAL / {action} (ORIGINAL SITE)"
+            append_observation(label,crops)
+            refs.append(rec)
+    if rows:save_panel()
     return files,refs

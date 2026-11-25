@@ -50,7 +50,7 @@ def unpack(data, target):
                 raise ValueError('Office packet hash mismatch')
 
 
-def submit(job, pptx, irs, directory, timeout=1800, *, target_ids=None):
+def submit(job, pptx, irs, directory, timeout=1800, *, target_ids=None, original_sites=False):
     directory = Path(directory)
     request = directory/'worker-request'
     request.mkdir(parents=True)
@@ -60,6 +60,8 @@ def submit(job, pptx, irs, directory, timeout=1800, *, target_ids=None):
     req_payload = {'irs': [f'page-{i}/slideir.json' for i in range(len(irs))]}
     if target_ids is not None:
         req_payload['target_ids'] = sorted(set(target_ids))
+    if original_sites:
+        req_payload['original_sites'] = True
     write(request/'request.json', req_payload)
     pack(request, directory/'input.zip')
     write(directory/'worker-state.json', {'status': 'QUEUED', 'created': time.time(),
@@ -123,14 +125,17 @@ def execute_ticket(client,ticket,run,binding):
     if any(not p.is_relative_to(run/'input') for p in irs):
         raise ValueError('Office IR escaped packet')
     target_ids = request.get('target_ids')
-    result=check_local(run/'input/input.pptx',irs,run/'output/check',**({'target_ids':target_ids} if target_ids is not None else {}))
+    options = {'target_ids': target_ids} if target_ids is not None else {}
+    if request.get('original_sites'):
+        options['original_sites'] = True
+    result=check_local(run/'input/input.pptx',irs,run/'output/check',**options)
     for probe_file in list((run/'output/check').rglob('*')):
         if not probe_file.is_file():
             continue
         suf = probe_file.suffix.lower()
         if suf == '.pptx':
             probe_file.unlink()
-        elif suf == '.png' and not (probe_file.name.endswith('-before.png') or probe_file.name.endswith('-delete.png')):
+        elif suf == '.png' and not probe_file.name.endswith(('-before.png','-delete.png','-site.png','-reopen.png')):
             probe_file.unlink()
     result['files'] = {str(p): digest(p) for p in (run/'output/check').rglob('*') if p.is_file()}
     write(run/'output/check/checks.json', result)
@@ -153,6 +158,7 @@ def worker(url, token, root, once=False):
         'worker_code': digest(__file__),
         'office_code': digest(Path(__file__).with_name('office.py')),
         'parallel_office_code': digest(pkg / 'parallel_office.py'),
+        'office_site_code': digest(pkg / 'office_sites.py'),
         'parallel_probe_code': digest(pkg / 'parallel_edit_probe.py'),
     })
     with httpx.Client(base_url=url, headers={'Authorization': 'Bearer '+token,

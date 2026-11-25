@@ -128,6 +128,15 @@ class RuntimeState:
                 result = {**result, 'version': current['version'],'remaining_seconds':self.remaining_seconds()}
                 # A recovery receipt is written before publishing the mutable head.
                 files = {str(p.relative_to(self.job)): digest(p) for p in directory.rglob('*') if p.is_file()}
+                if operation == 'batch_reconstruct_page' and result.get('cache_hit'):
+                    # This turn referenced artifacts from another turn. Keep them in the
+                    # ordinary hash checks when replaying or recovering this operation.
+                    candidate = current['candidates'][result['candidate_id']]
+                    saved = candidate['batch_result']
+                    referenced = {**candidate['files'], **candidate['validation']['files'],
+                                  saved['path']: saved['sha256']}
+                    for path, sha in referenced.items():
+                        files[str(Path(path).relative_to(self.job))] = sha
                 receipt = {'state': current, 'response': result, 'files': files}
                 with self.publication_lock():
                     if (self.root/'delivery-selection.json').exists():

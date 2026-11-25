@@ -57,16 +57,26 @@ class RuntimeService(ExplorationTools):
         if not job.is_relative_to(self.root) or not (job/'request.json').is_file():
             raise ValueError('unknown job')
         request = json.loads((job/'request.json').read_text('utf8'))
-        if request.get('orchestrator') != 'opencode' or request.get('visual_review_backend') != 'opencode':
-            raise ValueError('job is not registered for OpenCode orchestration')
+        if (request.get('orchestrator'),request.get('visual_review_backend')) not in (
+                ('opencode','opencode'),('editable_reconstruction','moma')):
+            raise ValueError('job is not registered for a supported orchestration and visual review pair')
         return RuntimeState(job)
 
     def call(self, tool, job_id, *, expected_version=None, idempotency_key='', **arguments):
-        if tool not in TOOLS:
+        if tool not in TOOLS and tool != 'get_editable_draft':
             raise ValueError('unknown runtime tool')
         state = self.state(job_id)
         request = json.loads((state.job/'request.json').read_text('utf8'))
         host = request.get('host_stage0')
+        if tool == 'batch_reconstruct_page' and request.get('orchestrator') == 'editable_reconstruction':
+            from .batch_backbone import editable_batch_arguments
+            arguments = editable_batch_arguments(arguments)
+            self.page(state.read(), arguments['page'])
+        if tool == 'get_editable_draft':
+            if request.get('orchestrator') != 'editable_reconstruction' or host or arguments:
+                raise ValueError('an editable reconstruction job and no arguments are required')
+            from .editable_draft import get_editable_draft
+            return get_editable_draft(self, state, state.read(), request)
         if host:
             from .host_evidence import AGENT_TOOLS, context, normalize_arguments
             if tool not in AGENT_TOOLS:
@@ -111,6 +121,8 @@ class RuntimeService(ExplorationTools):
             if request.get('experiment_profile') in (None,'baseline'):
                 shortcuts.update(('plan_marked_page','inspect_marked_region','review_numbered_text'))
             result['tool_catalog'] = [name for name in TOOLS if name not in shortcuts]
+            if request.get('orchestrator') == 'editable_reconstruction':
+                result['tool_catalog'].append('get_editable_draft')
             result['goal'] = json.loads((state.job/'request.json').read_text('utf8')).get('goal', 'Faithful editable PPTX')
             result['budget']={'remaining_seconds':state.remaining_seconds(),
                 'wall_time_seconds':request.get('runtime_seconds',7200),
@@ -959,11 +971,15 @@ class RuntimeService(ExplorationTools):
     def office_check(state, pptx, irs, directory, *, target_ids=None):
         from ..recovery.adaptive_policy import AdaptiveBudget
         scoped = sorted(set(target_ids)) if target_ids is not None else None
+        request=json.loads((state.job/'request.json').read_text('utf8'))
+        site_checks = request.get('orchestrator') == 'editable_reconstruction'
         identity={'pptx':digest(pptx),'irs':[digest(ir) for ir in irs],
                   'implementation':RuntimeService.code_binding(),
                   'mode':os.environ.get('IMAGE2PPT_OFFICE_MODE','local')}
         if scoped is not None:
             identity['target_ids'] = scoped
+        if site_checks:
+            identity['original_site_scenes'] = [digest(Path(ir).parent/'scene.json') for ir in irs]
         if identity['mode']=='remote':
             binding=state.job.parent/'office-worker-binding.json'
             identity['worker']=json.loads(binding.read_text('utf8')) if binding.exists() else {'binding':'unknown'}
@@ -979,19 +995,31 @@ class RuntimeService(ExplorationTools):
                 if digest(path)!=sha:raise RuntimeConflict('cached Office evidence changed')
             write(Path(directory)/'checks.json',result)
             return {**result,'cache_hit':True}
-        request=json.loads((state.job/'request.json').read_text('utf8'))
         page_count=max(1,len(request.get('sources') or [1]))
         budget=AdaptiveBudget(Store(state.job/'state'),request.get('adaptive_budget'),page_count=page_count)
         budget.reserve('office_validations',identity)
         write(receipt,{'identity':identity,'status':'UNKNOWN','operation':str(directory)})
         from ..pipeline import _release_compile_headroom
         _release_compile_headroom()
+        options = {'target_ids': scoped} if scoped is not None else {}
+        if site_checks:
+            options['original_sites'] = True
         if os.environ.get('IMAGE2PPT_OFFICE_MODE', 'local') == 'remote':
             from .office_bridge import submit
-            result=submit(state.job, pptx, irs, directory, **({'target_ids': scoped} if scoped is not None else {}))
+            result=submit(state.job, pptx, irs, directory, **options)
         else:
             from .office import check_local
-            result=check_local(pptx, irs, directory, **({'target_ids': scoped} if scoped is not None else {}))
+            result=check_local(pptx, irs, directory, **options)
+        if site_checks and result['status'] == 'PASS':
+            from ..office_sites import checked_sites
+            try:
+                if result.get('pptx_sha256') != identity['pptx'] or result['office'].get('pptx_sha256') != identity['pptx']:
+                    raise ValueError('original-site evidence belongs to another PPTX')
+                for page, ir in enumerate(irs, 1):
+                    checked_sites(result['office_directory'],result['office'],ir,page,scoped)
+            except (KeyError, IndexError, OSError, TypeError, ValueError, OverflowError) as exc:
+                result = {**result, 'status':'UNKNOWN', 'failure':'OFFICE_SITE_EVIDENCE_UNAVAILABLE',
+                          'reason':str(exc)[:300]}
         write(receipt,{'identity':identity,'operation':str(directory),'result':result})
         return result
 
@@ -1022,7 +1050,8 @@ class RuntimeService(ExplorationTools):
                 if candidate['status'] == 'VALIDATED':
                     self.commit_region(state, current, target, candidate_id=candidate['id'])
         result = self.compose_delivery(state, current, directory/'composition')
-        return {**result, 'visual_review': 'REQUIRES_AGENT_OBSERVATION', 'backend': 'opencode'}
+        return {**result, 'visual_review': 'REQUIRES_AGENT_OBSERVATION',
+                'backend':json.loads((state.job/'request.json').read_text('utf8'))['visual_review_backend']}
 
     def validate_office(self, state, current, directory, *, candidate_id=None):
         if candidate_id:
@@ -1044,14 +1073,16 @@ class RuntimeService(ExplorationTools):
             return result
         from ..parallel_review import panels
         required = []
+        site_options = ({'site_review':result['office']} if
+                        json.loads((state.job/'request.json').read_text('utf8')).get('orchestrator') == 'editable_reconstruction' else {})
         for i, page in enumerate(current['pages'], 1):
             preview = Path(result['office_directory'])/f'page-{i:02d}-before.png'
             canonical_src = self.source(state, i)
             src_path = canonical_src if digest(canonical_src) == page['snapshot']['source_sha256'] else page['snapshot']['path']
             required.append(state.register(src_path, 'source'))
             required.append(state.register(preview, 'office_preview'))
-            images, _ = panels(page['snapshot']['path'], preview, page['ir'],
-                               result['office_directory'], i, directory/f'panels-{i:02d}')
+            images, _ = panels(src_path, preview, page['ir'],
+                               result['office_directory'], i, directory/f'panels-{i:02d}', **site_options)
             required.extend(state.register(path, 'edit_panel') for path in images)
         required.append(state.register(directory/'checks.json', 'hard_checks'))
         composition['required_evidence'] = required
@@ -1090,7 +1121,8 @@ class RuntimeService(ExplorationTools):
                    if r['id'] not in supplied_refs and (r['role'], r['sha256']) not in supplied_role_shas]
         if missing:
             raise ValueError('review omitted required source, preview or edit evidence: '+', '.join(missing))
-        current['visual_review'] = {**review.model_dump(), 'backend': 'opencode',
+        backend=json.loads((state.job/'request.json').read_text('utf8'))['visual_review_backend']
+        current['visual_review'] = {**review.model_dump(), 'backend': backend,
                                     'composition_sha256': key(composition),
                                     'status': 'PASS' if review.passed else 'REVIEW_REQUIRED'}
         write(directory/'visual-review.json', current['visual_review'])
@@ -1099,9 +1131,12 @@ class RuntimeService(ExplorationTools):
     def finalize_job(self, state, current, directory):
         composition = self.composition(current)
         visual = current.get('visual_review', {})
+        request=json.loads((state.job/'request.json').read_text('utf8'))
+        backend=request['visual_review_backend']
         if (composition['office']['status'] != 'PASS' or visual.get('status') != 'PASS'
+                or (backend=='moma' and visual.get('backend')!='moma')
                 or visual.get('composition_sha256') != key(composition)):
-            return {'status': 'REVIEW_REQUIRED', 'reason': 'current Office and OpenCode evidence required'}
+            return {'status': 'REVIEW_REQUIRED', 'reason': 'current Office and visual review evidence required'}
         for reference in composition['required_evidence']:
             state.evidence(reference['id'])
         raw_selected = [self.graph(page).selected for page in current['pages']]
@@ -1175,7 +1210,7 @@ class RuntimeService(ExplorationTools):
         audit_ok = audit.get('passed') is True and not plate_exceeded
         delivery_state = 'SUCCEEDED' if (any(editable) and audit_ok) else 'REVIEW_REQUIRED'
         avg_recall = round(sum(recalls) / len(recalls), 4) if recalls else None
-        result = {'status': delivery_state, 'completion': status, 'reconstruction_succeeded': any(editable), 'visual_review_backend': 'opencode',
+        result = {'status': delivery_state, 'completion': status, 'reconstruction_succeeded': any(editable), 'visual_review_backend': backend,
                   'office_pass': True, 'visual_review': visual, 'independent_audit': audit,
                   'tolerance_profile': tol_cfg.get('profile'),
                   'pages': len(editable),
@@ -1190,6 +1225,10 @@ class RuntimeService(ExplorationTools):
                   'workflow_states': {'candidate_generation': 'COMPLETED', 'regional_commit': 'COMPLETED',
                                       'final_qa': 'PASS' if audit_ok else 'REVIEW_REQUIRED',
                                       'automatic_publication': 'GATED'}}
+        if backend=='moma':
+            from .editable_draft import delivery_page_summaries
+            result['orchestrator']='editable_reconstruction'
+            result['page_summaries']=delivery_page_summaries(current, office=composition['office'])
         write(delivery/'summary.json', result)
         result['artifacts'] = {p.name: digest(p) for p in delivery.iterdir() if p.is_file()}
         write(state.root/'agent-result.json' if host else state.job/'result.json', result)

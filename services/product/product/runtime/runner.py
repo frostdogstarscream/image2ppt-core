@@ -3,7 +3,6 @@ import base64
 import json
 import os
 from pathlib import Path
-import shutil
 import sys
 import time
 
@@ -24,11 +23,16 @@ def prepare_workspace(job):
     skill = ROOT/'skills/image2ppt-runtime/SKILL.md'
     target = workspace/'.opencode/skills/image2ppt-runtime/SKILL.md'
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(skill, target)
     from .provider import configure_model,provider_id
     selected_provider,cfg=configure_model(job)
     identity=provider_id(selected_provider)
     request=json.loads((job/'request.json').read_text('utf8'))
+    instructions = skill.read_text('utf8')
+    if request.get('host_stage0'):
+        instructions = instructions.split('<!-- legacy-runtime -->')[0]
+    policy = skill.with_name('reconstruction-policy.md').read_text('utf8')
+    instructions = instructions.rstrip() + '\n\n' + policy
+    target.write_text(instructions, encoding='utf8')
     permissions = [{'action': '*', 'resource': '*', 'effect': 'deny'},
                    {'action': 'image2ppt_*', 'resource': '*', 'effect': 'allow'},
                    {'action': 'skill', 'resource': 'image2ppt-runtime', 'effect': 'allow'}]
@@ -57,17 +61,13 @@ def prepare_workspace(job):
                 'limit': {'context': 128000, 'output': 16000}}}}},
         'agents': {'image2ppt-runtime': {'mode': 'primary',
             'description': 'Autonomous screenshot reconstruction using evidence tools',
-            'system': skill.read_text('utf8'), 'steps': request.get('agent_steps',64), 'permissions': permissions}},
+            'system': instructions, 'steps': request.get('agent_steps',64), 'permissions': permissions}},
         'mcp': {'servers': {'image2ppt': {'type': 'local', 'codemode': False,
             'command': [sys.executable, '-m', 'product.runtime.mcp_server', '--root', str(job.parent), '--job', job.name],
             'cwd': str(ROOT), 'environment': {'PYTHONPATH': str(ROOT/'services/product')},
             'timeout': 3600000}}}}
     profile=request.get('experiment_profile')
-    if request.get('host_stage0'):
-        instructions = skill.read_text('utf8').split('<!-- legacy-runtime -->')[0]
-        target.write_text(instructions,encoding='utf8')
-        configuration['agents']['image2ppt-runtime']['system'] = instructions
-    elif profile and profile!='baseline':
+    if not request.get('host_stage0') and profile and profile!='baseline':
         configuration['agents']['image2ppt-runtime']['system'] += (
             '\nFirst prepare every page sequentially. Read the original and use get_evidence on one numbered block image '
             'and its compact inventory at a time. Keep page-wide mark numbers. Choose fields on EVERY page before '

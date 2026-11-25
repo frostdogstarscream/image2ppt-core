@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from functools import lru_cache
+import importlib.metadata
 import importlib.util
 import json
 import os
@@ -98,6 +99,60 @@ def binding() -> dict | None:
     if cfg['sha256'] and sha != cfg['sha256']:
         raise ValueError('matting model hash mismatch')
     return {'method': 'rmbg2-matte/1', 'model_sha256': sha, 'worker_sha256': digest(WORKER)}
+
+
+def runtime_binding():
+    """Identify the RMBG model and its possible in-process and subprocess engines."""
+    cfg = _config()
+    model = binding()
+    if not model:
+        return {'available': False}
+    path = Path(cfg['model']).resolve()
+    packages = ('torch', 'safetensors') if path.is_dir() else ('onnxruntime', 'onnxruntime-gpu')
+    search = [cfg['python_path'], *sys.path] if cfg['python_path'] else sys.path
+    versions = {name: next((dist.version for dist in importlib.metadata.distributions(name=name, path=search)), None)
+                for name in packages}
+    external = None
+    if cfg['python'] and Path(cfg['python']).resolve() != Path(sys.executable).resolve():
+        # The fallback interpreter can have different packages despite using the same weights.
+        # Query distribution metadata only, without importing ML modules or running inference.
+        executable = Path(cfg['python']).resolve(strict=True)
+        query = ('import importlib.metadata as m,json,sys; '
+                 'print(json.dumps({p:next((d.version for d in m.distributions(name=p)),None) for p in sys.argv[1:]}))')
+        env = os.environ.copy()
+        if cfg['python_path']:
+            env['PYTHONPATH'] = os.pathsep.join(filter(None, [cfg['python_path'], env.get('PYTHONPATH')]))
+        result = subprocess.run([str(executable), '-c', query, *packages], env=env, check=True,
+                                capture_output=True, text=True, timeout=8,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        external = {'executable': digest(executable), 'packages': json.loads(result.stdout)}
+    has_engine = all if path.is_dir() else any
+    if not has_engine(versions.values()) and (_can_run_in_process(path.is_dir(), cfg['python_path']) or not external):
+        raise ValueError('matting engine version unavailable')
+    if external and not has_engine(external['packages'].values()):
+        raise ValueError('matting engine version unavailable')
+    if path.is_dir():
+        files = {p.relative_to(path).as_posix(): p for pattern in ('*.py', '*.json') for p in path.rglob(pattern)}
+    else:
+        # ONNX sidecar weights can have arbitrary names. Bind the tensor locations
+        # declared by this model, including subgraphs, rather than guessing by filename.
+        import onnx
+        from google.protobuf.message import DecodeError
+        from onnx.external_data_helper import _get_all_tensors, uses_external_data
+        try:
+            graph = onnx.load_model(str(path), load_external_data=False)
+        except DecodeError as exc:
+            raise ValueError('ONNX model manifest unreadable') from exc
+        files = {}
+        for tensor in _get_all_tensors(graph):
+            if uses_external_data(tensor):
+                location = next((item.value for item in tensor.external_data if item.key == 'location'), '')
+                sidecar = (path.parent / location).resolve(strict=True)
+                if not sidecar.is_file() or not sidecar.is_relative_to(path.parent):
+                    raise ValueError('unverifiable ONNX external tensor')
+                files[location] = sidecar
+    return {**model, 'model_path': str(path), 'configuration': cfg, 'packages': versions,
+            'external': external, 'model_files': {name: digest(p) for name, p in files.items()}}
 
 
 @lru_cache(maxsize=2)

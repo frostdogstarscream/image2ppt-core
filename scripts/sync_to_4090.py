@@ -32,6 +32,7 @@ STATIC_SYNC_FILES = [
     'services/product/OPENCODE_RUNTIME.md',
     'services/product/PARALLEL_R10.md',
     'skills/image2ppt-runtime/SKILL.md',
+    'skills/image2ppt-runtime/reconstruction-policy.md',
     'AGENTS.md',
     'skills/image2ppt/SKILL.md',
     'skills/image2ppt/references/parallel-product.md',

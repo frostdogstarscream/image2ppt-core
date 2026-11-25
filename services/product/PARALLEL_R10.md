@@ -1,6 +1,6 @@
 # OpenCode 主线与 r10 对照基线
 
-> 当前产品主线已切换至 **OpenCode Runtime**（`orchestrator=opencode`、`/api/v1/jobs`、`services/product/OPENCODE_RUNTIME.md`、`skills/image2ppt-runtime/SKILL.md`），采用两级门禁（`configs/fidelity_tolerance.json`：安全硬门禁保持不变，视觉轻微偏差按容差记入 `minor_deviations`，优先输出全原生 `text`/`shape`/`chart`）。r10/R12（`product.parallel_pipeline.run`）冻结为对照基线保留，不再新增特性。
+> `POST /api/v1/jobs` 默认使用 OpenCode。显式传入 `orchestrator=editable_reconstruction` 时，MoMA 直接从上传图片开始，调用进程内工具并执行视觉自检。两条路径共享 `skills/image2ppt-runtime/reconstruction-policy.md`，交付时均核对实际 Office 收据与最终审计。旧 r10/R12 三分支保留为对照基线。具体入口以任务 `request.json` 为准。
 
 ## OpenCode 自主工具运行路径（当前主线）
 
@@ -8,7 +8,7 @@
 
 Runtime Skill 的维护源为 `skills/image2ppt-runtime/SKILL.md`。启动器将其安装到每个任务的 OpenCode 工作目录。`tool_profile=basic` 是自主组合验收目录，省略四个高级快捷工具；默认目录保留全部工具。两种目录均由模型自主选择目标和调用顺序。
 
-OpenCode uses the Office-checked host baseline first. A distinct Go model reviews the final render and edited panels. A missing independent review keeps the delivery in REVIEW_REQUIRED.
+OpenCode 上传任务使用宿主准备的基线。Session 自检与交付审计分别记录；实际审计模型以任务配置和收据为准。冻结 r10/R12 路径使用 Go 进行独立复核。
 
 ## R12 区域候选入口
 

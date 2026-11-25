@@ -30,12 +30,15 @@ def safe_graph(graph):
 def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progress=None,office=None,prepare_only=False):
     from .parallel_config import configure
     configure()
+    job=Path(job).resolve();request=json.loads((job/'request.json').read_text(encoding='utf-8'))
+    if request.get('orchestrator')=='editable_reconstruction' and not prepare_only:
+        from .runtime.editable_runner import run as run_editable
+        return run_editable(job)
     from .pipeline import Provider,settings,compile_pages,effective_findings
     from .fonts import font_manifest
     from .contracts import Review
     from .parallel_review import PROMPT as REVIEW,panels
     from .go_provider import GoProvider
-    job=Path(job).resolve();request=json.loads((job/'request.json').read_text(encoding='utf-8'))
     if request.get('orchestrator')=='opencode' and not prepare_only:
         from .runtime.runner import run as run_agent
         return run_agent(job)
@@ -280,8 +283,9 @@ def run(job,*,provider=None,review_provider=None,compiler=None,fonts=None,progre
     with ThreadPoolExecutor(max_workers=2) as pool:pages=list(pool.map(page,range(len(snaps))))
     graphs=[p[0] for p in pages];irs=[p[1] for p in pages];reports=[p[2] for p in pages]
     if prepare_only:
-        if request.get('orchestrator')!='opencode' or request.get('visual_review_backend')!='opencode':
-            raise ValueError('OpenCode preparation requires explicit orchestration and review binding')
+        if (request.get('orchestrator'), request.get('visual_review_backend')) not in (
+                ('opencode','opencode'),('editable_reconstruction','moma')):
+            raise ValueError('preparation requires explicit orchestration and review binding')
         prepared=[]
         for graph,snap,ir,(_,_,_,failures) in zip(graphs,snaps,irs,pages):
             try:layers,_=layer_evidence(snap,cache)

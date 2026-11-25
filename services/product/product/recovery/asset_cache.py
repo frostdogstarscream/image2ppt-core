@@ -59,7 +59,7 @@ def l1_binding(graph, obj, source, layers, baseline, strategy, model):
             'runtime': python_runtime(), 'strategy': strategy, 'sam_model': model}
 
 
-def compiler_runtime_fingerprint():
+def compiler_runtime_fingerprint(*, local_office=True):
     from ..pipeline import compiler_runtime
     _, node = compiler_runtime()
     script = """
@@ -109,7 +109,7 @@ def compiler_runtime_fingerprint():
     runtime['finalizer_files'] = file_hashes(Path(runtime['skill'])/'container_tools')
     runtime['node_sha256'] = digest(node)
     runtime['python_sha256'] = digest(runtime['python'])
-    if os.name == 'nt':
+    if local_office and os.name == 'nt':
         import winreg
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
                            r'SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\POWERPNT.EXE') as handle:

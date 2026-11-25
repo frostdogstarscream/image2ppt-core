@@ -59,6 +59,8 @@ class Queue:
                     try:
                         request=json.loads((self.root/id/'request.json').read_text(encoding='utf-8'))
                         resume=request.get('pipeline_mode') in ('parallel_review','parallel_shadow') and (self.root/id/'state/parallel.sqlite').is_file()
+                        if request.get('orchestrator')=='editable_reconstruction':
+                            resume=not (self.root/id/'cancel.requested').exists()
                         resume=resume or (request.get('orchestrator')=='opencode' and ((self.root/id/'runtime/session.json').is_file() or (self.root/id/'host-baseline/started.json').is_file()))
                     except (OSError,ValueError):pass
                 db.execute('UPDATE jobs SET state=? WHERE id=?',('QUEUED' if resume else 'INTERRUPTED',id))
@@ -94,7 +96,7 @@ class Queue:
                     request=json.loads((job/'request.json').read_text(encoding='utf-8'))
                     start_mono=time.monotonic()
                     runtime_s=request.get('runtime_seconds',7200)
-                    if request.get('orchestrator')=='opencode':
+                    if request.get('orchestrator') in ('opencode','editable_reconstruction'):
                         extra=(min(runtime_s,max(300,int(runtime_s*0.5))) if runtime_s>0 else 0) if request.get('host_stage0') else 0
                         deadline=start_mono+runtime_s+extra+180
                         cap_deadline=start_mono+(runtime_s*2+300 if runtime_s>0 else 180)
@@ -339,6 +341,9 @@ def create_app(root=None, token=None, run_worker=True):
             raise HTTPException(422,'未知模型供应商')
         if native_variant not in ('combined','shape-only','joint-only'):
             raise HTTPException(422,'unknown native ablation')
+        editable = orchestrator == 'editable_reconstruction'
+        if editable and (agent_provider not in (None,'moma') or experiment_profile or baseline_only):
+            raise HTTPException(422,'editable_reconstruction requires MoMA and a regular reconstruction job')
         if experiment_profile is not None:
             if experiment_profile not in PROFILES or tool_profile!='all':
                 raise HTTPException(422,'unsupported experiment profile or tool catalog')
@@ -351,20 +356,23 @@ def create_app(root=None, token=None, run_worker=True):
         if agent_model is not None and ('..' in agent_model or not re.fullmatch(r'[A-Za-z0-9._:-]{1,40}(?:/[A-Za-z0-9._:-]{1,60})?',agent_model)):raise HTTPException(422,'模型标识格式无效')
         if request.url.path=='/api/v1/jobs' and orchestrator=='pipeline':orchestrator='opencode'
         if os.environ.get('IMAGE2PPT_DEFAULT_ORCHESTRATOR')=='opencode' and orchestrator=='pipeline':orchestrator='opencode'
-        if orchestrator not in ('pipeline','opencode'):raise HTTPException(422,'未知执行器')
+        if orchestrator not in ('pipeline','opencode','editable_reconstruction'):raise HTTPException(422,'未知执行器')
         if tool_profile not in ('all','basic'):raise HTTPException(422,'未知工具目录')
         from .parallel_contracts import strategy,mode
         try:object_route=strategy(object_extraction);selected_mode=mode(pipeline_mode)
         except ValueError:raise HTTPException(422,'未知对象提取模式') from None
-        max_pages=32 if orchestrator=='opencode' else 12
+        max_pages=32 if orchestrator!='pipeline' else 12
         if not 1<=len(files)<=max_pages:raise HTTPException(422,f'请上传 1–{max_pages} 张图片')
-        if not (1<=agent_steps<=(192 if orchestrator=='opencode' else 128) and 60<=runtime_seconds<=21600 and 1<=candidate_limit<=12
+        if not (1<=agent_steps<=(192 if orchestrator!='pipeline' else 128) and 60<=runtime_seconds<=21600 and 1<=candidate_limit<=12
                 and 0<=model_calls<=200 and 1<=office_validations<=200):raise HTTPException(422,'执行预算超出支持范围')
         from .pipeline import settings
-        if orchestrator!='opencode':
+        if editable:
+            from .runtime.provider import moma_api_keys
+            if not moma_api_keys():raise HTTPException(503,'未配置 MoMA 密钥')
+        if orchestrator=='pipeline':
             try:settings()
             except (RuntimeError,OSError):raise HTTPException(503,'未配置 MoMA 密钥，请使用启动器配置') from None
-        if orchestrator!='opencode' and not os.environ.get('OPENCODE_GO_API_KEY'):raise HTTPException(503,'未配置 OpenCode Go 复核密钥')
+        if orchestrator=='pipeline' and not os.environ.get('OPENCODE_GO_API_KEY'):raise HTTPException(503,'未配置 OpenCode Go 复核密钥')
         if not 1<=len(goal)<=4000:raise HTTPException(422,'交付目标长度无效')
         # Serialize admission, bounded decode and queue insertion.
         with queue.lock:
@@ -382,10 +390,18 @@ def create_app(root=None, token=None, run_worker=True):
                         format=image.format.lower();image=ImageOps.exif_transpose(image)
                         w,h=image.size
                         if max(w,h)>4000 or w*h>12_000_000:raise ValueError()
-                        if size is not None and image.size!=size:raise HTTPException(422,'同一批页面需相同尺寸')
+                        if size is not None and image.size!=size and not (editable and abs(w-size[0])<=1 and abs(h-size[1])<=1):
+                            raise HTTPException(422,'同一批页面需相同尺寸')
                         size=image.size;images.append(image.convert('RGB'));originals.append((data,format))
                 except (OSError,ValueError,UnidentifiedImageError,Image.DecompressionBombError):
                     raise HTTPException(422,'图片无效，支持尺寸不超过 4000px 的单帧 PNG/JPEG/WebP') from None
+            if editable:
+                # Some real decks contain a single one-pixel crop. Pad only the
+                # trailing edges so all source coordinates remain valid.
+                common=(max(i.width for i in images),max(i.height for i in images))
+                if any(common[0]-i.width>1 or common[1]-i.height>1 for i in images):
+                    raise HTTPException(422,'页面尺寸差异超过一个像素')
+                images=[ImageOps.expand(i,(0,0,common[0]-i.width,common[1]-i.height),'white') if i.size!=common else i for i in images]
             id=uuid4().hex;job=root/id;(job/'inputs').mkdir(parents=True)
             names=[];original_refs=[];(job/'originals').mkdir()
             for i,image in enumerate(images,1):
@@ -394,17 +410,17 @@ def create_app(root=None, token=None, run_worker=True):
                 original_refs.append({'path':str(original.relative_to(job)),'sha256':digest(original),
                                       'canonical_file':name,'canonical_sha256':digest(job/'inputs'/name)})
             write(job/'request.json',{'sources':names,'max_calls':None,'italic_difference_ignored':True,
-                                     'agent_inference_provider':agent_provider or os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma'),
-                                     'agent_model':agent_model or os.environ.get('IMAGE2PPT_AGENT_MODEL'),
+                                     'agent_inference_provider':'moma' if editable else agent_provider or os.environ.get('IMAGE2PPT_AGENT_PROVIDER','moma'),
+                                     'agent_model':agent_model or ('qwen/qwen3.8-max' if editable else os.environ.get('IMAGE2PPT_AGENT_MODEL')),
                                      'object_extraction':object_route,'pipeline_mode':selected_mode,'original_inputs':original_refs,
                                      'orchestrator':orchestrator,'host_stage0':orchestrator=='opencode','baseline_only':baseline_only,'native_variant':native_variant,
-                                     'visual_review_backend':'opencode' if orchestrator=='opencode' else 'go',
-                                     'goal':goal,'fresh_perception':fresh_perception,'candidate_engine':'r12-regional' if orchestrator=='opencode' else 'off',
+                                     'visual_review_backend':'moma' if editable else 'opencode' if orchestrator=='opencode' else 'go',
+                                     'goal':goal,'fresh_perception':fresh_perception,'candidate_engine':'off' if orchestrator=='pipeline' else 'r12-regional',
                                      'agent_steps':agent_steps,'runtime_seconds':runtime_seconds,
                                      'tool_profile':tool_profile, **({'experiment_profile':experiment_profile} if experiment_profile else {}),
                                      'agent_thinking':agent_thinking,
                                      **({'adaptive_budget':{'region_candidates':min(2,candidate_limit),'complex_region_candidates':candidate_limit,
-                                         'model_calls':model_calls,'office_validations':office_validations,'max_seconds':runtime_seconds}} if orchestrator=='opencode' else {})})
+                                         'model_calls':model_calls,'office_validations':office_validations,'max_seconds':runtime_seconds}} if orchestrator!='pipeline' else {})})
             with queue.connect() as db:db.execute('INSERT INTO jobs VALUES(?,?,?)',(id,'QUEUED',time.time()))
         return {'id':id,'status':'QUEUED','max_model_calls':None}
     @app.get('/api/jobs',dependencies=[Depends(auth)])

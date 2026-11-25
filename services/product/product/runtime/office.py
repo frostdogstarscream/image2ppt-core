@@ -48,13 +48,16 @@ def frame_feedback(result,graph,identifier):
             'meaning':'Measured transparent native-frame extent for create_candidate.frame_minimum. Source text bbox and authorized erase pixels remain independent.'}
 
 
-def check_local(pptx, irs, directory, *, target_ids=None):
+def check_local(pptx, irs, directory, *, target_ids=None, original_sites=False):
     from ..parallel_office import inspect, OfficeValidationError
     from ..parallel_edit_probe import inspect_text
     from ..parallel_residual_gate import inspect_residuals, residual_accepted
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     targets = set(target_ids) if target_ids is not None else None
+    probe_options = {'target_ids': targets} if targets is not None else {}
+    if original_sites:
+        probe_options['original_sites'] = True
     result = {'status': 'UNKNOWN', 'pptx_sha256': digest(pptx), 'office_directory': str(directory/'office'),
               'target_ids': sorted(targets) if targets is not None else None}
     try:
@@ -69,7 +72,7 @@ def check_local(pptx, irs, directory, *, target_ids=None):
                     shutil.rmtree(directory/'replacement', ignore_errors=True)
                     time.sleep(2.0 * attempt)
                 try:
-                    actual = inspect(pptx, irs, directory/'office', **({'target_ids': targets} if targets is not None else {}))
+                    actual = inspect(pptx, irs, directory/'office', **probe_options)
                 except OfficeValidationError as exc:
                     report_file = directory/'office/report.json'
                     actual = json.loads(report_file.read_text('utf8')) if report_file.is_file() else {
@@ -91,6 +94,10 @@ def check_local(pptx, irs, directory, *, target_ids=None):
         residuals = [inspect_residuals(ir, directory/'office', index, directory/f'residual-{index:02d}.json',
                                        **({'target_ids': targets} if targets is not None else {}))
                      for index, ir in enumerate(irs, 1)]
+        if original_sites and actual.get('status') == 'PASS_APP_AUTOMATED':
+            from ..office_sites import checked_sites
+            for page, ir in enumerate(irs, 1):
+                checked_sites(directory/'office', actual, ir, page, targets)
         if replacement.get('status') == 'UNKNOWN':
             result.update(error_type='RuntimeError', failure='QA_INFRASTRUCTURE_UNAVAILABLE',
                           office=actual, replacements=replacement, residuals=residuals)

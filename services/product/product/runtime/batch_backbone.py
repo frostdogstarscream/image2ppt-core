@@ -2375,6 +2375,111 @@ def restage_batch_candidate_subset(
     return True
 
 
+def editable_batch_arguments(arguments):
+    defaults = {'include_assets': True, 'include_containers': True, 'include_region_crops': False,
+                'allow_move_unsafe': False, 'use_inpaint': True, 'verify_office': True}
+    unsupported = set(arguments) - set(defaults) - {'page', 'object_ids'}
+    if unsupported:
+        raise ValueError('unsupported batch arguments: ' + ', '.join(sorted(unsupported)))
+    page = arguments.get('page')
+    if type(page) is not int or page < 1:
+        raise ValueError('batch page must be a positive integer')
+    ids = arguments.get('object_ids')
+    if ids is not None and (not isinstance(ids, list)
+            or any(not isinstance(oid, str) or not oid or oid.strip() != oid for oid in ids)):
+        raise ValueError('object_ids must be a list of nonempty object IDs or null')
+    flags = {name: arguments.get(name, default) for name, default in defaults.items()}
+    if any(type(value) is not bool for value in flags.values()):
+        raise ValueError('batch flags require JSON true or false')
+    return {'page': page, 'object_ids': sorted(set(ids)) if ids is not None else None, **flags}
+
+
+def _batch_request_binding(state, current, row, page, routes, options):
+    """Identify the reconstruction inputs independently of the tool turn or candidate ID."""
+    from ..parallel_config import ROOT
+    from ..recovery.asset_cache import (code_fingerprint, compiler_runtime_fingerprint,
+                                       file_hashes, python_runtime)
+    from ..object_registry import SAM_BINDING
+    from ..tolerance_config import load_tolerance_config
+
+    page_key = str(page)
+    evidence = {
+        name: current.get(name, {}).get(page_key)
+        for name in ('ocr', 'page_structure', 'layout', 'deferred_assets')
+    }
+    environment_files = [os.environ.get(name) for name in (
+        'IMAGE2PPT_EXPERIMENT_CONFIG', 'IMAGE2PPT_SAM_CONFIG')]
+    configuration_files = [
+        ROOT / '.runtime/parallel-services.json', ROOT / '.runtime/sam-client.json',
+        *environment_files,
+    ]
+    font_config = json.loads(Path(current['fonts']).read_text('utf8'))
+    request = json.loads((state.job/'request.json').read_text('utf8'))
+    matte = None
+    if options['include_assets'] or options['include_region_crops']:
+        from .. import matting
+        if request.get('experiment_profile') in ('vitmatte', 'local-layerd', 'vtracer', 'combined'):
+            # These optional workers run outside this process and expose no complete
+            # versioned toolchain for reuse. Their existing Office receipts remain valid.
+            return None
+        matte = matting.runtime_binding()
+    return key({
+        'page': page, 'options': options, 'request': digest(state.job / 'request.json'),
+        'source': digest(row['snapshot']['path']), 'scene': digest(row['scene']),
+        'baseline': file_hashes(Path(row['ir']).parent),
+        'layers': file_hashes(row['layers']) if row.get('layers') else None,
+        'evidence': {name: digest(path) if path else None for name, path in evidence.items()},
+        'routes': routes, 'relations': current.get('scene_relations', {}).get(page_key),
+        'font_config': font_config,
+        'font_files': {path: digest(path) for path in {f['file'] for f in font_config['fonts']}},
+        'configuration': {str(path): digest(path) for path in configuration_files
+                          if path and Path(path).is_file()},
+        'tools': {name: os.environ.get(name) for name in (
+            'IMAGE2PPT_SAM_URL', 'SAM_URL', 'LAYERD_MODEL_BINDING', 'IMAGE2PPT_OFFICE_MODE',
+            'IMAGE2PPT_NODE')},
+        'sam_model': SAM_BINDING, 'matting': matte,
+        'compiler': compiler_runtime_fingerprint(local_office=os.environ.get('IMAGE2PPT_OFFICE_MODE') != 'remote'),
+        'tolerance': load_tolerance_config(),
+        'implementation': code_fingerprint(ROOT, compiler=True), 'python': python_runtime(),
+    })
+
+
+def _reuse_validated_batch(service, state, current, directory, binding):
+    from .state import RuntimeConflict
+
+    for candidate in current['candidates'].values():
+        if (candidate.get('batch_request_binding') != binding or candidate['status'] != 'VALIDATED'
+                or candidate.get('validation', {}).get('status') != 'PASS'):
+            continue
+        receipt = candidate.get('batch_result')
+        if not receipt or not candidate['validation'].get('files'):
+            continue
+        if os.environ.get('IMAGE2PPT_OFFICE_MODE') == 'remote':
+            # The worker that actually ran Office can register after generation started.
+            worker = state.job.parent / 'office-worker-binding.json'
+            actual_worker = candidate['validation'].get('worker_binding')
+            if (not actual_worker or not worker.is_file()
+                    or json.loads(worker.read_text('utf8')).get('binding') != actual_worker):
+                continue
+        path = Path(receipt['path'])
+        if not path.is_file() or digest(path) != receipt['sha256']:
+            raise RuntimeConflict('validated batch result changed')
+        # The VALIDATED path verifies parent, code, candidate files and Office evidence
+        # without rerunning the compiler, GPU tools or Office.
+        service.validate_candidate(state, current, directory, candidate_id=candidate['id'])
+        result = json.loads(path.read_text('utf8'))
+        result.pop('timings', None)  # Timings in the immutable receipt belong to the first run.
+        return {**result, 'cache_hit': True, 'next_step': _batch_commit_hint(
+            candidate['id'], len(candidate['object_ids']), current['version'] + 1)}
+    return None
+
+
+def _batch_commit_hint(candidate_id, count, version):
+    return (f'Batch candidate {candidate_id} is VALIDATED ({count} staged, 0 committed). '
+            f'Call commit_candidate(candidate_id="{candidate_id}", expected_version={version}) '
+            'to formally commit, then inspect failed_regions or compose_delivery.')
+
+
 def batch_reconstruct_page(service, state, current, directory: Path, *, page: int,
                            object_ids: list[str] | None = None, include_assets: bool = True,
                            include_containers: bool = True, include_region_crops: bool = False,
@@ -2412,6 +2517,25 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                     wanted_filter.update(field['target_ids'])
         write(directory/'plan-bindings.json', routes)
     sam_enabled = bool(os.environ.get('IMAGE2PPT_SAM_URL') or os.environ.get('SAM_URL'))
+    binding = None
+    if request.get('orchestrator') == 'editable_reconstruction' and verify_office:
+        options = {
+            'object_ids': sorted(wanted_filter) if wanted_filter is not None else None,
+            'include_assets': include_assets, 'include_containers': include_containers,
+            'include_region_crops': include_region_crops, 'allow_move_unsafe': allow_move_unsafe,
+            'use_inpaint': use_inpaint,
+        }
+        try:
+            binding = _batch_request_binding(state, current, row, page, routes, options)
+        except (ImportError, OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+            # Incomplete optional inputs (for example an uninstalled font) cannot
+            # justify a cache hit. Let the normal builder measure the actual result.
+            state.event({'tool': 'batch_reconstruct_page', 'page': page,
+                         'cache_unavailable': type(exc).__name__})
+        if binding is not None:
+            existing = _reuse_validated_batch(service, state, current, directory, binding)
+            if existing is not None:
+                return existing
     t_batch_start = time.perf_counter()
     timings: dict[str, float] = {}
 
@@ -2730,7 +2854,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     enriched = _enriched_failures()
 
     if cand.get('status') == 'VALIDATED' and val.get('status') == 'PASS':
-        return {
+        result = {
             'status': 'VALIDATED',
             'office_status': 'PASS',
             'already_committed': False,
@@ -2745,8 +2869,14 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'timings': timings,
             'failed_count': len(enriched),
             'failed_regions': enriched,
-            'next_step': f'Batch candidate {batch_cid} is VALIDATED ({len(staged_ids)} staged, 0 committed). Call commit_candidate(candidate_id="{batch_cid}", expected_version={next_version}) to formally commit, then inspect failed_regions or compose_delivery.',
+            'next_step': _batch_commit_hint(batch_cid, len(staged_ids), next_version),
         }
+        if binding is not None:
+            receipt = directory / 'batch-result.json'
+            write(receipt, result)
+            cand['batch_request_binding'] = binding
+            cand['batch_result'] = {'path': str(receipt), 'sha256': digest(receipt)}
+        return result
 
     return {
         'status': 'OFFICE_UNAVAILABLE' if val.get('status') == 'UNKNOWN' else 'REVIEW_REQUIRED',

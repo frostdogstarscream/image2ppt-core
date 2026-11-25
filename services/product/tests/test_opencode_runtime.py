@@ -446,8 +446,9 @@ def test_transcript_pagination_preserves_full_decision_trace():
     assert [m['id'] for m in result['data']]==['a','b']
 
 
-def test_go_agent_configuration_and_tool_planner_use_the_selected_provider(job,monkeypatch):
-    from product.runtime.runner import prepare_workspace
+@pytest.mark.parametrize('host_prepared', [True, False])
+def test_go_agent_configuration_and_tool_planner_use_the_selected_provider(job,monkeypatch,host_prepared):
+    from product.runtime.runner import ROOT, prepare_workspace
     from product.runtime.provider import planning_actor,GO_BASE_URL
     _,_,directory=job
     for name in ('PLANNER_API_KEY','PLANNER_BASE_URL','PLANNER_MODEL'):
@@ -455,9 +456,15 @@ def test_go_agent_configuration_and_tool_planner_use_the_selected_provider(job,m
     monkeypatch.setenv('IMAGE2PPT_AGENT_PROVIDER','opencode_go')
     monkeypatch.setenv('IMAGE2PPT_AGENT_API_KEY','synthetic-agent-secret')
     monkeypatch.setenv('IMAGE2PPT_AGENT_MODEL','qwen3.8-flash')
+    request = json.loads((directory/'request.json').read_text('utf8'))
+    write(directory/'request.json', {**request, 'host_stage0': host_prepared})
     workspace=prepare_workspace(directory)
     encoded=(workspace/'opencode.json').read_text('utf8')
     configuration=json.loads(encoded)
+    instructions = configuration['agents']['image2ppt-runtime']['system']
+    policy = (ROOT/'skills/image2ppt-runtime/reconstruction-policy.md').read_text('utf8')
+    assert instructions.count(policy) == 1
+    assert (workspace/'.opencode/skills/image2ppt-runtime/SKILL.md').read_text('utf8') == instructions
     provider=configuration['providers']['image2ppt-go']
     assert provider['settings']['baseURL']==GO_BASE_URL
     assert provider['models']['vision']['modelID']=='qwen3.8-flash'

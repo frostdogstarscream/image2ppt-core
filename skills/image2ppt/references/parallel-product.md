@@ -2,7 +2,7 @@
 
 ## Entrypoints and evidence
 
-Run from the product worktree. The primary automatic mainline is the OpenCode runtime (`services/product/OPENCODE_RUNTIME.md`, `/api/v1/jobs`, `services/product/opencode_client.py`, and `skills/image2ppt-runtime/SKILL.md`), with two-tier hard-safety vs soft-fidelity gates configured in `configs/fidelity_tolerance.json`. `services/product/product/parallel_pipeline.py` (`PARALLEL_R10.md`) is retained as a frozen comparison baseline. Inspect CLI `--help` before adapting commands. Typical PowerShell entrypoints are:
+Run from the product worktree. Read the route table in [the engineering Skill](../SKILL.md) and the job's `request.json`. The versioned upload API defaults to OpenCode. Explicit `orchestrator=editable_reconstruction` selects the direct MoMA runner. Both use the shared runtime decision and edit-evidence policy. The r10/R12 comparison path runs through the same dispatcher. Inspect CLI `--help` before adapting commands.
 
 ```powershell
 # Primary OpenCode mainline (against 4090 / local tunnel):
@@ -18,7 +18,7 @@ Use a new job/output directory; preserve live services and prior outputs. Keys u
 
 The local OCR manifest must verify its three ONNX files; task processing does not silently download them. LayerD and SAM share a physical-GPU lock across processes, including loading and inference. Keep established CPU/API/Office/compiler limits and bounded object repair budgets. Do not terminate neighboring products to free resources.
 
-## Two barriers and local transactions
+## Frozen r10/R12 barriers and local transactions
 
 | Stage | Responsibility | Boundary |
 | --- | --- | --- |
@@ -56,12 +56,12 @@ An object-count improvement does not establish quality. A visually faithful whol
 
 The historical mean pixel difference near 10 is a sample-specific manual heuristic, not the sole automatic gate. Use source-bound object-type metrics and calibrated renderer tolerance alongside wording, completeness, residual and editability checks. Do not loosen thresholds globally to pass a failing page.
 
-## Actual PowerPoint and Go
+## Actual PowerPoint and route-specific visual review
 
 Use copies of the final PPTX. For staged target objects, test movement/scaling, deletion and save/reopen, checking effective text/run styles, other objects and pixels outside the authorized transaction. For text changes, also verify content editing when claimed. Preserve original output and user-open Office documents.
 
-Check inside the deleted object's proven owner region against independently justified backing and legitimate neighboring layers. Save before/delete/move renders, owner evidence and reference hashes; report confirmed residual pixels and PASS/FAIL/UNKNOWN. Do not use a candidate's own mask/recomposition as its only correctness reference. An outside-pixel count of zero cannot prove no old cloud half or text remains.
+Check the deleted object's proven pixels against independently justified backing and neighboring layers. Inspect the whole vacated footprint and a margin in the actual render after moving the entire icon clear. Where foreground and supporting shape are independently editable, inspect the foreground removed with the backing in place and then both removed. Keep the original, before/edited renders, action, object IDs and hashes together. Record untested actions and missing independent background evidence. The observation area can include neighboring pixels. Source modification remains limited to its proven owners.
 
-Go independently compares source and final render, with actual edit panels when available. A Go PASS only covers its bound checked evidence; it does not prove complete editability, replace Office/residual evidence or grant human acceptance. Transport failure means QA_UNAVAILABLE/UNKNOWN, not a semantic planning defect. Invalid final hash bindings cannot reuse old QA. The current page-level fallback may remain until finer-grained verified rollback is implemented; do not claim local rollback exists merely because the spec requires it.
+In frozen r10/R12, Go compares the source and the final render with the actual edit panels when available. For OpenCode and direct MoMA, check the recorded runtime visual review, its evidence and the delivery audit. Verify each result's PPTX hash and tested actions. Record PowerPoint, WPS and human checks separately.
 
 Keep `parallel_auto` closed until all separately defined release gates are evidenced. Documentation edits, synthetic tests and one provider verdict never change that state. `parallel_review` can deliver a safe partial result with an honest brief explanation; no manual deck may be substituted as an automatic success.

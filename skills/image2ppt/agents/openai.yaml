@@ -1,4 +1,4 @@
 interface:
   display_name: "image2PPT 自动产品开发"
-  short_description: "开发与验证三分支自动重建，检查局部事务、可编辑完成度和真实 PPTX"
-  default_prompt: "使用 $image2ppt 开发或调试 parallel_pipeline 自动重建链路，核对真实产物和编辑完成度，不以手工 SlideIR 替代产品规划。"
+  short_description: "核对 OpenCode、MoMA 直连或冻结基线，验证对象编辑和实际 PPTX"
+  default_prompt: "使用 $image2ppt 按任务记录定位实际执行器，开发或调试图片转 PPTX 服务，核对候选复用、原位残影和真实编辑结果。"

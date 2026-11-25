@@ -9,6 +9,7 @@ import io, hashlib, posixpath, zipfile, xml.etree.ElementTree as ET
 import numpy as np
 from PIL import Image
 from .materialize import digest,write
+from .office_sites import clear_position, edit_sites, observation_window, record_site, site_geometry, visible_box
 
 
 class OfficeValidationError(ValueError):
@@ -165,7 +166,7 @@ def _node_bleed_margin_px(node: dict) -> int:
     return margin
 
 
-def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
+def inspect(pptx,irs,output,*,render_only=False,target_ids=None,original_sites=False):
     import pythoncom
     import win32com.client
     pythoncom.CoInitialize()
@@ -180,7 +181,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
             app=None
             if attempt==2:raise
             time.sleep(0.4*(attempt+1))
-    deck=None;records=[];current_id=None
+    deck=None;records=[];site_records=[];unverified_site_groups=[];current_id=None
     def text_styles(s):
         if not (s.HasTextFrame and s.TextFrame.HasText):return ()
         tr=s.TextFrame.TextRange
@@ -191,38 +192,64 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
             str(s.TextFrame.TextRange.Text) if s.HasTextFrame and s.TextFrame.HasText else '',text_styles(s))
     def signature(slide):
         return {str(s.Name):shape_signature(s) for s in leaf_shapes(slide.Shapes)}
-    def _run_single(i,name,action,sig,before,pw,ph,sx,sy,pic_cache,margin_map):
+
+    def transform(shape, name):
+        if name not in destinations:
+            shape.Left += 12
+            shape.Top += 8
+        shape.Width *= .9
+        shape.Height *= .9
+        if name in destinations:
+            shape.Left, shape.Top = destinations[name]
+        if shape.HasTextFrame and shape.TextFrame.HasText:
+            scale_text(shape.TextFrame.TextRange, .9)
+        return shape_signature(shape)
+
+    def move_observation(name, reopened, after, render_file):
+        geometry=reopened[name]
+        new_bounds = visible_box(geometry, geometry[4])
+        new_window = _px_window([new_bounds], sx, sy, pw, ph, margin_map.get(name, 4))
+        if not _windows_disjoint(site_windows[name], new_window):
+            raise ValueError('transformed picture still covers its original site')
+        return record_site(output,i,[name],'move-clear',site_windows[name],after,render_file,sig,reopened)
+
+    def _run_single(i,name,action,sig,before,pw,ph,sx,sy,pic_cache,margin_map,partners=()):
         nonlocal deck,current_id
         current_id=name
+        members=(name,*partners)
         file=output/f'{i:02d}-{name}-{action}.pptx';shutil.copyfile(pptx,file)
         deck=app.Presentations.Open(str(file),ReadOnly=False,Untitled=False,WithWindow=False)
         slide=deck.Slides(i);s=next(s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name);old=sig[name];wanted=None
-        if action=='delete':s.Delete()
+        deleting = action in ('delete','delete-together')
+        if deleting:
+            for member in members:
+                next(shape for shape in leaf_shapes(slide.Shapes) if str(shape.Name)==member).Delete()
         else:
-            s.Left+=12;s.Top+=8;s.Width*=.9;s.Height*=.9
-            if s.HasTextFrame and s.TextFrame.HasText:
-                tr=s.TextFrame.TextRange
-                # A scale probe includes glyphs, not just the frame.
-                scale_text(tr,.9)
-            wanted=shape_signature(s)
+            wanted=transform(s,name)
         deck.Save();deck.Close();deck=None
-        verify_pictures(file,irs,(i,name) if action=='delete' else None,cache=pic_cache)
+        verify_pictures(file,irs,{(i,member) for member in members} if deleting else None,cache=pic_cache)
         deck=app.Presentations.Open(str(file),ReadOnly=True,Untitled=False,WithWindow=False)
         slide=deck.Slides(i);got=signature(slide)
-        if {k:v for k,v in got.items() if k!=name}!={k:v for k,v in sig.items() if k!=name}:raise ValueError('Office changed sibling')
-        if action=='delete' and name in got:raise ValueError('Office deletion did not persist')
+        if {k:v for k,v in got.items() if k not in members}!={k:v for k,v in sig.items() if k not in members}:raise ValueError('Office changed sibling')
+        if deleting and any(member in got for member in members):raise ValueError('Office deletion did not persist')
         if wanted and (name not in got or any(abs(a-b)>.1 for a,b in zip(got[name][:5],wanted[:5]))):raise ValueError('Office transform did not persist')
         if wanted and got[name][5:]!=wanted[5:]:raise ValueError('Office target text or effective run style did not persist')
         png=output/f'{i:02d}-{name}-{action}.png';slide.Export(str(png),'PNG',pw,ph)
         after=np.array(Image.open(png).convert('RGB'))
         allowed=np.zeros((ph,pw),bool)
-        pad=margin_map.get(name,4)
-        for b in [old]+([wanted] if wanted else []):
-            x,y,w,h=b[0]*sx,b[1]*sy,b[2]*sx,b[3]*sy
-            allowed[max(0,int(y)-pad):min(ph,int(np.ceil(y+h))+pad),max(0,int(x)-pad):min(pw,int(np.ceil(x+w))+pad)]=True
+        bounds=[(sig[member],margin_map.get(member,4)) for member in members]
+        if wanted:bounds.append((wanted,margin_map.get(name,4)))
+        for b,pad in bounds:
+            rect=visible_box(b,b[4]) if original_sites else b[:4]
+            x0,y0,x1,y1=_px_window([rect],sx,sy,pw,ph,pad)
+            allowed[y0:y1,x0:x1]=True
         outside=int(((before!=after).any(2)&~allowed).sum())
         if outside:raise ValueError('Office changed pixels outside transaction')
         deck.Close();deck=None
+        if partners:
+            return record_site(output,i,members,action,observation_window(site_boxes,members),after,png,sig,got)
+        if wanted and name in site_windows:
+            site_records.append(move_observation(name,got,after,png))
         return {'page':i,'id':name,'action':action,'saved_reopened':True,'outside_pixels':outside}
     def _try_run_batch(i,b_idx,batch_names,action,sig,before,influence_windows,pw,ph,sx,sy,pic_cache,margin_map):
         nonlocal deck
@@ -240,10 +267,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
                 s=by_name[name]
                 if action=='delete':s.Delete()
                 else:
-                    s.Left+=12;s.Top+=8;s.Width*=.9;s.Height*=.9
-                    if s.HasTextFrame and s.TextFrame.HasText:
-                        scale_text(s.TextFrame.TextRange,.9)
-                    wanted_map[name]=shape_signature(s)
+                    wanted_map[name]=transform(s,name)
             local_deck.Save();local_deck.Close();local_deck=None
             verify_pictures(batch_file,irs,{(i,n) for n in batch_names} if action=='delete' else None,cache=pic_cache)
             local_deck=app.Presentations.Open(str(batch_file),ReadOnly=True,Untitled=False,WithWindow=False)
@@ -259,6 +283,18 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
                         raise ValueError('Office transform did not persist in batch')
                     if got[name][5:]!=wanted[5:]:
                         raise ValueError('Office target text or effective run style did not persist in batch')
+            if action=='move-scale' and any(name in site_windows for name in batch_names):
+                # COM can preserve a picture's aspect ratio while applying a resize.
+                # Only attribute real batch crop pixels to one object when the actual
+                # reopened extents still isolate that observation from its batch peers.
+                for owner in batch_names:
+                    if owner not in site_windows:
+                        continue
+                    for peer in batch_set-{owner}:
+                        extents=[visible_box(g,g[4]) for g in (sig[peer],got[peer])]
+                        area=_px_window(extents,sx,sy,pw,ph,margin_map.get(peer,4))
+                        if not _windows_disjoint(site_windows[owner],area):
+                            raise ValueError('batch peer overlaps original-site observation')
             slide.Export(str(batch_png),'PNG',pw,ph)
             local_deck.Close();local_deck=None
             batch_after=np.array(Image.open(batch_png).convert('RGB'))
@@ -267,8 +303,9 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
                 pad=margin_map.get(name,4)
                 boxes=[sig[name]]+([wanted_map[name]] if name in wanted_map else [])
                 for b in boxes:
-                    x,y,w,h=b[0]*sx,b[1]*sy,b[2]*sx,b[3]*sy
-                    union_allowed[max(0,int(y)-pad):min(ph,int(np.ceil(y+h))+pad),max(0,int(x)-pad):min(pw,int(np.ceil(x+w))+pad)]=True
+                    rect=visible_box(b,b[4]) if original_sites else b[:4]
+                    x0,y0,x1,y1=_px_window([rect],sx,sy,pw,ph,pad)
+                    union_allowed[y0:y1,x0:x1]=True
             outside=int(((before!=batch_after).any(2)&~union_allowed).sum())
             if outside:
                 raise ValueError('Office changed pixels outside batch transaction')
@@ -278,6 +315,10 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
                     single=before.copy()
                     single[iy0:iy1,ix0:ix1]=batch_after[iy0:iy1,ix0:ix1]
                     Image.fromarray(single).save(output/f'{i:02d}-{name}-delete.png')
+            else:
+                observations = [move_observation(name,got,batch_after,batch_png)
+                                for name in batch_names if name in site_windows]
+                site_records.extend(observations)
             return {name:{'page':i,'id':name,'action':action,'saved_reopened':True,'outside_pixels':0} for name in batch_names}
         except Exception:
             return None
@@ -309,24 +350,46 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
                 rmap={oid:rec.get('restore_bbox') for oid,rec in sel.items() if rec.get('restore_bbox')}
             restore_maps[i]=rmap
             margin_maps[i]={n['id']:_node_bleed_margin_px(n) for n in ir['nodes']}
-            inventory.append((i,targets,sig))
+            moves,pairs,unverified=(edit_sites(irpath,target_ids,include_unverified=True)
+                                    if original_sites and not render_only else ([],[],[]))
+            unverified_site_groups.extend({'page':i,**row} for row in unverified)
+            inventory.append((i,targets,sig,moves,pairs))
         deck.Close();deck=None
-        for i,targets,sig in inventory:
+        for i,targets,sig,moves,pairs in inventory:
             before=before_arrays[i]
             rmap=restore_maps[i]
             margin_map=margin_maps[i]
+            site_windows={}
+            destinations={}
+            if moves or pairs:
+                site_boxes,canvas=site_geometry(irs[i-1])
+                if tuple(canvas)!=(pw,ph):raise ValueError('render size does not match bound original-site canvas')
+            for name in moves:
+                geometry=sig[name]
+                margin=margin_map.get(name,4)
+                window=observation_window(site_boxes,[name])
+                site_windows[name]=window
+                site_pt=(window[0]/sx,window[1]/sy,window[2]/sx,window[3]/sy)
+                destinations[name]=clear_position(geometry,site_pt,pw/sx,ph/sy,(margin+2)/min(sx,sy))
             records_by_key={}
             for action in ('move-scale','delete'):
                 influence_windows={}
                 for name in targets:
-                    old=sig[name][:4]
-                    boxes=[old]
+                    geometry=sig[name];old=geometry[:4]
+                    rotation=geometry[4] if original_sites else 0
+                    boxes=[visible_box(old,rotation)]
                     if action=='move-scale':
-                        boxes.append((old[0]+12,old[1]+8,old[2]*.9,old[3]*.9))
+                        left,top=destinations.get(name,(old[0]+12,old[1]+8))
+                        extent=1 if name in destinations else .9
+                        boxes.append(visible_box((left,top,old[2]*extent,old[3]*extent),rotation))
                     extra=[rmap[name]] if name in rmap else ()
                     win_pad=max(16,margin_map.get(name,4)+12)
                     influence_windows[name]=_px_window(boxes,sx,sy,pw,ph,pad_px=win_pad,extra_px_boxes=extra)
-                batches=_partition_disjoint_batches(targets,influence_windows,max_batch_size=16)
+                if action=='move-scale' and moves:
+                    batches=_partition_disjoint_batches(moves,influence_windows,max_batch_size=16)
+                    batches+=_partition_disjoint_batches([n for n in targets if n not in site_windows],influence_windows,max_batch_size=16)
+                else:
+                    batches=_partition_disjoint_batches(targets,influence_windows,max_batch_size=16)
                 for b_idx,batch_names in enumerate(batches):
                     if len(batch_names)>1:
                         batch_recs=_try_run_batch(i,b_idx,batch_names,action,sig,before,influence_windows,pw,ph,sx,sy,pic_cache,margin_map)
@@ -339,9 +402,16 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None):
             for name in targets:
                 for action in ('move-scale','delete'):
                     records.append(records_by_key[(name,action)])
+            for backing,front in pairs:
+                site_records.append(_run_single(i,backing,'delete-together',sig,before,pw,ph,sx,sy,
+                                                pic_cache,margin_map,partners=(front,)))
         if digest(pptx)!=original:raise ValueError('Office modified original')
         result={'status':'PASS_APP_AUTOMATED','pptx_sha256':original,'records':records,'human_acceptance':False,
                 'edit_checked':not render_only,'embedded_alpha_and_visible_rgb_checked':True,'powerpoint_version':app.Version}
+        if original_sites:
+            result['original_sites']=site_records
+            result['original_site_previews']={str(i):digest(output/f'page-{i:02d}-before.png') for i in before_arrays}
+            result['unverified_original_site_groups']=unverified_site_groups
         write(output/'report.json',result);return result
     except Exception as exc:
         write(output/'report.json',{'status':'FAIL_APP_AUTOMATED','failed_object_id':current_id,
