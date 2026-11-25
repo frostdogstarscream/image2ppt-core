@@ -10,7 +10,7 @@ from product.experiment_assets import contrast_edge_score
 from product.parallel_store import Store, BudgetExceeded
 from product.recovery.adaptive_policy import AdaptiveBudget
 from product.recovery.marked_fields import split_items, striped_backing
-from product.runtime.marked_routes import apply_move_groups
+from product.runtime.marked_routes import apply_move_groups, resolved_surface_groups
 from product.recovery.marked_tables import table_from_mark
 
 
@@ -31,6 +31,48 @@ def test_movement_preserves_overlapping_sibling_order():
     ir = scene(9)
     apply_move_groups(ir, [['label', 'box']])
     assert ir['groups'] == [] and [n['z'] for n in ir['nodes']] == [1, 2, 3]
+
+
+def test_surface_group_requires_source_bound_complete_members_and_no_unresolved_ink(tmp_path):
+    from product.materialize import digest, write
+    panel = SimpleNamespace(id='tile', bbox=[10,10,42,40])
+    icon = SimpleNamespace(id='logo', bbox=[13,12,37,34])
+    receipt = tmp_path/'owner-proof'
+    receipt.write_bytes(b'frozen-owner-evidence')
+    valid = dict(complete_owner_scope=True, source_sha256='source',
+                 owner_evidence={'file':receipt.name, 'sha256':digest(receipt)})
+    graph = SimpleNamespace(source_sha256='source', text=SimpleNamespace(texts=[],members={}),
+        surface=SimpleNamespace(shapes=[panel]), asset=SimpleNamespace(objects=[icon]),
+        ownership={'tile':'RESOLVED','logo':'RESOLVED'},
+        selected={'tile':dict(valid,kind='surface',bbox=panel.bbox),'logo':dict(valid,kind='asset',bbox=icon.bbox)},
+        relations=[SimpleNamespace(source='tile',target='logo',kind='contains',status='RESOLVED',evidence=['source'])])
+    backing = tmp_path/'backing.png'
+    white = np.full((90,90),255,dtype=np.uint8)
+    Image.fromarray(white).save(backing)
+    graph.raster_backing = {'source_sha256':'source','path':backing.name,'sha256':digest(backing)}
+    guard = tmp_path/'runtime-ocr-protection.json'
+    write(guard, {'source_sha256':'source','lines':[]})
+    assert resolved_surface_groups(graph,tmp_path) == [['tile','logo']]
+    framed = white.copy()
+    framed[51:57,10:52] = 245
+    Image.fromarray(framed).save(backing)
+    graph.raster_backing['sha256'] = digest(backing)
+    issues=[]
+    assert not resolved_surface_groups(graph,tmp_path,diagnostics=issues)
+    assert issues[0]['observed_edges'][0]['side']=='bottom'
+    Image.fromarray(white).save(backing)
+    graph.raster_backing['sha256'] = digest(backing)
+    write(guard, {'source_sha256':'source','lines':[{'id':'unowned','bbox':[18,21,6,5]}]})
+    assert not resolved_surface_groups(graph,tmp_path)
+    write(guard, {'source_sha256':'source','lines':[]})
+    graph.ownership['logo'] = 'AMBIGUOUS'
+    assert not resolved_surface_groups(graph,tmp_path)
+    graph.ownership['logo'] = 'RESOLVED'
+    graph.asset.objects.append(SimpleNamespace(id='other',bbox=[30,30,40,40]))
+    assert not resolved_surface_groups(graph,tmp_path)
+    graph.asset.objects.pop()
+    receipt.write_bytes(b'changed')
+    assert not resolved_surface_groups(graph,tmp_path)
 
 
 def test_only_complete_ocr_grid_can_become_table():

@@ -12,6 +12,7 @@ from PIL import Image
 from .materialize import digest,write,font_gate
 from .object_extract import rectangle,load_page
 from .object_closure import assemble
+from .parallel_contracts import native_paragraph_text
 from .parallel_fusion import glyph_evidence
 from .parallel_store import key
 from .resource_lease import lease
@@ -494,10 +495,17 @@ def adapt(graph,directory):
             ir['evidence'].append({'id':ev,'kind':'text','bbox':t.bbox,'text':t.text})
             max_ln_chars=max((len(ln) for ln in t.text.split('\n')), default=0)
             allow_wrap=('\n' in t.text) and (float(t.bbox[2]) >= max_ln_chars * float(s.size_px) + 8.0)
-            node={'id':t.id,'type':'text','bbox':t.bbox,'z':z,'evidence_ids':[ev],'text':t.text,**attrs(s),
+            # Keep observed OCR lines in the SceneGraph for glyph measurements and
+            # fitting. The native paragraph can then wrap inside the verified frame.
+            display_text=native_paragraph_text(t,s,graph.text)
+            if display_text!=t.text:
+                allow_wrap=True
+            node={'id':t.id,'type':'text','bbox':t.bbox,'z':z,'evidence_ids':[ev],'text':display_text,**attrs(s),
                   'align':t.align,'wrap':allow_wrap,'insets':[0,0,0,0],'vertical_anchor':'top','paragraphs':[]}
+            if display_text!=t.text:
+                node['text_override_reason']='OCR visual lines form one continuous paragraph; only line breaks removed.'
             lines=[[]]
-            for content,style in ([(x.text,styles[x.style]) for x in t.spans] or [(t.text,s)]):
+            for content,style in ([(x.text,styles[x.style]) for x in t.spans] or [(display_text,s)]):
                 for i,part in enumerate(content.split('\n')):
                     if i:lines.append([])
                     if part:lines[-1].append({'text':part,**attrs(style)})

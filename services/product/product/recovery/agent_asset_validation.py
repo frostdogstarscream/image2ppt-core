@@ -8,7 +8,7 @@ from PIL import Image
 from ..materialize import digest, write
 from ..object_extract import load_page
 from ..parallel_candidate_contracts import ReconstructionCandidate, PreflightResult
-from ..parallel_rebuild import asset_candidates, source_owner, backing_from_evidence
+from ..parallel_rebuild import asset_candidates, backing_from_evidence
 from ..parallel_regions import regions
 from ..parallel_store import key
 
@@ -105,9 +105,14 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
     seed_metadata=next((metadata for proposal,metadata in seeds if np.array_equal(seed,proposal)),None)
     if seed_metadata is None:
         raise ValueError('asset segmentation seed lacks original LayerD/source evidence')
-    from .asset_retry import localized_owner_object
+    from .asset_retry import localized_owner_object, asset_owner_and_matte
     owner_obj=localized_owner_object(obj,seed_metadata)
     completed,halo=complete_source_halo(owner_obj,seed,work_source,protected,surface)
+    light_tile=payload.get('payload',{}).get('light_tile_method')
+    completed,owner_box,backing,full_owner,owner_proof=asset_owner_and_matte(
+        owner_obj,completed,work_source,protected,surface,light_tile_marks=bool(light_tile),staged_text=staged_text_mask)
+    if light_tile!=owner_proof.get('light_tile_method'):
+        raise ValueError('opaque tile lacks independent source evidence')
     x,y,w,h=rgba_box
     if (min(x,y)<0 or min(w,h)<=0 or x+w>work_source.shape[1] or y+h>work_source.shape[0]
             or rgba.shape!=(h,w,4)):
@@ -122,7 +127,6 @@ def verify_asset_candidate(scene, original, object_id, source_file, directory, o
         raise ValueError('asset PNG hash mismatch')
     if not np.array_equal(np.array(Image.open(directory/filename).convert('RGBA')),rgba):
         raise ValueError('asset PNG pixels were resampled or changed')
-    owner_box,backing,full_owner,owner_proof=source_owner(owner_obj,full,work_source,protected,surface)
     expected_mask=full_owner&~staged_text_mask
     if owner_box!=box or not np.array_equal(expected_mask,mask):
         raise ValueError('asset owner closure differs from independent source components')

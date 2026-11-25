@@ -316,7 +316,34 @@ def asset_background(source, box, mask, protected, layers, fitted, *, raw_source
                   'big_lama_calls':0},fitted
 
 
-def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_directory,output,*,strategy='source-halo',sam_directory=None,sam_plan=None):
+def asset_owner_and_matte(obj, rgba, source, protected, surface, *, light_tile_marks=False, staged_text=None):
+    box, backing, owner, proof = source_owner(obj, rgba, source, protected, surface)
+    if light_tile_marks:
+        from .container_stage import _opaque_tile_interior
+        rx, ry, rw, rh = box
+        x, y, w, h = bounds(rgba[..., 3] > 0)
+        x0, y0 = max(rx, x-4), max(ry, y-4)
+        x1, y1 = min(rx+rw, x+w+4), min(ry+rh, y+h+4)
+        region = np.s_[y0:y1, x0:x1]
+        crop = source[region]
+        local_backing = backing[y0-ry:y1-ry, x0-rx:x1-rx]
+        parent = np.median(local_backing.reshape(-1, 3), axis=0)
+        guard = protected[region] if staged_text is None else protected[region] | staged_text[region]
+        interior = _opaque_tile_interior(crop, parent, guard)
+        if interior is not None:
+            strong = np.abs(crop.astype(float) - parent).max(2) > 35
+            if strong.any() and owner[region][strong].all():
+                rgba = rgba.copy()
+                rgba[region][interior, :3] = crop[interior]
+                rgba[region][interior, 3] = 255
+                owner[region] |= interior
+                proof.update(light_tile_method='source-enclosed-opaque-tile/1',
+                             source_owner_mask_sha256=array_sha(owner),
+                             png_visible_mask_sha256=array_sha(rgba[...,3]>0))
+    return rgba, box, backing, owner, proof
+
+
+def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_directory,output,*,strategy='source-halo',sam_directory=None,sam_plan=None,light_tile_marks=False):
     """Return one private candidate package, or retain explicit blocking evidence."""
     if strategy not in ('source-halo','verified-backing','sam','rmbg2','vitmatte','local-layerd'):raise ValueError('unsupported asset repair strategy')
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=False)
@@ -377,7 +404,8 @@ def retry_asset_extraction(graph,object_id,source_file,layer_directory,baseline_
             owner_obj=localized_owner_object(obj,metadata)
             rgba,segmentation=complete_source_halo(owner_obj,seed,work_source,protected,surface)
             write(folder/'segmentation.json',segmentation)
-            restore_box,backing,full_owner_mask,proof=source_owner(owner_obj,rgba,work_source,protected,surface)
+            rgba,restore_box,backing,full_owner_mask,proof=asset_owner_and_matte(
+                owner_obj,rgba,work_source,protected,surface,light_tile_marks=light_tile_marks,staged_text=staged_text_mask)
             mask=full_owner_mask&~staged_text_mask
             if not mask.any():raise ValueError('asset owner is completely covered by staged text')
             proof['owner_localization_bbox']=owner_obj.bbox

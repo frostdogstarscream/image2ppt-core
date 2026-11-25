@@ -74,6 +74,99 @@ def plan_move_groups(routes, graph):
     return groups
 
 
+def _backing_edge_evidence(plate, box):
+    """Look for a continuous dark outline flanked by lighter pixels on both sides of a card edge."""
+    x, y, w, h = map(round, box)
+    evidence = []
+    for side, plane, edge, outward, start, length, depth in (
+        ('top',plate,y,-1,x,w,h), ('bottom',plate,y+h-1,1,x,w,h),
+        ('left',plate.T,x,-1,y,h,w), ('right',plate.T,x+w-1,1,y,h,w),
+    ):
+        if depth < 24 or length < 36:
+            continue
+        # Read only the central span to avoid curved corners. The card interior and the
+        # farther exterior jointly distinguish a narrow dark band from a smooth gradient.
+        along = np.arange(max(0,start+length//5), min(plane.shape[1],start+length-length//5))
+        if not along.size or min(edge+outward*16,edge-outward*10)<0 or max(edge+outward*16,edge-outward*10)>=plane.shape[0]:
+            continue
+        def median_band(a,b):
+            return np.median(plane[edge+outward*np.arange(a,b)[:,None],along],axis=0)
+        near = median_band(2,7)
+        darkening = np.minimum(median_band(12,17),median_band(-10,-5)) - near
+        fraction = float((darkening >= 3).mean())
+        if fraction >= .8 and np.median(darkening) >= 4:
+            evidence.append({'side':side,'darkened_fraction':round(fraction,3),
+                             'median_luma_drop':round(float(np.median(darkening)),2)})
+    return evidence
+
+
+def resolved_surface_groups(graph, directory, *, diagnostics=None):
+    """Discover movable surface/child assemblies using the frozen scene and owner receipts."""
+    directory = Path(directory).resolve()
+    guard_file = directory / 'runtime-ocr-protection.json'
+    if not guard_file.is_file():
+        return []
+    guard = json.loads(guard_file.read_text('utf8'))
+    if guard.get('source_sha256') != graph.source_sha256:
+        return []
+    objects = {obj.id: obj for obj in [*graph.surface.shapes, *graph.asset.objects, *graph.text.texts]}
+    children = {}
+    doubtful = set()
+    for relation in graph.relations:
+        if relation.status != 'RESOLVED' or not relation.evidence:
+            doubtful.update((relation.source, relation.target))
+        elif relation.kind in ('contains', 'part_of'):
+            parent, child = ((relation.source, relation.target) if relation.kind == 'contains'
+                             else (relation.target, relation.source))
+            children.setdefault(parent, set()).add(child)
+    groups = []
+    backing = None
+    for parent, members in children.items():
+        ids = {parent, *members}
+        if parent in members or ids & doubtful or not ids <= graph.selected.keys():
+            continue
+        panel = graph.selected[parent]
+        if panel['kind'] != 'surface' or not any(graph.selected[i]['kind'] in ('asset', 'text') for i in members):
+            continue
+        if any(graph.ownership.get(i) != 'RESOLVED' or not graph.selected[i].get('complete_owner_scope')
+               or graph.selected[i].get('move_safety') == 'MOVE_UNSAFE' for i in ids):
+            continue
+        box = panel['bbox']
+        if any(intersection(box, objects[i].bbox) < objects[i].bbox[2] * objects[i].bbox[3] for i in members):
+            continue
+        if any(intersection(box, obj.bbox) > 0 for i, obj in objects.items() if i not in ids):
+            continue
+        owned_lines = {line for i in members for line in graph.text.members.get(i, [])}
+        if any(intersection(box, row['bbox']) > 0 and row.get('id') not in owned_lines for row in guard['lines']):
+            continue
+        for i in ids:
+            record = graph.selected[i]
+            proof = record.get('owner_evidence') or {}
+            path = (directory / proof.get('file', '')).resolve()
+            if (record.get('source_sha256') != graph.source_sha256 or not path.is_relative_to(directory)
+                    or not path.is_file() or digest(path) != proof.get('sha256')):
+                break
+        else:
+            if backing is None:
+                ref = graph.raster_backing or {}
+                path = (directory / ref.get('path','')).resolve()
+                if (ref.get('source_sha256') != graph.source_sha256 or not path.is_relative_to(directory)
+                        or not path.is_file() or digest(path) != ref.get('sha256')):
+                    return []
+                with Image.open(path) as image:
+                    backing = np.asarray(image.convert('L'),dtype=np.int16)
+            edges = _backing_edge_evidence(backing, box)
+            if edges:
+                if diagnostics is not None:
+                    diagnostics.append({'object_id':'g-'+key(sorted(ids))[:16], 'backing_id':parent, 'kind':'group', 'bbox':box,
+                        'failure':'BACKGROUND_REPAIR_FAILED', 'reason':'Visible edge on the exposed group backing',
+                        'members':[parent,*sorted(members)], 'observed_edges':edges,
+                        'backing_sha256':graph.raster_backing['sha256']})
+                continue
+            groups.append([parent, *sorted(members)])
+    return groups
+
+
 def iou(a, b):
     shared = intersection(a, b)
     return shared / max(1, a[2] * a[3] + b[2] * b[3] - shared)

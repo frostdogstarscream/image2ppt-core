@@ -228,7 +228,7 @@ class PrimitiveTools:
 
     def create_scene(self, state, current, directory, *, page, evidence, _update=False, _remove=()):
         from ..parallel_branches import snapshot
-        from ..parallel_contracts import TextEvidence, AssetEvidence, SurfaceEvidence
+        from ..parallel_contracts import EDITABLE_TEXT_METHOD, FLOWING_BODY, TextEvidence, AssetEvidence, SurfaceEvidence
         from ..parallel_fusion import fuse
         from ..parallel_rebuild import build
         snap = snapshot(self.source(state, page), directory/'snapshot')
@@ -264,6 +264,12 @@ class PrimitiveTools:
             value = {'schema': name.title()+'Evidence/1', **base,
                      **({'background': 'FFFFFF'} if name == 'surface' else {}), **evidence.get(name, {})}
             branches[name] = contract.model_validate(value)
+        if any(s.role == FLOWING_BODY for s in branches['text'].styles):
+            job_request = json.loads((state.job/'request.json').read_text('utf8'))
+            if job_request.get('orchestrator') == 'editable_reconstruction':
+                branches['text'].method_version = EDITABLE_TEXT_METHOD
+            elif branches['text'].method_version == EDITABLE_TEXT_METHOD:
+                branches['text'].method_version = base['method_version']
         ocr_file = current.get('ocr', {}).get(str(page))
         ocr = json.loads(Path(ocr_file).read_text('utf8')) if ocr_file else {'lines': []}
         branches['text']=bind_exact_ocr_members(branches['text'],ocr)

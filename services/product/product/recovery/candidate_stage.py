@@ -15,7 +15,7 @@ from ..materialize import digest, font_gate, write
 from ..parallel_candidate_contracts import ReconstructionCandidate, PreflightResult, transition
 from ..parallel_candidate_engine import CHECKS, font_bindings
 from ..parallel_candidate_stage import stage
-from ..parallel_contracts import SceneGraph
+from ..parallel_contracts import SceneGraph, native_paragraph_text
 from ..parallel_fusion import glyph_evidence
 from ..parallel_rebuild import background_model
 from ..parallel_regions import regions
@@ -177,6 +177,40 @@ def native_frame(text, styles, fonts, source_size, protected, scope, *, minimum_
     return payload
 
 
+def paragraph_edit_room(source, protected, frame, pitch, peer_boxes, carriers):
+    """Reserve transparent height for at most one more line, within the original column."""
+    left, top, width, height = frame
+    x0, x1 = math.floor(left), math.ceil(left + width)
+    start = math.ceil(top + height)
+    limit, reason = min(source.shape[0], start + math.ceil(pitch)), 'one_line'
+    if limit == source.shape[0]:
+        reason = 'page_bottom'
+    for box in carriers:
+        x, y, w, h = box
+        if x <= left and left+width <= x+w and y <= top < y+h and y+h-1 < limit:
+            limit, reason = math.floor(y+h)-1, 'carrier_edge'
+    for name, box in peer_boxes:
+        x, y, w, h = box
+        if x < x1 and x+w > x0 and y+h > start and y-1 < limit:
+            limit, reason = math.floor(y)-1, name
+    if start >= 3 and 0 <= x0 < x1 <= source.shape[1] and limit > start:
+        anchor = source[start-3:start,x0:x1].astype(float)
+        baseline = np.median(anchor,axis=0)
+        if abs(anchor-baseline).max() <= 8:
+            below = source[start:limit,x0:x1].astype(float)
+            clean = (abs(below-baseline).max(axis=(1,2)) <= 10) & ~protected[start:limit,x0:x1].any(axis=1)
+            stops = np.flatnonzero(~clean)
+            if len(stops):
+                limit, reason = start + int(stops[0]) - 1, 'source_or_protected_pixels'
+        else:
+            limit, reason = start, 'no_clean_margin'
+    elif limit > start:
+        limit, reason = start, 'no_clean_margin'
+    new_height = max(height, limit-top) if limit > start else height
+    return [left,top,width,new_height], {'source_frame':frame, 'extra_height_px':round(new_height-height,2),
+            'line_pitch_px':pitch, 'limited_by':reason, 'safe_bottom_px':round(top+new_height,2)}
+
+
 def stage_background(trial_directory, graph, baseline_directory, fonts, output, *, typography=None, frame_minimum=None, fit_origin=False, layer_directory=None, edit_headroom: bool = False):
     """Recompute all local prechecks, then atomically expose one trial directory.
 
@@ -313,6 +347,19 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
                 gradient = np.percentile(abs(np.diff(room,axis=1,prepend=room[:,:1])).max(2),90,axis=0)
                 clean = (variation<=12) & (gradient<=8) & ~blocked.any(0)
                 text_payload['bbox'][2] += int(np.cumprod(clean).sum())
+        room = None
+        if native_paragraph_text(proposed,styles[proposed.style],graph.text) != proposed.text:
+            left, top, width, height = text_payload['bbox']
+            carriers = [s.bbox for s in graph.surface.shapes if s.geometry in ('rect','roundRect')
+                        and s.bbox[0] <= left and s.bbox[1] <= top
+                        and s.bbox[0]+s.bbox[2] >= left+width and s.bbox[1]+s.bbox[3] >= top+height]
+            peers = [(p.id,p.bbox) for p in [*graph.text.texts,*graph.asset.objects] if p.id != text.id]
+            peers.extend((p.id,p.bbox) for p in graph.surface.shapes if p.bbox not in carriers)
+            screens = baseline_directory/'embedded-device-frames.json'
+            if screens.is_file():
+                peers.extend(('embedded_device',b) for b in json.loads(screens.read_text('utf8')))
+            pitch = proposed.line_spacing_px or styles[proposed.style].size_px*1.2
+            text_payload['bbox'],room = paragraph_edit_room(source,protected,text_payload['bbox'],pitch,peers,carriers)
         fitted=proposed.model_copy(update={'bbox':text_payload['bbox']})
         fitted_styles={fitted.style,*[span.style for span in fitted.spans]}
         font_gate(SimpleNamespace(styles=[styles[i] for i in fitted_styles],texts=[fitted]),fonts)
@@ -323,6 +370,8 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
                                      'reason': 'installed EA/Latin font bearings and leading; source origin and line pitch retained'},
                    'method': 'r12-'+saved['method'], 'owner_method': 'source-connected-strokes+lateral-context/r12-1',
                    'recovery_evidence': {'trial_path': str(trial_directory.resolve()), 'hashes': hashes}}
+        if room is not None:
+            payload['native_layout']['paragraph_edit_capacity'] = room
         write(folder/'payload.json', payload)
         refs = {name: digest(folder/name) for name in ('pixels.npz', 'payload.json')}
         candidate = transition(candidate.model_copy(update={'references': refs, 'hard_gate': 'PASS'}), 'PRECHECK_PASS')

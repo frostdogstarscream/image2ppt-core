@@ -442,6 +442,46 @@ def _clamped_rect_mask(bbox, size: tuple[int, int], pad: int = 0) -> np.ndarray:
     return mask
 
 
+def _opaque_tile_interior(crop, parent, protected):
+    """Recover light lettering enclosed by a source-visible, solid coloured tile."""
+    h, w = crop.shape[:2]
+    if min(h, w) < 16 or max(h, w) > 2 * min(h, w):
+        return None
+    rim = np.concatenate((crop[0], crop[-1], crop[:, 0], crop[:, -1]))
+    low, median, high = np.percentile(rim, [1, 50, 99], axis=0)
+    if (median < 225).any() or (high - low).max() > 8 or abs(median - parent).max() > 3:
+        return None
+    strong = np.abs(crop.astype(float) - median).max(2) > 35
+    contours, _ = cv2.findContours(strong.astype('uint8'), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if len(contours) != 1:
+        return None
+    contour = contours[0]
+    x, y, cw, ch = cv2.boundingRect(contour)
+    if min(x, y, w-x-cw, h-y-ch) < 1 or min(cw, ch) < 0.8 * max(cw, ch):
+        return None
+    tile = np.zeros((h, w), np.uint8)
+    cv2.drawContours(tile, [contour], -1, 1, -1)
+    if tile.sum() < 0.9 * cw * ch or strong.sum() < 0.6 * tile.sum():
+        return None
+    if protected[tile.astype(bool)].any():
+        return None
+    interior = cv2.erode(tile, np.ones((3, 3), np.uint8)).astype(bool)
+    # Each enclosed pale mark must measurably differ from the exterior.
+    # Ambiguous cutouts and transparent counters retain the normal matte.
+    marks = interior & ~strong
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(marks.astype('uint8'), 8)
+    if count <= 1:
+        return None
+    for label in range(1, count):
+        if stats[label, cv2.CC_STAT_AREA] < 6:
+            return None
+        samples = crop[labels == label].astype(float)
+        distinct = ((samples >= high + 1) & (samples >= median + 3)).any(1)
+        if distinct.mean() < .15:
+            return None
+    return interior
+
+
 def attach_bar_groups(selected, series):
     """Only group complete, detected series whose individual native bars were staged."""
     by_box = {tuple(obj['bbox']): oid for oid, obj in selected.items() if obj.get('kind') == 'surface'
@@ -567,6 +607,8 @@ def stage_containers_and_surfaces(
     skip_ids: set[str] | None = None,
     logo_ids: set[str] | None = None,
     wanted_ids: set[str] | None = None,
+    retained_frames=(),
+    recover_light_tile_marks: bool = False,
 ) -> tuple[Path, list[str]]:
     """Discover and stage native shapes (`s-*`) and structural frame/curve/line assets (`a-c*`)."""
     from reconstruction import extract_rgba
@@ -634,6 +676,8 @@ def stage_containers_and_surfaces(
     # can convert to native shapes; pixel-level anomaly checks in `try_fit_native_shape_v2`
     # protect any unmodeled icon/photo pixels.)
     unresolved_guard = np.zeros((h_img, w_img), bool)
+    for frame in retained_frames:
+        unresolved_guard |= _clamped_rect_mask(frame, size, pad=0)
     for t in graph.text.texts:
         if t.id not in graph.selected and not _in_movable_crop(t.bbox):
             unresolved_guard |= _clamped_rect_mask(t.bbox, size, pad=4)
@@ -1175,6 +1219,13 @@ def stage_containers_and_surfaces(
                     else:
                         continue
 
+            recovered_tile = None
+            if recover_light_tile_marks and is_fg_decor:
+                local_guard = already_claimed[ay:ay+ah, ax:ax+aw] | unresolved_guard[ay:ay+ah, ax:ax+aw]
+                recovered_tile = _opaque_tile_interior(acrop, parent_uint8, local_guard)
+                if recovered_tile is not None:
+                    rgba[recovered_tile, :3] = acrop[recovered_tile]
+                    rgba[recovered_tile, 3] = 255
             vis_local = rgba[..., 3] > 0
             if int(vis_local.sum()) < 12:
                 continue
@@ -1238,7 +1289,8 @@ def stage_containers_and_surfaces(
                 'container_layer': (cand_kind != 'asset_curve') and (not is_fg_decor),
                 'bbox': [ax, ay, aw, ah],
                 'restore_bbox': [ax, ay, aw, ah],
-                'payload': {'method': 'cleaned-plate-container-unmix/1'},
+                'payload': {'method': ('source-enclosed-opaque-tile/1' if recovered_tile is not None
+                                       else 'cleaned-plate-container-unmix/1')},
                 'state': 'STAGED',
                 'quality': 'REVIEW_REQUIRED',
                 'human_acceptance': False,

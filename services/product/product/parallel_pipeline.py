@@ -7,7 +7,7 @@ import shutil
 import sys
 from types import SimpleNamespace
 from .materialize import digest,write
-from .parallel_contracts import mode,strategy,SceneGraph
+from .parallel_contracts import mode,strategy,SceneGraph,native_paragraph_text
 from .parallel_store import Store,key
 from .parallel_branches import snapshot,perceive,local_ocr,layer_evidence
 from .parallel_fusion import fuse
@@ -19,7 +19,13 @@ ROOT=Path(__file__).resolve().parents[3]
 
 def effective_texts(graph,irfile):
     ir=json.loads(Path(irfile).read_text(encoding='utf-8'));ids={n['id'] for n in ir['nodes'] if n['type']=='text'}
-    return SimpleNamespace(texts=[t for t in graph.text.texts if t.id in ids],styles=graph.text.styles)
+    styles={s.id:s for s in graph.text.styles}
+    texts=[]
+    for t in graph.text.texts:
+        if t.id in ids:
+            display=native_paragraph_text(t,styles[t.style],graph.text)
+            texts.append(t if display==t.text else t.model_copy(update={'text':display}))
+    return SimpleNamespace(texts=texts,styles=graph.text.styles)
 
 
 def safe_graph(graph):

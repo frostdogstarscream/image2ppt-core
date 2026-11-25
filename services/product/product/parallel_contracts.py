@@ -1,8 +1,30 @@
 """Private r10 evidence contracts. None of these extend public SlideIR."""
+import re
 from typing import Literal
 from pydantic import Field, model_validator
 from .contracts import Strict, Style, Text, Shape
 from .object_contracts import ClosedObject,ClosedPlan
+
+FLOWING_BODY = 'flowing_body_paragraph'
+EDITABLE_TEXT_METHOD = 'editable-reconstruction-ocr/1'
+
+
+def continuous_chinese_lines(lines):
+    if len(lines) < 2 or not any(re.search(r'[，。；：、！？]', line) for line in lines):
+        return False
+    return all(len(first.strip()) >= 8 and len(second.strip()) >= 2
+               and re.search(r'[\u3400-\u9fff，、]$', first.strip())
+               and re.match(r'[\u3400-\u9fff]', second.strip()) for first, second in zip(lines, lines[1:]))
+
+
+def native_paragraph_text(text, style, evidence):
+    # Legacy providers may use arbitrary role names. Only current observed
+    # visual line breaks with one OCR reading per line may be removed.
+    if evidence.method_version == EDITABLE_TEXT_METHOD and style.role == FLOWING_BODY and not text.spans:
+        lines = text.text.split('\n')
+        if len(evidence.members.get(text.id, [])) == len(lines) and continuous_chinese_lines(lines):
+            return ''.join(lines)
+    return text.text
 
 
 class Binding(Strict):

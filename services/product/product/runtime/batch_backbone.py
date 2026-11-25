@@ -27,11 +27,12 @@ from ..contracts import intersection
 from ..materialize import digest, write
 from ..object_contracts import ClosedObject
 from ..object_extract import rectangle
-from ..parallel_contracts import Relation, SceneGraph
+from ..parallel_contracts import FLOWING_BODY, Relation, SceneGraph
 from ..parallel_fusion import fuse_incremental_scene, is_decorative_subspan
 from ..parallel_store import Store, key
 from ..parallel_typography import calibrate, snap_ooxml_size_px, measure_text_appearance
 from ..resource_lease import lease
+from .semantic_text import apply_heading_weights, is_body_continuation, plain_line_gap
 
 
 def _merge_structural_ocr_items(
@@ -40,6 +41,7 @@ def _merge_structural_ocr_items(
     asset_records: list[dict],
     extra_logo_boxes: list[list[float]] | None = None,
     layout_regions: list[dict] | None = None,
+    editable_paragraphs: bool = False,
 ) -> tuple[list[dict], dict]:
     """Perform pre-scene structural grouping and relation analysis (Astra Step 2).
 
@@ -336,7 +338,11 @@ def _merge_structural_ocr_items(
         x_max = min(w_img, int(round(max(ax + aw, bx + bw))))
         strip_box = [float(x_min), ay + ah - 1.0, float(max(1, x_max - x_min)), max(2.0, gap_y + 2.0)]
         if any(intersection(strip_box, ar['bbox']) > 0 for ar in asset_records):
-            return False, 'left'
+            gap_start = math.ceil(ay + ah) + 1
+            gap = [x_min, gap_start, x_max-x_min, math.floor(by)-1-gap_start]
+            if not (editable_paragraphs and left_aligned and is_body_continuation(
+                    {'align':'left'}, [last_line,cand]) and plain_line_gap(source,gap)):
+                return False, 'left'
         if gap_y >= 2.0 and x_max > x_min + 4:
             sy0 = max(0, int(round(ay + ah)))
             sy1 = min(h_img, int(round(by)))
@@ -387,6 +393,8 @@ def _merge_structural_ocr_items(
             avg_pitch = float(np.median(pitches)) if pitches else cur['est_size_px'] * 1.2
             cur['line_spacing_px'] = round(max(cur['est_size_px'] * 1.05, avg_pitch), 2)
             cur['align'] = 'center' if all(a == 'center' for a in aligns) else 'left'
+            if editable_paragraphs:
+                cur['natural_wrap'] = is_body_continuation(cur,cur['lines'])
             merged_paragraphs.append({
                 'source_ocr_ids': list(cur['ocr_line_ids']),
                 'line_count': len(cur['lines']),
@@ -1387,6 +1395,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         source, raw_items, [*immediate_assets, *deferred_assets],
         extra_logo_boxes=extra_logo_boxes,
         layout_regions=(layout_data or {}).get('regions', []),
+        editable_paragraphs=request.get('orchestrator') == 'editable_reconstruction',
     )
     if preflight or (profile and profile != 'baseline'):
         from ..recovery.marked_fields import split_items
@@ -1395,7 +1404,18 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     for item in measured_items:
         est_px = item['est_size_px']
         item['role'] = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
+        if item.get('natural_wrap'):
+            item['role'] = FLOWING_BODY
     ui_frames = _detect_embedded_ui_frames(source, measured_items, layout_data)
+    device_frames = []
+    if request.get('orchestrator') == 'editable_reconstruction':
+        from ..recovery.embedded_device import detect_device_frames
+        device_frames = detect_device_frames(source, raw_items, layout_data)
+        # Keep a phone inside an existing, larger application screenshot in its parent.
+        device_frames = [frame for frame in device_frames if not any(
+            intersection(frame, other) > 0.5 * frame[2] * frame[3] for other in ui_frames)]
+        ui_frames.extend(device_frames)
+        scene_relations['embedded_device_frames'] = device_frames
     if ui_frames:
         scene_relations['embedded_ui_frames'] = ui_frames
     merged_text_boxes = [it['bbox'] for it in measured_items]
@@ -1482,6 +1502,9 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         shared_fonts = {'schema': fonts.get('schema', 'FontManifest/1'), 'fonts': shared_font_list} if shared_font_list else fonts
         with lease('cpu'):
             calibrated = calibrate(graph, source, shared_fonts, store, ocr=ocr, adaptive=True)
+        if request.get('orchestrator') == 'editable_reconstruction':
+            scene_relations['heading_weight_evidence'] = apply_heading_weights(
+                calibrated, source, shared_fonts, structure_info)
         if calibrated.model_dump() != graph.model_dump():
             from ..parallel_rebuild import build
             cal_dir = directory / 'calibrated-backing'
@@ -1493,6 +1516,8 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
             row['scene'] = str(ir.parent / 'scene.json')
         shutil.copyfile(structure_file, Path(row['ir']).parent / 'page-structure.json')
         write(Path(row['ir']).parent / 'embedded-ui-frames.json', ui_frames)
+        if device_frames:
+            write(Path(row['ir']).parent / 'embedded-device-frames.json', device_frames)
         if deferred_assets and (directory / 'deferred-assets.json').is_file():
             shutil.copyfile(directory / 'deferred-assets.json', Path(row['ir']).parent / 'deferred-assets.json')
         scene_initialized = True
@@ -1713,10 +1738,13 @@ def _chain_stage_from_spec(
     wanted_filter: set[str] | None,
     sam_enabled: bool,
     experiment_profile: str | None = None,
+    recover_light_tile_marks: bool = False,
     marked_routes: tuple | list = (),
     prepared_tables=None,
     post_text_checkpoint: dict | None = None,
     embedded_ui_frames: list[list[int]] | None = None,
+    group_resolved_surfaces: bool = False,
+    embedded_device_frames: list[list[int]] | None = None,
 ) -> tuple[Path, list[str], list[dict]]:
     from .. import layout_evidence, matting
     from ..object_stage import infer_sam
@@ -1728,6 +1756,20 @@ def _chain_stage_from_spec(
     cur_base = initial_baseline
     staged_ids: list[str] = []
     stage_errors: list[dict] = []
+    devices_file = initial_baseline / 'embedded-device-frames.json'
+    devices = embedded_device_frames
+    if devices is None:
+        devices = json.loads(devices_file.read_text('utf8')) if devices_file.is_file() else []
+    retained_devices = list(devices)
+
+    def touches_device(box):
+        return box and any(intersection(box, frame) > .10 * min(box[2]*box[3], frame[2]*frame[3])
+                           for frame in devices)
+
+    marked_routes = [r for r in marked_routes if
+                     not (r.get('route') in ('asset', 'table', 'picture') and touches_device(r.get('bbox')))
+                     and not (r.get('route') == 'surface' and any(
+                         intersection(r['bbox'], frame) >= .75*r['bbox'][2]*r['bbox'][3] for frame in devices))]
     reused_post_text = False
     if (
         post_text_checkpoint
@@ -1755,6 +1797,7 @@ def _chain_stage_from_spec(
                 {'id': f'auto-tbl-{t_idx}', 'route': 'table', 'bbox': list(r['bbox'])}
                 for t_idx, r in enumerate(_layout_tbl.get('regions', []), 1)
                 if r.get('label') == 'table' and float(r.get('score', 0)) >= 0.65
+                and not touches_device(r.get('bbox'))
             ]
             if auto_tables:
                 from ..recovery.marked_tables import stage_tables
@@ -1767,6 +1810,8 @@ def _chain_stage_from_spec(
         if include_containers and wanted_filter is None and layout_path:
             from ..recovery.chart_stage import stage_native_charts
             layout = json.loads(Path(layout_path).read_text(encoding='utf8'))
+            if devices:
+                layout['regions'] = [r for r in layout.get('regions', []) if not touches_device(r.get('bbox'))]
             chart_ir, chart_ids = stage_native_charts(cur_base, directory/tag/'charts-staged', layout=layout,
                                                       fonts=fonts, skip_ids=skip_ids)
             if chart_ids:
@@ -1777,7 +1822,7 @@ def _chain_stage_from_spec(
                     covered_texts.update(chart_scene['selected'][cid]['covered_text_ids'])
         for idx, tr in enumerate(trials_spec):
             oid = tr['object_id']
-            if oid in skip_ids or oid in covered_texts:
+            if oid in skip_ids or oid in covered_texts or touches_device(tr.get('bbox')):
                 continue
             step_out = directory / tag / f'step-{idx:03d}-{oid}'
             frame_opt = (
@@ -1819,25 +1864,42 @@ def _chain_stage_from_spec(
             ui_id = f'ui-frame-{ui_idx}'
             if ui_id in skip_ids or (wanted_filter is not None and ui_id not in wanted_filter):
                 continue
-            if any(intersection(f.get('picture_frame', [0, 0, 0, 0]), uframe) >= 0.70 * max(1.0, uframe[2] * uframe[3])
+            device = uframe in devices
+            if device and any(rec.get('bbox') == uframe and rec.get('payload', {}).get(
+                    'background_evidence', {}).get('method') == 'source-device-bezel-and-paired-side-strips/1'
+                    for rec in initial_graph.selected.values()):
+                retained_devices.remove(uframe)
+                continue
+            if not device and any(intersection(f.get('picture_frame', [0, 0, 0, 0]), uframe) >= 0.70 * max(1.0, uframe[2] * uframe[3])
                    for f in marked_routes if f.get('picture_frame')):
                 continue
-            ui_seed = {'id': ui_id, 'bbox': uframe, 'kind': 'asset', 'picture_frame': uframe}
-            ui_ir, ui_ids, _ = stage_region_crops(
+            ui_seed = {'id': ui_id, 'bbox': uframe, 'kind': 'asset', 'picture_frame': uframe,
+                       'device_frame': device}
+            if device:
+                ui_seed['text'] = ' / '.join(t.text for t in initial_graph.text.texts
+                    if intersection(t.bbox, uframe) >= .9 * t.bbox[2] * t.bbox[3])
+            ui_ir, ui_ids, evidence = stage_region_crops(
                 cur_base,
                 directory / tag / f'ui-frame-{ui_idx}',
                 seeds=[ui_seed],
                 allow_transparent_upgrade=False,
                 max_area_fraction=0.65,
-                protected_text_ids=set(),
+                protected_text_ids=set(),  # Device path checks source-measured peer gutters before every write.
                 skip_seed_ids=skip_ids,
             )
             if ui_ids:
                 cur_base = ui_ir.parent
                 staged_ids.extend(ui_ids)
+                if device:
+                    retained_devices.remove(uframe)
+            elif device:
+                stage_errors.append({'object_id': ui_id, 'kind': 'asset', 'bbox': uframe,
+                                     'failure': 'PICTURE_NOT_ISOLATED', 'reason': str(evidence)[:500]})
         for field in marked_routes:
             frame = field.get('picture_frame')
             if not frame or field['id'] in skip_ids or (wanted_filter is not None and field['id'] not in wanted_filter):
+                continue
+            if any(intersection(frame, device_box) > 0 for device_box in devices):
                 continue
             seed = {'id': field['id'], 'bbox': frame, 'kind': 'asset',
                     'picture_frame': frame if field.get('intrinsic_ui') else None}
@@ -1869,6 +1931,8 @@ def _chain_stage_from_spec(
                 if wanted_filter is not None and oid not in wanted_filter:
                     continue
                 d_box = raw_obj['bbox']
+                if touches_device(d_box):
+                    continue
                 d_area = max(1.0, d_box[2] * d_box[3])
                 if any(intersection(a.bbox, d_box) >= 0.30 * min(max(1.0, a.bbox[2] * a.bbox[3]), d_area)
                        for a in cur_graph.asset.objects):
@@ -1898,6 +1962,7 @@ def _chain_stage_from_spec(
             if a.id not in cur_graph.selected
             and cur_graph.ownership.get(a.id) == 'RESOLVED'
             and a.id not in skip_ids
+            and not touches_device(a.bbox)
             and (wanted_filter is None or a.id in wanted_filter)
         ]
         asset_cache_root = page_cache_dir / 'asset-extract-cache'
@@ -1928,6 +1993,7 @@ def _chain_stage_from_spec(
                 'layers': str(layers_dir),
                 'plate_patch': plate_patch_sha,
                 'nearby_sel': nearby_sel,
+                'recover_light_tile_marks': recover_light_tile_marks,
             }
 
             def _cached_retry(strategy_name: str, fallback_dir: Path, **extra_kw):
@@ -1948,7 +2014,7 @@ def _chain_stage_from_spec(
                 cdir.mkdir(parents=True, exist_ok=True)
                 out_res = retry_asset_extraction(
                     active_graph, asset.id, source_path, layers_dir,
-                    cur_base, run_dir, strategy=strategy_name, **extra_kw,
+                    cur_base, run_dir, strategy=strategy_name, light_tile_marks=recover_light_tile_marks, **extra_kw,
                 )
                 write(meta_f, out_res)
                 return out_res
@@ -2075,6 +2141,8 @@ def _chain_stage_from_spec(
         for route in marked_routes:
             if not route.get('new_asset') or route['id'] in skip_ids or (wanted_filter is not None and route['id'] not in wanted_filter):
                 continue
+            if touches_device(route['bbox']):
+                continue
             from ..recovery.region_crop import stage_region_crops
             graph=SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
             if route['id'] not in graph.selected:
@@ -2089,7 +2157,9 @@ def _chain_stage_from_spec(
         cont_dir = directory / tag / 'containers-staged'
         try:
             cont_ir, cont_ids = stage_containers_and_surfaces(
-                cur_base, cont_dir, skip_ids=skip_ids, logo_ids=logo_ids, wanted_ids=wanted_filter
+                cur_base, cont_dir, skip_ids=skip_ids, logo_ids=logo_ids, wanted_ids=wanted_filter,
+                retained_frames=retained_devices,
+                recover_light_tile_marks=recover_light_tile_marks,
             )
             if cont_ids:
                 cur_base = cont_ir.parent
@@ -2141,6 +2211,7 @@ def _chain_stage_from_spec(
             logo_ids=logo_ids,
             skip_seed_ids=skip_ids,
         )
+        crop_seeds = [seed for seed in crop_seeds if not touches_device(seed['bbox'])]
         if crop_seeds:
             crop_dir = directory / tag / 'region-crops-staged'
             try:
@@ -2150,6 +2221,7 @@ def _chain_stage_from_spec(
                     allow_move_unsafe=bool(allow_move_unsafe),
                     protected_text_ids=protected_text_ids,
                     skip_seed_ids=skip_ids,
+                    preserve_boxes=retained_devices,
                 )
                 if crop_ids:
                     from ..recovery.vector_icons import upgrade_crops_to_vector_shapes
@@ -2162,7 +2234,9 @@ def _chain_stage_from_spec(
                         from ..recovery.container_stage import stage_containers_and_surfaces
                         post_cont_dir = directory / tag / 'post-crop-containers-staged'
                         pc_ir, pc_ids = stage_containers_and_surfaces(
-                            cur_base, post_cont_dir, skip_ids=skip_ids, logo_ids=logo_ids
+                            cur_base, post_cont_dir, skip_ids=skip_ids, logo_ids=logo_ids,
+                            retained_frames=retained_devices,
+                            recover_light_tile_marks=recover_light_tile_marks,
                         )
                         if pc_ids:
                             cur_base = pc_ir.parent
@@ -2173,13 +2247,28 @@ def _chain_stage_from_spec(
                     'failure': classify_exc(exc, 'generation'), 'reason': str(exc),
                 })
 
-    if marked_routes:
-        from .marked_routes import route_trace,plan_move_groups
+    discover_groups = group_resolved_surfaces and include_containers and wanted_filter is None
+    if marked_routes or discover_groups:
+        from .marked_routes import route_trace, plan_move_groups, resolved_surface_groups
         graph=SceneGraph.model_validate_json((cur_base/'scene.json').read_text('utf8'))
         movement_routes = [r if wanted_filter is None or r['id'] in wanted_filter
                            else {**r,'move_with':[]} for r in marked_routes]
-        groups = [g for g in plan_move_groups(movement_routes,graph)
-                  if not graph.selected[g[0]].get('move_members') and not set(g).intersection(skip_ids)]
+        proposals = plan_move_groups(movement_routes, graph)
+        if discover_groups:
+            group_issues = []
+            proposals.extend(resolved_surface_groups(graph, cur_base, diagnostics=group_issues))
+            blocked_groups = {frozenset(err['members']) for err in group_issues}
+            proposals = [group for group in proposals if frozenset(group) not in blocked_groups]
+            stage_errors.extend(group_issues)
+        occupied = set(skip_ids)
+        for entry in graph.selected.values():
+            occupied.update(entry.get('move_members', []))
+        groups = []
+        for group in proposals:
+            group_key = 'g-'+key(sorted(group))[:16]
+            if group_key not in skip_ids and not occupied.intersection(group):
+                groups.append(group)
+                occupied.update(group)
         if groups:
             from ..parallel_rebuild import adapt
             for group in groups:
@@ -2191,7 +2280,7 @@ def _chain_stage_from_spec(
                 for group in groups:
                     if group not in accepted:
                         graph.selected[group[0]].pop('move_members',None)
-                if cur_base == initial_baseline:
+                if cur_base == initial_baseline or (reused_post_text and cur_base == Path(post_text_checkpoint['path'])):
                     grouped = directory/tag/'movement'
                     shutil.copytree(cur_base,grouped)
                     cur_base = grouped
@@ -2199,7 +2288,8 @@ def _chain_stage_from_spec(
                 write(cur_base/'slideir.json',ir)
                 # A group-only change must go through the same compile and Office commit.
                 staged_ids.extend(i for g in accepted for i in g if i not in staged_ids)
-        write(directory/tag/'route-trace.json',route_trace(marked_routes,graph))
+        if marked_routes:
+            write(directory/tag/'route-trace.json',route_trace(marked_routes,graph))
     return cur_base, staged_ids, stage_errors
 
 
@@ -2218,6 +2308,34 @@ def restage_batch_candidate_subset(
         return False
     staged_graph = SceneGraph.model_validate_json((Path(candidate['ir']).parent / 'scene.json').read_text('utf8'))
     staged_ids = candidate.get('object_ids') or [candidate['object_id']]
+    failed_group = (office_res.get('office') or {}).get('failed_object_id')
+    if spec and spec.get('group_resolved_surfaces') and isinstance(failed_group,str) and failed_group.startswith('g-'):
+        from ..parallel_rebuild import adapt
+        current_ir = Path(candidate['ir'])
+        groups = {g['id']:g['member_ids'] for g in json.loads(current_ir.read_text('utf8'))['groups']}
+        parent_ir = json.loads((Path(spec['initial_baseline'])/'slideir.json').read_text('utf8'))
+        if failed_group in groups and failed_group not in {g['id'] for g in parent_ir['groups']}:
+            members = set(groups[failed_group])
+            holder = next((rec for rec in staged_graph.selected.values()
+                           if set(rec.get('move_members', [])) == members), None)
+            if holder is not None:
+                holder.pop('move_members')
+                holder.pop('card_move_group',None)
+                ir = adapt(staged_graph, current_ir.parent)
+                if {g['id'] for g in ir['groups']} == set(groups)-{failed_group}:
+                    base = directory/'ungrouped'
+                    shutil.copytree(current_ir.parent,base)
+                    write(base/'scene.json',staged_graph.model_dump())
+                    write(base/'slideir.json',ir)
+                    candidate['ir'] = str(base/'slideir.json')
+                    candidate['files'] = {str(p):digest(p) for p in base.rglob('*') if p.is_file()}
+                    candidate['fingerprint'] = key({'removed_group':failed_group,'ir':digest(base/'slideir.json')})
+                    candidate['isolation_attempts'] = int(candidate.get('isolation_attempts',0))+1
+                    candidate['isolation_attempted'] = True
+                    candidate['isolated_skip_ids'] = sorted(set(candidate.get('isolated_skip_ids',[])) | {failed_group})
+                    candidate.setdefault('isolation_failures',[]).append({'object_id':failed_group,'kind':'group',
+                        'members':sorted(members),'failure':'GROUP_EDIT_FAILED','reason':'Kept all native member objects'})
+                    return True
     frame_repairs, bad_ids = _collect_office_defects(office_res, staged_graph, staged_ids)
     if spec:
         if not (frame_repairs or (bad_ids and len(bad_ids) < len(staged_ids))):
@@ -2313,6 +2431,7 @@ def restage_batch_candidate_subset(
             directory=directory,
             tag=f'stage-pass{attempt_idx + 1}',
             experiment_profile=spec.get('experiment_profile'),
+            recover_light_tile_marks=spec.get('recover_light_tile_marks', False),
             marked_routes=spec.get('marked_routes', ()),
             trials_spec=spec['trials'],
             frame_overrides=merged_overrides,
@@ -2328,6 +2447,8 @@ def restage_batch_candidate_subset(
             sam_enabled=bool(spec.get('sam_enabled', False)),
             post_text_checkpoint=spec.get('post_text_checkpoint'),
             embedded_ui_frames=spec.get('embedded_ui_frames'),
+            group_resolved_surfaces=bool(spec.get('group_resolved_surfaces')),
+            embedded_device_frames=spec.get('embedded_device_frames'),
         )
         fp_key = {'batch': repaired_ids}
 
@@ -2546,6 +2667,10 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     if ui_frames is None:
         ui_f_path = initial_baseline / 'embedded-ui-frames.json'
         ui_frames = json.loads(ui_f_path.read_text('utf8')) if ui_f_path.is_file() else []
+    device_frames = current.get('scene_relations', {}).get(str(page), {}).get('embedded_device_frames')
+    if device_frames is None:
+        devices_file = initial_baseline / 'embedded-device-frames.json'
+        device_frames = json.loads(devices_file.read_text('utf8')) if devices_file.is_file() else []
     ui_text_ids = {
         t.id for t in initial_graph.text.texts
         if any(intersection(t.bbox, uf) >= 0.75 * max(1.0, t.bbox[2] * t.bbox[3]) for uf in ui_frames)
@@ -2561,6 +2686,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     preserved_ids = {i for r in routes if r['route']=='preserve' for i in [r['id'],*r['target_ids']]}
     prepared_tables=None
     table_fields=[r for r in routes if r['route']=='table' and (wanted_filter is None or r['id'] in wanted_filter)]
+    table_fields = [r for r in table_fields if not any(intersection(r['bbox'], frame) >
+                    .1 * min(r['bbox'][2]*r['bbox'][3], frame[2]*frame[3]) for frame in device_frames)]
     covered=set()
     if table_fields:
         from ..recovery.marked_tables import stage_tables
@@ -2752,6 +2879,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         tag='stage-pass1',
         prepared_tables=prepared_tables,
         experiment_profile=request.get('experiment_profile'),
+        recover_light_tile_marks=request.get('orchestrator') == 'editable_reconstruction',
         marked_routes=routes,
         trials_spec=trials_spec,
         frame_overrides={},
@@ -2767,6 +2895,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         sam_enabled=sam_enabled,
         post_text_checkpoint=post_text_ckpt,
         embedded_ui_frames=ui_frames,
+        group_resolved_surfaces=request.get('orchestrator') == 'editable_reconstruction',
+        embedded_device_frames=device_frames,
     )
     timings['stage_pass1_s'] = round(time.perf_counter() - t_stage_start, 2)
     failed_regions.extend(stage_errors)
@@ -2799,6 +2929,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         'batch_spec': {
             'initial_baseline': str(initial_baseline),
             'experiment_profile':request.get('experiment_profile'),
+            'recover_light_tile_marks':request.get('orchestrator') == 'editable_reconstruction',
             'marked_routes':routes,
             'cache_dir': str(directory),
             'trials': trials_spec,
@@ -2814,6 +2945,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'sam_enabled': bool(sam_enabled),
             'post_text_checkpoint': post_text_ckpt,
             'embedded_ui_frames': ui_frames,
+            'group_resolved_surfaces': request.get('orchestrator') == 'editable_reconstruction',
+            'embedded_device_frames': device_frames,
         },
         'auto_repaired_frame_ids': [],
         'isolated_bad_ids': [],

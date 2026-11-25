@@ -405,6 +405,16 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,original_sites=F
             for backing,front in pairs:
                 site_records.append(_run_single(i,backing,'delete-together',sig,before,pw,ph,sx,sy,
                                                 pic_cache,margin_map,partners=(front,)))
+            if original_sites and not render_only:
+                from .office_groups import group_edit_targets, probe_group
+                ir = json.loads(Path(irs[i-1]).read_text('utf8'))
+                for group in group_edit_targets(ir, target_ids):
+                    current_id = group[0]
+                    geometry, _ = site_geometry(irs[i-1])
+                    edits, sites = probe_group(app, pptx, output, i, group, before, sig, signature,
+                        lambda path: verify_pictures(path, irs, cache=pic_cache), margin_map, geometry)
+                    records.extend(edits)
+                    site_records.extend(sites)
         if digest(pptx)!=original:raise ValueError('Office modified original')
         result={'status':'PASS_APP_AUTOMATED','pptx_sha256':original,'records':records,'human_acceptance':False,
                 'edit_checked':not render_only,'embedded_alpha_and_visible_rgb_checked':True,'powerpoint_version':app.Version}

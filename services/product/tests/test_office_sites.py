@@ -71,6 +71,20 @@ def test_absent_incomplete_or_changed_original_site_evidence_stays_unverified(tm
         checked_sites(tmp_path,result,ir,1)
 
 
+def test_original_site_review_requires_native_group_move_and_member_recolor(tmp_path):
+    ir = tmp_path/'slideir.json'
+    write(ir, {'source_sha256':'s','nodes':[{'id':'tile','type':'shape','fill':'FFFFFF'},
+                                             {'id':'caption','type':'text'}],
+               'groups':[{'id':'g-card','member_ids':['tile','caption']}]})
+    write(tmp_path/'scene.json', {'source_sha256':'s','selected':{},'relations':[]})
+    with pytest.raises(ValueError,match='did not supply'):
+        checked_sites(tmp_path,{},ir,1)
+    assert checked_sites(tmp_path,{},ir,1,{'unrelated'}) == []
+    assert checked_sites(tmp_path,{},ir,1,{'caption'}) == []
+    with pytest.raises(ValueError,match='did not supply'):
+        checked_sites(tmp_path,{},ir,1,{'tile','caption'})
+
+
 @pytest.mark.parametrize('defect',['wrong_window','wrong_crop_pixels','unchanged_frame','wrong_source_frame',
                                    'outside_report','outside_render','absent_destination','missing_inventory'])
 def test_reported_pass_with_valid_file_hashes_rejects_invalid_site(tmp_path,defect):

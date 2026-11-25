@@ -11,6 +11,7 @@ PROMPT='''你是 OpenCode Go 独立视觉复核器。只返回符合 VisualRevie
 STAGED 是提交前正常阶段；human_acceptance=false 始终由用户决定。它们本身都不是视觉错误，不能作为 findings 的理由。质量字段是待你判断的输入，不是自己的正确答案。
 若证据行标注为 [MOVE_UNSAFE IN-PLACE CROP]，表示该区域属于原位底图兜底拷贝：底层 source-plate 故意未擦除（删除该对象后右列仍显示原图像素属预期设计，残差状态为 NOT_APPLICABLE，且不计入可编辑成功），不得仅因此将其判为泄漏或残留错误，除非实际合成图相对源图出现错位、裁切或色彩偏差。
 附图还包含逐对象证据，每行左原图、中最终实际 PPT、右实际删除该对象并保存重开后的 PPT。检查右列是否残留该对象原始字形、半图、细线或白色残片；独立标签和外部连线应保留。文字/形状删除测试也须保持邻居。原始源图及实际编辑结果才是依据，候选 mask、拟合背景和重合成分数不能充当真值。矩形上下文内的其他正常对象不是泄露。
+GROUP MOVED CLEAR 行显示整组移走后的原位，核对图形、底板和投影痕迹。MEMBER RECOLORED 行显示底板改色后的实际结果，检查前景的透明边缘、细节和其他成员是否完整。
 所有 ID 和绑定字段按上下文使用。仅有自动字段一致不能通过；任何无法确认的本次事务请给出相关 node_ids 和具体修复建议。
 如果本次任一对象或页面视觉发生实质错误，则 passed=false 并给出 findings，每项带实际 node_ids、description 和 suggested_fix；几何修正给出源图全页 xywh source_bbox。如果本次所有已完成事务均满足要求则 passed=true、findings=[]。这不代表全部原图已完成可编辑重建或人工验收。
 '''
@@ -57,7 +58,8 @@ def panels(source,preview,irfile,office_dir,page,output,*,site_review=None):
             with Image.open(Path(office_dir)/rec['crop']) as edited:
                 crops=[office_scale_source.crop(box),actual.crop(box),edited.convert('RGB')]
             if crops[0].size!=crops[2].size:raise ValueError('original-site crop size mismatch')
-            action='MOVED CLEAR' if rec['action']=='move-clear' else 'BOTH LAYERS DELETED'
+            action={'move-clear':'MOVED CLEAR', 'delete-together':'BOTH LAYERS DELETED',
+                    'group-move':'GROUP MOVED CLEAR', 'member-recolor':'MEMBER RECOLORED'}[rec['action']]
             label=f"{' + '.join(rec['members'])} : SOURCE / FINAL / {action} (ORIGINAL SITE)"
             append_observation(label,crops)
             refs.append(rec)

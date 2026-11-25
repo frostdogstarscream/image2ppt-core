@@ -16,6 +16,24 @@ from product.recovery.region_crop import grow_seed, stage_region_crops, _content
 from test_parallel import branches
 
 
+def test_light_mark_moves_with_tile_only_when_distinct_from_the_parent():
+    from product.recovery.container_stage import _opaque_tile_interior
+
+    parent = np.array([250, 252, 254], np.uint8)
+    crop = np.broadcast_to(parent, (64, 64, 3)).copy()
+    crop[8:56, 8:56] = (78, 160, 85)
+    crop[23:35, 20:32] = 255
+    protected = np.zeros(crop.shape[:2], bool)
+    inside = _opaque_tile_interior(crop, parent, protected)
+    assert inside[24:34, 21:31].all()
+    assert not inside[:8].any()
+    protected[28, 27] = True
+    assert _opaque_tile_interior(crop, parent, protected) is None
+    protected[:] = False
+    crop[23:35, 20:32] = parent
+    assert _opaque_tile_interior(crop, parent, protected) is None
+
+
 def _icon(box):
     return ClosedObject(id=box[0], description='complex graphic', prompt_en='complex graphic', kind='illustration',
                         bbox=box[1], layers=['layer-01.png'], components=['whole'],

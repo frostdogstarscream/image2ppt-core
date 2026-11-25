@@ -455,6 +455,7 @@ def plan_region_crops(
     max_area_fraction: float = MAX_AREA_FRACTION,
     protected_text_ids: set[str] | None = None,
     skip_seed_ids: set[str] | None = None,
+    preserve_boxes=(),
 ) -> tuple[list[dict], list[dict]]:
     size = (plate.shape[1], plate.shape[0])
     content = _content(plate)
@@ -481,6 +482,7 @@ def plan_region_crops(
         if t.id in prot_ids and len(t.bbox) == 4
     ]
     protected_boxes = [b for b in protected_boxes if b[2] > 0 and b[3] > 0]
+    protected_boxes.extend(_clip(box, size) for box in preserve_boxes)
 
     crops: list[dict] = []
     report: list[dict] = []
@@ -506,6 +508,7 @@ def plan_region_crops(
             'seed_boxes': [sb],
             'cuts': cuts,
             'fixed_frame': fixed_frame,
+            'device_frame': bool(seed.get('device_frame')),
         })
 
     changed = True
@@ -979,6 +982,7 @@ def stage_region_crops(
     max_area_fraction: float = MAX_AREA_FRACTION,
     protected_text_ids: set[str] | None = None,
     skip_seed_ids: set[str] | None = None,
+    preserve_boxes=(),
 ) -> tuple[Path, list[str], list[dict]]:
     """Stage crops on a built baseline directory; return (slideir path, staged ids, report)."""
     from ..object_unmix import backing_from_evidence
@@ -1031,6 +1035,7 @@ def stage_region_crops(
         max_area_fraction=max_area_fraction,
         protected_text_ids=protected_text_ids,
         skip_seed_ids=skip,
+        preserve_boxes=preserve_boxes,
     )
     if not crops:
         return baseline / 'slideir.json', [], report
@@ -1132,6 +1137,7 @@ def stage_region_crops(
 
         pixels = appearance[y:y + h, x:x + w].copy()
         safety, backing_meta, backing = 'MOVE_UNSAFE', {'reason': 'not attempted'}, None
+        device_owner = None
         flush_photo_used = False
         if not allow_movable:
             backing_meta = {'reason': 'movable crops disabled'}
@@ -1146,6 +1152,20 @@ def stage_region_crops(
             fit_protected = movable_mask | upgraded_mask | foreground | other_planned
             if crop['cuts']:
                 backing_meta = {'reason': 'crop boundary cuts continuing content'}
+            elif crop.get('device_frame'):
+                from .embedded_device import fit_device_backing
+                peers = [obj.bbox for obj in (*graph.text.texts, *graph.asset.objects)
+                         if _intersection_area(obj.bbox, crop_box_cur) < .9 * obj.bbox[2] * obj.bbox[3]]
+                try:
+                    backing, device_owner, proof = fit_device_backing(source, [x, y, w, h], fit_protected, peers)
+                except ValueError as exc:
+                    backing_meta = {'reason': str(exc)}
+                else:
+                    if lower_covered[y:y+h, x:x+w][device_owner].any():
+                        backing_meta = {'reason': 'device backing already claimed by a lower transaction'}
+                    else:
+                        backing_meta = {'background_evidence': proof}
+                        safety = 'MOVABLE'
             else:
                 try:
                     backing, error, evidence = backing_from_evidence(lower_comp, [x, y, w, h], fit_protected, graph.surface)
@@ -1184,7 +1204,7 @@ def stage_region_crops(
                         backing_meta = {'ring_error': float(f_err), 'background_evidence': {'method': 'flush-card-body-backing/1'}}
                         flush_photo_used = True
 
-        if safety == 'MOVE_UNSAFE' and not allow_move_unsafe:
+        if safety == 'MOVE_UNSAFE' and (not allow_move_unsafe or crop.get('device_frame')):
             report.append({
                 'id': rid,
                 'state': 'SKIPPED',
@@ -1265,13 +1285,15 @@ def stage_region_crops(
 
         round_meta: dict = {}
         out_pixels = pixels
-        if safety == 'MOVABLE' and backing is not None:
+        if safety == 'MOVABLE' and backing is not None and device_owner is None:
             rounded = _detect_and_prepare_rounded_photo(pixels, backing)
             if rounded is not None:
                 out_pixels, est_r = rounded
                 round_meta = {'corner_radius_px': est_r, 'clip_geometry': 'roundRect'}
 
-        Image.fromarray(np.dstack([out_pixels, np.full((h, w), 255, np.uint8)])).save(png)
+        alpha = (device_owner.astype(np.uint8) * 255 if device_owner is not None
+                 else np.full((h, w), 255, np.uint8))
+        Image.fromarray(np.dstack([out_pixels, alpha])).save(png)
         graph = fused_try
         record = {
             'id': rid, 'kind': 'asset', 'region_crop': True, 'move_safety': safety,
@@ -1286,12 +1308,17 @@ def stage_region_crops(
         if safety == 'MOVABLE':
             owner_mask = rectangle([x, y, w, h], size) & ~foreground
             local_owner = owner_mask[y:y + h, x:x + w]
-            clean_local = local_owner | contained_fg[y:y + h, x:x + w]
+            if device_owner is not None:
+                local_owner &= device_owner
+            clean_local = (local_owner if device_owner is not None
+                           else local_owner | contained_fg[y:y + h, x:x + w])
             backing_u8 = np.clip(np.rint(backing), 0, 255).astype(np.uint8)
             proof = output / f'{rid}-owner.npz'
             np.savez_compressed(proof, mask=owner_mask, restore_bbox=[x, y, w, h], backing_patch=backing_u8)
             record['mask_sha256'] = array_sha(owner_mask.astype('uint8'))
-            record['owner_evidence'] = {'file': proof.name, 'sha256': digest(proof), 'method': 'region-crop-lateral-backing/1'}
+            method = (backing_meta['background_evidence']['method'] if device_owner is not None
+                      else 'region-crop-lateral-backing/1')
+            record['owner_evidence'] = {'file': proof.name, 'sha256': digest(proof), 'method': method}
             lower_comp[y:y + h, x:x + w][clean_local] = backing_u8[clean_local]
             # Layer-algebra invariant: never overwrite canvas plate pixels underneath already-erased surfaces/containers,
             # while cleaning dark-blue caption islands under wholly-contained upper text/asset owners.

@@ -135,12 +135,19 @@ def record_site(output, page, members, action, window, rendered, render_file, or
 
 
 def checked_sites(directory, result, irfile, page, target_ids=None):
+    from .office_groups import group_edit_targets
     moves, pairs, unverified = edit_sites(irfile, target_ids, include_unverified=True)
     skipped = [row for row in result.get('unverified_original_site_groups', []) if row['page']==page]
     if skipped != [{'page':page,**row} for row in unverified]:
         raise ValueError('unverified joint-edit scope is missing or changed')
     expected = {('move-clear', (name,)) for name in moves} | {
         ('delete-together', members) for members in pairs}
+    groups = {}
+    for group_id, members, child in group_edit_targets(json.loads(Path(irfile).read_text('utf8')), target_ids):
+        groups['group-move',tuple(members)] = group_id
+        if child:
+            groups['member-recolor',(child,)] = group_id
+    expected.update(groups)
     rows = [row for row in result.get('original_sites', []) if row['page'] == page]
     seen = set()
     render_rows = {}
@@ -161,6 +168,8 @@ def checked_sites(directory, result, irfile, page, target_ids=None):
                 or type(row.get('outside_pixels')) is not int or row['outside_pixels'] != 0
                 or row['crop'] != filename or not path.is_file() or row['sha256'] != digest(path)):
             raise ValueError('missing or mismatched original-site observation')
+        if identity in groups and row.get('group_id') != groups[identity]:
+            raise ValueError('wrong native container for group edit')
         window = observation_window(geometry, members)
         if tuple(row.get('window', ())) != window:
             raise ValueError('original-site crop does not cover the bound object and restoration extent')
@@ -179,6 +188,18 @@ def checked_sites(directory, result, irfile, page, target_ids=None):
             after = new[member]
             if not isinstance(after,list) or len(after)!=5 or not all(math.isfinite(v) for v in after) or min(after[2:4])<=0:
                 raise ValueError('original-site move lacks a valid reopened frame')
+            if action == 'member-recolor':
+                colors = [row.get('initial_fill_rgb_com'),row.get('reopened_fill_rgb_com')]
+                if (any(type(color) is not int for color in colors) or colors[0] == colors[1]
+                        or any(abs(a-b) > .12 for a,b in zip(after, frame))):
+                    raise ValueError('member recolor missing independent fill and frame evidence')
+                continue
+            if action == 'group-move':
+                first = members[0]
+                offset = [new[first][j]-old[first][j] for j in (0,1)]
+                if (any(abs(after[j]-frame[j]-offset[j]) > .12 for j in (0,1))
+                        or any(abs(a-b) > .12 for a,b in zip(after[2:],frame[2:]))):
+                    raise ValueError('native group members did not move together')
             x,y,w,h = visible_box(after,after[4])
             left,top,right,bottom = (v*.75 for v in window)
             if x+w>left and x<right and y+h>top and y<bottom:
