@@ -93,6 +93,74 @@ def test_lower_layer_must_match_visible_paint_and_remove_source_glyphs(tmp_path,
     assert group["background"]["provenance"] == {"identifier": 2}
 
 
+def test_faint_strokes_on_otherwise_matching_gradients_do_not_survive(tmp_path, monkeypatch):
+    from product.recovery import layerd_adapter
+
+    source, pristine, graph, inventory = card_fixture()
+    (group,) = plan_regions(graph, graph.text.texts, inventory, source)
+    masks, fitted, guard = measure_group(graph, group, source, tmp_path, [])
+    x, y, w, h = group['bbox']
+    visible_ink = (pristine[y:y+h, x:x+w, 0].astype(int) - source[y:y+h, x:x+w, 0]) > 130
+    letters = masks['t-1'] & visible_ink
+    stained = pristine.copy()
+    stained[y:y+h, x:x+w][letters] -= 8
+    alternatives = [layerd_adapter.LowerBackground(pristine, {'trial': 'clean'})]
+    monkeypatch.setattr(layerd_adapter, 'lower_backgrounds', lambda *args: alternatives)
+    choose_region_background(group, graph, source, masks, fitted, guard, 'fixture', None, tmp_path)
+    assert group['background']['provenance']['trial'] == 'clean'
+    alternatives[:] = [layerd_adapter.LowerBackground(stained, {'trial': 'faint'})]
+    choose_region_background(group, graph, source, masks, fitted, guard, 'fixture', None, tmp_path)
+    assert group['background_decision']['selected'] == 'local-fit'
+    assert group['background_decision']['stroke_residuals'][0]['field'] == 't-1'
+    assert 'background' not in group
+    claimed = np.zeros(source.shape[:2], bool)
+    claimed[y:y+h, x:x+w] = np.logical_or.reduce(list(masks.values()))
+    np.testing.assert_array_equal(fitted[~claimed], source[~claimed])
+
+
+@pytest.mark.parametrize('touching', [False, True])
+def test_one_faint_character_in_a_clean_line_on_a_gradient(tmp_path, monkeypatch, touching):
+    from product.recovery import layerd_adapter
+
+    height, width = 40, 190
+    yy, xx = np.indices((height, width))
+    gradient = 120 + xx // 3 + yy // 2
+    paper = np.stack((gradient, gradient + 4, gradient + 9), axis=2).astype('uint8')
+    glyphs = []
+    for left in range(10, 160, 15):
+        glyph = np.zeros((height, width), 'uint8')
+        cv2.putText(glyph, 'H', (left, 27), cv2.FONT_HERSHEY_SIMPLEX, .5, 1, 2)
+        glyphs.append(glyph.astype(bool))
+    ink = np.logical_or.reduce(glyphs)
+    if touching:
+        ink[21:23, 13:151] = True
+    ink[26:28, 175:177] = True  # A tiny full stop offers too few samples by itself.
+    source = paper.copy()
+    source[ink] = 20
+    candidate = paper.copy()
+    candidate[glyphs[5]] -= 15
+    group = {'id': 'line', 'bbox': [0, 0, width, height]}
+    graph = SimpleNamespace(source_sha256='synthetic', image_size=[width, height])
+    layers = [layerd_adapter.LowerBackground(candidate, {'case': 'one old letter'}),
+              layerd_adapter.LowerBackground(paper, {'case': 'clean gradient'})]
+    monkeypatch.setattr(layerd_adapter, 'lower_backgrounds', lambda *args: layers)
+    choose_region_background(group, graph, source, {'field': ink}, paper, np.zeros_like(ink),
+                             'fixture', None, tmp_path)
+    assert group['background']['provenance']['case'] == 'clean gradient'
+    finding, = group['background_decision']['stroke_residuals']
+    x, y, w, h = finding['sample_bounds']
+    assert finding['field'] == 'field' and glyphs[5][y:y+h, x:x+w].any() and w < width / 2
+
+    # A small tone fluctuation on only the four pixels of the dot does not
+    # provide enough evidence to discard an otherwise clean lower layer.
+    dotted_paper = paper.copy()
+    dotted_paper[26:28, 175:177] -= 4
+    layers[:] = [layerd_adapter.LowerBackground(dotted_paper, {'case': 'small variation'})]
+    choose_region_background(group, graph, source, {'field': ink}, paper, np.zeros_like(ink),
+                             'fixture', None, tmp_path)
+    assert group['background']['provenance']['case'] == 'small variation'
+
+
 def test_text_on_retained_artwork_updates_bound_asset_and_owner(tmp_path):
     bg = np.full((15, 30, 3), 245, dtype=np.uint8)
     art = np.full((9, 20, 4), [25, 83, 134, 255], dtype=np.uint8)

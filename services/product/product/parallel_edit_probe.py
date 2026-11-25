@@ -22,7 +22,51 @@ def layout_result(frame, bounds, lines, original_lines):
             'frame':list(frame),'text_bounds':list(bounds)}
 
 
-def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True, checked_open=False):
+def _bounded_single_glyph(before, edited, deleted, pixel_frame):
+    """All visible original and replacement ink must fit the unpadded, unclipped frame."""
+    if before.shape != edited.shape or edited.shape != deleted.shape:
+        return False
+    height, width = edited.shape[:2]
+    left, top, right, bottom = pixel_frame
+    if not (0 < left < right < width and 0 < top < bottom < height):
+        return False
+    original_ink = (before != deleted).any(2)
+    new_ink = (edited != deleted).any(2)
+    crop = np.s_[top:bottom, left:right]
+    return (original_ink.any() and new_ink.any() and np.any(before[crop] != edited[crop])
+            and original_ink.sum() == original_ink[crop].sum() and new_ink.sum() == new_ink[crop].sum())
+
+
+def _single_glyph_probe(shape, slide, deck, before, edited, deleted_file, pixel_frame, expanded_file, layout):
+    """Check if an Office text bound overhang consists only of invisible spacing."""
+    import pywintypes
+
+    if not deleted_file.is_file():
+        return
+    try:
+        deleted = np.asarray(Image.open(deleted_file).convert('RGB'))
+        if not _bounded_single_glyph(before, edited, deleted, pixel_frame):
+            return
+        shape.Width *= 2
+        shape.Height *= 2
+        tr = shape.TextFrame.TextRange
+        expanded = layout_result((shape.Left, shape.Top, shape.Width, shape.Height),
+                                 (tr.BoundLeft, tr.BoundTop, tr.BoundWidth, tr.BoundHeight), tr.Lines().Count, 1)
+        if expanded['overflow'] or expanded['line_count'] != 1:
+            return
+        slide.Export(str(expanded_file), 'PNG', edited.shape[1], edited.shape[0])
+        if np.array_equal(edited, np.asarray(Image.open(expanded_file).convert('RGB'))):
+            layout.update(overflow=False, reported_overflow=True, evidence='single_glyph_ink_within_original_frame',
+                          delete_sha256=digest(deleted_file), expanded_preview_sha256=digest(expanded_file))
+    except (OSError, pywintypes.com_error):
+        return
+    finally:
+        # The comparison happens only in the reopened read-only probe copy.
+        deck.Saved = True
+
+
+def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True, checked_open=False,
+                 verified_deletions=None):
     from .parallel_office import close_probe_document, leaf_shapes, open_probe_document
     output=Path(output).resolve();output.mkdir(parents=True,exist_ok=False)
     pptx=Path(pptx).resolve();original=digest(pptx);records=[];deck=None;initialized=False
@@ -61,6 +105,13 @@ def inspect_text(pptx, irs, output, target_ids=None, *, include_long=True, check
                     outside=int(((a!=b).any(2)&~allowed).sum())
                     siblings={k:v for k,v in got.items() if k!=name}=={k:v for k,v in sig.items() if k!=name}
                     content=str(tr.Text)==value;frame=all(abs(a-b)<.1 for a,b in zip(got[name][:5],sig[name][:5]))
+                    delete_file = (verified_deletions or {}).get((page, name))
+                    if (delete_file and content and siblings and frame and outside == 0 and layout['overflow']
+                            and layout['line_count'] == count == 1 and sig[name][4] == 0
+                            and len(node['text']) == len(value) == 1 and node['text'].isalnum() and value.isalnum()):
+                        pixel_frame = (int(x*sx), int(y*sy), int(np.ceil((x+w)*sx)), int(np.ceil((y+h)*sy)))
+                        _single_glyph_probe(s, slide, deck, a, b, delete_file, pixel_frame,
+                                            output/f'{page:02d}-{name}-{action}-expanded.png', layout)
                     valid=content and siblings and frame and outside==0 and not layout['overflow'] and not layout['unexpected_wrap']
                     row={'page':page,'id':name,'action':action,'status':'PASS' if valid else 'FAIL',
                          'saved_reopened':True,'content_matches':content,'siblings_unchanged':siblings,'frame_unchanged':frame,

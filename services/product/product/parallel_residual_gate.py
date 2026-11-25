@@ -5,6 +5,8 @@ The source-derived ownership/backing receipt is mandatory, never a PNG mask.
 """
 import json
 from pathlib import Path
+from xml.etree.ElementTree import ParseError
+from zipfile import BadZipFile
 import numpy as np
 from PIL import Image
 from .materialize import digest,write
@@ -19,7 +21,62 @@ def residual_accepted(row):
         and row.get('move_safety')=='MOVE_UNSAFE')
 
 
-def inspect_residuals(irfile,office_dir,page,output,*,owned_group_ids=()):
+def _visible_text_backing(image, mask, source_ink, noise_limit):
+    """Measure the saved view against exposed, unowned neighbours of the former glyphs."""
+    import cv2
+
+    ring = cv2.dilate(mask.astype('uint8'), np.ones((3, 3), 'uint8')).astype(bool) & ~mask
+    if not ring.any() or (mask[0].any() or mask[-1].any() or mask[:, 0].any() or mask[:, -1].any()):
+        return None
+    yy, xx = np.indices(mask.shape)
+    basis = np.stack((xx, yy, np.ones_like(xx)), axis=-1)
+    fit, _, rank, _ = np.linalg.lstsq(basis[ring], image[ring], rcond=None)
+    error = np.abs(image - basis @ fit).max(2)
+    # A textured/partially occluded ring cannot certify the erased field. The tiny
+    # allowance on an otherwise smooth reference covers RGB raster quantization.
+    if rank != 3 or error[ring].max() > 2:
+        return None
+    excess = mask & (error > 2)
+    evidence = {'ring_pixels':int(ring.sum()), 'visible_peak_rgb':round(float(error[mask].max()), 3),
+                'off_surface_pixels':int(excess.sum())}
+    if not excess.any():
+        return evidence
+    if error[excess].max() > noise_limit:
+        return None
+    # Scale the test to the height of the original ink. A tiny but *complete*
+    # source mark (decimal point, accent, etc.) is never an isolated speck.
+    ink_rows = np.where(source_ink.any(axis=1))[0]
+    if not ink_rows.size:
+        return None
+    glyph_height = int(ink_rows[-1] - ink_rows[0] + 1)
+    _, _, components, _ = cv2.connectedComponentsWithStats(excess.astype('uint8'), connectivity=8)
+    if components[1:, 2:4].max() > glyph_height * .16:
+        return None
+    density = cv2.boxFilter(excess.astype('float32'), -1, (glyph_height, glyph_height),
+                            normalize=False, borderType=cv2.BORDER_CONSTANT)
+    if density.max() > .02 * glyph_height ** 2:
+        return None
+    count, labels = cv2.connectedComponents(source_ink.astype('uint8'), connectivity=8)
+    ink_area = np.bincount(labels.ravel(), minlength=count)[1:]
+    signal = np.bincount(labels[excess], minlength=count)[1:]
+    return None if (signal >= .35 * ink_area).any() else evidence
+
+
+def _verify_text_specks(deleted, visible_plate, mask, source_ink, noise_limit, neighbours):
+    import cv2
+    if np.any(cv2.dilate(mask.astype('uint8'), np.ones((3, 3), 'uint8')) & neighbours):
+        return None
+    # The actual deletion and the PPTX's named plate must each be clean. A solid
+    # native banner can otherwise hide old text baked into a lower picture.
+    office = _visible_text_backing(deleted, mask, source_ink, noise_limit)
+    if office is not None:
+        plate = _visible_text_backing(visible_plate, mask, source_ink, noise_limit)
+        if plate is not None:
+            return {'after_delete':office, 'named_plate':plate}
+    return None
+
+
+def inspect_residuals(irfile,office_dir,page,output,*,owned_group_ids=(), text_edit_pptx=None):
     irfile=Path(irfile);scene=json.loads((irfile.parent/'scene.json').read_text(encoding='utf-8'))
     ir=json.loads(irfile.read_text(encoding='utf-8')) if irfile.is_file() else {'nodes':[]}
     node_z={n['id']:int(n.get('z',0)) for n in ir.get('nodes',[]) if isinstance(n,dict) and 'id' in n}
@@ -31,6 +88,36 @@ def inspect_residuals(irfile,office_dir,page,output,*,owned_group_ids=()):
             node_z[group['id']] = min(node_z[member] for member in group['member_ids'])
     records=list(scene['selected'].values());source=np.array(Image.open(irfile.parent/'source.png').convert('RGB'));proofs={};results=[]
     rb=scene.get('raster_backing') or {}
+    visible_plate = None
+    plate_sha = None
+    checked_text_deletes = set()
+    receipt = Path(office_dir)/'report.json'
+    if text_edit_pptx and Path(text_edit_pptx).is_file() and receipt.is_file():
+        office = json.loads(receipt.read_text('utf8'))
+        if (office.get('status') == 'PASS_APP_AUTOMATED' and office.get('embedded_alpha_and_visible_rgb_checked')
+                and office.get('pptx_sha256') == digest(text_edit_pptx)):
+            checked_text_deletes = {r['id'] for r in office.get('records', [])
+                                    if r.get('action') == 'delete' and r.get('page') == page
+                                    and r.get('saved_reopened') and r.get('outside_pixels') == 0}
+    if (checked_text_deletes and ir.get('source_sha256') == scene['source_sha256']
+            and digest(irfile.parent/'source.png') == scene['source_sha256']):
+        ref = next((a for a in ir.get('assets', []) if a['id'] == 'source-plate'), None)
+        node = next((n for n in ir.get('nodes', []) if n.get('asset_id') == 'source-plate'), None)
+        if ref and node and node.get('type') == 'image' and node.get('bbox') == [0, 0, source.shape[1], source.shape[0]]:
+            from .parallel_office import verify_pictures
+            # Bind the current IR to the actual pictures in the saved presentation.
+            try:
+                verify_pictures(text_edit_pptx, [irfile], first_page=page)
+            except (BadZipFile, KeyError, OSError, ParseError, ValueError):
+                checked_text_deletes.clear()
+            file = (irfile.parent / ref['path']).resolve()
+            if (checked_text_deletes and file.is_relative_to(irfile.parent.resolve()) and file.is_file()
+                    and digest(file) == ref.get('sha256')):
+                with Image.open(file) as picture:
+                    has_alpha = 'A' in picture.getbands() or 'transparency' in picture.info
+                    if not has_alpha or picture.convert('RGBA').getchannel('A').getextrema() == (255, 255):
+                        visible_plate = np.asarray(picture.convert('RGB'))
+                        plate_sha = ref['sha256']
     plate=None
     if rb.get('path'):
         plate_file=(irfile.parent/rb['path']).resolve()
@@ -143,12 +230,40 @@ def inspect_residuals(irfile,office_dir,page,output,*,owned_group_ids=()):
                 surface_under_local[sy0:sy1,sx0:sx1]=True
         bg=data['backing_patch'].astype(float);src=source[y:y+h,x:x+w].astype(float);got=after[y:y+h,x:x+w].astype(float)
         distance=np.abs(got-bg).max(2);original=np.abs(src-bg).max(2)
-        # Confirm a residual only where the independently observed old signal
-        # remains closer to source than backing. Hard residual is never relaxed.
+        # Flag old signal that is closer to the original than to its estimated backing.
+        # Only weak differences can be reconsidered from the actual saved view below.
         residual=local&(original>ink_contrast)&(distance>plate_tol)&(np.abs(got-src).max(2)<distance)
         eff_tol=np.where(surface_under_local,surf_tol,plate_tol)
         minor_dev=local&(~residual)&(distance>plate_tol)&(distance<=eff_tol)
         unknown=local&(distance>eff_tol)&~residual
+        flagged = residual | unknown
+        if (identifier in checked_text_deletes and record.get('kind') == 'text' and flagged.any()
+                and distance[flagged].max() <= ink_contrast and visible_plate is not None
+                and visible_plate.shape == source.shape and _verified_single_line(record)
+                and np.array_equal(local, data['mask'][y:y+h,x:x+w])):
+            # Include real context beyond the restore bbox; do not extrapolate
+            # across the slide boundary or grant relief for missing evidence.
+            left, top = max(0, x - 1), max(0, y - 1)
+            area = np.s_[top:y+h+1, left:x+w+1]
+            field_mask = np.zeros(after[area].shape[:2], bool)
+            inner = np.s_[y-top:y-top+h, x-left:x-left+w]
+            field_mask[inner] = local
+            strong = np.zeros_like(field_mask)
+            strong[inner] = local & (original > max(ink_contrast, np.percentile(original[local], 90) * .4))
+            check = None
+            if strong.any():
+                neighbours = np.zeros_like(field_mask)
+                for other, proof in proofs.items():
+                    if other != identifier:
+                        neighbours |= proof['mask'][area].astype(bool)
+                check = _verify_text_specks(after[area], visible_plate[area], field_mask, strong,
+                                             ink_contrast, neighbours)
+            if check is not None:
+                base.update(text_backing_check=check, prior_residual_pixels=int(residual.sum()),
+                            prior_unexplained_pixels=int(unknown.sum()), visible_plate_sha256=plate_sha)
+                minor_dev |= flagged
+                residual[:] = False
+                unknown[:] = False
         status='FAIL' if residual.any() else 'UNKNOWN' if unknown.any() else 'PASS'
         results.append({**base,'residual_check_status':status,'residual_pixels_confirmed':int(residual.sum()),
             'minor_deviation_pixels':int(minor_dev.sum()),
@@ -157,3 +272,8 @@ def inspect_residuals(irfile,office_dir,page,output,*,owned_group_ids=()):
             'scope':'proven source-owner pixels excluding other staged owners; semantic completeness needs independent review'})
     write(output,{'schema':'SourceOwnerResiduals/1','records':results,'human_acceptance':False})
     return results
+
+
+def _verified_single_line(record):
+    text = (record.get('source_text_definition') or {}).get('text')
+    return isinstance(text, str) and bool(text.strip()) and len(text.splitlines()) == 1

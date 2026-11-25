@@ -153,13 +153,22 @@ AGENT_TOOLS = {'review_numbered_text','get_job_context','get_progress','get_evid
 def scoped_ids(state, current, page, block, object_ids):
     k = str(page)
     allowed = set()
-    matching = [b for b in current['questions'][k] if block is None or b['block']==block]
+    matching = [b for b in current.get('questions', {}).get(k, []) if block is None or b['block']==block]
     for b in matching:
         f, _ = state.evidence(b['questions'])
         allowed.update(it['id'] for it in read(f)['items'])
     ids = set(object_ids) if object_ids is not None else allowed
+    # The host issue list is a shortlist. A reviewer can see an overlooked edit
+    # in the original. Resolve its explicit ID against this page's frozen inventory.
+    if object_ids is not None and block is None and 1 <= len(ids) <= 30 and not ids <= allowed:
+        binding = current.get('host_evidence', {}).get(k, {})
+        file = current.get('experiment_marks', {}).get(k)
+        if file and binding.get('source_sha256') and binding.get('inventory_sha256') == digest(file):
+            inventory = read(file)
+            if inventory.get('source_sha256') == binding['source_sha256']:
+                allowed.update(row['id'] for row in inventory['rows'])
     if (block is None and object_ids is None) or not 1<=len(ids)<=30 or not ids <= allowed:
-        raise ValueError('choose a question block or issue object IDs from this page')
+        raise ValueError('choose a question block or up to 30 verified object IDs from this page')
     return sorted(ids)
 
 
@@ -183,11 +192,11 @@ def normalize_arguments(state,current,tool,arguments):
         available = []
         for identifier in ids:
             attempts = [r for r in rounds if identifier in r.get('object_ids', ids)]
-            previous = attempts[-1].get('inputs', {}).get(identifier) if attempts else None
-            if not attempts or (len(attempts) < 2 and previous is not None and inputs[identifier] != previous):
+            seen = {r.get('inputs', {}).get(identifier) for r in attempts}
+            if not seen or (seen != {None} and inputs[identifier] not in seen):
                 available.append(identifier)
         if not available:
-            raise ValueError('local repair limit reached or unchanged evidence for: '+', '.join(sorted(ids)))
+            raise ValueError('unchanged evidence or previously attempted strategy for: '+', '.join(sorted(ids)))
         return {'page':args['page'],'object_ids':available,'verify_office':True,'include_region_crops':False}
     if tool=='plan_marked_page':
         page = args['page']

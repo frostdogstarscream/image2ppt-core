@@ -396,10 +396,17 @@ def test_opencode_api_admits_without_go_and_cancel(tmp_path, monkeypatch):
     assert client.get(f'/api/v1/jobs/{identifier}', headers=auth).json()['status'] == 'CANCELLED'
 
 
-def test_runner_preserves_completed_result_when_session_becomes_idle(job,monkeypatch):
+@pytest.mark.parametrize('hosted,finished', [(False, True), (True, True), (True, False)])
+def test_runner_evidence_and_idle_finalization(job,monkeypatch,hosted,finished):
+    import base64
     import httpx
     from product.runtime import runner
     service,identifier,directory=job
+    request = json.loads((directory/'request.json').read_text('utf8'))
+    request['host_stage0'] = hosted
+    Image.new('RGB', (80, 60), 'blue').save(directory/'inputs/other.png')
+    request['sources'].insert(0, 'other.png')
+    write(directory/'request.json', request)
     def workspace(job):
         target=directory/'agent';target.mkdir()
         write(target/'opencode.json',{'providers':{'fixture-provider':{}}})
@@ -416,17 +423,59 @@ def test_runner_preserves_completed_result_when_session_becomes_idle(job,monkeyp
                 raise httpx.HTTPStatusError('missing',request=response.request,response=response)
             if route.endswith('/prompt'):
                 self.prompts+=1
+                prompt = options['json']
+                assert 'editable test' in prompt['text']
+                assert 'skill' not in prompt['text'].lower()
+                if hosted:
+                    assert 'source evidence ID' in prompt['text']
+                    assert prompt['files'] == []
+                else:
+                    assert 'attached in page order' in prompt['text']
+                    assert [f['name'] for f in prompt['files']] == request['sources']
+                    for image in prompt['files']:
+                        assert base64.b64decode(image['uri'].split(',', 1)[1]) == (directory/'inputs'/image['name']).read_bytes()
                 return {}
-            if route.endswith('/wait'):
+            if route.endswith('/wait') and finished:
                 current=service.state(identifier).read();current['status']='SUCCEEDED'
                 write(service.state(identifier).root/'state.json',current)
                 write(directory/'result.json',{'status':'SUCCEEDED','fixture':'no real delivery'})
             return {}
     client=Client()
-    result=runner.run(directory,client)
-    assert result['status']=='SUCCEEDED'
+    result=runner._agent_run(directory,client)
+    if finished:
+        assert result['status']=='SUCCEEDED'
+    else:
+        assert result['status']=='REVIEW_REQUIRED'
+        assert result['failure']=='AGENT_ENDED_BEFORE_FINALIZATION'
     assert json.loads((directory/'result.json').read_text('utf8'))==result
     assert client.prompts==1
+
+
+@pytest.mark.parametrize('hosted,profile,expected', [
+    (True, 'combined', 'Host evidence only'),
+    (False, 'combined', 'Direct-upload evidence only'),
+    (False, 'baseline', 'Direct-upload evidence only'),
+])
+def test_runner_loads_only_the_applicable_instructions_once(job, monkeypatch, tmp_path, hosted, profile, expected):
+    from product.runtime import runner
+
+    _, _, directory = job
+    skill = tmp_path/'skills/image2ppt-runtime/SKILL.md'
+    skill.parent.mkdir(parents=True)
+    skill.write_text('---\nname: fixture\n---\nHost evidence only\n'
+                     '<!-- legacy-runtime -->\nDirect-upload evidence only\n', encoding='utf8')
+    monkeypatch.setattr(runner, 'ROOT', tmp_path)
+    monkeypatch.setenv('IMAGE2PPT_AGENT_PROVIDER', 'opencode_go')
+    monkeypatch.setenv('IMAGE2PPT_AGENT_API_KEY', 'synthetic-agent-secret')
+    request = json.loads((directory/'request.json').read_text('utf8'))
+    write(directory/'request.json', dict(request, host_stage0=hosted, experiment_profile=profile))
+
+    workspace = runner.prepare_workspace(directory)
+    config = json.loads((workspace/'opencode.json').read_text('utf8'))
+    agent = config['agents']['image2ppt-runtime']
+    assert agent['system'] == expected
+    assert {rule['action'] for rule in agent['permissions'] if rule['effect'] == 'allow'} == {'image2ppt_*'}
+    assert not (workspace/'.opencode/skills/image2ppt-runtime/SKILL.md').exists()
 
 
 def test_exact_ocr_binding_preserves_disagreement_and_ambiguous_duplicates():

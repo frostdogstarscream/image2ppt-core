@@ -50,7 +50,14 @@ def check_local(pptx, irs, directory, *, check_owned_groups=False):
                 }
             has_text = any(n['type'] == 'text' for ir in irs
                            for n in json.loads(Path(ir).read_text('utf8'))['nodes'])
-            replacement = inspect_text(pptx, irs, directory/'replacement', include_long=False, checked_open=True) if has_text else {
+            verified_deletions = {}
+            if (actual.get('status') == 'PASS_APP_AUTOMATED' and actual.get('embedded_alpha_and_visible_rgb_checked')
+                    and actual.get('pptx_sha256') == result['pptx_sha256']):
+                verified_deletions = {(r['page'],r['id']):directory/'office'/f"{r['page']:02d}-{r['id']}-delete.png"
+                                      for r in actual.get('records', []) if r.get('action') == 'delete'
+                                      and r.get('saved_reopened') and r.get('outside_pixels') == 0}
+            replacement = inspect_text(pptx, irs, directory/'replacement', include_long=False, checked_open=True,
+                                       verified_deletions=verified_deletions) if has_text else {
                 'status': 'NOT_APPLICABLE', 'reason': 'no native text objects'}
         residuals = []
         for index, ir in enumerate(irs, 1):
@@ -58,7 +65,7 @@ def check_local(pptx, irs, directory, *, check_owned_groups=False):
                               and r.get('group_members') and r.get('action') == 'delete' and r.get('saved_reopened')}
             options = {'owned_group_ids':deleted_groups} if deleted_groups else {}
             residuals.append(inspect_residuals(ir, directory/'office', index, directory/f'residual-{index:02d}.json',
-                                               **options))
+                                               text_edit_pptx=pptx, **options))
         if replacement.get('status') == 'UNKNOWN':
             result.update(error_type='RuntimeError', failure='QA_INFRASTRUCTURE_UNAVAILABLE',
                           office=actual, replacements=replacement, residuals=residuals)

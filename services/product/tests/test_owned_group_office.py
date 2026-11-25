@@ -84,7 +84,12 @@ def test_research_worker_returns_group_move_and_delete_previews(tmp_path, monkey
         folder=directory/'office';folder.mkdir(parents=True)
         for name in ['01-drawing-move-scale','01-drawing-delete','01-left-move-scale','01-left-delete']:
             (folder/(name+'.png')).write_bytes(b'preview')
-        return {'status':'PASS','office':{'records':[move]}}
+        replacement=directory/'replacement'
+        replacement.mkdir()
+        for name in ['01-glyph-replace-equal','01-glyph-replace-equal-expanded','01-other-replace-equal']:
+            (replacement/(name+'.png')).write_bytes(b'preview')
+        glyph={'id':'glyph','action':'replace-equal','page':1,'layout':{'evidence':'single_glyph_ink_within_original_frame'}}
+        return {'status':'PASS','office':{'records':[move]},'replacements':{'records':[glyph]}}
 
     monkeypatch.setattr(office,'check_local',check)
     office_bridge.execute_ticket(Client(),{'ticket':'synthetic'},tmp_path/'run','test-worker')
@@ -93,3 +98,6 @@ def test_research_worker_returns_group_move_and_delete_previews(tmp_path, monkey
         assert 'check/office/01-drawing-delete.png' in result.namelist()
         assert 'check/office/01-left-move-scale.png' not in result.namelist()
         assert 'check/office/01-left-delete.png' in result.namelist()
+        assert 'check/replacement/01-glyph-replace-equal.png' in result.namelist()
+        assert 'check/replacement/01-glyph-replace-equal-expanded.png' in result.namelist()
+        assert 'check/replacement/01-other-replace-equal.png' not in result.namelist()

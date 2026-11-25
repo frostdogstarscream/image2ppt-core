@@ -221,7 +221,7 @@ def test_numbered_actions_reject_whole_page_and_unowned_marks(tmp_path):
     c['repair_rounds'] = {'1':[{'object_ids':['b'],'progress':False}]}
     assert batch(block=1)['object_ids'] == ['a']
     c['repair_rounds']['1'].append({'object_ids':['a'],'progress':False})
-    with pytest.raises(ValueError, match='local repair limit'):
+    with pytest.raises(ValueError, match='unchanged evidence'):
         batch(block=1)
 
 def test_object_only_delivery_checks_each_page_and_source_plate():

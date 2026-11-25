@@ -35,9 +35,9 @@ These are target engineering rules, not proof of implementation. The r10 baselin
 
 ## Source-plate and failure diagnosis
 
-First preserve the source plate and clean only proven object ink. Later local RasterTile work is a separate shadow experiment with coordinate, alpha, overlap and backing evidence. Neither a source plate's presence nor its removal proves editing quality.
+Open the selected file, try the requested edit and inspect the old position at normal viewing size. Identify the raster embedded in that file by hash. Also inspect the lower native shapes that become visible when a field is deleted. The two views can show different failures.
 
-For an OpenCode upload, start with `request.json`, `host-baseline/manifest.json`, the corresponding baseline scorecard, the actual Office checks, `result.json` and `runtime/delivery-selection.json`. Follow the object IDs through the page's numbered evidence, plans, scene, independent audit and final PowerPoint file. Verify the selected file hash against the artifact list. When selection is empty, distinguish the diagnostic preview and any internal candidate file.
+To trace that observed result through an OpenCode upload, consult `request.json`, `host-baseline/manifest.json`, the corresponding baseline scorecard, the actual Office checks, `result.json` and `runtime/delivery-selection.json`. Follow the object IDs through the page's numbered evidence, plans, scene, independent audit and final PowerPoint file. Verify the selected file hash against the artifact list. When selection is empty, distinguish the diagnostic preview and any internal candidate file.
 
 For a frozen parallel run, inspect `provenance.json`, `page-*/barrier-1.json`, the final IR paths in `result.json`, their `scene.json`, `transactions.json`, ownership maps, `quality-round-*.json`, `qa.json`, Office reports and SQLite call/commit records. Bind diagnoses to the actual job evidence and record absent evidence as UNKNOWN.
 
@@ -55,7 +55,7 @@ Report these separately, including per-page values where available:
 
 An object-count improvement does not establish quality. A visually faithful whole-page screenshot does not establish reconstruction. Keep legacy `reconstructed_pages` explicitly labeled as pages with any retained native/asset candidate if compatibility requires it; add honest completion fields instead of silently changing its meaning. Engineering targets such as 95% text recall are not achieved values or substitutes for independent references.
 
-The historical mean pixel difference near 10 is a sample-specific manual heuristic, not the sole automatic gate. Use source-bound object-type metrics and calibrated renderer tolerance alongside wording, completeness, residual and editability checks. Do not loosen thresholds globally to pass a failing page.
+Treat renderer color differences and pixel counts as diagnostic measurements. Use recognizable old text, missing strokes or a changed neighbor after a real edit to decide whether restoration failed. Keep the exact file, render and object bindings for that decision.
 
 ## Real PowerPoint edits and independent visual review
 

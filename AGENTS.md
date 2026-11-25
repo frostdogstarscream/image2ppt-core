@@ -1,6 +1,6 @@
 # image2PPT project
 
-This worktree converts uploaded slide images, including AI-generated pages, into presentations people can edit in PowerPoint. Submit new automatic jobs through the OpenCode runtime at `POST /api/v1/jobs` using `services/product/opencode_client.py`. The host builds a deterministic baseline before the Agent sees the job. Use the [engineering skill](skills/image2ppt/SKILL.md) for development, the [runtime skill](skills/image2ppt-runtime/SKILL.md) for the production Agent and the [runtime guide](services/product/OPENCODE_RUNTIME.md) for deployment and delivery.
+This worktree converts uploaded slide images, including AI-generated pages, into presentations people can edit in PowerPoint. Submit new automatic jobs through the OpenCode runtime at `POST /api/v1/jobs` using `services/product/opencode_client.py`. The host builds a deterministic baseline before the Agent sees the job. Use the actual source, selected PPTX and saved edits to decide which product behavior to change. Compare a suspect rule against those artifacts, including when it appears in the [engineering skill](skills/image2ppt/SKILL.md), the [Agent instructions](skills/image2ppt-runtime/SKILL.md) or the [deployment guide](services/product/OPENCODE_RUNTIME.md).
 
 For each applicable object, verify the edit a user needs on a copy of the actual PPTX, then save, close and reopen it.
 
@@ -8,7 +8,7 @@ For each applicable object, verify the edit a user needs on a copy of the actual
 - Recolor a card while its label, icon or photo stays in place. When intended to move as one card, select it once and verify the accompanying parts move. Delete an independent photo and verify its title and the exposed background. Check transparent icons against a contrasting fill.
 - Edit a cell or supported chart datum through its native PowerPoint object when the source provides the underlying information. A complex visual can fall back to a movable image of that one object. Whole-page raster fallback cannot qualify as an editable delivery.
 
-Allow minor font, gradient and shadow differences within the configured visual tolerances (`configs/fidelity_tolerance.json`). Preserve content, hierarchy and proportions. Require clear ownership for erased pixels, clean old locations, actual PowerPoint checks and the independent review receipt bound to the checked composition.
+Allow minor font, gradient and shadow differences within the configured visual tolerances (`configs/fidelity_tolerance.json`). Preserve content, hierarchy and proportions. Assess old locations at normal viewing size after a real PowerPoint edit, using the background actually visible there. Check independently for recognizable old ink, missing content and damage to a neighbor. Keep the independent review receipt bound to the checked composition. A verified partial copy may be downloaded with its outstanding defects.
 
 Use the frozen r10/R12 pipeline (`product.parallel_pipeline.run`, `services/product/run_local.py`) for comparisons. Its [runbook](services/product/PARALLEL_R10.md) describes `parallel_review` and the gated `parallel_auto` mode. Label manual comparisons, compiler fixtures and evidence replays separately from fresh automatic uploads.
 

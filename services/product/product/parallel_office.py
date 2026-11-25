@@ -29,11 +29,11 @@ def scale_text(tr, factor):
                 setattr(paragraph, spacing, value*factor)
 
 
-def verify_pictures(pptx,irs,deleted=None):
+def verify_pictures(pptx,irs,deleted=None,*,first_page=1):
     ns={'p':'http://schemas.openxmlformats.org/presentationml/2006/main','a':'http://schemas.openxmlformats.org/drawingml/2006/main',
         'r':'http://schemas.openxmlformats.org/officeDocument/2006/relationships'}
     with zipfile.ZipFile(pptx) as z:
-        for i,irfile in enumerate(irs,1):
+        for i,irfile in enumerate(irs,first_page):
             irfile=Path(irfile);ir=json.loads(irfile.read_text(encoding='utf-8'));assets={a['id']:a for a in ir['assets']}
             omitted = set()
             if deleted and deleted[0] == i:

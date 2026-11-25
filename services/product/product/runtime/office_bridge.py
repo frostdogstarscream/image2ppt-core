@@ -127,13 +127,18 @@ def execute_ticket(client,ticket,run,binding):
                    if r.get('group_members') and r.get('action') == 'move-scale'}
     if options and office.get('failed_object_id'):
         group_moves.update(f"{i:02d}-{office['failed_object_id']}-move-scale.png" for i in range(1, len(irs)+1))
+    retained_previews = set(group_moves)
+    for row in result.get('replacements', {}).get('records', []):
+        if row.get('layout', {}).get('evidence') == 'single_glyph_ink_within_original_frame':
+            stem = f"{row['page']:02d}-{row['id']}-{row['action']}"
+            retained_previews.update((stem+'.png', stem+'-expanded.png'))
     for probe_file in (run/'output/check').rglob('*'):
         if not probe_file.is_file():
             continue
         suf = probe_file.suffix.lower()
         if probe_file.name.startswith('~$') or probe_file == run/'output/check/checks.json':
             continue
-        if suf == '.pptx' or (suf == '.png' and probe_file.name not in group_moves
+        if suf == '.pptx' or (suf == '.png' and probe_file.name not in retained_previews
                               and not probe_file.name.endswith(('-before.png', '-delete.png', '-text-hidden.png'))):
             try:
                 probe_file.unlink()

@@ -263,12 +263,12 @@ test('the skill asks for per-sub-region decomposition, not whole-region crops',a
     assert.doesNotMatch(text,/Only when the background itself cannot be rebuilt does the whole region/,'整块保留的逃生舱不得回归');
     if(file.includes('image2ppt/SKILL.md')){
       assert.match(text,/POST \/api\/v1\/jobs/,'自动还原使用 OpenCode 上传入口');
-      assert.match(text,/r10\/R12[^\n]*frozen comparison/i,'说明旧链路用于冻结对照');
-      assert.match(text,/Do not hand-author SlideIR/,'不得用手工 IR 替代自动规划');
-      assert.match(text,/Split safe subregions/,'安全子区域独立重建');
-      assert.match(text,/Font sharing is not a pixel dependency/,'样式不得扩大像素回退范围');
-      assert.match(text,/visual integrity and editability separately/,'视觉与编辑化分别验收');
-      assert.match(text,/actual PowerPoint/,'保留实际文件验收');
+      // Check the routes and that engineers receive the maintained copy.
+      // Concrete edit, rollback and Office behavior is covered in the product tests.
+      assert.match(text,/product\.parallel_pipeline\.run/,'保留冻结对照入口');
+      const installed = new URL('../.agents/skills/image2ppt/SKILL.md', import.meta.url);
+      const copy = await fs.readFile(fileURLToPath(installed), 'utf8');
+      assert.equal(text.replaceAll('\r\n','\n'), copy.replaceAll('\r\n','\n'));
       continue;
     }
     assert.match(text,/[Dd]ecompos/,`${file} 应保留下拆解要求`);

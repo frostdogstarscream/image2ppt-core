@@ -103,4 +103,75 @@ def test_findings_open_only_requested_objects_and_limit_retries(tmp_path,monkeyp
     current['repair_rounds']['1'].append({'object_ids':['card'],'inputs':repair_inputs(current,1,['card'])})
     current['marked_plans']['1'][0]['shape'] = 'roundRect'
     current['review_issues']['1']['field'].append({'finding_id':'new-evidence'})
-    assert eligible() == ['field']
+    assert eligible() == ['card','field']
+    current['marked_plans']['1'][0].pop('shape')
+    assert eligible() == ['field']  # Returning to a tried strategy cannot start a loop.
+
+    # Direct inspection can find a missed edit outside the host's questions.
+    from product.materialize import digest
+    binding = current['host_evidence']['1']
+    binding.update(source_sha256='s', inventory_sha256=digest(tmp_path/'marks.json'))
+    assert scoped_ids(state,current,1,None,['other']) == ['other']
+    for block, requested in ((1,['other']), (None,['not-in-inventory'])):
+        with pytest.raises(ValueError):
+            scoped_ids(state,current,1,block,requested)
+    binding['source_sha256'] = 'other-page'
+    with pytest.raises(ValueError):
+        scoped_ids(state,current,1,None,['other'])
+
+
+def test_repair_strategy_tracks_meaningful_roles_and_planned_movement():
+    plan = {'id': 'target', 'route': 'text', 'role': 'field'}
+    current = {'marked_plans': {'1': [plan]}}
+    def fingerprint():
+        return repair_inputs(current, 1, ['target'])['target']
+    text = fingerprint()
+    for role in ('label', 'caption', 'body', 'title'):
+        plan['role'] = role
+        assert fingerprint() == text
+    plan['role'] = 'project'
+    assert fingerprint() != text
+    plan.update(route='asset', role='screenshot')
+    screenshot = fingerprint()
+    plan['role'] = 'dashboard'
+    assert fingerprint() == screenshot
+    plan['role'] = 'brand'
+    assert fingerprint() != screenshot
+    plan.update(route='surface', role='card', origin='host', move_with=['label'])
+    group = fingerprint()
+    plan.update(role='role_box', move_with=['label', 'label'])
+    assert fingerprint() == group
+    plan.pop('origin')
+    assert fingerprint() != group
+
+
+def test_retry_uses_source_bound_readings_for_just_the_addressed_object(tmp_path):
+    current = {'host_evidence': {'1': {'source_sha256': 'source'}}, 'reading_reports': {'1': []}}
+    ids = ['text-1', 'alias', 'adjacent']
+    initial = repair_inputs(current, 1, ids)
+    observation = {'object_id':'text-1', 'crop_sha256':'crop', 'context_sha256':'context',
+                   'reading':'流程衔接', 'legible':True, 'model':'reader'}
+    def report(name, source, *observations):
+        path = tmp_path/(name+'.json')
+        write(path, {'source_sha256':source, 'observations':observations,
+                     'items':[{'id':'alias', 'target_id':'text-1', 'status':'observed'}]})
+        current['reading_reports']['1'].append(str(path))
+
+    report('wrong-page', 'other-page', observation)
+    report('no-transcription', 'source', {**observation, 'reading':''})
+    report('no-reading', 'source', {**observation, 'reading':None})
+    current['reading_reports']['1'].append(str(tmp_path/'archived.json'))
+    assert repair_inputs(current, 1, ids) == initial
+    report('first', 'source', observation)
+    first = repair_inputs(current, 1, ids)
+    assert first['text-1'] != initial['text-1'] and first['alias'] != initial['alias']
+    assert first['adjacent'] == initial['adjacent']
+    report('repeat', 'source', {**observation, 'crop_file':'different-run/path.png'})
+    assert repair_inputs(current, 1, ids) == first
+    view = {'source_sha256':'other-page', 'status':'ok', 'model':'reader', 'answer':{'text':'流程衔接','legible':True}}
+    report('foreign-view', 'source', {**observation,'views':{'page':view}})
+    assert repair_inputs(current, 1, ids) == first
+    report('independent-view', 'source', {**observation, 'views':{'page':{**view, 'source_sha256':'source'}}})
+    comparable = repair_inputs(current, 1, ids)
+    assert comparable['text-1'] != first['text-1'] and comparable['alias'] != first['alias']
+    assert comparable['adjacent'] == initial['adjacent']

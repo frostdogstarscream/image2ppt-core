@@ -1,5 +1,8 @@
 """Bind a visual finding to marks on the audited source, before offering an edit."""
+from functools import lru_cache
+import json
 from math import isfinite
+from pathlib import Path
 
 from ..parallel_store import key
 from .marked_routes import iou
@@ -38,6 +41,31 @@ def locate(defect, rows, size):
     return {**result, 'binding':'new_region', 'bbox':box}
 
 
+@lru_cache(maxsize=64)
+def _reading_report_index(path, mtime_ns, size):
+    """Index small evidence signatures once per report revision, without opening the images."""
+    report = json.loads(path.read_text('utf8'))
+    source = report.get('source_sha256')
+    by_id = {}
+    for row in report.get('observations', []):
+        oid, crop = row.get('object_id'), row.get('crop_sha256')
+        if not oid or not crop:
+            continue
+        readings = by_id.setdefault(oid, set())
+        reading = row.get('reading')
+        if isinstance(reading, str) and reading.strip():
+            readings.add(key([crop, row.get('context_sha256'), row.get('model'), reading.strip(), row.get('legible')]))
+        for view_name, view in row.get('views', {}).items():
+            answer = view.get('answer') or {}
+            text = answer.get('text')
+            if view.get('status') == 'ok' and view.get('source_sha256') == source and isinstance(text, str) and text.strip():
+                readings.add(key([crop, view_name, view.get('model'), text.strip(), answer.get('legible')]))
+    for item in report.get('items', []):
+        if item.get('status') == 'observed' and item.get('target_id') in by_id:
+            by_id.setdefault(item['id'], set()).update(by_id[item['target_id']])
+    return source, by_id
+
+
 def repair_inputs(current, page, ids):
     """Count only changed inputs for this exact target as a reason to retry."""
     k = str(page)
@@ -45,14 +73,41 @@ def repair_inputs(current, page, ids):
     reviews = current.get('review_issues', {}).get(k, {})
     plate = current.get('plate_issues', {}).get(k, {})
     late = current.get('late_fields', {}).get(k, {})
+    source = current.get('host_evidence', {}).get(k, {}).get('source_sha256')
+    readings = {oid: set() for oid in ids}
+    if source:
+        for file in current.get('reading_reports', {}).get(k, []):
+            path = Path(file)
+            try:
+                stat = path.stat()
+                bound_source, index = _reading_report_index(path, stat.st_mtime_ns, stat.st_size)
+            except (OSError, ValueError):
+                # Archived optional observations cannot unlock a retry without their contents.
+                continue
+            if bound_source == source:
+                for oid in readings:
+                    readings[oid].update(index.get(oid, ()))
     fingerprints = {}
     for oid in ids:
         plan = plans.get(oid, {})
-        signature = {name:plan[name] for name in ('route','role','shape') if name in plan}
-        signature['move_with'] = sorted(plan.get('move_with', []))
+        route, role = plan.get('route'), plan.get('role')
+        signature = {name:plan[name] for name in ('route','shape') if name in plan}
+        signature['move_with'] = sorted(set(plan.get('move_with', [])) - {oid})
+        # Roles change execution only when they affect picture lettering,
+        # protected project names or an automatically owned parent card.
+        if role in ('brand', 'screenshot', 'dashboard'):
+            signature['artwork_text'] = True
+            if route == 'asset' and role != 'brand':
+                signature['intrinsic_ui'] = True
+        elif role == 'project':
+            signature['protected_project'] = True
+        if route == 'surface' and plan.get('origin') == 'host':
+            signature['group_owned_children'] = True
+            signature['eligible_card_parent'] = role in ('card', 'role_box')
         field = late.get(oid, {})
         fingerprints[oid] = key({'plan':signature, 'review':sorted({r['finding_id'] for r in reviews.get(oid, [])}),
                                  'plate':plate.get(oid), 'source_reading':field.get('source_reading'),
+                                 'observed_readings':sorted(readings[oid]),
                                  'source_views':[v.get('crop_sha256') for v in field.get('source_views', [])]})
     return fingerprints
 

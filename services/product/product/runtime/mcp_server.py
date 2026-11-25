@@ -216,9 +216,10 @@ def create_server(root, bound_job=None):
                     props['fields']['maxItems']=30
                     props['fields']['items']['properties']['role']={'enum':ROLES}
                 if t.name=='batch_reconstruct_page':
-                    t.description = ('Rebuild up to 30 issue objects in one block. Inspect repair_attempt, group_issues '
-                                     'and office_attempts. A second attempt requires changed evidence or strategy for '
-                                     'that same object. Commit the returned validated candidate.')
+                    t.description = ('Rebuild a suggested issue block or up to 30 explicit numbered object IDs from '
+                                     'this page, including omissions you find in the original. Retry when that object '
+                                     'has new evidence or an untried strategy. Inspect the outcome and Office checks '
+                                     'before committing the validated candidate.')
                     for n in ('include_assets','include_containers','include_region_crops','use_inpaint','verify_office'):
                         props.pop(n,None)
                     props['block']={'type':'integer','minimum':1}

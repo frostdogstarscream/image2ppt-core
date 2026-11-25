@@ -342,6 +342,78 @@ def _project(mask, box, size):
     return result
 
 
+def _supported_cores(contrast, ink, noise):
+    """Measure a field and its individual strokes without pooling a faint character with clean ones."""
+    strong = ink & (contrast >= 4 * noise)
+    rows, cols = np.nonzero(strong & (contrast >= .6 * np.percentile(contrast[ink], 70)))
+    if len(rows) >= 8:
+        yield rows, cols
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(strong.astype('uint8'), connectivity=8)
+    for label in range(1, count):
+        left, top, width, height, area = stats[label]
+        if area < 8:
+            continue
+        window = np.s_[top:top+height, left:left+width]
+        component = labels[window] == label
+        # Touching letters may form one long component. Keep the comparison
+        # local to a glyph-sized span even when no blank column separates it.
+        groups = [(0, width)]
+        if width > 2 * height:
+            span = max(height, int(np.ceil(8 * width / area)))
+            if span < width:
+                # Overlap windows so that a character cannot straddle two
+                # trial boundaries and disappear from both medians.
+                groups.extend((start, start+span) for start in range(0, width-span+1, max(1,span//2)))
+                groups.append((width-span, width))
+        for start, end in groups:
+            segment = component[:, start:end]
+            if segment.sum() < 8:
+                continue
+            fill = contrast[window][:, start:end]
+            core = segment & (fill >= .6 * np.percentile(fill[segment], 70))
+            yy, xx = np.nonzero(core)
+            if len(yy) >= 8:
+                yield top + yy, left + start + xx
+
+
+def _stroke_witnesses(source, fitted, ring, masks):
+    """Compare each old glyph core with the nearest exposed paint on the same face."""
+    witnesses = []
+    for object_id, mask in masks.items():
+        # Adjacent source pixels supply the reference and its natural variation.
+        exposed = ring & cv2.dilate(mask.astype('uint8'), np.ones((5, 5), 'uint8')).astype(bool)
+        ys, xs = np.nonzero(exposed | mask)
+        if not exposed.any() or not mask.any():
+            continue
+        tile = np.s_[ys.min():ys.max()+1, xs.min():xs.max()+1]
+        face = exposed[tile]
+        pixels = source[tile].astype(np.float32)
+        neighbors = np.concatenate((
+            (pixels[1:] - pixels[:-1])[face[1:] & face[:-1]],
+            (pixels[:, 1:] - pixels[:, :-1])[face[:, 1:] & face[:, :-1]],
+        ))
+        if len(neighbors) < 10:
+            continue
+        _, labels = cv2.distanceTransformWithLabels((~face).astype('uint8'), cv2.DIST_L2, 5,
+                                                    labelType=cv2.DIST_LABEL_PIXEL)
+        swatches = np.empty((labels.max()+1, 3), dtype=np.float32)
+        swatches[labels[face]] = pixels[face]
+        paper = swatches[labels]
+        contrast = np.max(np.abs(pixels - paper), axis=2)
+        noise = max(np.sqrt(3), np.percentile(np.abs(neighbors).max(1), 80))
+        ink = mask[tile]
+        # A systematic shift along the original stroke colour reproduces the
+        # letters, even when its absolute RGB error is small enough to pass QA.
+        for rows, cols in _supported_cores(contrast, ink, noise):
+            reference = paper[rows, cols]
+            direction = pixels[rows, cols] - reference
+            direction /= np.linalg.norm(direction, axis=1)[:, None]
+            local_errors = np.abs(np.sum((fitted[tile][rows, cols] - reference) * direction, axis=1))
+            limit = float(np.median(local_errors) + noise)
+            witnesses.append((object_id, ys.min()+rows, xs.min()+cols, reference, direction, limit))
+    return witnesses
+
+
 def choose_region_background(group, graph, source, masks, fitted, guard, layers, inpaint, directory):
     """Compare any supplied lower layer against the observed face before spending an inpaint call."""
     from .layerd_adapter import lower_backgrounds
@@ -352,6 +424,8 @@ def choose_region_background(group, graph, source, masks, fitted, guard, layers,
     ring = outline & ~union & ~guard
     gx, gy, gw, gh = group["bbox"]
     ring &= rectangle([gx, gy, gw, gh], graph.image_size)
+    tile = np.s_[gy:gy+gh, gx:gx+gw]
+    group.pop('background', None)  # A reused group must not retain a rejected lower layer.
     group["background_decision"] = decision = {"selected":"local-fit","layer_candidates":0,"members":list(masks)}
     if ring.sum() < 10:
         decision["reason"]="insufficient unprotected surroundings"
@@ -363,24 +437,39 @@ def choose_region_background(group, graph, source, masks, fitted, guard, layers,
         except (RecoveryBlocked, ValueError, OSError):
             pass
 
-    def acceptable(image):
+    witnesses = _stroke_witnesses(source[tile], fitted[tile], ring[tile], masks) if fallbacks or inpaint else []
+
+    def acceptable(image, method):
         if image is None or image.shape != source.shape or image.dtype != np.uint8:
             return False
         # A lower layer that still contains the glyph, or lost the paint behind it,
         # cannot represent the revealed face. Use normal-view colour variation.
         seam = np.abs(image[ring].astype(float) - source[ring]).max(1)
         paint = np.abs(image[union].astype(float) - fitted[union]).max(1)
-        return np.percentile(seam, 90) <= 12 and np.percentile(paint, 90) <= 19
+        if np.percentile(seam, 90) > 12 or np.percentile(paint, 90) > 19:
+            return False
+        for object_id, rows, cols, paper, direction, limit in witnesses:
+            samples = image[tile][rows, cols].astype(np.float32) - paper
+            bias = float(abs(np.median(np.sum(samples * direction, axis=1))))
+            if bias > limit:
+                decision.setdefault('stroke_residuals', []).append({
+                    'method': method, 'field': object_id, 'stroke_bias': round(bias, 2),
+                    'local_reference_limit': round(limit, 2),
+                    'sample_bounds': [int(gx+cols.min()), int(gy+rows.min()),
+                                      int(np.ptp(cols)+1), int(np.ptp(rows)+1)],
+                })
+                return False
+        return True
 
     decision["layer_candidates"]=len(fallbacks)
-    chosen = next((v for v in fallbacks if acceptable(v[0])), None)
+    chosen = next((v for v in fallbacks if acceptable(v[0], v[1])), None)
     if chosen is None and inpaint:
         neighbors = fitted[ring].astype(float)
         spread = np.percentile(neighbors, 90, axis=0) - np.percentile(neighbors, 10, axis=0)
         if np.max(spread) > 30:
             try:
                 image = inpaint(source.copy(), union)
-                if acceptable(image):
+                if acceptable(image, 'LaMa'):
                     chosen = (image, "LaMa", {})
             except (ValueError, OSError, RuntimeError):
                 pass

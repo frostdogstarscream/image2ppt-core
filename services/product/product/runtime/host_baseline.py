@@ -624,6 +624,46 @@ def delivery_defects(score):
     return defects
 
 
+def _verified_partial_copy(score, deck_sha, sources, defects):
+    """Allow an explicitly incomplete review copy only for measured, source-bound wording gaps."""
+    wording = {'TEXT_STILL_ON_BACKGROUND', 'SOURCE_TEXT_WITHOUT_NATIVE_FIELD'}
+    if (not defects or not sources or not score.get('verified') or score.get('office_status') != 'PASS'
+            or score.get('pptx_sha256') != deck_sha or len(score['pages']) != len(sources)
+            or any(set(item['reasons']) - wording for item in defects)):
+        return False
+    for index, (page, source_sha) in enumerate(zip(score['pages'], sources), 1):
+        audit = page.get('plate_audit', {})
+        editable = page.get('selected_editables', [])
+        edits = set(page.get('passed_edits', []))
+        if (not editable or page['page'] != index or page.get('source_sha256') != source_sha
+                or audit.get('pptx_sha256') != deck_sha or audit.get('source_sha256') != source_sha
+                or not all({oid + '/move-scale', oid + '/delete'} <= edits for oid in editable)):
+            return False
+    return True
+
+
+def _preserves_partial_edits(baseline_defects, candidate_defects):
+    """Avoid trading one unresolved field for another when selecting a review copy."""
+    from .marked_routes import iou
+    baseline = {page['page']:page['retained_fields'] for page in baseline_defects}
+    for page in candidate_defects:
+        remaining = list(baseline.get(page['page'], []))
+        for field in page['retained_fields']:
+            original_id = field.get('ocr_id')
+            for index, old in enumerate(remaining):
+                if original_id is not None:
+                    same_field = original_id == old.get('ocr_id')
+                else:
+                    same_field = (old.get('ocr_id') is None and field.get('text') == old.get('text')
+                                  and field.get('bbox') and old.get('bbox') and iou(field['bbox'], old['bbox']) >= .5)
+                if same_field:
+                    remaining.pop(index)
+                    break
+            else:
+                return False
+    return True
+
+
 def _publish(job, agent, reasons, candidate):
     root = job/'host-baseline'
     manifest = ensure_baseline(job)
@@ -642,13 +682,25 @@ def _publish(job, agent, reasons, candidate):
                     for name,sha in files.items())):
             reasons = ['AGENT_PACKAGE_HASH_MISMATCH']
     strict = read(job/'request.json').get('object_scoped_delivery', False)
-    if strict and candidate and not reasons and delivery_defects(candidate):
-        reasons = ['AGENT_FAILED_OBJECT_SCOPE_GATE']
+    base_defects = delivery_defects(base) if strict else []
+    partial_baseline = bool(base_defects) and _verified_partial_copy(
+        base, manifest['files']['baseline.pptx'], manifest['sources'], base_defects)
+    partial_defects = []
+    if strict and candidate and not reasons:
+        defects = delivery_defects(candidate)
+        if defects:
+            if (base_defects and _verified_partial_copy(candidate, files['result.pptx'], manifest['sources'], defects)
+                    and (not partial_baseline or _preserves_partial_edits(base_defects, defects))):
+                partial_defects = defects
+            else:
+                reasons = ['AGENT_FAILED_OBJECT_SCOPE_GATE']
     fallback = bool(reasons)
-    if strict and fallback and delivery_defects(base):
+    if fallback and partial_baseline:
+        partial_defects = base_defects
+    if fallback and base_defects and not partial_defects:
         result = {'status':'REVIEW_REQUIRED', 'completion':'RECONSTRUCTION_INCOMPLETE',
                   'reason':'No verified object-scoped presentation', 'origin': ORIGIN,
-                  'failed_pages':delivery_defects(base), 'fallback_reasons':reasons,
+                  'failed_pages':base_defects, 'fallback_reasons':reasons,
                   'office_pass':base['verified'], 'automatic_publication':False, 'human_acceptance':False,
                   'baseline_pages':summary(base), 'independent_go_review':'UNKNOWN', 'wps_acceptance':'UNKNOWN'}
         write(delivery/'summary.json', result)
@@ -697,6 +749,12 @@ def _publish(job, agent, reasons, candidate):
             if name!='summary.json':
                 install_file(staging/name,delivery/name)
     changed = not fallback and candidate['pptx_sha256']!=base['pptx_sha256']
+    if partial_defects:
+        result.update(status='REVIEW_REQUIRED', completion='PARTIAL_EDITABLE',
+                      reason='Verified edits available; source wording remains unresolved',
+                      failed_pages=partial_defects, automatic_publication=False,
+                      human_acceptance=False, final_qa='REVIEW_REQUIRED',
+                      workflow_states={**result.get('workflow_states', {}), 'final_qa':'REVIEW_REQUIRED'})
     result.update(origin='agent-incremental' if changed else ORIGIN,baseline_sha256=manifest['files']['baseline.pptx'],
                   agent={'participated':(bool(usage.get('tool_calls')) or bool(usage.get('tokens',{}).get('output')))
                         if usage else 'UNKNOWN' if (state.root/'session.json').exists() else False,
@@ -748,7 +806,7 @@ def _publish(job, agent, reasons, candidate):
         names = {name for name in names if not name.lower().endswith('.pptx') or name == 'result.pptx'}
     result['artifacts'] = {name:digest(delivery/name) for name in sorted(names) if (delivery/name).is_file()}
     write(job/'result.json',result)
-    if not fallback and result.get('pending_text_objects') and current['status'] != 'REVIEW_REQUIRED':
+    if not fallback and (result.get('pending_text_objects') or partial_defects) and current['status'] != 'REVIEW_REQUIRED':
         current.update(status='REVIEW_REQUIRED',version=current['version']+1)
         write(state.root/'state.json',current)
     write(state.root/'delivery-selection.json',{'result_sha256':digest(job/'result.json'),
