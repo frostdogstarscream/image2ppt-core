@@ -381,6 +381,8 @@ def ensure_baseline(job):
                         checked = svc.validate_candidate(state, current, directory/'validate', candidate_id=cid)
                         if checked['status'] == 'PASS':
                             return svc.commit_region(state, current, directory/'commit', candidate_id=cid)
+                        if checked.get('failure') == 'PREVIOUS_NATIVE_EDIT_LOST':
+                            return {**checked, 'frame':frame['id'], 'committed_count':0}
                         return {'status': checked['status'], 'frame': frame['id']}
                     return staged
                 step(f"photo-frame-{page}-{frame['id']}", finish_frame)

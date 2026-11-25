@@ -386,7 +386,10 @@ class RuntimeService(ExplorationTools):
             if frame.get('required_card_frames'):
                 response['required_card_frames'] = frame['required_card_frames']
             return response
-        return self._stage_asset_candidate(state, current, directory, page, ir, ids, 'photo_frame', [])
+        result = self._stage_asset_candidate(state, current, directory, page, ir, ids, 'photo_frame', [])
+        if request.get('object_scoped_delivery'):
+            current['candidates'][result['candidate_id']]['card_repair_targets'] = [frame['id']]
+        return result
 
     def _stage_asset_candidate(self, state, current, directory, page, ir, ids, strategy, report):
         row = self.page(current, page)
@@ -649,7 +652,18 @@ class RuntimeService(ExplorationTools):
                     'failed_checks':candidate.get('failed_checks',[]),'evidence':candidate.get('evidence',[])}
         ir, graph, _, _ = self._verify_staged_candidate_graph(current, candidate)
         from .compiler import compile_local as compile_pages
+        from .card_edit_preservation import previous_edits_lost
         from ..parallel_pipeline import effective_texts
+        def reject_regression(issues, attempts):
+            result = {'status':'REVIEW_REQUIRED','failure':'PREVIOUS_NATIVE_EDIT_LOST',
+                      'office_status':'NOT_RUN_FOR_REGRESSING_CANDIDATE','office_attempts':attempts,
+                      'failed_regions':issues, 'card_repair_targets':candidate['card_repair_targets'],
+                      'parent_ir_sha256':candidate['parent_ir_sha256']}
+            candidate.update(status='REVIEW_REQUIRED', validation=result)
+            return {'candidate_id':candidate_id, **result}
+        issues = previous_edits_lost(state, current, candidate, ir)
+        if issues:
+            return reject_regression(issues, 0)
         with lease('compiler'):
             artifacts = compile_pages([ir], directory/'compiled', [effective_texts(graph, ir)])
         result = self.office_check(state, artifacts['pptx'], [ir], directory/'office-check')
@@ -662,6 +676,9 @@ class RuntimeService(ExplorationTools):
                 if not restage_batch_candidate_subset(self, state, current, directory/f'isolate-{attempt}', candidate, result):
                     break
                 ir, graph, _, _ = self._verify_staged_candidate_graph(current, candidate)
+                issues = previous_edits_lost(state, current, candidate, ir)
+                if issues:
+                    return reject_regression(issues, attempts)
                 with lease('compiler'):
                     artifacts = compile_pages([ir], directory/f'compiled-repair-{attempt}', [effective_texts(graph, ir)])
                 result = self.office_check(state, artifacts['pptx'], [ir], directory/f'office-repair-{attempt}')
@@ -720,6 +737,8 @@ class RuntimeService(ExplorationTools):
                     'object_id': candidate.get('object_id'), 'object_ids': obj_ids, 'committed_count': len(obj_ids)}
         if candidate.get('status') == 'STAGED_LOCAL':
             self.validate_candidate(state, current, directory/'auto-validate', candidate_id=candidate_id)
+        if candidate.get('validation', {}).get('failure') == 'PREVIOUS_NATIVE_EDIT_LOST':
+            return {'candidate_id':candidate_id, 'committed_count':0, **candidate['validation']}
         if candidate.get('status') != 'VALIDATED' or candidate.get('validation', {}).get('status') != 'PASS':
             raise ValueError('candidate requires successful hard and actual edit checks')
         ir, _, row, _ = self._verify_staged_candidate_graph(current, candidate)

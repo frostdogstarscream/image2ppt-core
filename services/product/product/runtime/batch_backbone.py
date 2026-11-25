@@ -397,7 +397,9 @@ def _classify_failed_region(
             for a in graph.asset.objects))
     )
 
-    if kind == 'group':
+    if failure == 'PREVIOUS_NATIVE_EDIT_LOST':
+        category, action, cap = failure, 'keep_parent_and_retry_card_without_consuming_verified_objects', 1
+    elif kind == 'group':
         category, action, cap = failure, 'inspect_group_members_and_conflicts', 1
     elif kind in ('table', 'chart'):
         category, action, cap = failure, 'inspect_structured_region_and_ownership', 1
@@ -2156,6 +2158,11 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         'isolated_bad_ids': [],
         'isolation_failures': [],
     }
+    if request.get('object_scoped_delivery') and wanted_filter is not None:
+        card_ids = {r['id'] for r in routes if r['route']=='surface' and r['id'] in wanted_filter}
+        card_ids.update(i for i in wanted_filter if i.startswith(('s-', 'a-c')))
+        if card_ids:
+            cand['card_repair_targets'] = sorted(card_ids)
     current['candidates'][batch_cid] = cand
     next_version = current['version'] + 1
 
@@ -2179,6 +2186,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     val = service.validate_candidate(state, current, directory / 'validate', candidate_id=batch_cid)
     cand_ir_ref[0] = Path(cand['ir'])
     failed_regions.extend(cand.get('isolation_failures', []))
+    if val.get('failure') == 'PREVIOUS_NATIVE_EDIT_LOST':
+        failed_regions.extend({**issue,'bbox':[]} for issue in val['failed_regions'])
     staged_ids = cand.get('object_ids', staged_ids)
     auto_repaired_frames = cand.get('auto_repaired_frame_ids', [])
     isolated_bad_ids = cand.get('isolated_bad_ids', [])
