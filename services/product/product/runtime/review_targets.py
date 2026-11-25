@@ -57,6 +57,40 @@ def repair_inputs(current, page, ids):
     return fingerprints
 
 
+def explain_empty_retry(requested, routes, graph, failures):
+    """Explain a scoped no-op from the actual bound plan and pre-trial graph."""
+    routes_by_id = {row['id']: row for row in routes}
+    errors = {row['object_id']: row for row in failures if row.get('object_id')}
+    known_text = {obj.id for obj in graph.text.texts}
+    outcomes = []
+    for object_id in dict.fromkeys(requested):
+        route = routes_by_id.get(object_id, {})
+        targets = sorted(set(route.get('target_ids', ())))
+        selected = sorted(({object_id} | set(targets)) & graph.selected.keys())
+        failed = [errors[i] for i in dict.fromkeys([object_id, *targets]) if i in errors]
+        if failed:
+            reason = 'EXECUTOR_REPORTED_FAILURE'
+        elif object_id in graph.selected and graph.selected[object_id].get('kind') == 'text':
+            reason = 'SELECTED_TEXT_NOT_REOPENED_BY_BATCH'
+        elif route.get('route') == 'preserve':
+            reason = 'PRESERVED_BY_PLAN'
+        elif object_id not in graph.selected and targets and set(targets).issubset(graph.selected):
+            reason = 'ROUTE_BOUND_ONLY_TO_SELECTED_OBJECTS'
+        elif route.get('route') == 'text' and not targets and object_id not in known_text:
+            reason = 'TEXT_MARK_HAS_NO_BOUND_SCENE_TEXT'
+        elif object_id in known_text and graph.ownership.get(object_id) != 'RESOLVED':
+            reason = 'TEXT_OWNERSHIP_UNRESOLVED'
+        elif object_id in graph.selected:
+            reason = 'SELECTED_OBJECT_NO_CHANGE_STAGED'
+        else:
+            reason = 'NO_CANDIDATE_RECORDED_CAUSE_UNKNOWN'
+        outcomes.append({'object_id': object_id, 'route': route.get('route'), 'reason': reason,
+                         'bound_target_ids': targets, 'existing_selected_ids': selected,
+                         'executor_failures': [{'id': row['object_id'], 'failure': row.get('failure'),
+                                                'reason': row.get('reason')} for row in failed]})
+    return outcomes
+
+
 def expose_review(service, state, current, directory, audit):
     from .host_evidence import questions
     from ..materialize import write

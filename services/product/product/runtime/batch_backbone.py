@@ -2112,9 +2112,21 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
 
     if not staged_ids:
         enriched = _enriched_failures()
+        details = {}
+        if object_ids and current.get('review_issues', {}).get(str(page)) and request.get('object_scoped_delivery'):
+            from .review_targets import explain_empty_retry
+            outcomes = explain_empty_retry(object_ids, routes, initial_graph, enriched)
+            details = {'target_outcomes': outcomes, 'staged_count': 0, 'new_object_count': 0}
+            # Preserve concrete failures (including failed children); add one cause for every
+            # directly requested mark that the executor otherwise silently skipped.
+            explained = {row['object_id'] for row in enriched}
+            enriched.extend({'object_id': row['object_id'], 'failure': row['reason'],
+                             'diagnostic_category': row['reason'], 'kind': 'scoped_retry'}
+                            for row in outcomes if row['object_id'] not in explained)
         return {
             'status': 'NO_CANDIDATES_STAGED', 'page': page, 'committed_count': 0,
             'committed_object_ids': [], 'failed_count': len(enriched), 'failed_regions': enriched,
+            **details,
         }
 
     final_ir = final_base / 'slideir.json'

@@ -37,6 +37,7 @@ class AuditDefect(BaseModel):
     bbox_space: Literal['source_px_xywh','normalized_xywh'] | None = None
     mark_numbers: list[int] = Field(default_factory=list, max_length=30)
     edit_action: Literal['replace_text','move_group','recolor','delete','edit_cell','edit_chart','inspect'] = 'inspect'
+    text_impact: Literal['appearance_only','content_obscured','missing_strokes','wrong_or_missing_content','unknown'] = 'unknown'
 
 
 class VLMIndependentAuditReply(BaseModel):
@@ -44,6 +45,24 @@ class VLMIndependentAuditReply(BaseModel):
     passed: bool
     defects: list[AuditDefect] = Field(default_factory=list, max_length=50)
     summary: str = Field(default='', max_length=2000)
+
+
+def classify_audit(reply):
+    critical, minor = [], []
+    for defect in reply.defects:
+        row = defect.model_dump()
+        if defect.text_impact in ('content_obscured', 'missing_strokes', 'wrong_or_missing_content'):
+            row['severity'] = 'critical'
+        elif defect.category == 'font_or_shade_deviation' and defect.text_impact == 'appearance_only':
+            row['severity'] = 'minor'
+        if row['severity'] == 'critical':
+            critical.append(row)
+        else:
+            minor.append(row)
+    only_cosmetic = bool(minor) and all(
+        r['category'] == 'font_or_shade_deviation' and r['text_impact'] == 'appearance_only' for r in minor
+    )
+    return critical, minor, not critical and (reply.passed or only_cosmetic)
 
 
 def compute_inventory_and_form_metrics(
@@ -161,7 +180,10 @@ def _stateless_vlm_audit(
             'missing/deleted text or graphics in image (2) vs (1), corrupted/wrong text wording, or severe '
             'double-rendered ghosting. Subtle font-weight, shadow omission, or minor gradient shade differences '
             'are `severity="minor"` (`font_or_shade_deviation`) and MUST NOT fail the audit (`passed=true`). '
-            'Set `passed=false` ONLY when a `severity="critical"` defect exists.'
+            'Set `passed=false` ONLY when a `severity="critical"` defect exists. '
+            'Set text_impact=appearance_only only if all content remains legible and intact. '
+            'Report obscured words, missing glyph strokes and wrong/missing content with their respective '
+            'text_impact even when font or colour is the apparent cause. Use unknown if uncertain.'
         )
         if numbered_image:
             system_prompt += (
@@ -192,12 +214,11 @@ def _stateless_vlm_audit(
                     'reported_model':reported, 'builder_model':builder_model, 'session':reviewer.session,
                     'usage':reviewer.last_usage, 'receipt':audit_key, 'critical_defects':[], 'minor_deviations':[]}
         parsed = VLMIndependentAuditReply.model_validate(raw)
-        critical = [d.model_dump() for d in parsed.defects if d.severity == 'critical']
-        minor = [d.model_dump() for d in parsed.defects if d.severity != 'critical']
+        critical, minor, passed = classify_audit(parsed)
         verdict = {
             'status': 'READY', 'provider':provider, 'model': review_model, 'reported_model':reviewer.reported_model, 'usage':reviewer.last_usage, 'session': reviewer.session, 'receipt': audit_key, 'control':control,
             'builder_model':builder_model, 'builder_provider':builder_provider, 'builder_session':builder_session,
-            'passed': len(critical) == 0 and bool(parsed.passed),
+            'passed': passed,
             'critical_defects': critical,
             'minor_deviations': minor,
             'summary': parsed.summary,

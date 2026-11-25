@@ -215,7 +215,7 @@ def compact(tool,result):
         return {'page':result['page'],'planned_count':result['planned_count'],
                 'object_ids':[r['id'] for r in result['fields']]}
     if tool=='batch_reconstruct_page':
-        return {**{k:result[k] for k in ('page','status','candidate_id','failed_count','staged_count','office_attempts','isolation_history','repair_attempt') if k in result},
+        return {**{k:result[k] for k in ('page','status','candidate_id','failed_count','staged_count','new_object_count','target_outcomes','office_attempts','isolation_history','repair_attempt') if k in result},
                 'failures':dict(Counter(r.get('diagnostic_category','UNKNOWN') for r in result.get('failed_regions',[]))),
                 'group_issues':[{'id':r['object_id'],'reason':r['failure'],'conflicts':r.get('conflict_ids',[])}
                                 for r in result.get('failed_regions',[]) if r.get('kind')=='group'][:30]}

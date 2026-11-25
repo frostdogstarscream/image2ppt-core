@@ -112,6 +112,10 @@ The driver waits for the job's MCP connection before admitting the Agent prompt.
 
 Tool outcomes, region commits, final QA and publication qualification have separate receipts. A successful Agent composition also requires a passing independent audit and compliance with the final scorecard gate. The host then compares the eligible result to its baseline and applies the object-scoped delivery rules. Session admission with an uncertain response is reconciled through the saved Session and message IDs before another prompt is considered.
 
+When a numbered retry on an audited object-scoped page returns `NO_CANDIDATES_STAGED`, inspect `target_outcomes` for each requested ID. The response lists bound scene objects, existing selections and any child executor failure. A layout mark with no scene binding and an existing text field excluded from a new-text batch have distinct reasons. If the executor recorded no cause, the response reports it as unknown. All of these outcomes contribute zero new objects.
+
+The independent review records `text_impact`. A confirmed appearance-only font or shade defect is minor. Obscured content, absent strokes and wrong or missing content are critical. For an unknown impact the host retains the reported severity.
+
 ## Office worker
 
 Object-scoped OpenCode jobs request an extra edit test when a selected owner with hash-bound source evidence compiles to one PowerPoint group. The worker moves and scales the group, verifies that its children follow, then deletes the whole group on a separate copy. Both copies save, close and reopen. The worker returns both previews and checks the group deletion against the group's source mask. Receipts include the member IDs and the changed pixel count outside the edit. Each leaf retains its independent edit checks.

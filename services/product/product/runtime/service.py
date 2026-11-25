@@ -158,6 +158,8 @@ class RuntimeService(ExplorationTools):
                            'finding_ids':{oid:[f['finding_id'] for f in current.get('review_issues',{}).get(k,{}).get(oid,[])]
                                           for oid in args['object_ids']}, 'committed_ids':[],
                            'office_attempts':outcome.get('office_attempts'), 'status':outcome.get('status')}
+                if 'target_outcomes' in outcome:
+                    attempt['no_change_reasons'] = {r['object_id']:r['reason'] for r in outcome['target_outcomes']}
                 current.setdefault('repair_rounds', {}).setdefault(k, []).append(attempt)
                 outcome['repair_attempt'] = attempt.copy()
                 touched = set(args['object_ids'])
