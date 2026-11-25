@@ -119,6 +119,9 @@ def assess(job, current):
     verified = (office.get('status')=='PASS' and office.get('pptx_sha256')==sha
                 and office.get('office',{}).get('pptx_sha256')==sha
                 and office.get('office',{}).get('status')=='PASS_APP_AUTOMATED')
+    request_file = Path(job) / 'request.json'
+    checked_icons = (verified and request_file.is_file() and read(request_file).get('object_scoped_delivery')
+                     and office['office'].get('embedded_alpha_and_visible_rgb_checked'))
     pages = []
     for page,row in enumerate(current['pages'],1):
         k = str(page)
@@ -177,7 +180,13 @@ def assess(job, current):
         minor = [key for key, val in local.items()
                  if val['ssim'] < limits['min_ssim'] or val['delta_e2000_p95'] > limits['max_delta_e2000_p95']]
         plate = audit_plate(job, deck, sha, page, row['snapshot'], lines, fields, marks, adopted,
-                            office_view=hidden, view_receipt=receipt)
+                            office_view=hidden, view_receipt=receipt, check_icon_fragments=checked_icons)
+        residual_pages = office.get('residuals', [])
+        if checked_icons and len(residual_pages) >= page:
+            from .graphic_readings import bind_graphic_readings
+            bind_graphic_readings(plate, job=Path(job), page=page, scene=scene, backing=Path(row['ir']).parent,
+                                  source_path=Path(source), hidden_path=hidden, lines=lines, editable_ids=editables,
+                                  residuals=residual_pages[page-1], directory=Path(job)/'plate-audit'/sha/f'p{page}')
         for item in plate['rows']:
             if item['status']=='plate_only':
                 item['mark_ids']=[oid for oid,r in late_fields.items() if r['bbox']==item['bbox']]

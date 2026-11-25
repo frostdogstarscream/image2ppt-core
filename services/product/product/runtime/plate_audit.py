@@ -230,7 +230,8 @@ def reconcile(lines, detected, fields, marks, readings):
     return rows
 
 
-def audit(job, deck, sha, page, snapshot_row, lines, fields, marks, readings, *, office_view, view_receipt):
+def audit(job, deck, sha, page, snapshot_row, lines, fields, marks, readings, *, office_view, view_receipt,
+          check_icon_fragments=False):
     directory = Path(job)/'plate-audit'/sha/f'p{page}'
     directory.mkdir(parents=True, exist_ok=True)
     try:
@@ -253,6 +254,9 @@ def audit(job, deck, sha, page, snapshot_row, lines, fields, marks, readings, *,
                 row['raster_reading'] = row['plate_reading']
                 row['plate_reading'] = ' '.join(evidence['lines'][i]['text']
                     for i in _visible_fragments(row, evidence['lines'])) or None
+            elif check_icon_fragments and row['status'] == 'plate_only':
+                row['seen_on_named_plate'] = any(_overlap(row['bbox'], item['bbox']) > 0
+                                                 for item in evidence['lines'])
         return {'status':'MEASURED','pptx_sha256':sha,'source_sha256':snapshot_row['source_sha256'],
                 'plate_sha256':digest(path), 'text_hidden_sha256':view_receipt['sha256'],
                 'ocr_identity':composite['identity'],'rows':rows}
