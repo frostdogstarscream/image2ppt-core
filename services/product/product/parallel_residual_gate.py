@@ -19,11 +19,16 @@ def residual_accepted(row):
         and row.get('move_safety')=='MOVE_UNSAFE')
 
 
-def inspect_residuals(irfile,office_dir,page,output):
+def inspect_residuals(irfile,office_dir,page,output,*,owned_group_ids=()):
     irfile=Path(irfile);scene=json.loads((irfile.parent/'scene.json').read_text(encoding='utf-8'))
     ir=json.loads(irfile.read_text(encoding='utf-8')) if irfile.is_file() else {'nodes':[]}
     node_z={n['id']:int(n.get('z',0)) for n in ir.get('nodes',[]) if isinstance(n,dict) and 'id' in n}
     node_bbox={n['id']:n.get('bbox') for n in ir.get('nodes',[]) if isinstance(n,dict) and 'id' in n}
+    for group in ir.get('groups', []):
+        if group['id'] in owned_group_ids:
+            # A flat group occupies its members' contiguous z interval. A later
+            # independent shape can occlude it, an earlier one cannot.
+            node_z[group['id']] = min(node_z[member] for member in group['member_ids'])
     records=list(scene['selected'].values());source=np.array(Image.open(irfile.parent/'source.png').convert('RGB'));proofs={};results=[]
     rb=scene.get('raster_backing') or {}
     plate=None

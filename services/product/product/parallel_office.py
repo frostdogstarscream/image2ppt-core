@@ -35,6 +35,9 @@ def verify_pictures(pptx,irs,deleted=None):
     with zipfile.ZipFile(pptx) as z:
         for i,irfile in enumerate(irs,1):
             irfile=Path(irfile);ir=json.loads(irfile.read_text(encoding='utf-8'));assets={a['id']:a for a in ir['assets']}
+            omitted = set()
+            if deleted and deleted[0] == i:
+                omitted = {deleted[1]} if isinstance(deleted[1], str) else set(deleted[1])
             xml=ET.fromstring(z.read(f'ppt/slides/slide{i}.xml'));rels=ET.fromstring(z.read(f'ppt/slides/_rels/slide{i}.xml.rels'))
             mapping={r.get('Id'):r.get('Target') for r in rels};pictures={}
             for pic in xml.findall('.//p:pic',ns):
@@ -44,7 +47,7 @@ def verify_pictures(pptx,irs,deleted=None):
                 media=target.lstrip('/') if target.startswith('/') else posixpath.normpath('ppt/slides/'+target)
                 pictures[name]=np.array(Image.open(io.BytesIO(z.read(media))).convert('RGBA'))
             for node in ir['nodes']:
-                if node['type']!='image' or deleted==(i,node['id']):continue
+                if node['type']!='image' or node['id'] in omitted:continue
                 a=assets[node['asset_id']];file=(irfile.parent/a['path']).resolve()
                 if digest(file)!=a['sha256'] or node['id'] not in pictures:raise ValueError('final picture asset binding mismatch')
                 wanted=np.array(Image.open(file).convert('RGBA'));got=pictures[node['id']]
@@ -58,6 +61,26 @@ def leaf_shapes(shapes):
             yield from leaf_shapes(shape.GroupItems)
         else:
             yield shape
+
+
+def owned_edit_groups(irfile, ir, targets=None):
+    """A group merits its own residual probe only when a selected source owner maps to it."""
+    groups = [g for g in ir.get('groups', ()) if targets is None or g['id'] in targets]
+    if not groups:
+        return {}
+    parent = Path(irfile).resolve().parent
+    scene = json.loads((parent/'scene.json').read_text('utf8'))
+    selected = scene.get('selected', {})
+    verified = {}
+    for group in groups:
+        ref = selected.get(group['id'], {}).get('owner_evidence')
+        if not ref:
+            continue
+        path = (parent/ref['file']).resolve()
+        if not path.is_relative_to(parent) or not path.is_file() or digest(path) != ref['sha256']:
+            raise ValueError('group source-owner evidence binding mismatch')
+        verified[group['id']] = set(group['member_ids'])
+    return verified
 
 
 def _export_without_native_text(slide, ir, path, width, height):
@@ -136,7 +159,8 @@ def close_probe_document(app, document, path, *, checked):
     raise OfficeProbeUnavailable('Office could not confirm that the test copy closed') from error
 
 
-def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_views=False,checked_open=False):
+def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_views=False,checked_open=False,
+            check_owned_groups=False):
     import pythoncom
     import win32com.client
     pythoncom.CoInitialize()
@@ -151,6 +175,18 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
     def signature(slide):
         return {str(s.Name):(float(s.Left),float(s.Top),float(s.Width),float(s.Height),float(s.Rotation),
             str(s.TextFrame.TextRange.Text) if s.HasTextFrame and s.TextFrame.HasText else '',text_styles(s)) for s in leaf_shapes(slide.Shapes)}
+
+    def group_geometry(shape):
+        return tuple(float(v) for v in (shape.Left, shape.Top, shape.Width, shape.Height, shape.Rotation))
+
+    def real_group(slide, name, members):
+        shape = slide.Shapes(name)
+        if shape.Type != 6 or {str(s.Name) for s in leaf_shapes(shape.GroupItems)} != members:
+            raise ValueError('Office group membership differs from the claimed source owner')
+        return shape
+
+    def same_shape(actual, expected):
+        return all(abs(a-b) <= .1 for a,b in zip(actual[:5],expected[:5])) and actual[5:] == expected[5:]
     try:
         verify_pictures(pptx,irs)
         deck=open_probe_document(app,pptx,read_only=True,checked=checked_open)
@@ -163,7 +199,8 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
             sig=signature(slide);targets=[] if render_only else [n['id'] for n in ir['nodes'] if n['id']!='source-plate'
                 and (target_ids is None or n['id'] in target_ids)]
             if not set(targets)<=set(sig):raise ValueError('compiled object inventory mismatch')
-            inventory.append((i,targets,sig))
+            groups = owned_edit_groups(file,ir,target_ids) if check_owned_groups and not render_only else {}
+            inventory.append((i, [*targets,*groups], sig, groups))
             if text_hidden_views:
                 # This read-only presentation is discarded before opening any edit probe.
                 try:
@@ -174,31 +211,65 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
         if text_hidden_views:
             deck.Saved = True
         close_probe_document(app,deck,open_path,checked=checked_open);deck=None
-        for i,targets,sig in inventory:
+        for i,targets,sig,groups in inventory:
             for name in targets:
                 current_id=name
                 for action in ('move-scale','delete'):
                     file=output/f'{i:02d}-{name}-{action}.pptx';shutil.copyfile(pptx,file)
                     open_path = file
                     deck=open_probe_document(app,file,read_only=False,checked=checked_open)
-                    slide=deck.Slides(i);s=next(s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name);old=sig[name];wanted=None
+                    slide=deck.Slides(i)
+                    members = groups.get(name)
+                    edited_ids = members or {name}
+                    s = real_group(slide,name,members) if members else next(
+                        s for s in leaf_shapes(slide.Shapes) if str(s.Name)==name)
+                    old = group_geometry(s) if members else sig[name]
+                    wanted = None
+                    wanted_members = {}
                     if action=='delete':s.Delete()
                     else:
-                        s.Left+=12;s.Top+=8;s.Width*=.9;s.Height*=.9
-                        if s.HasTextFrame and s.TextFrame.HasText:
+                        s.Left+=12;s.Top+=8
+                        if members:
+                            moved = signature(slide)
+                            for member in members:
+                                expected = (sig[member][0]+12, sig[member][1]+8, *sig[member][2:])
+                                if not same_shape(moved[member],expected):
+                                    raise ValueError('single group movement did not move every member')
+                        if members:
+                            s.Width=old[2]*.9;s.Height=old[3]*.9
+                        else:
+                            s.Width*=.9;s.Height*=.9
+                        if not members and s.HasTextFrame and s.TextFrame.HasText:
                             tr=s.TextFrame.TextRange
                             # A scale probe includes glyphs, not just the frame.
                             scale_text(tr,.9)
-                        wanted=signature(slide)[name]
+                        if members:
+                            wanted = group_geometry(s)
+                            transformed = signature(slide)
+                            wanted_members = {member:transformed[member] for member in members}
+                            if abs(wanted[2]-old[2]*.9)>.1 or abs(wanted[3]-old[3]*.9)>.1:
+                                raise ValueError('Office group did not accept requested scale')
+                        else:
+                            wanted=signature(slide)[name]
                     deck.Save()
                     close_probe_document(app,deck,file,checked=checked_open);deck=None
-                    verify_pictures(file,irs,(i,name) if action=='delete' else None)
+                    verify_pictures(file,irs,(i,edited_ids) if action=='delete' else None)
                     deck=open_probe_document(app,file,read_only=True,checked=checked_open)
                     slide=deck.Slides(i);got=signature(slide)
-                    if {k:v for k,v in got.items() if k!=name}!={k:v for k,v in sig.items() if k!=name}:raise ValueError('Office changed sibling')
-                    if action=='delete' and name in got:raise ValueError('Office deletion did not persist')
-                    if wanted and (name not in got or any(abs(a-b)>.1 for a,b in zip(got[name][:5],wanted[:5]))):raise ValueError('Office transform did not persist')
-                    if wanted and got[name][5:]!=wanted[5:]:raise ValueError('Office target text or effective run style did not persist')
+                    if {k:v for k,v in got.items() if k not in edited_ids}!={k:v for k,v in sig.items() if k not in edited_ids}:
+                        raise ValueError('Office changed sibling')
+                    if action=='delete' and (edited_ids.intersection(got) or
+                            (members and name in {str(shape.Name) for shape in slide.Shapes})):
+                        raise ValueError('Office deletion did not persist')
+                    if wanted and members:
+                        if not same_shape(group_geometry(real_group(slide,name,members)), wanted) or not all(
+                                member in got and same_shape(got[member],expected) for member,expected in wanted_members.items()):
+                            raise ValueError('Office group transform or member content did not persist')
+                    elif wanted:
+                        if name not in got or any(abs(a-b)>.1 for a,b in zip(got[name][:5],wanted[:5])):
+                            raise ValueError('Office transform did not persist')
+                        if got[name][5:]!=wanted[5:]:
+                            raise ValueError('Office target text or effective run style did not persist')
                     png=output/f'{i:02d}-{name}-{action}.png';slide.Export(str(png),'PNG',pw,ph)
                     before=np.array(Image.open(output/f'page-{i:02d}-before.png').convert('RGB'));after=np.array(Image.open(png).convert('RGB'))
                     allowed=np.zeros((ph,pw),bool)
@@ -207,7 +278,8 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,text_hidden_view
                         allowed[max(0,int(y)-4):min(ph,int(np.ceil(y+h))+4),max(0,int(x)-4):min(pw,int(np.ceil(x+w))+4)]=True
                     outside=int(((before!=after).any(2)&~allowed).sum())
                     if outside:raise ValueError('Office changed pixels outside transaction')
-                    records.append({'page':i,'id':name,'action':action,'saved_reopened':True,'outside_pixels':outside})
+                    records.append({'page':i,'id':name,'action':action,'saved_reopened':True,'outside_pixels':outside,
+                                    **({'group_members':sorted(members)} if members else {})})
                     close_probe_document(app,deck,file,checked=checked_open);deck=None
         if digest(pptx)!=original:raise ValueError('Office modified original')
         result={'status':'PASS_APP_AUTOMATED','pptx_sha256':original,'records':records,'human_acceptance':False,

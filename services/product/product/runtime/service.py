@@ -822,9 +822,12 @@ class RuntimeService(ExplorationTools):
     @staticmethod
     def office_check(state, pptx, irs, directory):
         from ..recovery.adaptive_policy import AdaptiveBudget
+        request=json.loads((state.job/'request.json').read_text('utf8'))
+        options = {'check_owned_groups':True} if request.get('object_scoped_delivery') else {}
         identity={'pptx':digest(pptx),'irs':[digest(ir) for ir in irs],
                   'implementation':RuntimeService.code_binding(),
                   'mode':os.environ.get('IMAGE2PPT_OFFICE_MODE','local')}
+        identity.update(options)
         if identity['mode']=='remote':
             binding=state.job.parent/'office-worker-binding.json'
             identity['worker']=json.loads(binding.read_text('utf8')) if binding.exists() else {'binding':'unknown'}
@@ -840,7 +843,6 @@ class RuntimeService(ExplorationTools):
                 if digest(path)!=sha:raise RuntimeConflict('cached Office evidence changed')
             write(Path(directory)/'checks.json',result)
             return {**result,'cache_hit':True,'office_attempts':0}
-        request=json.loads((state.job/'request.json').read_text('utf8'))
         budget=AdaptiveBudget(Store(state.job/'state'),request.get('adaptive_budget'))
         budget.reserve('office_validations',identity)
         write(receipt,{'identity':identity,'status':'UNKNOWN','operation':str(directory)})
@@ -870,7 +872,7 @@ class RuntimeService(ExplorationTools):
                 receipt = state.root/'office-cache'/(key(identity)+'.json')
         else:
             from .office import check_local
-            result=check_local(pptx, irs, directory)
+            result=check_local(pptx, irs, directory, **options)
             result['office_attempts'] = 1
         write(receipt,{'identity':identity,'operation':str(directory),'result':result})
         if receipt != provisional:

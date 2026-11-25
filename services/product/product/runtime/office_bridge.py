@@ -55,7 +55,9 @@ def submit(job, pptx, irs, directory, timeout=1800):
     shutil.copyfile(pptx, request/'input.pptx')
     for i, ir in enumerate(irs):
         shutil.copytree(Path(ir).parent, request/f'page-{i}')
-    write(request/'request.json', {'irs': [f'page-{i}/slideir.json' for i in range(len(irs))]})
+    job_request=json.loads((Path(job)/'request.json').read_text('utf8'))
+    options = {'check_owned_groups':True} if job_request.get('object_scoped_delivery') else {}
+    write(request/'request.json', {'irs': [f'page-{i}/slideir.json' for i in range(len(irs))], **options})
     pack(request, directory/'input.zip')
     write(directory/'worker-state.json', {'status': 'QUEUED', 'created': time.time(),
         'input_sha256': digest(directory/'input.zip'), 'output_directory': str(directory)})
@@ -116,16 +118,23 @@ def execute_ticket(client,ticket,run,binding):
     irs=[(run/'input'/name).resolve() for name in request['irs']]
     if any(not p.is_relative_to(run/'input') for p in irs):
         raise ValueError('Office IR escaped packet')
-    result=check_local(run/'input/input.pptx',irs,run/'output/check')
+    options = {'check_owned_groups':True} if request.get('check_owned_groups') is True else {}
+    result=check_local(run/'input/input.pptx',irs,run/'output/check',**options)
 
     evidence = []
+    office = result.get('office', {})
+    group_moves = {f"{r['page']:02d}-{r['id']}-move-scale.png" for r in office.get('records', ())
+                   if r.get('group_members') and r.get('action') == 'move-scale'}
+    if options and office.get('failed_object_id'):
+        group_moves.update(f"{i:02d}-{office['failed_object_id']}-move-scale.png" for i in range(1, len(irs)+1))
     for probe_file in (run/'output/check').rglob('*'):
         if not probe_file.is_file():
             continue
         suf = probe_file.suffix.lower()
         if probe_file.name.startswith('~$') or probe_file == run/'output/check/checks.json':
             continue
-        if suf == '.pptx' or (suf == '.png' and not probe_file.name.endswith(('-before.png', '-delete.png', '-text-hidden.png'))):
+        if suf == '.pptx' or (suf == '.png' and probe_file.name not in group_moves
+                              and not probe_file.name.endswith(('-before.png', '-delete.png', '-text-hidden.png'))):
             try:
                 probe_file.unlink()
             except PermissionError:

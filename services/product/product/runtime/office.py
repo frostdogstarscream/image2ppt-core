@@ -30,7 +30,7 @@ def frame_feedback(result,graph,identifier):
             'meaning':'Measured transparent native-frame extent for create_candidate.frame_minimum. Source text bbox and authorized erase pixels remain independent.'}
 
 
-def check_local(pptx, irs, directory):
+def check_local(pptx, irs, directory, *, check_owned_groups=False):
     from ..parallel_office import inspect, OfficeValidationError
     from ..parallel_edit_probe import inspect_text
     from ..parallel_residual_gate import inspect_residuals, residual_accepted
@@ -40,7 +40,8 @@ def check_local(pptx, irs, directory):
     try:
         with lease('office'):
             try:
-                actual = inspect(pptx, irs, directory/'office', text_hidden_views=True, checked_open=True)
+                actual = inspect(pptx, irs, directory/'office', text_hidden_views=True, checked_open=True,
+                                 check_owned_groups=check_owned_groups)
             except OfficeValidationError as exc:
                 report_file = directory/'office/report.json'
                 actual = json.loads(report_file.read_text('utf8')) if report_file.is_file() else {
@@ -51,8 +52,13 @@ def check_local(pptx, irs, directory):
                            for n in json.loads(Path(ir).read_text('utf8'))['nodes'])
             replacement = inspect_text(pptx, irs, directory/'replacement', include_long=False, checked_open=True) if has_text else {
                 'status': 'NOT_APPLICABLE', 'reason': 'no native text objects'}
-        residuals = [inspect_residuals(ir, directory/'office', index, directory/f'residual-{index:02d}.json')
-                     for index, ir in enumerate(irs, 1)]
+        residuals = []
+        for index, ir in enumerate(irs, 1):
+            deleted_groups = {r['id'] for r in actual.get('records', []) if r.get('page') == index
+                              and r.get('group_members') and r.get('action') == 'delete' and r.get('saved_reopened')}
+            options = {'owned_group_ids':deleted_groups} if deleted_groups else {}
+            residuals.append(inspect_residuals(ir, directory/'office', index, directory/f'residual-{index:02d}.json',
+                                               **options))
         if replacement.get('status') == 'UNKNOWN':
             result.update(error_type='RuntimeError', failure='QA_INFRASTRUCTURE_UNAVAILABLE',
                           office=actual, replacements=replacement, residuals=residuals)
