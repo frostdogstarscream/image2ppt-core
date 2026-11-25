@@ -519,7 +519,7 @@ def stage_containers_and_surfaces(
         shape_fit = (
             try_fit_native_shape_v2(
                 work_plate, [x, y, w, h], parent_patch, direct_patches,
-                direct_children_mask_local, cand_kind=cand_kind,
+                direct_children_mask_local, cand_kind=cand_kind, measured_label=face_mark is not None,
             )
             if cand_kind in ('box', 'line') else None
         )
@@ -607,6 +607,8 @@ def stage_containers_and_surfaces(
                 'bbox': [float(x), float(y), float(w), float(h)],
                 'restore_bbox': restore_box,
                 'payload': shape_obj.model_dump(),
+                **({'geometry_approximation':shape_fit['geometry_approximation']}
+                   if 'geometry_approximation' in shape_fit else {}),
                 **({'arrow_adjustment':shape_fit['arrow_adjustment']} if 'arrow_adjustment' in shape_fit else {}),
                 'method': 'container-surface-v2-gradient-preset/1',
                 **({'mark_id':face_mark} if face_mark else {}),

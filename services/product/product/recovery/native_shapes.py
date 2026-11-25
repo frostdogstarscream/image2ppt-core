@@ -466,6 +466,54 @@ def _fit_linear_gradient(
     return pred, p95, Gradient(angle_deg=angle_deg, stops=stops)
 
 
+def _measured_side_rounding(crop, parent, fill, cs, counts):
+    """Verify two adjacent round corners against a straight chamfer at each corner."""
+    rounded = tuple(i for i, n in enumerate(counts) if n >= 20)
+    if rounded not in ((0, 1), (0, 2), (1, 3), (2, 3)):
+        return None
+    if any(counts[i] > 2 for i in range(4) if i not in rounded):
+        return None
+    # Estimate fractional coverage from source colours, so the exterior flood-fill
+    # alone cannot turn two straight bevels into a rounded native label.
+    axis = fill - parent
+    alpha = ((crop - parent) * axis).sum(2) / np.maximum(1, (axis * axis).sum(2))
+
+    def corners(arr):
+        return [arr, arr[:, ::-1], arr[::-1], arr[::-1, ::-1]]
+
+    yy, xx = np.mgrid[:cs, :cs] + 0.5
+    sample = (xx > 1) & (yy > 1)
+    bands = np.zeros(crop.shape[:2], bool)
+    radii = []
+    improvements = []
+    for index in rounded:
+        outside = corners(alpha)[index][:cs, :cs] < 0.5
+        if np.count_nonzero(outside & sample) < 10:
+            return None
+
+        def mismatch(prediction):
+            return np.count_nonzero((outside ^ prediction) & sample) / max(
+                1, np.count_nonzero((outside | prediction) & sample))
+
+        curves, cuts = [], []
+        for radius in range(4, cs + 1):
+            arc = (xx < radius) & (yy < radius) & (np.hypot(xx - radius, yy - radius) > radius)
+            curves.append((mismatch(arc), radius))
+            cuts.append(mismatch(xx + yy < radius))
+        error, radius = min(curves)
+        gain = min(cuts) - error
+        if error > 0.2 or gain <= 0:
+            return None
+        radii.append(radius)
+        improvements.append(gain)
+        band = corners(bands)[index][:cs, :cs]
+        distance_from_arc = np.abs(np.hypot(xx - radius, yy - radius) - radius)
+        band |= (xx <= radius) & (yy <= radius) & (distance_from_arc <= 3)
+    if abs(radii[0] - radii[1]) > max(2, 0.2 * max(radii)) or np.mean(improvements) < 0.035:
+        return None
+    return bands
+
+
 def try_fit_native_shape_v2(
     work_plate: np.ndarray,
     box: list[int],
@@ -474,6 +522,7 @@ def try_fit_native_shape_v2(
     direct_children_mask_local: np.ndarray,
     *,
     cand_kind: str = 'box',
+    measured_label: bool = False,
 ) -> dict | None:
     """Fit solid or gradient native `Shape` (`rect`, `roundRect`, `ellipse`, `pentagon`, `chevron`)."""
     tol = load_tolerance_config().get('shape_fitting', {})
@@ -522,6 +571,7 @@ def try_fit_native_shape_v2(
         return None
 
     # 1. Check preset geometry (`ellipse`, `pentagon`, `chevron`) vs `rect`/`roundRect`
+    side_rounding_band = None
     preset = _detect_preset_geometry(crop, parent_f, direct_children_mask_local)
     if preset is not None:
         geometry, corner_r, ext_corner_mask = preset
@@ -548,7 +598,10 @@ def try_fit_native_shape_v2(
             return None
         # Reject asymmetric chamfered polygons (e.g. two opposite 45-deg cut corners and two sharp corners)
         if max(corner_bg_counts) >= 20 and min(corner_bg_counts) <= 2:
-            return None
+            if measured_label:
+                side_rounding_band = _measured_side_rounding(crop, parent_f, fill_med0, cs, corner_bg_counts)
+            if side_rounding_band is None:
+                return None
         avg_corner_px = float(np.median(corner_bg_counts))
         est_r = round(math.sqrt(max(0.0, avg_corner_px) / 0.2146))
         max_r = max(0, min(22, int(min(w, h) // 2) - 1))
@@ -568,6 +621,10 @@ def try_fit_native_shape_v2(
     perimeter_zone[:, -border_t:] = True
     if ext_corner_mask.any():
         perimeter_zone |= cv2.dilate(ext_corner_mask.astype('uint8'), np.ones((5, 5), np.uint8)) > 0
+    if side_rounding_band is not None:
+        # Every antialiased pixel here still has to lie on the measured colour
+        # segment before entering the erase mask.
+        perimeter_zone |= side_rounding_band
 
     interior_unclaimed = (~ext_corner_mask) & (~perimeter_zone) & (~direct_children_mask_local)
     if int(interior_unclaimed.sum()) < 20:
@@ -579,7 +636,9 @@ def try_fit_native_shape_v2(
     flat_p95 = float(np.percentile(flat_dev[interior_unclaimed], 95))
     grad_obj: Gradient | None = None
 
-    if flat_p95 <= solid_tol:
+    measured_gradient = (_fit_linear_gradient(crop, interior_unclaimed, grad_tol)
+                         if side_rounding_band is not None and flat_p95 > 5 else None)
+    if flat_p95 <= solid_tol and measured_gradient is None:
         base_rgb = np.rint(fill_med).astype(int)
         best_rgb = base_rgb.copy()
         if direct_child_patches:
@@ -594,7 +653,7 @@ def try_fit_native_shape_v2(
                     best_rgb = np.clip(cand_rgb, 0, 255)
         pred_fill = np.broadcast_to(best_rgb.astype(np.float64), (h, w, 3)).copy()
     else:
-        grad_res = _fit_linear_gradient(crop, interior_unclaimed, grad_tol)
+        grad_res = measured_gradient or _fit_linear_gradient(crop, interior_unclaimed, grad_tol)
         if grad_res is None:
             return None
         pred_fill, _, grad_obj = grad_res
@@ -716,6 +775,8 @@ def try_fit_native_shape_v2(
     erase_mask_local = (direct_children_mask_local | proven_fill | proven_border) & ~ext_corner_mask
     return {
         'geometry': geometry,
+        **({'geometry_approximation': 'two-adjacent-rounded-corners-as-roundRect'}
+           if side_rounding_band is not None else {}),
         **({'arrow_adjustment':round(100000*int(ext_corner_mask[0].sum())/min(w,h))}
            if geometry=='pentagon' else {}),
         'fill': hex_rgb(best_rgb),

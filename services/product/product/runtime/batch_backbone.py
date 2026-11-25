@@ -1884,6 +1884,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             for field in routes:
                 if field['id'] in wanted_filter:
                     wanted_filter.update(field['target_ids'])
+                    if field.get('measured_label_face') and field.get('group_owned_children'):
+                        wanted_filter.update(field.get('move_with', ()))
         write(directory/'plan-bindings.json', routes)
     sam_enabled = sam_evidence.configured()
 
@@ -1959,7 +1961,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         ocr_file = initial_baseline/'runtime-ocr-protection.json'
         lines = json.loads(ocr_file.read_text('utf8'))['lines'] if ocr_file.is_file() else []
         rejected = []
-        for group in plan_regions(initial_graph, text_targets, inventory, image):
+        measured_labels = [r for r in routes if r.get('measured_label_face') and r.get('group_owned_children')]
+        for group in plan_regions(initial_graph, text_targets, inventory, image, measured_labels):
             try:
                 if request.get('object_scoped_delivery'):
                     group['source_field_ink'] = True

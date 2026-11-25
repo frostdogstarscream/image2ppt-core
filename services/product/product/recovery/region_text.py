@@ -28,7 +28,7 @@ def clipped(box, size):
     return [left, top, max(0, min(size[0], x + w) - left), max(0, min(size[1], y + h) - top)]
 
 
-def plan_regions(graph, targets, inventory, source):
+def plan_regions(graph, targets, inventory, source, measured_labels=()):
     """Photo interiors and different cells can never become one repair region."""
     elements = inventory.get("elements", [])
     target_ids = {t.id for t in targets}
@@ -43,6 +43,16 @@ def plan_regions(graph, targets, inventory, source):
             and contains(e["bbox"], text.bbox)
         ]
         parent = min(parents, key=lambda e: e["bbox"][2] * e["bbox"][3], default=None)
+        if not any(e["category"] in ("photo", "logo", "chart", "table", "cell") for e in parents):
+            # Limit context to the observed face of this specific label. Wider
+            # field padding can cross its border onto differently coloured paper.
+            faces = [(route["measured_label_face"], route["id"]) for route in measured_labels
+                     if text.id in route.get("move_with", ()) and route.get("measured_label_face")
+                     and contains(route["measured_label_face"], text.bbox)]
+            if faces:
+                box, mark_id = min(faces, key=lambda item: item[0][2] * item[0][3])
+                if parent is None or box[2]*box[3] < parent["bbox"][2]*parent["bbox"][3]:
+                    parent = {"id": mark_id, "category": "card_shape", "bbox": box}
         # A chart detector can enclose the separate captions underneath it.
         # A tight header observation permits a field trial, subject to all
         # subsequent colour, neighbor ownership and actual Office checks.
