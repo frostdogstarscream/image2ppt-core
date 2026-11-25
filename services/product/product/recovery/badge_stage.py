@@ -240,9 +240,10 @@ def stage_badge_symbols(baseline, output, layout, *, wanted=None, skip=(), panel
             physical, parent_id = result
         elif not np.array_equal(source[tile][mask], plate[tile][..., :3][mask]):
             continue
-        excluded = {name for name in ('LayerD','color-unmix') if oid+'-'+name in skip}
+        excluded = {name for name in ('LayerD','color-unmix','stroke-unmix') if oid+'-'+name in skip}
         rgba, decision = select_badge_ink(source[tile], backing, candidate['rgba'],
-                                         layer[tile] if layer is not None else None, excluded=excluded, strict_holes=True)
+                                         layer[tile] if layer is not None else None, excluded=excluded,
+                                         strict_holes=True, compare_edges=True)
         decisions.append({'object_id':oid, 'disc':candidate.get('disc'), 'bbox':box, 'evidence_ids':sorted(aliases), **decision})
         if rgba is None:
             continue

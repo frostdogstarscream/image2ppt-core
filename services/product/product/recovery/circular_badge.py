@@ -213,7 +213,53 @@ def bind_layer_foreground(directory, layers, source, source_sha):
     )
 
 
-def select_badge_ink(pixels, face, measured, layer, *, excluded=(), strict_holes=False):
+def _single_ink_reference(pixels, backing, support):
+    """Estimate opacity from dominant stroke interiors only for a supported one-colour symbol."""
+    from ..matting import unmix
+
+    backdrop = np.broadcast_to(backing, pixels.shape)
+    delta = pixels.astype(float) - backdrop
+    contrast = abs(delta).max(2)
+    if support.sum() < 12:
+        return None, 'insufficient-strokes'
+    solid_threshold = np.percentile(contrast[support], 80)
+    if solid_threshold < 48:
+        return None, 'ambiguous-ink-or-backing'
+    core = support & (contrast >= solid_threshold)
+    ink = np.median(pixels[core], axis=0)
+    direction = ink - backdrop
+    norm_sq = np.square(direction).sum(2)
+    if np.min(norm_sq[support]) < 48**2:
+        return None, 'low-contrast-against-local-backing'
+    opacity = np.clip((delta * direction).sum(2) / np.maximum(norm_sq, 1), 0, 1)
+    opacity[~support] = 0
+    error = abs(delta - opacity[...,None] * direction).max(2)
+    if np.percentile(error[core], 90) > solid_threshold * .12:
+        return None, 'multiple-stroke-colours'
+    # Only small source variations next to a measured contour can be attributed
+    # to ringing. Preserve independent or coherent secondary strokes, even white.
+    contours = opacity > .35
+    distance_to_stroke = cv2.distanceTransform((~contours).astype('uint8'), cv2.DIST_L2, 5)
+    internal = cv2.distanceTransform(contours.astype('uint8'), cv2.DIST_L2, 5)
+    radius = max(1., float(np.percentile(internal[core], 80)))
+    other = support & (error > max(8., solid_threshold * .07)) & (opacity < .65)
+    if other.any():
+        if np.any(distance_to_stroke[other] > radius + .5):
+            return None, 'independent-secondary-strokes'
+        _, _, components, _ = cv2.connectedComponentsWithStats(other.astype('uint8'), connectivity=8)
+        thickness = cv2.distanceTransform(other.astype('uint8'), cv2.DIST_L2, 5)
+        if (thickness.max() > max(1.4, radius*.65)
+                or any(max(w,h) > 6*radius or area > 3*(radius+1)**2 for _,_,w,h,area in components[1:])):
+            return None, 'coherent-secondary-strokes'
+    if np.any(support & (error > max(18., solid_threshold * .18))):
+        return None, 'unexplained-source-colour'
+    # Preserve genuine variation along the stroke. Straight RGB is solved
+    # against measured paper rather than copied from either comparison fill.
+    rgba = unmix(pixels, backdrop, opacity, floor=1/255)
+    return (rgba, ink, opacity, support & (opacity < .85)), None
+
+
+def select_badge_ink(pixels, face, measured, layer, *, excluded=(), strict_holes=False, compare_edges=False):
     """Compare against source on the disc and check exposed holes/ink on a dark fill."""
     face = np.array(list(bytes.fromhex(face)), dtype=float) if isinstance(face, str) else np.asarray(face, dtype=float)
     measured_alpha = measured[..., 3] / 255.0
@@ -223,7 +269,15 @@ def select_badge_ink(pixels, face, measured, layer, *, excluded=(), strict_holes
     best = measured
     selected = "color-unmix"
     best_score = float("inf")
-    for name, candidate in (("color-unmix", measured), ("LayerD", layer)):
+    candidates = [("color-unmix", measured), ("LayerD", layer)]
+    reference = None
+    if compare_edges:
+        reference, reason = _single_ink_reference(pixels, face, measured[...,3] != 0)
+        if reference is None:
+            trials.append({'method':'stroke-unmix', 'status':'not-applicable', 'reason':reason})
+        else:
+            candidates.append(('stroke-unmix', reference[0]))
+    for name, candidate in candidates:
         if name in excluded:
             trials.append({"method": name, "status": "excluded-by-office"})
             continue
@@ -246,7 +300,19 @@ def select_badge_ink(pixels, face, measured, layer, *, excluded=(), strict_holes
                 contrast = rgb[empty] * alpha[empty] + background * (1 - alpha[empty])
                 valid = valid and np.percentile(abs(contrast-background).max(1), 95) <= 8
             valid = valid and not np.any(alpha[..., 0][empty] > .06)
-        score = source_error + spill
+        edge_errors = {}
+        if reference is not None:
+            _, ink, opacity, edge = reference
+            if edge.any():
+                for label, paper in [('dark',32),('light',242)]:
+                    observed = rgb[edge] * alpha[edge] + paper * (1-alpha[edge])
+                    weight = opacity[edge,None]
+                    expected = ink * weight + paper * (1-weight)
+                    edge_errors[label] = float(np.percentile(abs(observed-expected).max(1),90))
+                # The reference uses a supported single ink, so large
+                # deviations on new paper represent baked-in edge colour.
+                valid = valid and max(edge_errors.values()) <= 24
+        score = source_error + spill + max(edge_errors.values(),default=0)
         trials.append(
             {
                 "method": name,
@@ -254,11 +320,12 @@ def select_badge_ink(pixels, face, measured, layer, *, excluded=(), strict_holes
                 "source_error": source_error,
                 "dark_hole_error": spill,
                 "stroke_coverage": coverage,
+                **({'contrast_edge_p90':edge_errors} if edge_errors else {}),
             }
         )
         if valid and score < best_score:
             best_score, selected, best = score, name, candidate
-    return (best if np.isfinite(best_score) else None), {
-        "selected": selected if np.isfinite(best_score) else "opaque-crop",
-        "candidates": trials,
-    }
+    if np.isfinite(best_score):
+        return best, {'selected':selected, 'candidates':trials}
+    unavailable = 'no-eligible-foreground' if compare_edges else 'opaque-crop'
+    return None, {'selected':unavailable, 'candidates':trials}
