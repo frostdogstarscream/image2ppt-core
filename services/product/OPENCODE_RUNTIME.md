@@ -1,12 +1,11 @@
 # OpenCode autonomous runtime
 
-The runtime uses OpenCode 2.1.4, MCP 1.3.0 and Pydantic 2.10.x. MCP 1.3 imports an internal Pydantic helper, so the product dependency range is constrained to the compatible minor version. Its job-scoped MCP server exposes basic image/evidence tools together with optional reconstruction shortcuts. Original pipeline defaults remain available.
+The automatic entry point is `POST /api/v1/jobs`. On a new upload the host builds an Office-checked baseline, then an OpenCode Agent addresses open issues using the tools listed by `get_job_context`. The runtime uses OpenCode 2.1.4, MCP 1.3.0 and Pydantic 2.10.x. MCP 1.3 imports an internal Pydantic helper, so the product dependency range is constrained to the compatible minor version.
 
 ## Region-based text and context-assisted reading
 
 The admission host freezes two experiment settings in each new OpenCode job. By default, new jobs reconstruct text on a common title, band or card
-surface before falling back to individual lines. Add `IMAGE2PPT_PAGE_READING=1`
-to use the configured MoMA reading model after the deterministic Office baseline.
+surface before falling back to individual lines. With a configured MoMA reading model the host can prepare a local reading draft after the baseline. Add `IMAGE2PPT_PAGE_READING=1` to enable the full-page reading comparison.
 The upload API is unchanged. Existing jobs keep their recorded settings. Set `IMAGE2PPT_REGION_TEXT=0` for a line-only comparison. Page reading remains opt-in.
 
 The page reader sees a numbered source image. An independent local reader sees
@@ -14,6 +13,8 @@ only crops. They use fresh calls to the same model. Matching ordinary wording
 is recorded as model-confirmed, separately from human confirmation. Disputed
 readings and fields retained in raster content are recorded in the delivery
 report. Changes to quantities, units and names require additional source evidence.
+
+For a doubtful word, pass its object ID from the current page's numbered inventory to `review_numbered_text`. Explicit requests can include a high-confidence OCR line outside the issue blocks. Each requested ID gets an entry in `items` with a status (`observed`, `skipped` or `unavailable`) and a reason. When the source is bound, the entry identifies the target and OCR row. A single-view result records the original wording, transcription and legibility. In a two-view comparison, individual transcriptions appear in `readings` and missing answers in `unavailable_views`. `checked` counts distinct targets for which at least one model reading was nonempty. A split field must map unambiguously to the requested part of the source line. An OCR-only field or a text-layout mark can yield a reading while it still lacks a writable native field. Such an observation supplies evidence for a later rebuild. Office verification requires an actual editable object.
 
 For the frozen comparison, run `services/experiments/run_native_benchmark.py`
 against three pinned hosts (control, region, combined) with the same input roots,
@@ -42,9 +43,15 @@ For an isolated single-line field, the runtime retains the actual typeface and s
 
 The runtime Office worker exports a second PNG per slide with editable text cleared in an unsaved copy of the presentation. Pictures, card fills, groups and their stacking order remain visible. The receipt binds this view to the checked PPTX, its hidden field names and the PNG hash. The host runs local OCR on that view and records readings from the bare plate separately. A partial native match, including a missing digit or punctuation mark, does not count as a complete field.
 
-`get_job_context` gives a small issue index for each page. Each spatial block holds up to 30 stable numbers. The Agent can assign routes and movement partners and request an incremental rebuild by block or object IDs. It can also request new evidence. Source text and placement come from the job inventory. Private evaluation references are read only by the offline evaluator.
+`get_job_context` returns two indexes per page. `issue_blocks` supplies the mark numbers for `plan_marked_page` and the scope for local rebuilds. `reading_blocks` covers the page's numbered inventory in blocks of up to 30 marks. Each entry identifies the block and its `image` and `inventory` evidence. Fetch the relevant block with `get_evidence` to find a reading's object ID or inspect a high-confidence line missing from the issue list.
 
-Both arms use the same immutable source. The delivery gate checks actual Office evidence, per-page edit counts, source OCR lines matched by native fields, native field counts and RGB mean absolute error on each 64 px tile and marked region. A local increase above 2 levels on the 0–255 scale rejects the candidate. The delivered `result.json` identifies the selected origin, provider usage and fallback reason. A provider failure after baseline creation delivers the baseline with `REVIEW_REQUIRED`.
+The plan accepts a route, role and `move_with` partner numbers. A `surface` route may include the outline hint `roundRect`, `homePlate` or `chevron`. The host measures the proposed geometry. To move a card and its label together, plan the card and the movement relationship. Check the resulting group with a single-selection move in PowerPoint. Source text and placement come from the job inventory. Private evaluation references are read only by the offline evaluator.
+
+Local rebuilds accept an issue block or up to 30 current object IDs. The host counts batch attempts per participating object. One attempt is available initially. A second requires the preceding batch to have made progress through a candidate commit. When some requested objects remain eligible the host processes that subset. An all-ineligible request returns `local repair limit reached for the selected objects`. A refreshed issue list and a new plan do not reset the history.
+
+Both arms use the same immutable source. The host compares page identities, Office verification, previously passed object edits, editable object counts, OCR lines matched by native fields (including recorded reading revisions), native field counts and background text findings. It also compares the Office render with the source over each marked region and the whole page. RGB mean error is recorded. The regression decision uses ΔE00 p95 and SSIM. For each region the allowed maximum color difference is the larger of the baseline value and the configured hard limit. The minimum similarity is the smaller of the baseline value and the configured hard limit. A reviewed reading draft matching the candidate file may use the configured margins in its changed fields. Soft deviations and hard limits are defined in `configs/fidelity_tolerance.json`.
+
+The host keeps the immutable internal PPTX under `host-baseline/`. A locally checked Agent composition is also an internal candidate until selection. If the Agent fails, an eligible baseline can be downloaded with `REVIEW_REQUIRED`. Strict object-scoped uploads apply the same eligibility check on fallback. When both choices are ineligible, the API exposes the summary, scorecard and diagnostic preview. `runtime/delivery-selection.json` records `selected_sha256: null`. Read the selection and the public artifact list together. A file listed for download may still require content confirmation. Report the terminal status, the actual downloadable files and their hashes, and the independent review receipt separately from human or WPS acceptance.
 
 Run `services/experiments/evaluate_two_pages.py` twice with the same `--job`, private `--references` and `--cases`. Use separate output directories and `--arm baseline` and `--arm final`. Each invocation performs the six actual PowerPoint edits on copies and compares the exported slide to the original. Keep these artifacts outside Git.
 
@@ -58,7 +65,7 @@ $env:IMAGE2PPT_PRODUCT_TOKEN=[Guid]::NewGuid().ToString('N')
 python -m product.runtime.launch --root F:/i2oc/jobs --port 8771 --prompt-key
 ```
 
-The hidden prompt supplies MoMA credentials to the process and its OpenCode child. The launcher accepts `IMAGE2PPT_OPENCODE_BIN`, verifies the exact server version and redacts process credentials from its server log. Production credentials should be injected by the service host. Keep the product token available to the authenticated business client.
+The hidden prompt supplies the selected execution credential. Configure the independent review provider and its credentials separately. The launcher accepts `IMAGE2PPT_OPENCODE_BIN`, verifies the exact server version and redacts process credentials from its server log. Production credentials should be injected by the service host. Keep the product token available to the authenticated business client.
 
 Select Go inference by setting `IMAGE2PPT_AGENT_PROVIDER=opencode_go` and `IMAGE2PPT_AGENT_MODEL=qwen3.8-flash` before launch. Supply `IMAGE2PPT_AGENT_API_KEY` through the host or `--prompt-key`. This selects `https://opencode.ai/inference/go/openai/v1` for both the OpenCode Session and semantic/planning tool calls. The Agent and tool transports identify their client and share the job's stable session header. Visual self-review stays in the current Session.
 
@@ -77,7 +84,9 @@ Submit ordered multipart `files` to `POST /api/v1/jobs`. Query the resulting job
 
 ## Agent and evidence
 
-Basic computation now returns exploratory artifacts. `create_candidate` uses the existing scene adapter to create a private native preview, including candidates whose mask or background remains unapproved. `compile_pptx(candidate_id)` compiles that preview without changing the committed page or delivery composition. `validate_office(candidate_id)` returns edit diagnostics for observation. `commit_candidate` separately invokes the existing submission checks and actual Office verification.
+In the host-precomputed upload, the available tools are `get_job_context`, `get_progress`, `get_evidence`, `prepare_page_evidence`, `plan_marked_page`, `review_numbered_text`, `batch_reconstruct_page`, `commit_candidate`, `compile_pptx`, `validate_office`, `record_visual_review` and `finalize_job`. This list takes precedence over `tool_profile`. Fetch up to eight evidence IDs per call. Use current issue blocks after a commit. A successful tool call may return zero readings, no usable candidate or a negative quality verdict. Inspect the per-object result and the candidate or selection receipt.
+
+The following low-level tools describe jobs using the exploratory catalog. `create_candidate` uses the existing scene adapter to create a private native preview, including candidates whose mask or background remains unapproved. `compile_pptx(candidate_id)` compiles that preview without changing the committed page or delivery composition. `validate_office(candidate_id)` returns edit diagnostics for observation. `commit_candidate` separately invokes the existing submission checks and actual Office verification.
 
 `validate_mask` and `validate_rgba` return measurements and uncertainty. RGBA measurement accepts image evidence directly. `unmix_foreground` computes from explicit source, background and mask evidence. Scene-mode `complete_text_mask` requires a chosen background. Inpainting accepts source/mask evidence without requiring text-mask approval. Layout proposals include conflict measurements. LayerD exploration returns prefix hypotheses with their actual opacity coverage and recomposition error. Stable production callers retain strict staging behavior.
 
@@ -85,9 +94,9 @@ Agent local findings use `record_observation`, which has no Office prerequisite.
 
 The runtime Skill is `skills/image2ppt-runtime/SKILL.md`. A job receives a private MCP context, source attachments and the delivery goal. Each tool records its input, implementation/candidate bindings and output artifacts. Candidates may combine separately generated masks and backgrounds. The source mask, private staging adapter and actual Office checks validate submissions.
 
-`tool_profile=basic` in a task request exposes the basic tool catalog for autonomous-composition acceptance. It omits `run_perception`, `run_parallel_pipeline`, `rebuild_region` and `repair_region`. It does not select an object or prescribe a tool sequence.
+In a job without host precomputation, `tool_profile=basic` filters out `run_perception`, `run_parallel_pipeline`, `rebuild_region`, `repair_region`, `prepare_page_evidence` and `batch_reconstruct_page`. Numbered planning and inspection tools in that catalog also depend on the experiment profile. Refer to the job's actual MCP tool list.
 
-Visual reviews bind the final package, scene, Office previews and edit evidence. `get_evidence` returns actual MCP image content and records provision. This is a transport receipt. Missing required checks or a changed file blocks finalization. Complete recall remains unknown without an independent source inventory.
+Visual reviews bind the final package, scene, Office previews and edit evidence. `get_evidence` records which source, render and editing panels the Agent received. A missing required check or a changed file blocks finalization. The Agent self-review and independent visual audit have different receipts. Report the independent provider and actual model from the audit, including whether the response was obtained live, reused from cache or unavailable. A missing verified independent verdict leaves the result under review. Complete recall remains unknown without an independent source inventory.
 
 Scene proposals may grow incrementally. Updates preserve accepted object definitions and shared styles. A changed accepted object requires a local rollback. Candidate commits bind both the parent private scene and public IR, so an unchanged raster IR cannot conceal changed ownership evidence.
 
@@ -97,7 +106,7 @@ The optional `fit_background.context_width` changes the independent source sampl
 
 The driver waits for the job's MCP connection before admitting the Agent prompt. The prompt and tool receipts expose the remaining wall-time budget. Image evidence references include filenames so the Agent can request local comparisons selectively. The Office adapter can return an unverified native-frame size proposal after replacement overflow. That proposal requires a new candidate and the complete existing checks.
 
-Tool outcomes, region commits, final QA and publication qualification have separate receipts. A source-only raster package remains `REVIEW_REQUIRED`. A hash-bound, Office-checked and self-reviewed partial editable package can finish successfully. Session admission with an uncertain response is reconciled through the saved Session and message IDs before another prompt is considered.
+Tool outcomes, region commits, final QA and publication qualification have separate receipts. A successful Agent composition also requires a passing independent audit and compliance with the final scorecard gate. The host then compares the eligible result to its baseline and applies the object-scoped delivery rules. Session admission with an uncertain response is reconciled through the saved Session and message IDs before another prompt is considered.
 
 ## Office worker
 
@@ -122,11 +131,15 @@ The validated deployment uses business port 8772 and OpenCode port 14100 on the 
 
 `product.runtime.client.save_profile` encrypts generated business/worker access configuration with Windows DPAPI. Model credentials are outside that profile. Use the client with a profile or inject `IMAGE2PPT_PRODUCT_TOKEN` into its environment.
 
+For a normal job, express the editing operations appropriate to the input page. Save, close and reopen the copy in actual PowerPoint when measuring whether those operations work. Keep benchmark-specific answers in the evaluator.
+
 ```powershell
-python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi submit input.png --tool-profile basic --seconds 1800 --goal "Restore at least one complete editable object and verify the partial delivery."
+python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi submit input.png --goal "Restore business text and numbers as independent editable fields. Preserve card labels and icons through single-selection movement and recoloring. Keep separate photos removable. Verify applicable edits in PowerPoint."
 python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi status JOB_ID
 python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi artifacts JOB_ID --output outputs/downloaded-job
 ```
+
+For a connectivity smoke test, a narrow goal such as “restore at least one complete editable object” can exercise upload and editing. Its pass criterion covers only that operation.
 
 ## Optional script sandbox
 
@@ -143,4 +156,6 @@ python -m pytest services/product/tests/test_opencode_runtime.py -q
 
 Synthetic checks cover contracts and recovery behavior. Real image/Agent/Office acceptance is recorded separately under `docs/acceptance` when executed.
 
-For object-scoped uploads each Office ticket makes one physical check. On an infrastructure failure the host may reserve one extra Office validation and submit the same package a second time. Each ticket uploads its own output/check evidence. Retry evidence lives under the original operation's retry directory. Object failures are handled separately by the batch isolation path. The compact batch response includes office_attempts and isolation_history. New uploads omit presentation downloads when a page has no verified independent objects, retained text on its background, or an unverified object crop. Diagnostic previews and scorecards remain available.
+For object-scoped uploads each Office ticket makes one physical check. On an infrastructure failure the host may reserve one extra Office validation and submit the same package a second time. Each ticket uploads its own `output/check` evidence. Retry evidence lives under the original operation's retry directory. Object failures are handled separately by the batch isolation path. The compact batch response includes `office_attempts` and `isolation_history`.
+
+The strict delivery check in `product/runtime/host_baseline.py` requires verified editable objects on every page, a measured source-plate audit, no audit rows classified as retained, residual, plate-only or unresolved, and a single verified object owner for every fallback crop. Use the reported rows when investigating a rejection. Inspect whether a flagged mark is business wording, an intrinsic brand label or a decorative symbol. If fallback also fails these conditions, the API lists diagnostic artifacts only. When a PPTX is selected, the strict artifact list exposes the selected `result.pptx`.

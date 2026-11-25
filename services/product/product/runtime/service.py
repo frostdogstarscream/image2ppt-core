@@ -202,11 +202,11 @@ class RuntimeService(ExplorationTools):
         current.setdefault('page_structure', {})[str(page)] = str(out_file)
         return info
 
-    def review_numbered_text(self, state, current, directory, *, page, object_ids):
+    def review_numbered_text(self, state, current, directory, *, page, object_ids, explicit=False):
         from .text_reading import stage_readings
         if not (state.job/'host-baseline/manifest.json').is_file():
             raise ValueError('source reading requires a frozen baseline')
-        return stage_readings(self, state, current, directory, page=page, object_ids=object_ids)
+        return stage_readings(self, state, current, directory, page=page, object_ids=object_ids, explicit=explicit)
 
     def audit_delivery(self, state, current, directory, *, use_vlm=True):
         from .independent_review import run_delivery_audit

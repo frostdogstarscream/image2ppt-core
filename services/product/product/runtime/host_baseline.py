@@ -13,6 +13,7 @@ from ..tolerance_config import load_tolerance_config
 from ..scorecard import fidelity, score_page, _native_fields, _overlap
 from .plate_audit import audit as audit_plate, bind_native_paragraphs, bind_separate_symbols, native_line_fields
 from .host_evidence import prepare_all, questions, read
+from .reading_targets import revised_lines
 from .state import RuntimeState, RuntimeConflict
 from .service import RuntimeService
 
@@ -131,7 +132,7 @@ def assess(job, current):
         scene = read(row['scene'])
         selected = scene['selected']
         readings = {i:r['source_reading'] for i,r in selected.items() if r.get('source_reading')}
-        updated = {v['ocr_id'] for v in readings.values()}
+        updated = {v['ocr_id'] for v in readings.values() if 'source_span' not in v}
         # A retained OCR value may also be uncertain (for example a disputed amount).
         # Include the latest bound observation even when it did not change the text.
         observed = {}
@@ -146,7 +147,7 @@ def assess(job, current):
             if oid in selected and oid not in readings and obs.get('status') == 'pending_confirmation':
                 readings[oid] = {**obs, 'after':obs['before']}
         pending = {v['ocr_id'] for v in readings.values() if v['status']=='pending_confirmation'}
-        adopted = {v['ocr_id']:v['after'] for v in readings.values() if v.get('after')}
+        adopted = revised_lines(lines, readings)
         members = scene['text']['members']
         fields = bind_native_paragraphs(lines, fields, members, adopted)
         actions = {}
@@ -162,6 +163,7 @@ def assess(job, current):
         hits = [line['id'] for line in lines
                 if native_line_fields({**line, 'text': adopted.get(line['id'], line['text'])}, fields)]
         updated.update(pending.intersection(hits))
+        updated.update(adopted.keys() & set(hits))
         marks = read(current['experiment_marks'][k])['rows']
         local = local_fidelity(source, preview, marks) if preview.is_file() else {}
         limits = load_tolerance_config()['fidelity']

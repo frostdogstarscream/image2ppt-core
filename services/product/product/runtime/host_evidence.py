@@ -145,8 +145,10 @@ ROLES = ['field','title','label','caption','body','number','project','industry',
 def normalize_arguments(state,current,tool,arguments):
     args = dict(arguments)
     if tool=='review_numbered_text':
-        ids = scoped_ids(state, current, args['page'], None, args['object_ids'])
-        return {'page':args['page'], 'object_ids':ids}
+        ids = args['object_ids']
+        if not isinstance(ids, list) or not 1 <= len(ids) <= 30 or not all(isinstance(i, str) for i in ids):
+            raise ValueError('select 1 to 30 numbered object IDs on this page')
+        return {'page':args['page'], 'object_ids':list(dict.fromkeys(ids)), 'explicit':True}
     if tool=='batch_reconstruct_page':
         page = str(args['page'])
         rounds = current.setdefault('repair_rounds', {}).get(page, [])
@@ -205,13 +207,19 @@ def context(state,request):
     pages = []
     for i,page in enumerate(c['pages'],1):
         blocks = c['questions'][str(i)]
+        evidence = c['host_evidence'][str(i)]
+        reading_blocks = [
+            {'block': index, 'inventory': block['inventory']['id'], 'image': block['image']['id']}
+            for index, block in enumerate(evidence.get('blocks', []), 1)
+        ]
         audit = base['pages'][i-1].get('plate_audit', {})
         findings = [r for r in audit.get('rows', []) if r['status'] in ('retained','residual','plate_only','unresolved')]
         pages.append({'plate_audit_status':audit.get('status','UNKNOWN'),
                       'plate_findings':len(findings),
                       'plate_retry_ids':list(dict.fromkeys(oid for r in findings for oid in r['mark_ids']))[:30],
                       'page':i,'committed_objects':len(read(page['scene'])['selected']),
-                      'evidence':{k:v for k,v in c['host_evidence'][str(i)].items() if k.endswith('_status')},
+                      'evidence':{k:v for k,v in evidence.items() if k.endswith('_status')},
+                      'reading_blocks':reading_blocks,
                       'issue_blocks':[{k:v for k,v in b.items() if k!='marks'} for b in blocks],
                       'source':state.register(state.job/'inputs'/request['sources'][i-1],'source')['id']})
     return {'version':c['version'],'pages':pages,'tool_catalog':sorted(AGENT_TOOLS),'goal':request.get('goal'),

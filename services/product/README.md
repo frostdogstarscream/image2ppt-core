@@ -1,8 +1,10 @@
-# r10：三分支独立图片转 PPT 服务
+# 图片转 PPT 产品服务
 
-本分支的上传和 CLI 默认已改为 `parallel_review`：文字、素材、背景独立产证据，经 SceneGraph 仲裁和两次屏障重建，再由固定编译器、实际 PowerPoint 与 Go 验收。不先运行旧 `VisualPage/1` 规划，不支持 `serial` 执行模式。`object_extraction=off` 也不关闭三分支，只保留素材的源图表示。`parallel_auto` 尚未取得发布资格。
+本工作树的正式上传入口是 OpenCode 的 `POST /api/v1/jobs`，客户端为 `opencode_client.py`。新任务由宿主先生成确定性基线，再由 Agent 处理局部问题。部署、模型配置、Office worker 和下载说明见 [OpenCode 运行说明](OPENCODE_RUNTIME.md)。
 
-**当前启动、部署、缓存和验收说明请阅读 [PARALLEL_R10.md](PARALLEL_R10.md)。** 修订计划保存在 [parallel-three-branches-r10.md](../../docs/plans/parallel-three-branches-r10.md)。
+## 冻结的 r10/R12 对照
+
+历史上传和 `run_local.py` 默认使用 `parallel_review`。文字、素材、背景独立产证据，经 SceneGraph、固定编译器、实际 PowerPoint 与 Go 验收。`parallel_auto` 的发布门禁继续适用。[r10/R12 启动与历史验收](PARALLEL_R10.md) · [修订计划](../../docs/plans/parallel-three-branches-r10.md)
 
 以下保留旧串行实现的历史说明，用于理解冻结对照；其中的 `VisualPage/1`、重试策略、默认对象开关和交付状态不代表 r10 路由。
 

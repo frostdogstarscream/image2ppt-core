@@ -1,24 +1,32 @@
-# image2PPT Codex 原型
+# image2PPT 图片转可编辑 PowerPoint
 
-现已增加 **image2ppt-core M1**：共享 Python 引擎、保存产物离线回放、不可变修订、阶段恢复、最终 PPTX 对象检查及直接编辑探针。入口是 `python -m image2ppt` / `image2ppt-core`。完整安装与调用说明见 [核心引擎说明](docs/core-m1.md)。SlideIR 仍为 0.1，旧 PowerShell 命令继续可用。
+在本研究工作树中，正式入口是 OpenCode 的 `POST /api/v1/jobs`。上传幻灯片原图后，宿主识别文字和版面、重建对象并生成经过 PowerPoint 检查的基线。Agent 根据源图和疑难对象做局部修复。执行模型与独立视觉复核模型由部署配置指定。[运行和部署说明](services/product/OPENCODE_RUNTIME.md)
 
-由 Codex 读取页面图片、理解结构并保存 SlideIR；固定工具将 SlideIR 编译为可编辑 PPTX，再重新导入最终文件生成预览。本项目的脚本不调用大模型 API。
+在含有 `services/product/opencode_client.py` 的工作树根目录运行以下命令。示例使用已配置的客户端凭据文件，将图片路径换成实际值。提交返回的任务编号可用于查询状态，任务结束后用同一编号列出可下载文件。
 
-## 在 Codex 中使用
+```powershell
+$job = python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi submit C:/slides/page.png | ConvertFrom-Json
+python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi status $job.id
+python services/product/opencode_client.py --profile .runtime/opencode-client.dpapi artifacts $job.id
+```
 
-在当前项目聊天中使用 `$image2ppt`，并提供一张清晰的幻灯片图片。如果新技能尚未出现在选择器中，可直接指定：
+交付按实际动作验收。单改文字或数字后要能保存重开；移动卡片时标签和图标要跟随；给底框换色后照片能单独删除，露出新底色。AI 原图上无法确认的业务文字应保留识读依据和待确认状态。复杂素材可作为单独图片，整页栅格不能算可编辑交付。用户可下载的文件以该任务的 `artifacts` 清单为准。[项目验收要求](AGENTS.md)
 
-> 使用 `D:\Code\image2PPT\skills\image2ppt\SKILL.md`，把我提供的图片还原为可编辑 PPT，保留原文、数字、颜色和布局；生成实际 PPTX 预览，并检查移动、改字和删除后的表现。
+## 工作流与使用范围
 
-专用技能负责忠实重建；不应用通用演示文稿的文案改写、默认字号和重新设计要求。
+| 目的 | 入口 |
+|---|---|
+| 自动上传、工程开发与真实编辑验收 | 工程助手使用当前工作树的 [Codex 工程技能](skills/image2ppt/SKILL.md)。每个 OpenCode 任务加载本工作树的 [运行技能](skills/image2ppt-runtime/SKILL.md)。 |
+| 复现 r10/R12 冻结对照 | `services/product/run_local.py` 运行历史的 `parallel_review`。记录是否复用感知证据。[r10/R12 说明](services/product/PARALLEL_R10.md) |
+| 显式半自动对照 | 由 Codex 看图、拆分字段并布局，单独标记为半自动结果。[历史手工流程](skills/image2ppt/references/legacy-manual-workflow.md) |
+| 固定编译器与离线回放 | M1 的 `python -m image2ppt` / `image2ppt-core` 支持不可变修订、恢复与对象检查。下列命令用于编译器调试。[核心引擎说明](docs/core-m1.md) |
 
-## 在 Claude Code 中使用
+## 在 Claude Code 中调试编译器
 
 Claude Code 加载 `~/.claude/skills/image2ppt/`（由维护源 `skills/image2ppt-claude/` 部署）。它的 shell 是 bash，
 而 `.\image2ppt.ps1` 在 bash 下是语法错误（`syntax error near unexpected token`），因此命令请走转发脚本：
 
 ```bash
-cd D:/Code/image2PPT
 ./image2ppt.sh doctor
 ./image2ppt.sh compile -InputPath runs/具体任务/slideir.json
 ./image2ppt.sh compose -InputPath 'runs/<run02>/slideir.json,runs/<run03>/slideir.json' -OutputPath outputs/deck
@@ -28,23 +36,22 @@ cd D:/Code/image2PPT
 两者不能互相复制，也不要靠字符串替换从 Codex 版生成 Claude 版；改完维护源后重新导出（见 `exports/`）。
 另外 `image2ppt.ps1` 含非 ASCII 文本，必须保留 UTF-8 BOM，否则 Windows PowerShell 5.1 直接解析失败。
 
-## 最短工具命令
+## 固定编译器与历史原型命令
 
 ```powershell
-cd D:\Code\image2PPT
 .\image2ppt.ps1 doctor
 .\image2ppt.ps1 demo
 .\image2ppt.ps1 compile -InputPath '.\examples\synthetic\slideir.json'
 .\image2ppt.ps1 prepare -InputPath 'D:\路径\幻灯片.png'
-.\image2ppt.ps1 compile -InputPath 'D:\Code\image2PPT\runs\具体任务\slideir.json'
-.\image2ppt.ps1 perturb -InputPath 'D:\Code\image2PPT\runs\具体任务\slideir.json' -NodeId title -Action replace -Value '新的标题'
+.\image2ppt.ps1 compile -InputPath '.\runs\具体任务\slideir.json'
+.\image2ppt.ps1 perturb -InputPath '.\runs\具体任务\slideir.json' -NodeId title -Action replace -Value '新的标题'
 .\image2ppt.ps1 compose -InputPath 'runs\任务A\slideir.json,runs\任务B\slideir.json' -OutputPath 'outputs\deck'
 .\image2ppt.ps1 test
 ```
 
 在 bash / Claude Code 中，把 `.\image2ppt.ps1` 换成 `./image2ppt.sh`，参数不变。
 
-`prepare` 只建立输入和待分析结构；之后由当前 Codex 聊天查看图片并填写 SlideIR。`demo` 使用固定合成样本验证工具链，结构来自测试夹具，不代表真实图片识别效果。
+历史手工流程通过 `prepare` 建立输入和待分析结构，由 Codex 看图并填写 SlideIR。`demo` 使用固定合成样本验证编译工具链。
 
 已经验证的合成 PPT 与实际文件预览保存在 `outputs/smoke-20261014/`；可复用的输入和结构保存在 `examples/synthetic/`。
 
@@ -54,14 +61,14 @@ cd D:\Code\image2PPT
 
 输出版本附带源页面和图片资产，`slideir.snapshot.json` 可独立重新编译；原始未规范化输入仍保留在任务的 `source/original.*`。
 
-## 已支持的原型范围
+## 历史原型的能力范围
 
 - 单页图片、方向校正、原件保存、分析副本、局部裁剪。
 - 原生文字、简单矩形/圆角矩形/椭圆/线条、图片模块和实际 PPT 分组。
 - 文本和资产内容归属校验、文件哈希、独立输出版本、PPTX 结构检查及实际文件重新导入预览。
 - 删除、移动和改写的扰动副本。测试不会覆盖原始 IR。
 
-PDF 解析、自动 OCR、自动擦字与背景修复、原生表格/图表、多页图片自动识别、网站/API 尚未实现。M1 支持固定清单的逐页回放回归，不负责自动识别整套图片。`compose` 可以把多个**已还原页**的 IR 组装成一个多页 deck（传入顺序即页序），但它是打包步骤，不代替逐页识别，也不修复还原得不好的页。复杂图表可以明确保留为图片；其中的数据不可编辑。复杂底图需要先提供经检查的清理资产，不能在原图文字上叠加可编辑文字冒充还原。
+早期手工原型将识别、擦字与背景修复留给作者。M1 支持固定清单的逐页回放。`compose` 按传入顺序把已完成的 SlideIR 打包成多页演示文稿。当前编译器是否支持原生表格和图表以当前工作树的 `doctor` 结果为准。
 
 ## 运行环境
 

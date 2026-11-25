@@ -69,6 +69,8 @@ def field_crop(image, line):
     x, y, w, h = map(round, line['bbox'])
     # A little source context, with the reference line occupying the central band.
     pad = max(1, round(h*.18))
+    if line.get('source_span'):
+        return image.crop((x, y, x+w, y+h))
     return image.crop((max(0,x-pad), max(0,y-pad), min(image.width,x+w+pad), min(image.height,y+h+pad)))
 
 
@@ -124,9 +126,12 @@ def call_view(model, view, entries, images, cache, budget, source_sha):
 
 def field_view(batch, number):
     answer = batch['fields'].get(str(number))
-    return {'receipt_id':batch['receipt_id'], 'view':batch['request']['view'], 'session':batch.get('session'),
+    result = {'receipt_id':batch['receipt_id'], 'view':batch['request']['view'], 'session':batch.get('session'),
             'model':batch.get('model',batch['request']['model']), 'status':batch['status'],
             'source_sha256':batch['request']['source_sha256'], 'number':number, 'answer':answer}
+    if answer is None:
+        result['reason'] = batch.get('reason') or 'requested_field_missing'
+    return result
 
 
 def protected_reading(before, after, views):
@@ -194,12 +199,14 @@ def authorized(change, source_sha):
     return (after,status,reason)==(change['after'],change['status'],change['reason'])
 
 
-def observe_page(model, state, current, directory, page, scene, lines, object_ids, source, image, budget):
+def observe_page(model, state, current, directory, page, scene, lines, object_ids, source, image, budget, *, targets=None):
     directory = Path(directory)
     work = directory/'source-readings'
     work.mkdir(parents=True,exist_ok=True)
     cache = state.job/'runtime'/'blind-views'
-    numbered = [(i,line) for i,line in enumerate(lines.values(),1) if min(line['bbox'][2:])>0]
+    target_ids = list(targets or {})
+    numbered = ([(i, targets[oid][0]) for i, oid in enumerate(target_ids, 1)] if targets is not None else
+                [(i,line) for i,line in enumerate(lines.values(),1) if min(line['bbox'][2:])>0])
     page_views = {}
     batches = []
     for start in range(0,len(numbered),16):
@@ -223,7 +230,7 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
         if not first:
             continue
         raw = line.get('ocr_raw_text',line['text'])
-        if (line.get('score',1)<.94 or not first.get('legible') or normalized(first.get('text',''))!=normalized(raw)
+        if (targets is not None or line.get('score',1)<.94 or not first.get('legible') or normalized(first.get('text',''))!=normalized(raw)
                 or any(intersection(line['bbox'],b)>=.5*line['bbox'][2]*line['bbox'][3] for b in flagged)):
             disputed.append((n,line))
             field_images[n] = crop
@@ -254,12 +261,17 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
         owners = [o for o in candidates if len(scene.text.members[o.id])==1 and o.text==line['text']]
         obj = owners[0] if len(owners)==1 and len(candidates)==1 else None
         primary = obj.id if obj else line['id']
-        if object_ids is not None and primary not in object_ids and not any(o.id in object_ids for o in candidates):
+        if targets is not None:
+            primary = target_ids[n-1]
+            obj = next((o for o in candidates if o.id == primary), None)
+        elif object_ids is not None and primary not in object_ids and not any(o.id in object_ids for o in candidates):
             continue
         record = {'protocol':'two-blind-views/1','object_id':primary,'ocr_id':line['id'],
                   'bbox':line['bbox'],'before':raw,'crop_file':str(crop_paths[n]),'crop_sha256':digest(crop_paths[n]),
                   'views':{'page':page_views[n]},'status':'ocr_retained','reason':'page_agrees_with_ocr','after':raw}
         area = line['bbox'][2]*line['bbox'][3]
+        if 'source_span' in line:
+            record['source_span'] = line['source_span']
         project_name = any(intersection(b,line['bbox'])>=.95*area for b in project_boxes)
         record['project_name'] = project_name
         if page_views[n]['answer'] is None:
@@ -270,13 +282,14 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
             record['views']['crop'] = local
             word = (full.get('answer') or {}).get('text','')
             witness = None
-            if word and (project_name or protected_reading(raw,word,[full,local])):
+            if targets is None and word and (project_name or protected_reading(raw,word,[full,local])):
                 witness = witness_for(word,line,numbered,page_views)
             if witness:
                 witness['crop_sha256'] = digest(crop_paths[line_numbers[witness['ocr_id']]])
                 record['witness'] = witness
             record['after'],record['status'],record['reason'] = decide(raw,full,local,witness,project_name=project_name)
-        native = obj is not None and scene.selected.get(obj.id,{}).get('kind')=='text' and not obj.spans
+        native = (targets[primary][1] if targets is not None else
+                  obj is not None and scene.selected.get(obj.id,{}).get('kind')=='text' and not obj.spans)
         if any(o.id in intrinsic for o in candidates) or any(intersection(b,line['bbox'])>=.95*area for b in picture_boxes):
             native = False
             record['delivery'] = 'intrinsic_image_text'

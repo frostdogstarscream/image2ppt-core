@@ -1,4 +1,4 @@
-"""Export only project-owned sources and a Claude Code skill entry."""
+"""Export project-owned sources and the Codex and Claude Code project skills."""
 import hashlib
 import json
 from datetime import datetime
@@ -22,18 +22,19 @@ OWN_SOURCES = [
 for flavor in ('image2ppt','image2ppt-claude'):
     OWN_SOURCES.extend('skills/'+flavor+'/'+name for name in skill_files(ROOT/'skills'/flavor))
 
-README = r"""# image2PPT 技能源码包与 Claude Code 入口
+README = r"""# image2PPT 源码包与 Codex、Claude Code 项目技能
 
-本包导出 image2PPT v0.1 的项目自有源码，并提供 Claude Code 的项目级技能入口。
+本包导出 image2PPT v0.1 的项目自有源码，并提供 Codex 和 Claude Code 的项目级技能入口。
 它是源码及接入包；没有包含 PPT 编译、渲染引擎，不能当作独立安装包。
 
-Codex 主 Skill 已面向 r10 三分支自动产品；本包仍仅导出固定核心，
-不包含 services/product 后台、模型或完整自动产品部署。运行自动任务须回到
-具有 parallel_pipeline 的完整项目工作区。手工流程仅为历史参考。
+本包提供固定编译核心与工程技能。自动还原请在完整产品工作树按
+`services/product/OPENCODE_RUNTIME.md` 向 `POST /api/v1/jobs` 上传原图。
+该服务另外部署。r10/R12 用于冻结对照，手工流程用于明确标注的实验。
 
 ## 包含的内容
 
 - `skills/image2ppt/`：Codex Skill 源码及原有 UI 元数据。
+- `.agents/skills/image2ppt/` 是 Codex 在解压后的项目目录中读取的技能副本，内容取自 `skills/image2ppt/`。
 - `skills/image2ppt-claude/`：Claude Code Skill 的**维护源**（bash 调用形式、多页 `compose` 说明）。
 - `.claude/skills/image2ppt/`：由上述维护源写入的项目级 Claude Code 入口，改用当前具备视觉能力的模型分析图片。
 - `scripts/`、`image2ppt.ps1`、`image2ppt.sh`：准备图片、校验 SlideIR、编译、回渲染、编辑扰动检查与多页合成。
@@ -168,15 +169,12 @@ def main():
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(source.read_bytes())
 
-    # The Claude Code entry has its own maintained source. Do not derive it from
-    # the Codex skill by string substitution: that drifts silently whenever the
-    # Codex wording moves, and it cannot express Claude-Code-specific guidance.
-    claude_source = ROOT / "skills/image2ppt-claude"
-    claude = package / ".claude/skills/image2ppt"
-    for name in skill_files(claude_source):
-        target = claude / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes((claude_source / name).read_bytes())
+    for flavor, project_directory in (("image2ppt", ".agents"), ("image2ppt-claude", ".claude")):
+        source = package / "skills" / flavor
+        for name in skill_files(source):
+            target = package / project_directory / "skills/image2ppt" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((source / name).read_bytes())
     (package / "README.md").write_text(README, encoding="utf-8", newline="\n")
     example = {"node_modules": "C:/path/to/existing/node_modules",
                "python": "C:/path/to/python.exe",

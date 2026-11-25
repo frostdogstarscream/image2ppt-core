@@ -262,7 +262,8 @@ test('the skill asks for per-sub-region decomposition, not whole-region crops',a
     assert.doesNotMatch(text,/Keep complex visual modules as cropped images/,'整块裁图的无条件规则不得回归');
     assert.doesNotMatch(text,/Only when the background itself cannot be rebuilt does the whole region/,'整块保留的逃生舱不得回归');
     if(file.includes('image2ppt/SKILL.md')){
-      assert.match(text,/product\.parallel_pipeline\.run/,'Codex 使用自动产品入口');
+      assert.match(text,/POST \/api\/v1\/jobs/,'自动还原使用 OpenCode 上传入口');
+      assert.match(text,/r10\/R12[^\n]*frozen comparison/i,'说明旧链路用于冻结对照');
       assert.match(text,/Do not hand-author SlideIR/,'不得用手工 IR 替代自动规划');
       assert.match(text,/Split safe subregions/,'安全子区域独立重建');
       assert.match(text,/Font sharing is not a pixel dependency/,'样式不得扩大像素回退范围');
