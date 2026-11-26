@@ -15,7 +15,7 @@ class TextMaskCompletion:
     report: dict
 
     @classmethod
-    def analyze(cls, source, original_mask, protected, bbox, backing, *, glyph_height):
+    def analyze(cls, source, original_mask, protected, bbox, backing, *, glyph_height, light_paragraph=False):
         if (original_mask.dtype != bool or protected.dtype != bool
                 or original_mask.shape != source.shape[:2] or protected.shape != original_mask.shape
                 or backing.shape != source.shape or not original_mask.any()):
@@ -51,6 +51,56 @@ class TextMaskCompletion:
             component_evidence.append({'component': index, 'pixels': int(component.sum()),
                 'confirmed_seed_fraction': coverage, 'max_seed_distance': extent,
                 'protected_conflict': peer_conflict, 'accepted': accepted})
+        halo_pixels = 0
+        if light_paragraph:
+            # Codec ringing can run through the pale backing between two OCR lines.
+            # Require a short source-contrast path to ink, dense local stroke support
+            # and an independently fitted light ground. Never cross protected ink.
+            x, y, w, h = map(round, bbox)
+            region = np.s_[y:y+h, x:x+w]
+            seed = original_mask[region]
+            strong = source[region][seed]
+            ground = backing[region].astype(float)
+            if np.percentile(ground, 5) >= 195 and np.median(ground[seed]-strong) > 90:
+                radius_px = min(8, max(2, round(glyph_height*.34)))
+                # Re-test components above the weak noise floor. A one-level
+                # bridge can join a real stroke to an entire benign gradient.
+                count, islands, stats, _ = cv2.connectedComponentsWithStats(
+                    (delta[region] > 4).astype(np.uint8), 8)
+                for i in range(1, count):
+                    island = islands == i
+                    if ((island & seed).sum() >= .35 * stats[i, cv2.CC_STAT_AREA]
+                            and distance[region][island].max() <= radius
+                            and not (protected[region] & island).any()):
+                        semantic[region] |= island
+                width = 2*radius_px+1
+                kernel = np.ones((3,3), np.uint8)
+                density = cv2.blur(seed.astype(np.float32), (width,width))
+                peer = cv2.dilate(protected[region].astype(np.uint8), kernel) > 0
+                fringe = ((delta[region] > 3) & (delta[region] <= 24) & (density >= .15)
+                          & (distance[region] <= radius_px) & ~peer)
+                grown = seed | antialias[region]
+                for _ in range(radius_px):
+                    grown |= (cv2.dilate(grown.astype(np.uint8), kernel) > 0) & fringe
+                # A weaker second bright lobe can follow a dark printed edge.
+                # Verify the four samples in order, including a return to ground.
+                signed = source[region].astype(float) - ground
+                bright = signed.mean(2)
+                for axis in (0, 1):
+                    for direction in (-1, 1):
+                        def lag(array, count):
+                            return np.roll(array, direction*count, axis=axis)
+                        echo = (lag(seed,3) & (lag(bright,2) >= bright*1.5)
+                                & (np.abs(lag(bright,1)) <= 3) & (bright >= 3)
+                                & (signed.min(2) >= -2) & (delta[region] <= 12)
+                                & ~(peer | lag(peer,1) | lag(peer,2) | lag(peer,3)))
+                        boundary = [slice(None), slice(None)]
+                        boundary[axis] = slice(0,3) if direction > 0 else slice(-3,None)
+                        echo[tuple(boundary)] = False
+                        semantic[region] |= echo
+                extra = grown & fringe & ~semantic[region]
+                halo_pixels = int(extra.sum())
+                semantic[region] |= extra
         possible = semantic & allowed & ~original_mask & ~antialias
         evidence = {'confirmed_text': original_mask.copy(), 'text_antialias': antialias,
                     'possible_text': possible, 'protected_peer': protected & scope}
@@ -68,7 +118,7 @@ class TextMaskCompletion:
                   'mask_counts': {name: int(mask.sum()) for name, mask in masks.items()},
                   'unassigned_contrast_pixels': int(unassigned.sum()),
                   'unassigned_components': components, 'max_completion_radius': radius,
-                  'semantic_components': component_evidence,
+                  'semantic_components': component_evidence, 'corroborated_halo_pixels': halo_pixels,
                   'unknown_note': 'Includes unchanged low-contrast background; visible unassigned signal blocks staging',
                   'semantic_authority': 'resolved source text plus bounded source-contrast stroke connections'}
         for mask in [*evidence.values(), *masks.values()]:

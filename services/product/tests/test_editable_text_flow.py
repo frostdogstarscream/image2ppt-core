@@ -13,6 +13,66 @@ from product.runtime.batch_backbone import _merge_structural_ocr_items
 from product.runtime.semantic_text import apply_heading_weights, is_body_continuation
 
 
+def test_light_paragraph_can_explain_a_compression_echo_without_claiming_neighbor():
+    from product.recovery.text_mask_completion import TextMaskCompletion
+    ground = np.full((70,128,3),225,np.uint8)
+    source = ground.copy()
+    seed = np.zeros(source.shape[:2],bool)
+    seed[28:34,22:97] = True
+    source[seed] = 10
+    source[34,22:97] = 248
+    source[36,22:97] = 233
+    protected = np.zeros_like(seed)
+    protected[36,65:72] = True
+    source[46,22:97] = 233
+    result = TextMaskCompletion.analyze(source, seed, protected, [4,4,118,58], ground,
+                                        glyph_height=23, light_paragraph=True)
+    complete = result.masks['semantic_completion']
+    assert complete[36,45] and not complete[46].any() and not complete[protected].any()
+    assert not TextMaskCompletion.analyze(source, seed, protected, [4,4,118,58], ground,
+                                          glyph_height=23).masks['semantic_completion'][36,45]
+
+
+def test_ocr_paragraph_evidence_distinguishes_a_continuous_side_rail_from_two_bullets():
+    source = np.full((180,480,3), 248, np.uint8)
+    source[30:98,48:52] = 90
+    lines = [
+        dict(id='a', ocr_line_id='la', text='辅助生成完整记录和异常摘要', bbox=[76,30,330,26],
+             color_hex='121212', est_size_px=24, bold=False),
+        dict(id='b', ocr_line_id='lb', text='用于业务分析。', bbox=[77,68,180,27],
+             color_hex='121212', est_size_px=24, bold=False),
+    ]
+    groups = [dict(score=.99,lines=['la','lb'])]
+    def merge():
+        return _merge_structural_ocr_items(source, lines, [], editable_paragraphs=True, ocr_boxes=groups)[0]
+    paragraph, = merge()
+    assert paragraph['natural_wrap'] and paragraph['ocr_line_ids'] == ['la','lb']
+    source[30:98,48:52] = 248
+    source[38:47,50:58] = source[76:85,50:58] = 90
+    assert len(merge()) == 2
+
+
+def test_repeated_template_reuses_weight_only_on_the_matching_page_member(tmp_path):
+    from product.runtime.semantic_text import reuse_template_fonts
+    pixels = np.full((60,160,3),255,np.uint8)
+    pixels[10:25,20:24] = 25
+    path = tmp_path/'prior.png'
+    Image.fromarray(pixels).save(path)
+    prior = Style(id='head',role='title',size_px=22,ea='A',latin='A',color='222222',bold=True)
+    current = prior.model_copy(update={'bold':False})
+    t = Text(id='item',bbox=[16.,8.,56.,24.],z=1,style='head',text='重复标题')
+    other = t.model_copy(update={'id':'other','text':'其他标题'})
+    def scene(style, texts):
+        return SimpleNamespace(text=SimpleNamespace(texts=texts,styles=[style]),selected={},
+                               source_sha256='source',ownership={row.id:'RESOLVED' for row in texts})
+    graph = scene(current,[t.model_copy(),other])
+    pages = [(scene(prior,[t]),path)]
+    faces = {'fonts':[{'family':'A','bold':True}]}
+    assert reuse_template_fonts(graph,pixels,pages,faces,{'item'}) == []
+    assert reuse_template_fonts(graph,pixels,pages,faces,set())[0]['member'] == 'item'
+    assert graph.text.texts[0].style != other.style and not current.bold
+
+
 def test_edit_room_stops_at_card_content_and_protected_source_without_moving_text():
     source = np.full((120,200,3),250,np.uint8)
     protected = np.zeros((120,200),bool)

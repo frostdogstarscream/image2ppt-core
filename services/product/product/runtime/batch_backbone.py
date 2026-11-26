@@ -32,7 +32,7 @@ from ..parallel_fusion import fuse_incremental_scene, is_decorative_subspan
 from ..parallel_store import Store, key
 from ..parallel_typography import calibrate, snap_ooxml_size_px, measure_text_appearance
 from ..resource_lease import lease
-from .semantic_text import apply_heading_weights, is_body_continuation, plain_line_gap
+from .semantic_text import apply_heading_weights, is_body_continuation, plain_line_gap, reuse_template_fonts
 
 
 def _merge_structural_ocr_items(
@@ -42,6 +42,7 @@ def _merge_structural_ocr_items(
     extra_logo_boxes: list[list[float]] | None = None,
     layout_regions: list[dict] | None = None,
     editable_paragraphs: bool = False,
+    ocr_boxes: list[dict] | None = None,
 ) -> tuple[list[dict], dict]:
     """Perform pre-scene structural grouping and relation analysis (Astra Step 2).
 
@@ -50,6 +51,10 @@ def _merge_structural_ocr_items(
     dual-color colon lines before `create_scene` locks individual single-line bboxes.
     """
     h_img, w_img = source.shape[:2]
+    adjacent_ocr_lines = {
+        pair for box in (ocr_boxes or []) if box.get('score', 0) >= .85
+        for pair in zip(box.get('lines', []), box.get('lines', [])[1:])
+    } if editable_paragraphs else set()
     items = []
     for it in raw_items:
         rgb = [int(it['color_hex'][i:i + 2], 16) for i in (0, 2, 4)]
@@ -237,7 +242,7 @@ def _merge_structural_ocr_items(
                     best_idx = b_idx
         return best_idx
 
-    def _has_independent_left_markers(box_a: list[float], box_b: list[float]) -> bool:
+    def _has_independent_left_markers(box_a: list[float], box_b: list[float], source_continuation: bool) -> bool:
         b1, b2 = _left_bullet_index(box_a), _left_bullet_index(box_b)
         if b1 is not None and b2 is not None and b1 != b2:
             return True
@@ -260,6 +265,13 @@ def _merge_structural_ocr_items(
         if int(fg_a.sum()) < 8 or int(fg_b.sum()) < 8:
             return False
         fg_gap = np.abs(source[ya1:yb0, x_left:x_right].astype(np.float32) - bg).max(2) > 16.0
+        if source_continuation:
+            # A continuous card separator touches both lines but is not two bullets.
+            rail = fg_a.all(0) & fg_gap.all(0) & fg_b.all(0)
+            if rail.any():
+                other = ~cv2.dilate(rail.astype(np.uint8)[None, :], np.ones((1, 5), np.uint8))[0].astype(bool)
+                if not (fg_a[:, other].sum() >= 8 and fg_b[:, other].sum() >= 8):
+                    return False
         if float(fg_gap.mean()) > 0.08:
             return False
         # Require left marker blobs near a similar x-column
@@ -286,6 +298,11 @@ def _merge_structural_ocr_items(
         bx, by, bw, bh = cand['bbox']
         gap_y = by - (ay + ah)
         avg_h = 0.5 * (ah + bh)
+        source_continuation = (
+            (last_line['id'], cand['ocr_line_id']) in adjacent_ocr_lines
+            and is_body_continuation({'align': 'left'}, [last_line, cand])
+            and gap_y <= .80 * avg_h
+        )
         rgb_diff = max(abs(a - b) for a, b in zip(last_line['rgb'], cand['rgb']))
         max_sz = max(cur_item['est_size_px'], cand['est_size_px'])
         stacked_short_header = (
@@ -306,7 +323,7 @@ def _merge_structural_ocr_items(
             and gap_y <= max(8.0, 0.45 * avg_h)
             and rgb_diff <= 20
         )
-        if max_sz > 23.0 and not (stacked_short_header or wrapped_body_prose):
+        if max_sz > 23.0 and not (stacked_short_header or wrapped_body_prose or source_continuation):
             return False, 'left'
         in_layout_para = _same_layout_paragraph(last_line['bbox'], cand['bbox'])
         size_diff = abs(last_line['est_size_px'] - cand['est_size_px'])
@@ -317,7 +334,8 @@ def _merge_structural_ocr_items(
             return False, 'left'
         if rgb_diff > 26:
             return False, 'left'
-        if not (-5.0 <= gap_y <= (max(14.0, 0.78 * avg_h) if in_layout_para else max(10.0, 0.62 * avg_h))):
+        gap_limit = max(14.0, .78 * avg_h) if in_layout_para else max(10.0, .62 * avg_h)
+        if gap_y < -5.0 or (gap_y > gap_limit and not source_continuation):
             return False, 'left'
         x_ov = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
         min_w = max(1.0, min(aw, bw))
@@ -331,7 +349,7 @@ def _merge_structural_ocr_items(
             return False, 'left'
         if not in_layout_para and size_diff > 2.8 and not (gap_y <= 4.0 and left_aligned and rgb_diff <= 20):
             return False, 'left'
-        if _has_independent_left_markers(last_line['bbox'], cand['bbox']):
+        if _has_independent_left_markers(last_line['bbox'], cand['bbox'], source_continuation):
             return False, 'left'
         # Do not merge across an asset or horizontal divider line.
         x_min = max(0, int(round(min(ax, bx))))
@@ -721,10 +739,47 @@ def _split_pill_divider_ocr_lines(source: np.ndarray, ocr: dict) -> bool:
     return changed
 
 
+def _include_screen_edges(source, box, texts):
+    """Trace a dark screen's contiguous edge into a smooth surrounding ground."""
+    x, y, w, h = box
+    exterior_texts = [item['bbox'] for item in texts if intersection(item['bbox'], box) == 0]
+    bounds = [x, y, x+w, y+h]
+    for axis, side in ((0, -1), (0, 1), (1, -1), (1, 1)):
+        view = source if axis else source.transpose(1, 0, 2)
+        start, length = (x, w) if axis else (y, h)
+        lo, hi = start + length//10, start + length - length//10
+        edge = (y if side < 0 else y+h-1) if axis else (x if side < 0 else x+w-1)
+        if not (0 <= edge+side*22 < len(view)):
+            continue
+        outer = np.stack([view[edge+side*d, lo:hi] for d in range(17, 23)]).astype(float)
+        ground = np.median(outer, axis=0)
+        if np.percentile(ground, 10) < 185:
+            continue
+        ink = view[edge-side*2, lo:hi].astype(float)
+        if np.median((ground-ink).max(1)) < 65:
+            continue
+        last = 0
+        for d in range(1, 17):
+            delta = ground-view[edge+side*d, lo:hi]
+            # Only an edge-wide darkening contiguous with the screen is eligible.
+            strong_rim = d == 1 and np.mean(delta.max(1) > 15) >= .85
+            if not strong_rim and (np.percentile(np.abs(outer-ground), 90) > 6
+                                    or np.mean((delta.max(1) > 5) & (delta.min(1) >= -5)) < .80):
+                break
+            last = d
+        if last and last < 16:
+            strip = ([x, edge-last if side < 0 else edge+1, w, last] if axis else
+                     [edge-last if side < 0 else edge+1, y, last, h])
+            if not any(intersection(strip, other) > 0 for other in exterior_texts):
+                bounds[axis + (2 if side > 0 else 0)] += side*last
+    return [bounds[0], bounds[1], bounds[2]-bounds[0], bounds[3]-bounds[1]]
+
+
 def _detect_embedded_ui_frames(
     source: np.ndarray,
     measured_items: list[dict],
     layout_data: dict | None = None,
+    *, trace_edges: bool = False,
 ) -> list[list[int]]:
     """Detect embedded software UI screenshots / dark BI dashboards so they extract intact instead of fragmenting."""
     h_img, w_img = source.shape[:2]
@@ -765,7 +820,7 @@ def _detect_embedded_ui_frames(
                 continue
             cand = [bx, by, bw, bh]
             if _inside_count(cand, measured_items) >= 5:
-                frames.append(cand)
+                frames.append(_include_screen_edges(source, cand, measured_items) if trace_edges else cand)
 
     # Rule 2: Inset light multi-pane application window mockup (micro UI chrome + tiny UI icons)
     micro_texts = [
@@ -1231,6 +1286,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
                 current.setdefault('ocr',{})[str(page)]=str(file)
                 break
     ocr = json.loads(Path(current['ocr'][str(page)]).read_text('utf8'))
+    original_ocr_path = Path(current['ocr'][str(page)])
     if 'fonts' not in current:
         font_dir = directory / 'fonts'
         font_dir.mkdir(parents=True, exist_ok=True)
@@ -1396,6 +1452,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         extra_logo_boxes=extra_logo_boxes,
         layout_regions=(layout_data or {}).get('regions', []),
         editable_paragraphs=request.get('orchestrator') == 'editable_reconstruction',
+        ocr_boxes=ocr.get('boxes'),
     )
     if preflight or (profile and profile != 'baseline'):
         from ..recovery.marked_fields import split_items
@@ -1406,7 +1463,8 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         item['role'] = 'title' if est_px >= 26.0 else ('subtitle' if est_px >= 18.0 else ('caption' if est_px <= 12.0 else 'body'))
         if item.get('natural_wrap'):
             item['role'] = FLOWING_BODY
-    ui_frames = _detect_embedded_ui_frames(source, measured_items, layout_data)
+    ui_frames = _detect_embedded_ui_frames(source, measured_items, layout_data,
+                                           trace_edges=request.get('orchestrator') == 'editable_reconstruction')
     device_frames = []
     if request.get('orchestrator') == 'editable_reconstruction':
         from ..recovery.embedded_device import detect_device_frames
@@ -1505,6 +1563,13 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         if request.get('orchestrator') == 'editable_reconstruction':
             scene_relations['heading_weight_evidence'] = apply_heading_weights(
                 calibrated, source, shared_fonts, structure_info)
+            if page > 1:
+                previous_pages = ((service.graph(p), p['snapshot']['path'])
+                                  for p in current['pages'][:page-1] if p)
+                local_members = {member for group in scene_relations['heading_weight_evidence']
+                                 for member in group['members']}
+                scene_relations['repeated_template_fonts'] = reuse_template_fonts(
+                    calibrated, source, previous_pages, shared_fonts, local_members)
         if calibrated.model_dump() != graph.model_dump():
             from ..parallel_rebuild import build
             cal_dir = directory / 'calibrated-backing'
@@ -1537,6 +1602,22 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         else:
             item['ownership'] = 'DRAFT_PROPOSAL'
 
+    if request.get('orchestrator') == 'editable_reconstruction':
+        from .editable_draft import _page_objects
+        objects, relations = _page_objects(active_graph, structure_info) if active_graph else ([], [])
+        ledger = directory / 'source-text-inventory.json'
+        write(ledger, {
+            'source_sha256': digest(source_path), 'source': str(source_path),
+            'original_ocr_sha256': digest(original_ocr_path), 'original_ocr': str(original_ocr_path),
+            'lines': ocr.get('lines', []), 'ocr_paragraphs': ocr.get('boxes', []),
+            'corrections': structure_info.get('applied_ocr_corrections', []),
+            'visual_status': structure_info.get('vlm_status', 'SKIPPED'),
+            'objects': objects, 'relations': relations, 'styles': final_styles,
+            'embedded_frames': ui_frames,
+            'retained_low_confidence': [line['id'] for line in ocr.get('lines', [])
+                                        if line.get('score', 0) < .85],
+        })
+        current.setdefault('source_text_inventory', {})[str(page)] = str(ledger)
     counts = Counter(item['backing_class'] for item in measured_items)
     resolved_count = sum(1 for item in measured_items if item['ownership'] == 'RESOLVED')
     asset_summaries = (
@@ -1895,7 +1976,7 @@ def _chain_stage_from_spec(
                    for f in marked_routes if f.get('picture_frame')):
                 continue
             ui_seed = {'id': ui_id, 'bbox': uframe, 'kind': 'asset', 'picture_frame': uframe,
-                       'device_frame': device}
+                       'device_frame': device, 'screen_backing': recover_light_tile_marks and not device}
             if device:
                 ui_seed['text'] = ' / '.join(t.text for t in initial_graph.text.texts
                     if intersection(t.bbox, uframe) >= .9 * t.bbox[2] * t.bbox[3])

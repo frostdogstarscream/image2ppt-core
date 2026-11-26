@@ -136,7 +136,11 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
         stripe = striped_backing(source, box, context_protected, max_span=max_span)
         if stripe and stripe[1]['validation_p95_rgb'] < fit['validation_p95_rgb']:
             reference, fit = stripe
-    completion = TextMaskCompletion.analyze(source,original,protected,box,reference,glyph_height=style.size_px)
+    from ..parallel_contracts import EDITABLE_TEXT_METHOD, FLOWING_BODY
+    light_paragraph = (graph.text.method_version == EDITABLE_TEXT_METHOD and style.role == FLOWING_BODY
+                       and fit['validation_p95_rgb'] <= 3)
+    completion = TextMaskCompletion.analyze(source,original,protected,box,reference,glyph_height=style.size_px,
+                                            light_paragraph=light_paragraph)
     write(directory/'mask-completion.json',completion.report)
     np.savez_compressed(directory/'mask-evidence.npz',**completion.evidence,**completion.masks)
     for name,mask in completion.evidence.items():
@@ -180,6 +184,8 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
               'generated_candidates':len(records),'published':False})
     def save(method,raw,provenance):
         if budget:budget.reserve('background_candidates',{'region':identifier,'scene':key(graph.model_dump()),'method':method,'mask':mask_name})
+        if light_paragraph:
+            provenance = {**(provenance or {}), 'mask_evidence_method': 'light-paragraph/1'}
         name=mask_name+'--'+method
         row=save_trial(directory/name,source,mask,raw,protected,box,reference,fit,
             {'candidate':name,'mask_variant':mask_name,'method':method,'object_id':identifier,

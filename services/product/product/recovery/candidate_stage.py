@@ -277,8 +277,14 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
         if stripe is None:
             raise ValueError('scanline backing no longer corroborated')
         reference, fit_report = stripe
+    from ..parallel_contracts import EDITABLE_TEXT_METHOD, FLOWING_BODY
+    style = styles[text.style]
+    light_paragraph = prov.get('mask_evidence_method') == 'light-paragraph/1'
+    if light_paragraph and (graph.text.method_version != EDITABLE_TEXT_METHOD or style.role != FLOWING_BODY
+                            or fit_report['validation_p95_rgb'] > 3):
+        raise ValueError('paragraph mask lacks an independent light background reference')
     completion = TextMaskCompletion.analyze(source, original, protected, box, reference,
-                                             glyph_height=styles[text.style].size_px)
+                                             glyph_height=style.size_px, light_paragraph=light_paragraph)
     selected = np.array(Image.open(trial_directory/'mask.png').convert('L'))
     if saved['mask_variant']=='source_authorized_subset':
         if not np.isin(selected,[0,255]).all() or selected.shape!=source.shape[:2]:

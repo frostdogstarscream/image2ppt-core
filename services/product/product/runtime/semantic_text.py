@@ -47,6 +47,71 @@ def _ink_density(alpha):
     return float(alpha[ys.min():ys.max()+1, xs.min():xs.max()+1].mean())
 
 
+def reuse_template_fonts(graph, source, previous_pages, fonts, local_members):
+    """Transfer installed faces only for repeated, visually matching template text."""
+    installed = {(face['family'], face['bold']) for face in fonts['fonts']}
+    styles = {s.id: s for s in graph.text.styles}
+    anchors = defaultdict(list)
+    for t in graph.text.texts:
+        if (t.id not in local_members and not t.spans and t.id not in graph.selected
+                and graph.ownership.get(t.id) == 'RESOLVED' and styles[t.style].role in ('title','subtitle','caption')):
+            anchors[t.text].append(t)
+    matches = defaultdict(list)
+    for previous, path in previous_pages:
+        prev_styles = {s.id: s for s in previous.text.styles}
+        peers = [t for t in previous.text.texts if t.text in anchors and not t.spans
+                 and previous.ownership.get(t.id) == 'RESOLVED']
+        if not peers:
+            continue
+        with Image.open(path) as image:
+            if image.size != (source.shape[1], source.shape[0]):
+                continue
+            for peer in peers:
+                prior = prev_styles[peer.style]
+                face = (prior.ea, prior.latin, prior.bold)
+                if any((family,prior.bold) not in installed for family in face[:2]):
+                    continue
+                for t in anchors[peer.text]:
+                    style = styles[t.style]
+                    if (t.align != peer.align or style.role != prior.role
+                            or max(abs(a-b) for a,b in zip(t.bbox,peer.bbox)) > 2):
+                        continue
+                    x,y,w,h = map(round,t.bbox)
+                    px,py,pw,ph = map(round,peer.bbox)
+                    if min(w,h,pw,ph) < 1:
+                        continue
+                    sample = source[y:y+h,x:x+w]
+                    earlier = np.array(image.crop((px,py,px+pw,py+ph)).convert('RGB').resize((w,h)))
+                    if sample.shape != earlier.shape:
+                        continue
+                    ink = np.abs(earlier.astype(float)-np.median(earlier,axis=(0,1))).max(2) > 30
+                    if ink.sum() >= 16 and np.percentile(np.abs(sample.astype(float)-earlier)[ink], 95) <= 6:
+                        matches[t.id].append((face, previous.source_sha256, peer.id))
+    reports = []
+    for t in graph.text.texts:
+        records = matches[t.id]
+        if len({r[0] for r in records}) != 1:
+            continue
+        face = records[0][0]
+        style = styles[t.style]
+        if face != (style.ea,style.latin,style.bold):
+            updated = style.model_copy(update={'ea':face[0], 'latin':face[1], 'bold':face[2]})
+            same = next((s for s in styles.values() if s.model_dump(exclude={'id'}) ==
+                         updated.model_dump(exclude={'id'})), None)
+            if same is None:
+                if len(styles) >= 100:
+                    continue
+                updated.id = f'tpl-{t.id}'
+                if updated.id in styles:
+                    continue
+                graph.text.styles.append(updated)
+                styles[updated.id] = updated
+            t.style = (same or updated).id
+        reports.append({'member':t.id, 'source_pages':[r[1] for r in records],
+                        'source_members':[r[2] for r in records], 'face':list(face)})
+    return reports
+
+
 def apply_heading_weights(graph, source, fonts, inventory):
     """Compare actual heading ink with both installed faces across aligned page peers."""
     styles = {s.id: s for s in graph.text.styles}
@@ -54,7 +119,7 @@ def apply_heading_weights(graph, source, fonts, inventory):
     groups = []
     for text in graph.text.texts:
         if (graph.ownership.get(text.id) != 'RESOLVED' or text.spans or text.id in graph.selected
-                or '\n' in text.text or not re.search(r'[\u3400-\u9fff]', text.text)):
+                or '\n' in text.text):
             continue
         x, y, w, h = text.bbox
         if min(w,h) <= 0:
@@ -64,7 +129,12 @@ def apply_heading_weights(graph, source, fonts, inventory):
         role = next((e['category'] for e in inventory.get('elements', [])
                      if e.get('category') in ('title','section_header')
                      and intersection(text.bbox, e['bbox']) >= .86*w*h), None)
-        if role is None:
+        metric = re.fullmatch(r'\d+(?:[.,]\d+)?\s*(?:[%％+＋]|[\u3400-\u9fff]{1,2})', text.text.strip())
+        if metric and any(t.id != text.id and t.bbox[3] < h * .85
+                          and abs(t.bbox[0]+t.bbox[2]/2-x-w/2) <= max(w, t.bbox[2])*.5
+                          and -.15*h <= t.bbox[1]-y-h <= h for t in graph.text.texts):
+            role = 'metric'
+        if role is None or (role != 'metric' and not re.search(r'[\u3400-\u9fff]', text.text)):
             continue
         below = any(t.id != text.id and len(t.text.replace('\n','')) >= 8
                     and abs(t.bbox[0]-x) <= h*.65 and -.2*h <= t.bbox[1]-(y+h) <= h
@@ -89,7 +159,8 @@ def apply_heading_weights(graph, source, fonts, inventory):
         samples = []
         for t in members:
             s = styles[t.style]
-            if any((s.ea,b) not in faces for b in (False,True)):
+            family = s.ea if re.search(r'[\u3400-\u9fff]', t.text) else s.latin
+            if any((family,b) not in faces for b in (False,True)):
                 continue
             a = measure_text_appearance(source,t.bbox)
             if a is None or a['backing_error'] > 6 or a['agreement'] < .72:
@@ -104,7 +175,7 @@ def apply_heading_weights(graph, source, fonts, inventory):
             density = _ink_density(alpha)
             alternatives = []
             for bold in (False,True):
-                face = faces[s.ea,bold]
+                face = faces[family,bold]
                 try:
                     font = ImageFont.truetype(face['file'],max(1,round(s.size_px)),index=face['index'])
                     l,top,r,bot = font.getbbox(t.text)
@@ -129,7 +200,7 @@ def apply_heading_weights(graph, source, fonts, inventory):
             by_style[t.style].append(t)
         for sid, subset in by_style.items():
             style = styles[sid]
-            if style.bold == weight or (style.latin,weight) not in faces:
+            if style.bold == weight or any((family,weight) not in faces for family in (style.latin, style.ea)):
                 continue
             if any((t.style==sid and t.id not in identifiers) or any(sp.style==sid for sp in t.spans)
                    for t in graph.text.texts):

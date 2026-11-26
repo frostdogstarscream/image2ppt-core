@@ -108,12 +108,65 @@ def _split_protruding_ticks(fg_support: np.ndarray, box: list[int], size: tuple[
     return results or [('box', box)]
 
 
+def _layered_card_boxes(tile, outside):
+    """Locate the inset body and outer edge of a two-tone card from four measured edges."""
+    height, width = tile.shape[:2]
+    if height < 64 or width < height or width > height * 7:
+        return []
+    pixels = tile.astype(np.float32)
+    middle = pixels[:, width//5:width*4//5]
+    rows = np.median(middle, axis=1)
+    ground = np.median(outside.reshape(-1, 3), axis=0)
+    # An inset panel produces a horizontal transition shared across the card.
+    steps = np.abs(rows[2:]-rows[:-2]).max(1)
+    top = height//5 + int(np.argmax(steps[height//5:2*height//3])) + 1
+    header = np.median(rows[height//8:top-2], axis=0)
+    body = np.median(rows[top+3:height*4//5], axis=0)
+    if (np.max(np.abs(header-body)) < 12 or np.max(np.abs(header-ground)) < 14
+            or np.mean(np.abs(middle[top+4]-body).max(1) < 9) < .8):
+        return []
+    body_like = np.abs(pixels-body).max(2) + 3 < np.abs(pixels-header).max(2)
+    inner_rows = np.where(body_like[:, width//5:width*4//5].mean(1) > .8)[0]
+    # Exterior canvas can match the light inner body. Require continuous panel
+    # support behind both narrow side rails, and stop at the first closing edge.
+    rails = (np.abs(pixels-header).max(2) + 2 < np.abs(pixels-body).max(2))
+    mid_y = (top + height*4//5)//2
+    rails_x = np.where(rails[mid_y])[0]
+    mid = width//2
+    if not (rails_x < mid).any() or not (rails_x > mid).any():
+        return []
+    left = int(rails_x[rails_x < mid].max()+1)
+    right = int(rails_x[rails_x > mid].min())
+    if not (2 <= left <= width*.08 and 2 <= width-right <= width*.08):
+        return []
+    central_body = np.isin(np.arange(height), inner_rows)
+    stops = np.where(~central_body[top+4:])[0]
+    if not len(stops):
+        return []
+    bottom = int(top+4+stops[0])
+    if bottom-top < height*.25 or height-bottom > height*.20:
+        return []
+    outer_rows = np.where(np.abs(rows[bottom:]-ground).max(1) >= 12)[0]
+    if not len(outer_rows) or outer_rows[0] > 1 or np.any(np.diff(outer_rows) != 1):
+        return []
+    outer_end = int(bottom+outer_rows[-1]+1)
+    # Include a transition scanline on the inset's lower rim if it lies
+    # between its two adjacent fills. The shape fitter verifies every pixel.
+    below = rows[min(height-1, bottom+2)]
+    direction = body-below
+    fraction = float(np.dot(rows[bottom]-below, direction) / max(1., np.dot(direction,direction)))
+    if .12 < fraction < .88 and np.max(np.abs(rows[bottom] - below - fraction*direction)) < 4:
+        bottom += 1
+    return [[left, top, right-left, bottom-top], [0, 0, width, outer_end]]
+
+
 def _discover_candidates(
     work_plate: np.ndarray,
     canvas_field: np.ndarray,
     scenery_guard: np.ndarray,
     *,
     is_flat_canvas: bool = True,
+    layered_cards: bool = False,
     bar_series: list | None = None,
 ) -> list[tuple[str, list[int]]]:
     h_img, w_img = work_plate.shape[:2]
@@ -299,6 +352,16 @@ def _discover_candidates(
     for kind, card_box in discover_bordered_cards(work_plate, scenery_guard):
         _add(kind, card_box, allow_tighter_shadow_box=True)
         _scan_nested_children(card_box)
+
+    if layered_cards:
+        for kind, (x, y, w, h) in list(found):
+            if kind == 'box':
+                panels = _layered_card_boxes(work_plate[y:y+h, x:x+w], canvas_field[y:y+h, x:x+w])
+                if panels and panels[-1][3] < h:
+                    seen_boxes.remove([x,y,w,h])
+                    found.remove((kind, [x,y,w,h]))
+                for dx, dy, cw, ch in panels:
+                    _add('box', [x+dx, y+dy, cw, ch], allow_tighter_shadow_box=True)
 
     cleaned: list[tuple[str, list[int]]] = []
     for kind, b in found:
@@ -676,6 +739,13 @@ def stage_containers_and_surfaces(
     # can convert to native shapes; pixel-level anomaly checks in `try_fit_native_shape_v2`
     # protect any unmodeled icon/photo pixels.)
     unresolved_guard = np.zeros((h_img, w_img), bool)
+    if recover_light_tile_marks:
+        # An extracted application's reconstructed backing is synthetic. It
+        # cannot supply fresh source evidence for another native card or border.
+        for selected in graph.selected.values():
+            if (selected.get('region_crop') and selected.get('complete_owner_scope')
+                    and any(s.startswith('ui-frame-') for s in selected.get('seed_ids', []))):
+                unresolved_guard |= _clamped_rect_mask(selected['restore_bbox'], size, pad=0)
     for frame in retained_frames:
         unresolved_guard |= _clamped_rect_mask(frame, size, pad=0)
     for t in graph.text.texts:
@@ -728,7 +798,8 @@ def stage_containers_and_surfaces(
 
     bar_series = []
     candidates = _discover_candidates(
-        work_plate, canvas_field, scenery_guard, is_flat_canvas=is_flat_canvas, bar_series=bar_series
+        work_plate, canvas_field, scenery_guard, is_flat_canvas=is_flat_canvas, bar_series=bar_series,
+        layered_cards=recover_light_tile_marks
     )
     for ps_cand in (baseline / 'page-structure.json', baseline.parent / 'page-structure.json'):
         if ps_cand.is_file():

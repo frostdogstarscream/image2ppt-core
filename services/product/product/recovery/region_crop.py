@@ -509,6 +509,7 @@ def plan_region_crops(
             'cuts': cuts,
             'fixed_frame': fixed_frame,
             'device_frame': bool(seed.get('device_frame')),
+            'screen_backing': bool(seed.get('screen_backing')),
         })
 
     changed = True
@@ -971,6 +972,50 @@ def _submask_any(entry: tuple[int, int, int, int, np.ndarray], box: list[int]) -
     return bool(sub_m[iy0 - my0:iy1 - my0, ix0 - mx0:ix1 - mx0].any())
 
 
+def _screen_backing_from_edges(source, box, protected, preliminary):
+    """Continue a pale carrier into a removed screen using four held-out edge strips."""
+    x,y,w,h = box
+    if min(x,y,source.shape[1]-x-w,source.shape[0]-y-h) < 6 or min(w,h) < 80:
+        return None
+    result = preliminary.astype(np.float32).copy()
+    yy,xx = np.ogrid[:h,:w]
+    corrections = np.zeros_like(result)
+    weights = np.zeros((h,w,1), np.float32)
+    old_errors, validation = [], []
+    for axis, side in ((0,-1),(0,1),(1,-1),(1,1)):
+        view = source if axis else source.transpose(1,0,2)
+        guard = protected if axis else protected.T
+        start, length = (x,w) if axis else (y,h)
+        edge = (y if side < 0 else y+h-1) if axis else (x if side < 0 else x+w-1)
+        offsets = edge+side*np.arange(1,7)
+        strips = view[offsets,start:start+length].astype(np.float32)
+        if guard[offsets,start:start+length].any() or np.percentile(strips,2) < 190:
+            return None
+        profile = np.median(strips[2:],axis=0).astype(np.float32)
+        profile = cv2.GaussianBlur(profile[None],(11,1),2)[0]
+        held = np.median(strips[:2],axis=0)
+        if np.percentile(np.abs(held-profile).max(1),95) > 6:
+            return None
+        index = 0 if side < 0 else -1
+        ref = result[index] if axis else result[:,index]
+        correction = profile-ref
+        if np.max(np.abs(correction)) > 18:
+            return None
+        distance = (yy if side < 0 else h-1-yy) if axis else (xx if side < 0 else w-1-xx)
+        weight = np.exp(-distance / max(8,min(h,w)*.12))[...,None]
+        corrections += weight*(correction[None] if axis else correction[:,None])
+        weights += weight
+        old_errors.append(np.abs(held-ref).max(1))
+        validation.append((axis,index,held))
+    result = np.uint8(np.clip(np.rint(result+corrections/np.maximum(1,weights)),0,255))
+    before = float(np.percentile(np.concatenate(old_errors),95))
+    after = float(np.percentile(np.concatenate([np.abs(held-(result[i] if axis else result[:,i])).max(1)
+                                                for axis,i,held in validation]),95))
+    if after >= before or after > 6:
+        return None
+    return result, {'method':'four-side-held-out-carrier/1','edge_p95_before':before, 'edge_p95_after':after}
+
+
 def stage_region_crops(
     baseline: str | Path,
     output: str | Path,
@@ -1172,6 +1217,11 @@ def stage_region_crops(
                     if np.isfinite(error) and error <= MOVABLE_RING_ERROR:
                         safety = 'MOVABLE'
                         backing_meta = {'ring_error': float(error), 'background_evidence': evidence}
+                        if crop.get('screen_backing') and crop.get('fixed_frame'):
+                            refined = _screen_backing_from_edges(lower_comp, [x,y,w,h], fit_protected, backing)
+                            if refined is not None:
+                                backing, proof = refined
+                                backing_meta['background_evidence'] = {**proof, 'base': evidence}
                     else:
                         backing_meta = {'reason': 'surrounding backing not independently fitted', 'ring_error': float(error)}
                 except ValueError as exc:

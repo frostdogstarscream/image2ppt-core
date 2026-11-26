@@ -17,8 +17,14 @@ def group_edit_targets(ir, target_ids=None):
             continue
         if not any(nodes[i]['type'] in ('image', 'text') for i in ids):
             continue
-        child = next((i for i in ids if nodes[i]['type'] == 'shape' and nodes[i].get('fill')
-                      and not nodes[i].get('fill_gradient') and nodes[i].get('fill_opacity', 1) > 0), None)
+        fills = [i for i in ids if nodes[i]['type'] == 'shape'
+                 and (nodes[i].get('fill') or nodes[i].get('fill_gradient'))
+                 and nodes[i].get('fill_opacity', 1) > 0]
+        # A card's carrier precedes an inset badge or accent as a recolor target.
+        def area(identifier):
+            box = nodes[identifier].get('bbox')
+            return box[2] * box[3] if box else 0
+        child = max(fills, key=area, default=None)
         groups.append((group['id'], list(ids), child))
     return groups
 
@@ -54,6 +60,7 @@ def probe_group(app, pptx, output, page, target, before, original, signature, ve
                 fill = group.GroupItems.Item(child_id).Fill
                 original_color = int(fill.ForeColor.RGB)
                 color = 0x2363CD if original_color != 0x2363CD else 0xD36C24
+                fill.Solid()
                 fill.ForeColor.RGB = color
             deck.Save()
         finally:
