@@ -1,0 +1,255 @@
+{
+  "scope": "10-page diagnostic deck, registered editing actions; production upload final QA pending",
+  "office": "16.0",
+  "deck_sha256": "7aff761aa3bc79ae584a261bd695ea015bb82e793e21dd310074f8aec798e24b",
+  "benchmark_sha256": "4c332007b4438d6c307a86e5f6de579e08302e3586619ffeaeed04835375625d",
+  "actions": [
+    {
+      "case": 1,
+      "page": 1,
+      "action": "text",
+      "target": "岗位职责",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "905a8843e0de57c76e57851a5c06ed4aeaec48c336271717e9d071f13fb6cea1",
+      "after_sha256": "0749a3b5a5ceee827ff212a2b43484c2383c03669e5a37755c1f386c315e8041"
+    },
+    {
+      "case": 2,
+      "page": 1,
+      "action": "fill",
+      "target": "岗位职责标题条",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "b3364a571ebd7dc98bc6fdf2278771df6d722ce0911bcef580d11c663f242b78",
+      "after_sha256": "453747601d67f44ca680a124b5a1a2b06de0f8b5c849db0186056e3a520fb714"
+    },
+    {
+      "case": 3,
+      "page": 2,
+      "action": "text",
+      "target": "围绕医院科研需求，开发场景化AI助手，将技术能力融入科研工作流程",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "7a57cc4d3a6ddd32dd83b59739f604fc4e6083d6cb1d3ccf87a7bf65182e9ad4",
+      "after_sha256": "a6b47cef65204ccdfdb10f5d96c56dc95da1673278c86026c675601b6ead2630"
+    },
+    {
+      "case": 4,
+      "page": 2,
+      "action": "text",
+      "target": "试用进展",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "1dd264773d76532e6a2a02dde815862718a95e28d6c0e94f230aac7ac329c51e",
+      "after_sha256": "f3de8953561e36bac16e31a2a89376ff780f62073dd369ce1cc27d38470cbdcc"
+    },
+    {
+      "case": 5,
+      "page": 3,
+      "action": "text",
+      "target": "企业服务",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "ecd9eded235bbff7102e4a4c33f78569db02bc4d84e6cb56ed23b7f6663935bc",
+      "after_sha256": "904c0f27e948e65d7b887747566c5b124e7de0fd99ab747d397f9756ec948ed8"
+    },
+    {
+      "case": 6,
+      "page": 3,
+      "action": "move",
+      "target": "系统协同",
+      "status": "NO_TARGET_OBJECT"
+    },
+    {
+      "case": 7,
+      "page": 4,
+      "action": "text",
+      "target": "政策文件",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "66322fa83c62d72a11a227bb1d586dea4afc4d34dd0c0fbef0d86429a4ba6261",
+      "after_sha256": "2a61522e4e400923371acf2f8e9c8b52e48d52ee976da920cc6175b12f7d9683"
+    },
+    {
+      "case": 8,
+      "page": 4,
+      "action": "fill",
+      "target": "政策文件底框",
+      "status": "NO_TARGET_OBJECT"
+    },
+    {
+      "case": 9,
+      "page": 5,
+      "action": "text",
+      "target": "辅助整理会议纪要、议定事项和任务清单，经确认后衔接办理。",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "6260555419fc707a0cf527dc01507fbd3c0e4e7afb0f15aaa2a637762cc28d1c",
+      "after_sha256": "0b79f8b23ad8a6d4c0148f8b7009a2220a3e00ffd4d525239de9596c76a77ad4"
+    },
+    {
+      "case": 10,
+      "page": 5,
+      "action": "move",
+      "target": "材料起草",
+      "status": "NO_TARGET_OBJECT"
+    },
+    {
+      "case": 11,
+      "page": 6,
+      "action": "text",
+      "target": "知识入库",
+      "status": "NO_TARGET_OBJECT"
+    },
+    {
+      "case": 12,
+      "page": 6,
+      "action": "fill",
+      "target": "知识服务闭环流程标题条",
+      "status": "NO_TARGET_OBJECT"
+    },
+    {
+      "case": 13,
+      "page": 7,
+      "action": "text",
+      "target": "来电",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "47a6914673138b49088af7cccbfe1d01e7698c1088c0eef109545c9425e54667",
+      "after_sha256": "627c540320da484b20e73c5848060d791fb055e4b8a5799b80a14eae599d71cd"
+    },
+    {
+      "case": 14,
+      "page": 7,
+      "action": "fill",
+      "target": "后续处置标题条",
+      "status": "NO_TARGET_OBJECT"
+    },
+    {
+      "case": 15,
+      "page": 8,
+      "action": "text",
+      "target": "医保基金异常",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "7bc3cd6ce3b5b6493947f3e6e1037b07936b173eda8eb5e70250f91f833232bf",
+      "after_sha256": "96fd1c10d276420391fe42688ab32165a0c4614c5448a72f1b95dace4f3b71ef"
+    },
+    {
+      "case": 16,
+      "page": 8,
+      "action": "delete",
+      "target": "医疗领域医院照片",
+      "status": "NO_TARGET_OBJECT"
+    },
+    {
+      "case": 17,
+      "page": 9,
+      "action": "text",
+      "target": "企业微信",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "5f9d3b3ec1054e2e1de93741c33033b5b04548b1182b1c7e1f532b4f1903d4ba",
+      "after_sha256": "459954e95540a3668ee4472b7471e4c0446d69619672688375597d9f68af6a1e"
+    },
+    {
+      "case": 18,
+      "page": 9,
+      "action": "delete",
+      "target": "企业微信手机界面",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "453ab6ef8919d663c1609b192e067e701132c6027d6c5fa9d25b6b3bf3bf32fe",
+      "after_sha256": "cc8711a921d7fd930b47dfe14aec9321954329ff74a546b53fdd26a199f16f6f"
+    },
+    {
+      "case": 19,
+      "page": 10,
+      "action": "text",
+      "target": "应用更广泛",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "403b412a0c3a01d83738e6ef6c1f59d045ebeedf4538a71785cc9d05f92e7726",
+      "after_sha256": "9cdf4988cfd9810e80f2ef5235aecbc5e2b0e98ecfdcbabf7ce95e5316f73658"
+    },
+    {
+      "case": 20,
+      "page": 10,
+      "action": "delete",
+      "target": "公文写作辅助图片",
+      "status": "EDIT_OBSERVED",
+      "edited_sha256": "b2d6b3bcfedc2a4d5b5210136e28663b5882696e4f7051f770fbc5e2ab86db63",
+      "after_sha256": "b650fb9010ed8bc215b4c0860fa3a7cd54d7f206e6feae5b9de10a7263d553e4"
+    }
+  ],
+  "text_outcomes": {
+    "registered": 11,
+    "observed_after_reopen": 10,
+    "missing_native_target": 1
+  },
+  "readability_examples": {
+    "5": {
+      "accepted": true,
+      "reasons": [],
+      "glyph_count": 6,
+      "visible_glyph_count": 6,
+      "frame_outside_pixels": 920,
+      "outside_pixels": 0,
+      "text_cleared_preview": "case-5-blank.png",
+      "text_cleared_sha256": "5ea25e05d513c69396fd5930bce49792d01d768d9d4c1f49930be85772cf7154"
+    },
+    "13": {
+      "accepted": true,
+      "reasons": [],
+      "glyph_count": 4,
+      "visible_glyph_count": 4,
+      "frame_outside_pixels": 312,
+      "outside_pixels": 0,
+      "text_cleared_preview": "case-13-blank.png",
+      "text_cleared_sha256": "98c2ed17b37f8b355e789e06c4fb6b648b70bcec0e8af208ecc3dd6fd18b487f"
+    }
+  },
+  "office_controls": {
+    "clean-verified": {
+      "report_sha256": "296ff6ea5b2b23c969556af38b94e1ae53348e37fa9aa02a1cc7867ad7df33e1",
+      "status": "PASS",
+      "records": [
+        {
+          "action": "replace-short",
+          "status": "PASS",
+          "pptx_sha256": "4671bacaf648f4a40273c8c4cc6a608b5290a34a97da1c7f86ee8c29fae7ed41",
+          "preview_sha256": "557650d1f953ad2e438da4191ed61d90caede4ee51dcd8cfbe750d708ce4797e",
+          "hidden_ink_pixels": null,
+          "reasons": []
+        },
+        {
+          "action": "replace-equal",
+          "status": "PASS",
+          "pptx_sha256": "64b41a6906815b9fe353e30e22415cddc58af01e0d4d1fa860e1eee17d94f49a",
+          "preview_sha256": "d2279cadfddf229998f7844bf48f4bdc0bbf9e83196e3b1fae5df7ac33647ab6",
+          "hidden_ink_pixels": null,
+          "reasons": []
+        }
+      ]
+    },
+    "obscured-verified": {
+      "report_sha256": "e39b264e0b6880be2f0b43f9feca953b002d71a875e1b3c1ef8fbaee176f844d",
+      "status": "FAIL",
+      "records": [
+        {
+          "action": "replace-short",
+          "status": "FAIL",
+          "pptx_sha256": "5961d4785ae65e6b7c286c7adde5fe9510d118368bd85447133d92cafbc7db1d",
+          "preview_sha256": "53f98ed99724846bfe7bf8fbd37a0e4c6d781c68f20331cd81d65a0d6af7a84d",
+          "hidden_ink_pixels": 349,
+          "reasons": [
+            "foreground_obscures_text"
+          ]
+        },
+        {
+          "action": "replace-equal",
+          "status": "FAIL",
+          "pptx_sha256": "49126ae42b159b6ad88633e466a3c4f50dac6f645c165da6b90f0de39ea356bd",
+          "preview_sha256": "3f45a853bae5f53ef75b004cd95f3a1d5a0588461621ca266f31294ec2d9ed12",
+          "hidden_ink_pixels": 349,
+          "reasons": [
+            "foreground_obscures_text"
+          ]
+        }
+      ]
+    }
+  },
+  "image_deletion_notes": {
+    "18": "phone removed; light background marks visible, cleanup not certified",
+    "20": "picture removed; a blue vertical mark remains, cleanup not certified"
+  }
+}

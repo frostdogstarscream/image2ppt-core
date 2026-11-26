@@ -27,11 +27,11 @@ def _is_transient_com_error(exc_or_reason) -> bool:
 
 def frame_feedback(result,graph,identifier):
     """Expose measured Office overflow separately from the source erase scope."""
-    rows=[r for r in result.get('replacements',{}).get('records',[]) if r['id']==identifier]
+    rows=[r for r in result.get('replacements',{}).get('records',[]) if r['id']==identifier and r.get('status') != 'PASS']
     if not rows or not any(r['layout']['overflow'] for r in rows):
         return None
     if any(not r['content_matches'] or not r['siblings_unchanged'] or not r['frame_unchanged']
-           or r['layout']['unexpected_wrap'] for r in rows):
+           or r['layout'].get('readability') or r['layout']['unexpected_wrap'] for r in rows):
         return None
     text=next(t for t in graph.text.texts if t.id==identifier)
     sizes=[]
@@ -86,6 +86,7 @@ def check_local(pptx, irs, directory, *, target_ids=None, original_sites=False):
                         continue
                     raise
                 replacement = inspect_text(pptx, irs, directory/'replacement', include_long=False,
+                                           **({'readable_text': True} if original_sites else {}),
                                            **({'target_ids': targets} if targets is not None else {})) if has_text else {
                     'status': 'NOT_APPLICABLE', 'reason': 'no native text objects'}
                 if replacement.get('status') == 'UNKNOWN' and attempt < 2 and _is_transient_com_error(replacement.get('reason', '')):

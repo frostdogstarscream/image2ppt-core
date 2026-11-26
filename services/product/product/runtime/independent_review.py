@@ -137,7 +137,8 @@ def _stateless_vlm_audit(
             'Additional panels show actual Office edits. Check original positions for old text and neighbors for damage. '
             'Check strictly for CRITICAL defects (`severity="critical"`): '
             'missing/deleted text or graphics in image (2) vs (1), corrupted/wrong text wording, or severe '
-            'double-rendered ghosting. Subtle font-weight, shadow omission, or minor gradient shade differences '
+            'double-rendered ghosting, visible clipping or overlap that hides content. Readable typeface substitutions, '
+            'natural reflow, modest font-weight changes, shadow omission, or minor gradient shade differences '
             'are `severity="minor"` (`font_or_shade_deviation`) and MUST NOT fail the audit (`passed=true`). '
             'Set `passed=false` ONLY when a `severity="critical"` defect exists.'
         )

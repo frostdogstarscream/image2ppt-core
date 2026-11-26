@@ -1694,6 +1694,7 @@ def _threadsafe_inpaint(raw_inpaint):
 
 def _collect_office_defects(office_result: dict, graph: SceneGraph, staged_ids: list[str]) -> tuple[dict, set[str]]:
     from ..parallel_residual_gate import residual_accepted
+    from ..parallel_edit_probe import replacement_accepted
     from .office import frame_feedback
     frame_repairs = {}
     bad_ids: set[str] = set()
@@ -1714,10 +1715,7 @@ def _collect_office_defects(office_result: dict, graph: SceneGraph, staged_ids: 
         oid = rec.get('id')
         if not oid:
             continue
-        ok = (rec.get('content_matches') and rec.get('siblings_unchanged')
-              and rec.get('frame_unchanged') and rec.get('outside_pixels', 0) == 0
-              and not rec.get('layout', {}).get('overflow')
-              and not rec.get('layout', {}).get('unexpected_wrap'))
+        ok = replacement_accepted(rec)
         if not ok:
             if oid in staged_set:
                 fb = frame_feedback(office_result, graph, oid)

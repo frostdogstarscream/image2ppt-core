@@ -661,17 +661,13 @@ class RuntimeService(ExplorationTools):
                     oid = rec.get('id')
                     if oid and residual_accepted(rec):
                         prev_res_pass.add(oid)
+            from ..parallel_edit_probe import replacement_accepted
             prev_repl_bad = set()
             for rec in (prev_res.get('replacements') or {}).get('records', []):
                 oid = rec.get('id')
                 if not oid:
                     continue
-                ok = (
-                    rec.get('content_matches') and rec.get('siblings_unchanged')
-                    and rec.get('frame_unchanged') and rec.get('outside_pixels', 0) == 0
-                    and not rec.get('layout', {}).get('overflow')
-                    and not rec.get('layout', {}).get('unexpected_wrap')
-                )
+                ok = replacement_accepted(rec)
                 if not ok:
                     prev_repl_bad.add(oid)
             prev_passed = prev_res_pass - prev_repl_bad - ({failed_oid} if failed_oid else set())

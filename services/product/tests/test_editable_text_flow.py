@@ -151,3 +151,40 @@ def test_page_heading_weight_uses_real_peer_ink_and_preserves_unrelated_style():
     draw.rectangle((337,16,475,55),fill='white')
     draw.text((340,20),'业务办理',font=ImageFont.truetype(str(font_files[0]),30),fill='#123456',anchor='lt')
     assert apply_heading_weights(graph,np.array(image),fonts,inventory) == []
+
+def test_office_explains_only_visible_replacement_ink_beyond_frame():
+    from product.parallel_edit_probe import assess_text_footprint, replacement_accepted
+    blank = np.full((20, 40, 3), 245, dtype=np.uint8)
+    after = blank.copy()
+    after[4:10, 5:8] = 30
+    after[4:10, 22:25] = 30
+    glyphs = [('文', (4, 3, 6, 8)), ('字', (21, 3, 6, 8))]
+    def inspect(render, backing=blank, letters=glyphs):
+        return assess_text_footprint(blank, render, backing, (2, 2, 10, 10), letters, (1, 1))
+    proof = inspect(after)
+    assert proof['accepted'] and proof['visible_glyph_count'] == 2
+    assert proof['frame_outside_pixels'] == 18 and proof['outside_pixels'] == 0
+    row = dict(status='PASS', content_matches=True, siblings_unchanged=True, frame_unchanged=True,
+               outside_pixels=0, layout=dict(overflow=True, unexpected_wrap=True, readability=proof))
+    assert replacement_accepted(row)
+    for key in ('content_matches', 'siblings_unchanged', 'frame_unchanged'):
+        assert not replacement_accepted({**row, key: False})
+    assert not replacement_accepted({**row, 'outside_pixels': 1})
+    assert not replacement_accepted({**row, 'layout': {'overflow': True}})
+    missing = after.copy()
+    missing[:, 20:] = 245
+    assert 'glyph_without_visible_ink' in inspect(missing)['reasons']
+    neighbor = after.copy()
+    neighbor[16, 32] = 10
+    assert 'unexplained_pixel_change' in inspect(neighbor)['reasons']
+    rule = blank.copy()
+    rule[6, 21:27] = 50
+    assert 'nonuniform_backing_needs_review' in inspect(after, rule)['reasons']
+    assert 'glyph_outside_slide' in inspect(after, letters=[('字', (38, 5, 8, 8))])['reasons']
+
+
+def test_text_content_comparison_accepts_reflow_but_preserves_meaningful_characters():
+    from product.parallel_edit_probe import source_wording_matches
+    assert source_wording_matches('年度\r收入\v5.0万元', '年度收入5.0万元')
+    for changed in ('年度收入50万元', '年度收入5.0元', '年度收人5.0万元'):
+        assert not source_wording_matches(changed, '年度收入5.0万元')
