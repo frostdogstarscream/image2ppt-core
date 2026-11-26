@@ -174,6 +174,8 @@ def assess(job, current):
         fields = bind_separate_symbols(fields, members, source_fields, graphics)
         hits = [line['id'] for line in lines
                 if native_line_fields({**line, 'text': adopted.get(line['id'], line['text'])}, fields)]
+        raw_hits = [line['id'] for line in lines if native_line_fields(
+            {**line, 'text':line.get('ocr_raw_text',line['text'])}, fields)]
         updated.update(pending.intersection(hits))
         updated.update(adopted.keys() & set(hits))
         marks = read(current['experiment_marks'][k])['rows']
@@ -230,7 +232,8 @@ def assess(job, current):
                       'ocr_native_hits':sorted(set(hits)-pending), 'revised_ocr_lines':sorted(updated),
                       'pending_readings':{i:v for i,v in readings.items() if v['status']=='pending_confirmation'},
                       'model_confirmed_readings':{i:v for i,v in readings.items() if v['status']=='model_confirmed'},
-                      'text_content':{'native_fields':len(fields),'ocr_matched_lines':sorted(hits),
+                      'text_content':{'native_fields':len(fields),'ocr_matched_lines':sorted(raw_hits),
+                                      'adopted_reading_matched_lines':sorted(hits),
                                       'confirmed_source_ids':sorted(confirmed-set(pending)),
                                       'pending_source_ids':sorted(pending)},
                       'native_field_count':len(fields), 'local_fidelity':local, 'minor_deviations':minor,
