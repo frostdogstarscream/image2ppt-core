@@ -1380,7 +1380,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
     do_vlm_structure = (bool(run_layers) and has_vlm_creds) if run_structure is None else bool(run_structure)
     isolated = isolated_label_neighbors(ocr.get('lines', [])) if request.get('orchestrator') == 'editable_reconstruction' else {}
     if run_structure is None and request.get('orchestrator') == 'editable_reconstruction':
-        do_vlm_structure = bool(isolated) and has_vlm_creds
+        do_vlm_structure = has_vlm_creds
     structure_info = parse_page_structure(
         state, source_path, ocr, layout=layout_data, assets=[], fonts=fonts, use_vlm=do_vlm_structure
     )
@@ -1852,6 +1852,7 @@ def _chain_stage_from_spec(
     experiment_profile: str | None = None,
     recover_light_tile_marks: bool = False,
     prefer_rmbg_icons: bool = False,
+    native_picture_text: bool = False,
     marked_routes: tuple | list = (),
     prepared_tables=None,
     post_text_checkpoint: dict | None = None,
@@ -1935,7 +1936,7 @@ def _chain_stage_from_spec(
                     covered_texts.update(chart_scene['selected'][cid]['covered_text_ids'])
         for idx, tr in enumerate(trials_spec):
             oid = tr['object_id']
-            if oid in skip_ids or oid in covered_texts or touches_device(tr.get('bbox')):
+            if oid in skip_ids or oid in covered_texts or (not native_picture_text and touches_device(tr.get('bbox'))):
                 continue
             step_out = directory / tag / f'step-{idx:03d}-{oid}'
             frame_opt = (
@@ -1978,6 +1979,11 @@ def _chain_stage_from_spec(
             if ui_id in skip_ids or (wanted_filter is not None and ui_id not in wanted_filter):
                 continue
             device = uframe in devices
+            if native_picture_text and any(tr['object_id'] in staged_ids and intersection(tr['bbox'],uframe)
+                                          for tr in trials_spec):
+                # A crop of the original device could bake the old glyphs back in.
+                # Keep its already repaired plate and its native text together.
+                continue
             if device and any(rec.get('bbox') == uframe and rec.get('payload', {}).get(
                     'background_evidence', {}).get('method') == 'source-device-bezel-and-paired-side-strips/1'
                     for rec in initial_graph.selected.values()):
@@ -2569,6 +2575,7 @@ def restage_batch_candidate_subset(
             tag=f'stage-pass{attempt_idx + 1}',
             experiment_profile=spec.get('experiment_profile'),
             recover_light_tile_marks=spec.get('recover_light_tile_marks', False),
+            native_picture_text=spec.get('native_picture_text',False),
             prefer_rmbg_icons=spec.get('prefer_rmbg_icons', False),
             marked_routes=spec.get('marked_routes', ()),
             trials_spec=spec['trials'],
@@ -2816,7 +2823,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     text_targets = [
         t for t in initial_graph.text.texts
         if t.id not in initial_graph.selected
-        and t.id not in ui_text_ids
+        and (request.get('orchestrator') == 'editable_reconstruction' or t.id not in ui_text_ids)
         and initial_graph.ownership.get(t.id) == 'RESOLVED'
         and (wanted_filter is None or t.id in wanted_filter)
     ]
@@ -2890,7 +2897,33 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             def capture(image, mask):
                 masks[obj.id] = mask.copy()
                 raise ValueError('deferred to local group repair')
-            return _probe_text(obj, inpaint=(safe_inpaint if variant == 'shape-only' else capture) if safe_inpaint else None)
+            result = _probe_text(obj, inpaint=(safe_inpaint if variant == 'shape-only' else capture) if safe_inpaint else None)
+            if request.get('orchestrator') != 'editable_reconstruction':
+                return result
+            if result['status'] == 'PRECHECK_PASS':
+                if not result['method'].startswith('layerd-'):
+                    return result
+                evidence = json.loads((result['trial_dir']/'residual_report.json').read_text('utf8'))
+                if (not evidence.get('nonplanar_backing_proof') or
+                        evidence['reference_context']['validation_p95_rgb'] > 3 or evidence['scope_error_p95_rgb'] < 5):
+                    return result
+                trial_root = result['trial_dir'].parent
+            elif result['failure'] in {'MASK_INCOMPLETE','BACKGROUND_REPAIR_FAILED','INSUFFICIENT_CONTEXT','PROTECTED_NEIGHBOR','INVALID_MASK'}:
+                trial_root = result['trial_root']
+            else:
+                return result
+            from ..recovery.background_adapter import RecoveryBlocked
+            from ..recovery.interletter import field_trial
+            try:
+                trial = field_trial(initial_graph, obj, initial_baseline, trial_root)
+            except RecoveryBlocked as exc:
+                result['attempts'].append({'candidate':'interletter','status':'BLOCKED','reason':str(exc)})
+                return result
+            result['attempts'].append({'candidate':'interletter','status':trial['status']})
+            if trial['status'] == 'PRECHECK_PASS':
+                return {'object':obj,'status':'PRECHECK_PASS','trial_dir':trial_root/trial['candidate'],
+                        'method':trial['method'],'attempts':result['attempts']}
+            return result
         with ThreadPoolExecutor(max_workers=workers) as pool:
             outcomes = list(pool.map(local_probe, text_targets))
         containers = [el for el in inventory.get('elements', []) if el['category'] in ('card_shape','photo','ribbon_shape','table')]
@@ -2959,7 +2992,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
                             ev.append(state.register(png, 'candidate_observation')['id'])
                 failed_regions.append({
                     'object_id': t_obj.id, 'kind': 'text', 'text': t_obj.text, 'bbox': t_obj.bbox,
-                    'failure': item['failure'], 'reason': item['reason'], 'evidence_ids': ev[:4],
+                    'failure': item['failure'], 'reason': item['reason'], 'attempts':item.get('attempts', []), 'evidence_ids': ev[:4],
                 })
 
     trials_spec = [
@@ -2982,7 +3015,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         {fr['object_id'] for fr in failed_regions
          if fr.get('kind') == 'text'
          and _classify_failed_region(fr, initial_graph, logo_ids, [])['max_repair_attempts'] == 0}
-        | ui_text_ids
+        | (set() if request.get('orchestrator') == 'editable_reconstruction' else ui_text_ids)
         | {t.id for t in initial_graph.text.texts
            if t.id not in initial_graph.selected and (t.id in logo_ids or initial_graph.ownership.get(t.id) != 'RESOLVED')}
     )
@@ -3020,6 +3053,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         prepared_tables=prepared_tables,
         experiment_profile=request.get('experiment_profile'),
         recover_light_tile_marks=request.get('orchestrator') == 'editable_reconstruction',
+        native_picture_text=request.get('orchestrator') == 'editable_reconstruction',
         prefer_rmbg_icons=prefer_rmbg_icons,
         marked_routes=routes,
         trials_spec=trials_spec,
@@ -3071,6 +3105,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'initial_baseline': str(initial_baseline),
             'experiment_profile':request.get('experiment_profile'),
             'recover_light_tile_marks':request.get('orchestrator') == 'editable_reconstruction',
+            'native_picture_text':request.get('orchestrator') == 'editable_reconstruction',
             'prefer_rmbg_icons':prefer_rmbg_icons,
             'marked_routes':routes,
             'cache_dir': str(directory),

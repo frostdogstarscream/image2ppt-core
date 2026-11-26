@@ -98,6 +98,16 @@ def assess_trial(source, mask, raw, protected, bbox, reference, reference_report
               'protected_integrity': not (changed & protected).any(),
               'outside_mask_integrity': not (changed & ~mask).any(),
               'raw_writeback_identity': np.array_equal(written[mask], raw[mask])}
+    if metadata.get('method') == 'interletter' and reference_report.get('method') == 'interletter':
+        # The local fit independently measured variation in untouched gaps.
+        # Keep original gap pixels; at stroke sites the complete fitted ground
+        # must have been written and the seams must match nearby actual paper.
+        noise = reference_report['gap_noise_rgb']
+        missing = scope & (source_signal > noise) & ~mask
+        residual = (scope & mask & (error > 3)) | missing
+        checks.update(reference_context=reference_report['validation_p95_rgb'] <= 8,
+                      complete_visible_scope=not missing.any(), no_visible_original_signal=not residual.any(),
+                      background_colour=not (error[mask] > 3).any(), seam=seam_p95 <= noise and seam_max <= noise)
     quality_mode = 'MEASURED' if checks['reference_context'] else 'UNKNOWN'
     nonplanar = None
     if not all(checks.values()) and checks['protected_integrity'] and checks['outside_mask_integrity'] and checks['raw_writeback_identity']:

@@ -111,7 +111,8 @@ def isolated_label_neighbors(lines):
     matches = {}
     for line in lines:
         token = line.get('text', '').strip()
-        if len(token) != 1 or not token.isalpha() or line.get('score', 0) < .85:
+        uncertain_symbol = 0 < len(token) <= 2 and line.get('score', 0) < .85
+        if token.isdecimal() or not (uncertain_symbol or (len(token) == 1 and token.isalpha())):
             continue
         x, y, w, h = line['bbox']
         if h < 8 or not .55 <= w/h <= 1.5:

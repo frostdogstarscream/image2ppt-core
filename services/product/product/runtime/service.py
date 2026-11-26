@@ -974,7 +974,7 @@ class RuntimeService(ExplorationTools):
                   'mode':os.environ.get('IMAGE2PPT_OFFICE_MODE','local')}
         if text_layer_audit:
             identity['text_layer_inputs'] = [
-                {name: digest(Path(ir).parent/name) for name in ('source.png','runtime-ocr-protection.json',
+                {name: digest(Path(ir).parent/name) for name in ('source.png','source-plate.png','runtime-ocr-protection.json',
                  'page-structure.json','embedded-ui-frames.json') if (Path(ir).parent/name).is_file()} for ir in irs]
         if scoped is not None:
             identity['target_ids'] = scoped
@@ -1094,6 +1094,10 @@ class RuntimeService(ExplorationTools):
                 if layer.get('type_conflicts'):
                     result.update(status='REVIEW_REQUIRED', failure='GRAPHIC_EXPORTED_AS_TEXT', page=i)
                     return result
+                if layer.get('coverage_status') != 'INVENTORY_COVERED':
+                    result.update(status='REVIEW_REQUIRED', failure='WHOLE_PAGE_TEXT_INCOMPLETE', page=i,
+                                  text_blockers=layer.get('blockers', []))
+                    return result
                 required.append(state.register(blank, 'text_cleared_preview'))
             images, _ = panels(src_path, preview, page['ir'],
                                result['office_directory'], i, directory/f'panels-{i:02d}', **site_options)
@@ -1151,6 +1155,11 @@ class RuntimeService(ExplorationTools):
                 or (backend=='moma' and visual.get('backend')!='moma')
                 or visual.get('composition_sha256') != key(composition)):
             return {'status': 'REVIEW_REQUIRED', 'reason': 'current Office and visual review evidence required'}
+        if request.get('orchestrator') == 'editable_reconstruction':
+            layers = composition['office'].get('office',{}).get('text_layers',{})
+            if any(layers.get(str(i),{}).get('coverage_status') != 'INVENTORY_COVERED'
+                   for i in range(1,len(current['pages'])+1)):
+                return {'status':'REVIEW_REQUIRED','reason':'WHOLE_PAGE_TEXT_INCOMPLETE'}
         for reference in composition['required_evidence']:
             state.evidence(reference['id'])
         raw_selected = [self.graph(page).selected for page in current['pages']]

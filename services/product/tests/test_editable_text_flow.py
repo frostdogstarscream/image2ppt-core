@@ -246,3 +246,23 @@ def test_cleared_page_reports_missing_text_and_a_graphic_written_as_text(tmp_pat
     assert result['type_conflicts']==[{'ocr_id':'glyph','wrong_text_objects':['bad']}]
     assert result['fields'][1]['representation']=='no_native_text'
     assert result['preview_sha256']==digest(tmp_path/'cleared.png')
+    assert result['coverage_status']=='INCOMPLETE'
+    assert {'ocr_id':'label','text':'独立文字','reason':'MISSING_NATIVE_TEXT'} in result['blockers']
+
+
+def test_interletter_recovery_rechecks_strokes_and_protects_foreign_ink():
+    from product.recovery.interletter import interletter_backing
+    from product.recovery.background_adapter import RecoveryBlocked
+    base = np.full((60,150,3), (223,236,249), np.uint8)
+    image = Image.fromarray(base)
+    ImageDraw.Draw(image).text((16,19),'Test 123',fill=(24,47,81))
+    source = np.asarray(image)
+    protected = np.zeros(source.shape[:2],bool)
+    shape = [[(14,16),(70,16),(70,36),(14,36)]]
+    args = (source,[11,13,62,26],protected,'182F51',13)
+    ref,mask,_ = interletter_backing(*args,line_polygons=shape)
+    assert mask.any() and np.array_equal(ref[mask],base[mask])
+    assert not np.any((source != base).any(2) & ~mask)
+    protected[mask] = True
+    with pytest.raises(RecoveryBlocked):
+        interletter_backing(*args,line_polygons=shape)

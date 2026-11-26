@@ -18,6 +18,14 @@ def text_search_box(graph, text, source):
             px, py, pw, ph = map(round, peer.bbox)
             if min(x+w, px+pw)-max(x, px) < .6*min(w, pw) or peer.id == text.id:
                 continue
+            from ..peer_evidence import measured_line_divider
+            gutter = measured_line_divider(source,text.bbox,peer.bbox)
+            if gutter is not None:
+                if py > y:
+                    bottom = min(bottom,gutter)
+                else:
+                    top = max(top,gutter)
+                continue
             if 0 <= py-y-h < 6:
                 cut = (py+y+h)//2
             elif 0 <= y-py-ph < 6:

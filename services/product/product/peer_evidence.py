@@ -111,6 +111,28 @@ def _tight_peer_ink_mask(source, bbox, size, pad=2):
     return full
 
 
+def measured_line_divider(source, first, second):
+    upper, lower = sorted((first, second), key=lambda box: box[1])
+    x,y,w,h = map(round, upper)
+    xx,yy,ww,hh = map(round, lower)
+    overlap = y+h-yy
+    if not (-10 <= overlap <= 6 and yy-y >= .65*h and min(x+w,xx+ww)-max(x,xx) >= .65*min(w,ww)):
+        return None
+    top, bottom = max(0,min(yy,y+h)-6), min(source.shape[0],max(y+h,yy)+6)
+    strip = source[top:bottom,max(0,min(x,xx)):max(x+w,xx+ww)].astype(float)
+    if not strip.size:
+        return None
+    contrast = np.abs(strip-np.median(strip,axis=1)[:,None,:]).max(2)
+    clean = contrast.max(1) <= 18
+    # A true gutter needs visible ink on both sides. Stop on textured cards.
+    active = contrast.max(1) > 40
+    pairs = [i for i in range(1,len(clean)-2) if clean[i:i+2].all() and active[:i].any() and active[i+2:].any()
+             and np.median(np.abs(strip[i]-strip[i+1])) <= 3 and np.percentile(np.abs(strip[i]-strip[i+1]),98) <= 12]
+    if pairs:
+        return top+min(pairs,key=lambda i:abs(top+i+1-(yy+y+h)/2))+1
+    return None
+
+
 def protection(text,graph,source,blocked,baseline=None,*,purpose='erase',diagnostics=None):
     from .parallel_fusion import glyph_evidence
     classified=roles(graph);surfaces={s.id:s for s in graph.surface.shapes}
@@ -119,7 +141,25 @@ def protection(text,graph,source,blocked,baseline=None,*,purpose='erase',diagnos
     for peer in graph.text.texts:
         if peer.id==text.id:continue
         tight=_tight_peer_ink_mask(source,peer.bbox,size,pad=2) if intersection(peer.bbox,near_box) else None
-        if tight is not None:
+        from .parallel_contracts import EDITABLE_TEXT_METHOD
+        cut = (measured_line_divider(source, text.bbox, peer.bbox)
+               if getattr(graph.text,'method_version',None) == EDITABLE_TEXT_METHOD else None)
+        if cut is not None:
+            mask = tight if tight is not None else rectangle(peer.bbox,size)
+            if peer.bbox[1] > text.bbox[1]:
+                mask[:cut] = False
+            else:
+                mask[cut:] = False
+            left,top,width,height = map(round,peer.bbox)
+            # Reserve the peer-facing half of the measured gutter. Otherwise
+            # both fields can claim the same faint halo between their letters.
+            if peer.bbox[1] > text.bbox[1]:
+                mask[cut:max(cut,top+height), max(0,left-3):left+width+3] = True
+            else:
+                mask[max(0,top):cut, max(0,left-3):left+width+3] = True
+            context |= mask
+            rows.append((peer.id,'TEXT',mask,{'method':'source-interline-gutter','cut_y':cut}))
+        elif tight is not None:
             context|=tight
             rows.append((peer.id,'TEXT',tight,{'method':'tight-peer-glyph-mask/1'}))
         else:

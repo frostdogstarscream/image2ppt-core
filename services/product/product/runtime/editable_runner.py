@@ -99,7 +99,8 @@ def _review_checks(checks):
         for rows in checks.get('residuals') or []]
     office = checks.get('office') or {}
     if office.get('text_layers'):
-        result['text_layers'] = {pg: {'status': layer['status'],
+        result['text_layers'] = {pg: {'status': layer['status'],'coverage_status':layer.get('coverage_status'),
+            'blockers':layer.get('blockers',[]),
             'fields_by_representation': dict(Counter(f['representation'] for f in layer['fields'])),
             'preview_sha256': layer['preview_sha256']} for pg, layer in office['text_layers'].items()}
     if 'original_sites' in office:

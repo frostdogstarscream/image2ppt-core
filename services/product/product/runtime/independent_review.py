@@ -142,6 +142,11 @@ def _stateless_vlm_audit(
             'are `severity="minor"` (`font_or_shade_deviation`) and MUST NOT fail the audit (`passed=true`). '
             'Set `passed=false` ONLY when a `severity="critical"` defect exists.'
         )
+        if request.get('orchestrator') == 'editable_reconstruction':
+            system_prompt += (' Inspect the slide with native text cleared and compare every source region, '
+                              'including words in logos, labels and photographs. Any readable source text '
+                              'remaining on that slide or reported on its backing image is a critical defect. '
+                              'Look for missed fields even when OCR has no entry.')
         _, _, reviewer = review_actor(state.job, f'independent-audit-{uuid.uuid4().hex}')
         control = review_control.verify_reviewer(reviewer, cache_dir / 'controls', budget)
         if not control['passed']:
@@ -283,7 +288,8 @@ def run_delivery_audit(
                 raise ValueError('text-cleared preview no longer matches Office receipt')
             edit_panels.append(cleared)
             compact_sc['last_image'] = 'Actual Office slide with native text removed. Look for old glyphs at native field sites, retained source words, and original icons mistaken for text.'
-            compact_sc['text_layer_fields'] = [{k: f[k] for k in ('text','bbox','representation','source_ink_similarity')}
+            compact_sc['text_layer_fields'] = [{k: f.get(k) for k in ('text','bbox','representation','source_ink_similarity',
+                                                'plate_stroke_edges','cleared_stroke_edges')}
                                                for f in layer['fields']]
         vlm_verdict = (
             _stateless_vlm_audit(state, src_path, render_path, owner_png, compact_sc, deck_path=pptx_path, edit_panels=edit_panels)

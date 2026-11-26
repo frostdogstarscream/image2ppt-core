@@ -249,55 +249,72 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
     box = text_search_box(graph, text, source)
     bx, by, bw, bh = box
     context_protected=peer_protection(text,graph,source,np.zeros(source.shape[:2],bool),purpose='context',baseline_directory=baseline_directory)
-    from .region_candidates import _fallback_nonplanar_reference, _safe_background_model
-    backing, _ = _safe_background_model(source, box, context_protected)
-    ink, _ = glyph_evidence(source, box, styles[text.style].color, backing)
-    original = np.zeros(source.shape[:2], bool)
-    original[by:by+bh, bx:bx+bw] = ink
-    prov = saved.get('provenance') or {}
-    reference_ctx = prov.get('background_context_width', 14)
-    if type(reference_ctx) is not int or not 8 <= reference_ctx <= 128:
-        raise ValueError('invalid source context width')
-    allow_vert = bool(prov.get('allow_vertical_context') or (prov.get('fit') or {}).get('allow_vertical_context'))
-    if (saved.get('reference_context') or {}).get('schema') == 'NonPlanarFallbackReference/1':
-        reference, fit_report, _ = _fallback_nonplanar_reference(source, box, backing, original, layer_directory)
-    elif allow_vert:
-        reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx, allow_vertical=True)
+    if saved['method'] == 'interletter':
+        from .interletter import interletter_backing, source_polygons
+        from ..parallel_contracts import EDITABLE_TEXT_METHOD
+        if graph.text.method_version != EDITABLE_TEXT_METHOD or saved['mask_variant'] != 'corroborated_strokes':
+            raise ValueError('invalid interletter field provenance')
+        style = styles[text.style]
+        reference, wanted, fit_report = interletter_backing(source, box, protected, style.color, style.size_px,
+            line_polygons=source_polygons(baseline_directory,graph,text))
+        box = fit_report.get('write_bbox',box)
+        bx,by,bw,bh = box
+        selected = np.array(Image.open(trial_directory/'mask.png').convert('L'))
+        raw = np.array(Image.open(trial_directory/'raw_inpaint.png').convert('RGB'))
+        if not np.array_equal(selected, wanted.astype(np.uint8)*255) or not np.array_equal(raw, reference):
+            raise ValueError('interletter evidence changed during staging')
+        completion_report = fit_report
     else:
-        try:
-            reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx)
-        except RecoveryBlocked:
+        from .region_candidates import _fallback_nonplanar_reference, _safe_background_model
+        backing, _ = _safe_background_model(source, box, context_protected)
+        ink, _ = glyph_evidence(source, box, styles[text.style].color, backing)
+        original = np.zeros(source.shape[:2], bool)
+        original[by:by+bh, bx:bx+bw] = ink
+        prov = saved.get('provenance') or {}
+        reference_ctx = prov.get('background_context_width', 14)
+        if type(reference_ctx) is not int or not 8 <= reference_ctx <= 128:
+            raise ValueError('invalid source context width')
+        allow_vert = bool(prov.get('allow_vertical_context') or (prov.get('fit') or {}).get('allow_vertical_context'))
+        if (saved.get('reference_context') or {}).get('schema') == 'NonPlanarFallbackReference/1':
+            reference, fit_report, _ = _fallback_nonplanar_reference(source, box, backing, original, layer_directory)
+        elif allow_vert:
             reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx, allow_vertical=True)
-    fit_meta = ((saved.get('provenance') or {}).get('fit') or saved.get('reference_context') or {})
-    if fit_meta.get('method') == 'scanline-lateral':
-        from .marked_fields import striped_backing
-        max_span = float(fit_meta.get('max_span', 18.0))
-        stripe = striped_backing(source, box, context_protected, max_span=max_span)
-        if stripe is None:
-            raise ValueError('scanline backing no longer corroborated')
-        reference, fit_report = stripe
-    from ..parallel_contracts import EDITABLE_TEXT_METHOD, FLOWING_BODY
-    style = styles[text.style]
-    light_paragraph = prov.get('mask_evidence_method') == 'light-paragraph/1'
-    if light_paragraph and (graph.text.method_version != EDITABLE_TEXT_METHOD or style.role != FLOWING_BODY
-                            or fit_report['validation_p95_rgb'] > 3):
-        raise ValueError('paragraph mask lacks an independent light background reference')
-    completion = TextMaskCompletion.analyze(source, original, protected, box, reference,
-                                             glyph_height=style.size_px, light_paragraph=light_paragraph)
-    selected = np.array(Image.open(trial_directory/'mask.png').convert('L'))
-    if saved['mask_variant']=='source_authorized_subset':
-        if not np.isin(selected,[0,255]).all() or selected.shape!=source.shape[:2]:
-            raise ValueError('invalid source-authorized subset mask')
-        wanted=selected>0
-        if not wanted.any() or (wanted & ~completion.masks['semantic_completion']).any():
-            raise ValueError('trial mask contains pixels without source authorization')
-    else:
-        wanted = completion.masks[saved['mask_variant']]
-    if not np.isin(selected, [0, 255]).all() or not np.array_equal(selected > 0, wanted):
-        raise ValueError('trial mask is not source-authorized')
-    raw = np.array(Image.open(trial_directory/'raw_inpaint.png').convert('RGB'))
-    if saved['method'] == 'gradient' and not np.array_equal(raw, reference):
-        raise ValueError('gradient raw backing binding mismatch')
+        else:
+            try:
+                reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx)
+            except RecoveryBlocked:
+                reference, fit_report = fit_gradient(source, box, context_protected, context=reference_ctx, allow_vertical=True)
+        fit_meta = ((saved.get('provenance') or {}).get('fit') or saved.get('reference_context') or {})
+        if fit_meta.get('method') == 'scanline-lateral':
+            from .marked_fields import striped_backing
+            max_span = float(fit_meta.get('max_span', 18.0))
+            stripe = striped_backing(source, box, context_protected, max_span=max_span)
+            if stripe is None:
+                raise ValueError('scanline backing no longer corroborated')
+            reference, fit_report = stripe
+        from ..parallel_contracts import EDITABLE_TEXT_METHOD, FLOWING_BODY
+        style = styles[text.style]
+        light_paragraph = prov.get('mask_evidence_method') == 'light-paragraph/1'
+        if light_paragraph and (graph.text.method_version != EDITABLE_TEXT_METHOD or style.role != FLOWING_BODY
+                                or fit_report['validation_p95_rgb'] > 3):
+            raise ValueError('paragraph mask lacks an independent light background reference')
+        completion = TextMaskCompletion.analyze(source, original, protected, box, reference,
+                                                 glyph_height=style.size_px, light_paragraph=light_paragraph)
+        selected = np.array(Image.open(trial_directory/'mask.png').convert('L'))
+        if saved['mask_variant']=='source_authorized_subset':
+            if not np.isin(selected,[0,255]).all() or selected.shape!=source.shape[:2]:
+                raise ValueError('invalid source-authorized subset mask')
+            wanted=selected>0
+            if not wanted.any() or (wanted & ~completion.masks['semantic_completion']).any():
+                raise ValueError('trial mask contains pixels without source authorization')
+        else:
+            wanted = completion.masks[saved['mask_variant']]
+        if not np.isin(selected, [0, 255]).all() or not np.array_equal(selected > 0, wanted):
+            raise ValueError('trial mask is not source-authorized')
+        raw = np.array(Image.open(trial_directory/'raw_inpaint.png').convert('RGB'))
+        if saved['method'] == 'gradient' and not np.array_equal(raw, reference):
+            raise ValueError('gradient raw backing binding mismatch')
+        completion_report = completion.report
     report, written, _ = assess_trial(source, wanted, raw, protected, box, reference, fit_report,
                                       {'method': saved['method'], 'provenance': saved.get('provenance')})
     if report['status'] != 'PRECHECK_PASS':
@@ -336,7 +353,42 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
             frame_options['fit_origin'] = True
         if edit_headroom:
             frame_options['edit_headroom'] = True
-        text_payload = native_frame(proposed, styles, fonts, source.shape[1::-1], protected, box, **frame_options)
+        try:
+            text_payload = native_frame(proposed, styles, fonts, source.shape[1::-1], protected, box, **frame_options)
+        except ValueError as exc:
+            from ..parallel_contracts import EDITABLE_TEXT_METHOD
+            if (graph.text.method_version != EDITABLE_TEXT_METHOD or not fit_origin or frame_minimum or proposed.spans
+                    or 'frame allowance' not in str(exc)):
+                raise
+            # OCR rectangles include blank leading and can touch the next row.
+            # Derive a second frame from the owned visible strokes on this field.
+            yy,xx = np.nonzero(wanted & (np.abs(source.astype(float)-reference).max(2) > 42))
+            if not len(xx):
+                raise
+            left,top = int(xx.min()),int(yy.min())
+            width,height = int(xx.max())-left+1,int(yy.max())-top+1
+            fitted_field = proposed.model_copy(update={'bbox':[left,top,width,height]})
+            try:
+                text_payload = native_frame(fitted_field, styles, fonts, source.shape[1::-1], protected, box,
+                                            fit_origin=True)
+            except ValueError:
+                # A neighboring baseline can constrain the font's leading even when all
+                # glyphs fit. Measure one alternative size against the visible ink.
+                old_style = styles[proposed.style]
+                face_name = old_style.ea if any(ord(c) > 255 for c in proposed.text) else old_style.latin
+                record = next(f for f in fonts['fonts'] if (f['family'],f['bold'])==(face_name,old_style.bold))
+                face = ImageFont.truetype(record['file'], max(1,round(old_style.size_px)),index=record['index'])
+                lengths = [face.getlength(line) for line in proposed.text.splitlines()]
+                scale = min(.95, (width + 1) / max(1, *lengths), height / max(1,old_style.size_px))
+                size = max(old_style.size_px * .83, math.floor(old_style.size_px * scale))
+                if size >= old_style.size_px or size < 8:
+                    raise
+                smaller = old_style.model_copy(update={'size_px':size})
+                smaller.id = text.style[:40]+'-fit-'+key(smaller.model_dump())[:12]
+                styles = {**styles,smaller.id:smaller}
+                proposed.style = fitted_field.style = smaller.id
+                text_payload = native_frame(fitted_field,styles,fonts,source.shape[1::-1],protected,box,fit_origin=True)
+                definitions = [smaller.model_dump()]
         if fit_origin and proposed.align == 'left' and any(k!=text.id and ids==graph.text.members[text.id]
                                                          for k,ids in graph.text.members.items()):
             # Reserve transparent editing room only along a measured blank run.
@@ -388,6 +440,6 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
         stage(folder, graph, baseline_directory, staged)
         write(staged/'r12-background-preflight.json', {'candidate': candidate.model_dump(by_alias=True),
               'preflight': preflight.model_dump(by_alias=True), 'residual_recheck': report,
-              'completion': completion.report, 'trial_hashes': hashes, 'published': False})
+              'completion': completion_report, 'trial_hashes': hashes, 'published': False})
         _expose_staged_dir(staged, output)
     return output/'slideir.json'

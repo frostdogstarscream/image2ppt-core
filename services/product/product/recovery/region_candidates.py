@@ -206,10 +206,12 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
                     if assessment['status']=='PRECHECK_PASS':
                         shared_light_ground = (box != [x-3,y-3,w+6,h+6] and use_planar
                             and fit['validation_p95_rgb'] <= 2 and np.percentile(reference[mask],5) >= 220)
-                        if shared_light_ground and assessment['scope_error_p95_rgb'] > 2+fit['validation_p95_rgb']:
+                        measured_fit = (graph.text.method_version == EDITABLE_TEXT_METHOD and use_planar
+                                        and bool(assessment.get('nonplanar_backing_proof')))
+                        if measured_fit or (shared_light_ground and assessment['scope_error_p95_rgb'] > 2+fit['validation_p95_rgb']):
                             routes[-1]['decision'] = 'PREFER_MEASURED_CONTINUOUS_CARD_BACKGROUND'
                             gradient_tried = True
-                            routes.append({'tool':'gradient','reason':'adjacent fields on verified continuous light backing'})
+                            routes.append({'tool':'gradient','reason':'independently measured continuous backing at source glyphs'})
                             yield save('gradient',reference,{'fit':fit})
                             if len(records)>=limit:return
                         yield save(method_name,bg.image,bg.provenance)
