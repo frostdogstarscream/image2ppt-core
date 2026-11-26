@@ -166,7 +166,7 @@ def _node_bleed_margin_px(node: dict) -> int:
     return margin
 
 
-def inspect(pptx,irs,output,*,render_only=False,target_ids=None,original_sites=False):
+def inspect(pptx,irs,output,*,render_only=False,target_ids=None,original_sites=False,text_layer_audit=False):
     import pythoncom
     import win32com.client
     pythoncom.CoInitialize()
@@ -182,6 +182,7 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,original_sites=F
             if attempt==2:raise
             time.sleep(0.4*(attempt+1))
     deck=None;records=[];site_records=[];unverified_site_groups=[];current_id=None
+    text_layers = {}
     def text_styles(s):
         if not (s.HasTextFrame and s.TextFrame.HasText):return ()
         tr=s.TextFrame.TextRange
@@ -354,6 +355,9 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,original_sites=F
                                     if original_sites and not render_only else ([],[],[]))
             unverified_site_groups.extend({'page':i,**row} for row in unverified)
             inventory.append((i,targets,sig,moves,pairs))
+            if text_layer_audit:
+                from .office_text_layer import export_text_layer
+                text_layers[str(i)] = export_text_layer(slide, irpath, output/f'page-{i:02d}-text-cleared.png', pw, ph)
         deck.Close();deck=None
         for i,targets,sig,moves,pairs in inventory:
             before=before_arrays[i]
@@ -422,6 +426,8 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,original_sites=F
             result['original_sites']=site_records
             result['original_site_previews']={str(i):digest(output/f'page-{i:02d}-before.png') for i in before_arrays}
             result['unverified_original_site_groups']=unverified_site_groups
+        if text_layer_audit:
+            result['text_layers'] = text_layers
         write(output/'report.json',result);return result
     except Exception as exc:
         write(output/'report.json',{'status':'FAIL_APP_AUTOMATED','failed_object_id':current_id,

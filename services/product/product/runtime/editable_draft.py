@@ -172,12 +172,20 @@ def delivery_page_summaries(current, office=None):
         records = [{'id': r.get('id'), 'action': r.get('action'), 'saved_reopened': r.get('saved_reopened'),
                     'outside_pixels': r.get('outside_pixels')} for r in app.get('records', [])
                    if bound and r.get('page') == page]
+        failures = current.get('regional_failures', {}).get(str(page), [])
+        layer = app.get('text_layers', {}).get(str(page)) if bound else None
+        if layer:
+            reasons = {r['object_id']: r.get('reason') or r.get('failure') for r in failures if r.get('object_id')}
+            layer = {**layer, 'fields': [
+                {**field, 'reconstruction_failures': [reasons[oid] for oid in field.get('source_object_ids', []) if oid in reasons]}
+                for field in layer['fields']]}
         summaries.append({'page': page, 'source_sha256': entry['snapshot']['source_sha256'], 'pptx_sha256': sha,
                           'object_counts': dict(classes), 'text_boxes': classes['text'], 'tables': classes['table'],
                           'charts': classes['chart'], 'shapes': classes['shape'], 'groups_in_ir': len(ir.get('groups', [])),
                           'raster_objects': rasters, 'raster_backing_present': bool(classes['plate']),
                           'perception_failures': entry.get('failures', []), 'editable_recall': None,
                           'office_status': office.get('status', 'UNKNOWN') if bound else 'UNKNOWN',
+                          'text_layer_inspection': layer,
                           'observed_edit_actions': records,
-                          'region_failures': current.get('regional_failures', {}).get(str(page), [])})
+                          'region_failures': failures})
     return summaries

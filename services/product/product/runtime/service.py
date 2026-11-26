@@ -964,7 +964,7 @@ class RuntimeService(ExplorationTools):
                 'evidence': references, 'delivery_approval': False}
 
     @staticmethod
-    def office_check(state, pptx, irs, directory, *, target_ids=None):
+    def office_check(state, pptx, irs, directory, *, target_ids=None, text_layer_audit=False):
         from ..recovery.adaptive_policy import AdaptiveBudget
         scoped = sorted(set(target_ids)) if target_ids is not None else None
         request=json.loads((state.job/'request.json').read_text('utf8'))
@@ -972,6 +972,10 @@ class RuntimeService(ExplorationTools):
         identity={'pptx':digest(pptx),'irs':[digest(ir) for ir in irs],
                   'implementation':RuntimeService.code_binding(),
                   'mode':os.environ.get('IMAGE2PPT_OFFICE_MODE','local')}
+        if text_layer_audit:
+            identity['text_layer_inputs'] = [
+                {name: digest(Path(ir).parent/name) for name in ('source.png','runtime-ocr-protection.json',
+                 'page-structure.json','embedded-ui-frames.json') if (Path(ir).parent/name).is_file()} for ir in irs]
         if scoped is not None:
             identity['target_ids'] = scoped
         if site_checks:
@@ -998,6 +1002,8 @@ class RuntimeService(ExplorationTools):
         from ..pipeline import _release_compile_headroom
         _release_compile_headroom()
         options = {'target_ids': scoped} if scoped is not None else {}
+        if text_layer_audit:
+            options['text_layer_audit'] = True
         if site_checks:
             options['original_sites'] = True
         if os.environ.get('IMAGE2PPT_OFFICE_MODE', 'local') == 'remote':
@@ -1063,7 +1069,9 @@ class RuntimeService(ExplorationTools):
             return {'status': 'MEASURED' if result['status'] != 'UNKNOWN' else 'UNKNOWN',
                     'checks': result, 'delivery_approval': False}
         composition = self.composition(current)
-        result = self.office_check(state, composition['artifacts']['pptx'], [Path(p['ir']) for p in current['pages']], directory)
+        direct = json.loads((state.job/'request.json').read_text('utf8')).get('orchestrator') == 'editable_reconstruction'
+        options = {'text_layer_audit': True} if direct else {}
+        result = self.office_check(state, composition['artifacts']['pptx'], [Path(p['ir']) for p in current['pages']], directory, **options)
         composition['office'] = result
         if result['status'] != 'PASS':
             return result
@@ -1077,6 +1085,16 @@ class RuntimeService(ExplorationTools):
             src_path = canonical_src if digest(canonical_src) == page['snapshot']['source_sha256'] else page['snapshot']['path']
             required.append(state.register(src_path, 'source'))
             required.append(state.register(preview, 'office_preview'))
+            if direct:
+                layer = result.get('office', {}).get('text_layers', {}).get(str(i), {})
+                blank = preview.with_name(f'page-{i:02d}-text-cleared.png')
+                if layer.get('status') != 'MEASURED' or not blank.is_file() or digest(blank) != layer.get('preview_sha256'):
+                    result.update(status='UNKNOWN', failure='TEXT_LAYER_EVIDENCE_UNAVAILABLE')
+                    return result
+                if layer.get('type_conflicts'):
+                    result.update(status='REVIEW_REQUIRED', failure='GRAPHIC_EXPORTED_AS_TEXT', page=i)
+                    return result
+                required.append(state.register(blank, 'text_cleared_preview'))
             images, _ = panels(src_path, preview, page['ir'],
                                result['office_directory'], i, directory/f'panels-{i:02d}', **site_options)
             required.extend(state.register(path, 'edit_panel') for path in images)

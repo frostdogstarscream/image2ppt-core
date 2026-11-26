@@ -1263,7 +1263,7 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
                           run_structure: bool | None = None) -> dict:
     """Run local OCR, optional LayerD/PP-DocLayout, VLM OCR proofreading/inventory, pixel ink measurement, and style tiering."""
     from .. import layout_evidence
-    from .page_structure import parse_page_structure
+    from .page_structure import parse_page_structure, isolated_label_neighbors, resolve_isolated_roles
     source_path = service.source(state, page)
     if str(page) not in current.get('ocr', {}):
         ocr_dir = directory / 'ocr'
@@ -1378,6 +1378,9 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         or os.environ.get('PLANNER_API_KEY')
     )
     do_vlm_structure = (bool(run_layers) and has_vlm_creds) if run_structure is None else bool(run_structure)
+    isolated = isolated_label_neighbors(ocr.get('lines', [])) if request.get('orchestrator') == 'editable_reconstruction' else {}
+    if run_structure is None and request.get('orchestrator') == 'editable_reconstruction':
+        do_vlm_structure = bool(isolated) and has_vlm_creds
     structure_info = parse_page_structure(
         state, source_path, ocr, layout=layout_data, assets=[], fonts=fonts, use_vlm=do_vlm_structure
     )
@@ -1388,6 +1391,14 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
         write(proof_ocr_file, ocr)
         current.setdefault('ocr', {})[str(page)] = str(proof_ocr_file)
     structure_file = directory / 'page-structure.json'
+    graphic_fields = resolve_isolated_roles(source, ocr, layout_data, structure_info, fonts, isolated)
+    structure_info['graphic_or_uncertain_ocr'] = graphic_fields
+    for element in structure_info.get('elements', []):
+        candidate = graphic_fields.get(element.get('ocr_id'))
+        if candidate:
+            element['category'] = 'icon' if candidate['disposition'] == 'graphic' else 'unclassified'
+            element['label'] = ''
+
     write(structure_file, structure_info)
     current.setdefault('page_structure', {})[str(page)] = str(structure_file)
 
@@ -1396,6 +1407,8 @@ def prepare_page_evidence(service, state, current, directory: Path, *, page: int
 
     raw_items = []
     for index, row in enumerate(valid_lines, 1):
+        if row['id'] in graphic_fields:
+            continue
         peers_mask = np.zeros((h_img, w_img), bool)
         for j, rect_mask in enumerate(line_rects):
             if j != index - 1:

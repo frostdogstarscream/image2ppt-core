@@ -98,6 +98,10 @@ def _review_checks(checks):
                        for r in rows if r.get('residual_check_status') != 'PASS']}
         for rows in checks.get('residuals') or []]
     office = checks.get('office') or {}
+    if office.get('text_layers'):
+        result['text_layers'] = {pg: {'status': layer['status'],
+            'fields_by_representation': dict(Counter(f['representation'] for f in layer['fields'])),
+            'preview_sha256': layer['preview_sha256']} for pg, layer in office['text_layers'].items()}
     if 'original_sites' in office:
         result['original_sites'] = [{k: r[k] for k in ('page', 'action', 'members', 'outside_pixels') if k in r}
                                     for r in office['original_sites']]
@@ -173,9 +177,6 @@ def _dispatch(service, state, decision, token, parent):
                 'relations': [r for r in row.get('relations', []) if any(x in ids for x in
                                (r.get('source'), r.get('target')))][:40],
                 'styles': draft['style_families'][:10]}
-    if name == 'prepare_page_evidence':
-        # Semantic reasoning is performed by the same directly budgeted vision actor.
-        args['run_structure'] = False
     if name == 'get_evidence':
         ids = args['evidence_ids']
         _, _, refs = _attachments(state, ids)

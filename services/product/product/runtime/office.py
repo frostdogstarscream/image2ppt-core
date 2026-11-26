@@ -48,7 +48,7 @@ def frame_feedback(result,graph,identifier):
             'meaning':'Measured transparent native-frame extent for create_candidate.frame_minimum. Source text bbox and authorized erase pixels remain independent.'}
 
 
-def check_local(pptx, irs, directory, *, target_ids=None, original_sites=False):
+def check_local(pptx, irs, directory, *, target_ids=None, original_sites=False, text_layer_audit=False):
     from ..parallel_office import inspect, OfficeValidationError
     from ..parallel_edit_probe import inspect_text
     from ..parallel_residual_gate import inspect_residuals, residual_accepted
@@ -56,6 +56,8 @@ def check_local(pptx, irs, directory, *, target_ids=None, original_sites=False):
     directory.mkdir(parents=True, exist_ok=True)
     targets = set(target_ids) if target_ids is not None else None
     probe_options = {'target_ids': targets} if targets is not None else {}
+    if text_layer_audit:
+        probe_options['text_layer_audit'] = True
     if original_sites:
         probe_options['original_sites'] = True
     result = {'status': 'UNKNOWN', 'pptx_sha256': digest(pptx), 'office_directory': str(directory/'office'),

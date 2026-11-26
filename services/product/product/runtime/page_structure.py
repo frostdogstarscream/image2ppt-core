@@ -45,8 +45,14 @@ class InventoryElement(BaseModel):
     label: str = ''
 
 
+class OCRVisualRole(BaseModel):
+    ocr_id: str
+    role: Literal['readable_text', 'graphic', 'uncertain']
+
+
 class VLMPageParseReply(BaseModel):
     model_config = ConfigDict(extra='ignore')
+    isolated_roles: list[OCRVisualRole] = Field(default_factory=list, max_length=100)
     ocr_corrections: list[OCRCorrection] = Field(default_factory=list, max_length=80)
     elements: list[InventoryElement] = Field(default_factory=list, max_length=200)
 
@@ -98,6 +104,63 @@ def _render_glyph_iou(
     inter = int((src_d & ren_d).sum())
     union = int((src_d | ren_d).sum())
     return inter / float(max(1, union))
+
+
+def isolated_label_neighbors(lines):
+    """Find square OCR fields next to a distinct longer label (keep numbers as text)."""
+    matches = {}
+    for line in lines:
+        token = line.get('text', '').strip()
+        if len(token) != 1 or not token.isalpha() or line.get('score', 0) < .85:
+            continue
+        x, y, w, h = line['bbox']
+        if h < 8 or not .55 <= w/h <= 1.5:
+            continue
+        neighbors = [peer for peer in lines if len(peer.get('text', '').strip()) >= 2
+                     and 0 <= peer['bbox'][0]-x-w <= 2.5*h
+                     and abs(peer['bbox'][1]+peer['bbox'][3]/2-y-h/2) <= .55*h]
+        if neighbors:
+            matches[line['id']] = min(neighbors, key=lambda peer: peer['bbox'][0])
+    return matches
+
+
+def resolve_isolated_roles(source, ocr, layout, structure, fonts, neighbors):
+    """Only credited textual readings may become editable words; abstentions keep source pixels."""
+    judgments = {item['ocr_id']: item['role'] for item in structure.get('isolated_roles', [])}
+    candidates = {}
+    font = next((f for f in fonts.get('fonts', []) if f.get('cjk') and
+                 ('雅黑' in f.get('family', '') or 'YaHei' in f.get('family', ''))), None)
+    for line in ocr.get('lines', []):
+        peer = neighbors.get(line['id'])
+        if not peer:
+            continue
+        box = line['bbox']
+        x, y, w, h = map(round, box)
+        crop = source[y:y+h, x:x+w]
+        if not crop.size:
+            continue
+        hints = [r for r in (layout or {}).get('regions', []) if r.get('label') == 'image'
+                 and intersection(box, r['bbox']) >= .5*w*h and r['bbox'][2]*r['bbox'][3] <= 4*w*h]
+        def ink_color(img):
+            colors = img.reshape(-1, 3).astype(float)
+            bg = np.median(colors, axis=0)
+            contrast = np.abs(colors-bg).max(axis=1)
+            ink = colors[contrast >= max(20, np.percentile(contrast, 80))]
+            return np.median(ink, axis=0) if len(ink) else bg
+        px, py, pw, ph = map(round, peer['bbox'])
+        label = source[py:py+ph, px:px+pw]
+        if not label.size:
+            continue
+        color_gap = float(np.abs(ink_color(crop)-ink_color(label)).max())
+        similarity = _render_glyph_iou(crop, line['text'], font['file'], font.get('index', 0)) if font else None
+        role = judgments.get(line['id'])
+        oversized_marker = h >= 1.25 * ph
+        ambiguous = bool(hints) or (color_gap > 42 and (oversized_marker or similarity is None or similarity < .72))
+        if role == 'graphic' or (role != 'readable_text' and (ambiguous or role == 'uncertain')):
+            candidates[line['id']] = dict(text=line['text'], bbox=box, neighbor_id=peer['id'],
+                disposition='graphic' if role == 'graphic' or hints else 'unresolved_graphic_or_text',
+                visual_role=role, layout_image=bool(hints), color_gap=round(color_gap, 2), glyph_iou=similarity)
+    return candidates
 
 
 def verify_and_apply_ocr_corrections(
@@ -278,6 +341,7 @@ def build_deterministic_inventory(
             'geometry_hint': None,
             'has_overlay_text': False,
             'label': ln.get('text', ''),
+            'ocr_id': ln.get('id'),
         })
         idx += 1
 
@@ -306,6 +370,7 @@ def parse_page_structure(
     det_elements = build_deterministic_inventory([w_img, h_img], ocr, layout, assets or [])
     vlm_status = 'SKIPPED'
     applied_corrections: list[dict] = []
+    isolated_roles = []
     final_elements = det_elements
 
     request_file = state.job / 'request.json'
@@ -318,7 +383,7 @@ def parse_page_structure(
         cache_dir.mkdir(parents=True, exist_ok=True)
         ocr_digest = key([{'id': r.get('id'), 'text': r.get('text'), 'bbox': r.get('bbox')} for r in ocr.get('lines', [])])
         cache_key = key({
-            'schema': 'PageStructureCall/1',
+            'schema': 'PageStructureCall/2', 'implementation': digest(__file__),
             'source_sha256': src_sha,
             'ocr_digest': ocr_digest,
             'model': request.get('agent_model') or 'default',
@@ -351,12 +416,34 @@ def parse_page_structure(
                     'Copy exact source characters from the image; never paraphrase. '
                     '2) In `elements`, list major visual containers/shapes (`card_shape`, `ribbon_shape`, `badge_shape`), '
                     '`chart`, `photo` (with `has_overlay_text`), `icon`, and `logo` with `[x,y,w,h]` pixel bboxes. '
+                    '3) For each isolated_ocr_id compare the original symbol with the neighboring label. In isolated_roles return readable_text for real letters, graphic for pictograms, or uncertain. '
                     'Return strict JSON matching `output_schema`.'
                 )
+                attachments = [source_file]
+                isolated = isolated_label_neighbors(ocr.get('lines', []))
+                if isolated:
+                    # Include enough of the adjacent wording to distinguish a leading icon
+                    # from an independent number/letter. The page itself provides context.
+                    tiles = [(ln, isolated[ln['id']]) for ln in ocr['lines'] if ln['id'] in isolated][:24]
+                    board = Image.new('RGB', (720, ((len(tiles)+1)//2)*106), 'white')
+                    draw = ImageDraw.Draw(board)
+                    for i, (ln, peer) in enumerate(tiles):
+                        x, y, w, h = map(round, ln['bbox'])
+                        px, py, pw, ph = map(round, peer['bbox'])
+                        xa, ya = max(0,x-h//2), max(0,min(y,py)-h//3)
+                        crop = Image.fromarray(source[ya:min(h_img,max(y+h,py+ph)+h//3),
+                                                      xa:min(w_img,px+pw+h//3)])
+                        crop.thumbnail((350,82))
+                        at = (360*(i%2),106*(i//2))
+                        draw.text(at, str(ln['id']), fill='black')
+                        board.paste(crop, (at[0],at[1]+18))
+                    sheet = cache_dir/f'{cache_key}-isolated.png'
+                    board.save(sheet)
+                    attachments.append(sheet)
                 raw_reply = actor.ask(
                     system_prompt,
-                    {'image_size': [w_img, h_img], 'ocr_lines': compact_ocr},
-                    [source_file],
+                    {'image_size': [w_img, h_img], 'ocr_lines': compact_ocr, 'isolated_ocr_ids': list(isolated)},
+                    attachments,
                     VLMPageParseReply,
                 )
                 write(cache_file, raw_reply)
@@ -367,6 +454,7 @@ def parse_page_structure(
         if raw_reply is not None:
             try:
                 parsed = VLMPageParseReply.model_validate(raw_reply)
+                isolated_roles = [role.model_dump() for role in parsed.isolated_roles]
                 if parsed.ocr_corrections:
                     ocr, applied_corrections = verify_and_apply_ocr_corrections(
                         source, ocr, parsed.ocr_corrections, fonts=fonts
@@ -375,7 +463,7 @@ def parse_page_structure(
                     det_elements = build_deterministic_inventory([w_img, h_img], ocr, layout, assets or [])
                 vlm_shapes = [
                     el.model_dump() for el in parsed.elements
-                    if el.category in ('card_shape', 'ribbon_shape', 'badge_shape', 'chart', 'table', 'photo', 'logo')
+                    if el.category in ('card_shape', 'ribbon_shape', 'badge_shape', 'chart', 'table', 'photo', 'logo', 'icon')
                     and all(v >= 0 for v in el.bbox[:2]) and el.bbox[2] > 8 and el.bbox[3] > 8
                 ]
                 # Merge non-duplicate VLM container/shape inventory items with deterministic items
@@ -397,6 +485,7 @@ def parse_page_structure(
         'source_sha256': src_sha,
         'image_size': [w_img, h_img],
         'vlm_status': vlm_status,
+        'isolated_roles': isolated_roles,
         'applied_ocr_corrections': applied_corrections,
         'elements': final_elements,
     }

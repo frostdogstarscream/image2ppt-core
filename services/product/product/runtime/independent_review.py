@@ -276,6 +276,15 @@ def run_delivery_audit(
 
         edit_panels = [state.evidence(r['id'])[0] for r in composition.get('required_evidence', [])
                        if r['role'] == 'edit_panel' and Path(state.evidence(r['id'])[0]).parent.name == f'panels-{idx:02d}']
+        layer = (office.get('office') or {}).get('text_layers', {}).get(str(idx), {})
+        if layer.get('status') == 'MEASURED' and office_dir:
+            cleared = office_dir/f'page-{idx:02d}-text-cleared.png'
+            if not cleared.is_file() or digest(cleared) != layer.get('preview_sha256'):
+                raise ValueError('text-cleared preview no longer matches Office receipt')
+            edit_panels.append(cleared)
+            compact_sc['last_image'] = 'Actual Office slide with native text removed. Look for old glyphs at native field sites, retained source words, and original icons mistaken for text.'
+            compact_sc['text_layer_fields'] = [{k: f[k] for k in ('text','bbox','representation','source_ink_similarity')}
+                                               for f in layer['fields']]
         vlm_verdict = (
             _stateless_vlm_audit(state, src_path, render_path, owner_png, compact_sc, deck_path=pptx_path, edit_panels=edit_panels)
             if (use_vlm and render_path is not None) else {

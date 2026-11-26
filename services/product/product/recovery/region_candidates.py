@@ -8,7 +8,7 @@ from ..parallel_text_candidates import peer_protection
 from ..parallel_rebuild import background_model
 from ..parallel_fusion import glyph_evidence
 from .gradient_backing import fit_gradient
-from .text_mask_completion import TextMaskCompletion
+from .text_mask_completion import TextMaskCompletion, text_search_box
 from .layerd_adapter import lower_backgrounds
 from .diagnostics import save_trial
 from .background_adapter import RecoveryBlocked
@@ -106,7 +106,7 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
     save_diagnostics(directory,text,graph,source,protected,context_protected,details)
     if graph.ownership[text.id]!='RESOLVED':raise RecoveryBlocked('OWNER_CONFLICT','unresolved source owner')
     x,y,w,h = map(round,text.bbox)
-    box = [x-3,y-3,w+6,h+6]
+    box = text_search_box(graph, text, source)
     bx,by,bw,bh = box
     if min(bx,by)<0 or bx+bw>source.shape[1] or by+bh>source.shape[0]:
         raise RecoveryBlocked('MASK_INCOMPLETE','text scope leaves source')
@@ -193,6 +193,7 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
              'scene_sha256':key(graph.model_dump()),'provenance':_with_context_provenance(provenance,ctx_w,allow_vertical=bool(fit.get('allow_vertical_context')))})
         records.append(row);receipt()
         return row
+    gradient_tried = False
     try:
         if layer_directory:
             try:
@@ -203,16 +204,24 @@ def adaptive_candidates(graph, identifier, source_file, layer_directory, directo
                     routes.append({'tool':method_name,'checks':assessment['checks'],
                                    'decision':'USE' if assessment['status']=='PRECHECK_PASS' else 'REJECT_LOWER_EVIDENCE'})
                     if assessment['status']=='PRECHECK_PASS':
+                        shared_light_ground = (box != [x-3,y-3,w+6,h+6] and use_planar
+                            and fit['validation_p95_rgb'] <= 2 and np.percentile(reference[mask],5) >= 220)
+                        if shared_light_ground and assessment['scope_error_p95_rgb'] > 2+fit['validation_p95_rgb']:
+                            routes[-1]['decision'] = 'PREFER_MEASURED_CONTINUOUS_CARD_BACKGROUND'
+                            gradient_tried = True
+                            routes.append({'tool':'gradient','reason':'adjacent fields on verified continuous light backing'})
+                            yield save('gradient',reference,{'fit':fit})
+                            if len(records)>=limit:return
                         yield save(method_name,bg.image,bg.provenance)
                         if len(records)>=limit:return
                         break
             except (ValueError,OSError) as exc:
                 failures.append({'stage':'layerd','code':getattr(exc,'code','BACKGROUND_REPAIR_FAILED')})
-        if use_planar:
+        if use_planar and not gradient_tried:
             routes.append({'tool':'gradient','reason':'source-context continuous fit','validation_p95_rgb':fit['validation_p95_rgb']})
             yield save('gradient',reference,{'fit':fit})
             if len(records)>=limit:return
-        else:
+        elif not use_planar:
             routes.append({'tool':'gradient','decision':'SKIP_NONPLANAR_CONTEXT','validation_p95_rgb':fit['validation_p95_rgb']})
         if inpaint:
             routes.append({'tool':'big-lama','reason':'earlier candidate rejected by consumer or local gates'})
@@ -236,7 +245,8 @@ def generate(graph,identifier,source_file,layer_directory,directory,*,inpaint=No
     from ..peer_evidence import save_diagnostics
     save_diagnostics(directory,text,graph,source,protected,context_protected,details)
     if graph.ownership[text.id]!='RESOLVED':raise RecoveryBlocked('OWNER_CONFLICT','unresolved source owner')
-    x,y,w,h=map(round,text.bbox);box=[x-3,y-3,w+6,h+6];bx,by,bw,bh=box
+    box = text_search_box(graph, text, source)
+    bx,by,bw,bh = box
     if min(bx,by)<0 or bx+bw>source.shape[1] or by+bh>source.shape[0]:
         raise RecoveryBlocked('MASK_INCOMPLETE','text scope leaves source')
     try:

@@ -24,7 +24,7 @@ from ..parallel_text_candidates import peer_protection
 from .diagnostics import assess_trial
 from .background_adapter import RecoveryBlocked
 from .gradient_backing import fit_gradient
-from .text_mask_completion import TextMaskCompletion
+from .text_mask_completion import TextMaskCompletion, text_search_box
 
 
 def _expose_staged_dir(staged: Path, output: Path) -> None:
@@ -246,8 +246,7 @@ def stage_background(trial_directory, graph, baseline_directory, fonts, output, 
         raise ValueError('indivisible region cannot be split')
     styles = {s.id: s for s in graph.text.styles}
     protected = peer_protection(text, graph, source, np.zeros(source.shape[:2], bool),baseline_directory=baseline_directory)
-    x, y, w, h = map(round, text.bbox)
-    box = [x-3, y-3, w+6, h+6]
+    box = text_search_box(graph, text, source)
     bx, by, bw, bh = box
     context_protected=peer_protection(text,graph,source,np.zeros(source.shape[:2],bool),purpose='context',baseline_directory=baseline_directory)
     from .region_candidates import _fallback_nonplanar_reference, _safe_background_model

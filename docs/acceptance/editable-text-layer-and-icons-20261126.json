@@ -1,0 +1,208 @@
+{
+  "scope": "Three affected pages rebuilt from hash-bound frozen OCR, Layout and LayerD. Direct MoMA source and crop review for pages 2 and 8 on the 4090. Compiler and PowerPoint on Windows. No fresh upload release claimed.",
+  "pptx_sha256": "907d614b9e985dc9349b66ee6635616cbb91d7b047814f127c5b3215e28b15ba",
+  "office_sha256": "1779f324bab0b37e086fed0735b26d9e04ce48521f64ba37b62adefdbf92fcc4",
+  "live_visual_roles": [
+    {
+      "page": "2",
+      "status": "READY",
+      "isolated_roles": [
+        {
+          "ocr_id": "l031",
+          "role": "graphic"
+        }
+      ],
+      "source_sha256": "05ec8007d0a01b88aa3b20e03177e6104520507b9d36affd0995d291ab89dce4",
+      "schema_code": "e63cc2ad4ea68e0fe927f9db176b957c802f6b1119b95d194b89c6135a5ade65"
+    },
+    {
+      "page": "8",
+      "status": "READY",
+      "isolated_roles": [
+        {
+          "ocr_id": "l019",
+          "role": "graphic"
+        },
+        {
+          "ocr_id": "l030",
+          "role": "graphic"
+        }
+      ],
+      "source_sha256": "6927f2bd3edf5a1ab16fb029989b3d758eca4680ff878c047e0f5f3ad45e483a",
+      "schema_code": "e63cc2ad4ea68e0fe927f9db176b957c802f6b1119b95d194b89c6135a5ade65"
+    }
+  ],
+  "pages": {
+    "2": {
+      "native_text_objects": 24,
+      "preview_sha256": "f3f46fb630da1b52ea72ebf28f3a2b9fdfb460f2619923f9fcb6cf5403c58106",
+      "source_sha256": "05ec8007d0a01b88aa3b20e03177e6104520507b9d36affd0995d291ab89dce4",
+      "fields_observed": {
+        "no_native_text": 20,
+        "native": 30,
+        "graphic": 1
+      },
+      "graphic_exported_as_text": [],
+      "targets": [
+        {
+          "ocr_id": "l031",
+          "text": "昆",
+          "bbox": [
+            168,
+            490,
+            32,
+            31
+          ],
+          "representation": "graphic",
+          "source_object_ids": [],
+          "native_ids": [],
+          "source_ink_similarity": 1.0
+        }
+      ]
+    },
+    "6": {
+      "native_text_objects": 41,
+      "preview_sha256": "1c54f89821a3a2c1e0beb0d4f7cea977d96623e63e5f7b1959c6053aac4e1b6b",
+      "source_sha256": "77593f38f369681e983b3e13e9936f3831f2717176b0b396cf02e92e3235ef11",
+      "fields_observed": {
+        "native": 48,
+        "no_native_text": 29
+      },
+      "graphic_exported_as_text": [],
+      "targets": [
+        {
+          "ocr_id": "l015",
+          "text": "知识入库",
+          "bbox": [
+            668,
+            349,
+            91,
+            27
+          ],
+          "representation": "native",
+          "source_object_ids": [
+            "t-016"
+          ],
+          "native_ids": [
+            "t-016"
+          ],
+          "source_ink_similarity": 0.0
+        },
+        {
+          "ocr_id": "l021",
+          "text": "构建结构化",
+          "bbox": [
+            669,
+            376,
+            91,
+            25
+          ],
+          "representation": "native",
+          "source_object_ids": [
+            "t-022"
+          ],
+          "native_ids": [
+            "t-022"
+          ],
+          "source_ink_similarity": 0.0
+        },
+        {
+          "ocr_id": "l027",
+          "text": "纪检知识库",
+          "bbox": [
+            669,
+            397,
+            90,
+            25
+          ],
+          "representation": "native",
+          "source_object_ids": [
+            "t-022"
+          ],
+          "native_ids": [
+            "t-022"
+          ],
+          "source_ink_similarity": 0.0
+        }
+      ]
+    },
+    "8": {
+      "native_text_objects": 30,
+      "preview_sha256": "60e13d44e1b3951f79a91cb56508c5526a839329f787ffa42bfc34e2c213c84b",
+      "source_sha256": "6927f2bd3edf5a1ab16fb029989b3d758eca4680ff878c047e0f5f3ad45e483a",
+      "fields_observed": {
+        "no_native_text": 15,
+        "native": 30,
+        "graphic": 2
+      },
+      "graphic_exported_as_text": [],
+      "targets": [
+        {
+          "ocr_id": "l019",
+          "text": "品",
+          "bbox": [
+            1288,
+            501,
+            28,
+            36
+          ],
+          "representation": "graphic",
+          "source_object_ids": [],
+          "native_ids": [],
+          "source_ink_similarity": 1.0
+        },
+        {
+          "ocr_id": "l030",
+          "text": "曲",
+          "bbox": [
+            499,
+            666,
+            30,
+            28
+          ],
+          "representation": "graphic",
+          "source_object_ids": [],
+          "native_ids": [],
+          "source_ink_similarity": 1.0
+        }
+      ]
+    }
+  },
+  "real_text_edits": [
+    {
+      "target": "t-016",
+      "value": "知识资料归档",
+      "passed": true,
+      "reopened_sha256": "2c84147d849db5a45073d32c9b6296660ab0354af31912c9a6c1a3ba29a667e4"
+    },
+    {
+      "target": "t-022",
+      "value": "整理资料，形成知识目录",
+      "passed": true,
+      "reopened_sha256": "bea95e547785e97cff34a41789691107de00e48a5c35d56e2233efcec57b51c9"
+    }
+  ],
+  "icon_edits": [
+    {
+      "page": 2,
+      "id": "r-005",
+      "old_reading": "昆",
+      "reopened_move": true,
+      "strong_original_ink_retained": 0.0,
+      "preview_sha256": "739d65d7ae8f1eb312cb50cf829e8ce25df9d9f2cb36a6f9233feadce008e271",
+      "baseline_ink_pixels": 404,
+      "background_sample": "3px exterior ring median",
+      "visual_inspection": "Whole icon moved; a pale rectangular patch remains at the old site."
+    },
+    {
+      "page": 8,
+      "old_reading": "品",
+      "state": "NO_INDEPENDENT_PICTURE"
+    },
+    {
+      "page": 8,
+      "old_reading": "曲",
+      "state": "NO_INDEPENDENT_PICTURE"
+    }
+  ]
+}

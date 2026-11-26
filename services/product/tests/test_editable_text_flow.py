@@ -188,3 +188,61 @@ def test_text_content_comparison_accepts_reflow_but_preserves_meaningful_charact
     assert source_wording_matches('年度\r收入\v5.0万元', '年度收入5.0万元')
     for changed in ('年度收入50万元', '年度收入5.0元', '年度收人5.0万元'):
         assert not source_wording_matches(changed, '年度收入5.0万元')
+
+def test_neighbor_search_margins_split_only_at_a_measured_clear_row():
+    from product.parallel_contracts import EDITABLE_TEXT_METHOD
+    from product.recovery.text_mask_completion import text_search_box
+    title = SimpleNamespace(id='title', bbox=[10, 5, 30, 10])
+    body = SimpleNamespace(id='body', bbox=[10, 15, 30, 20])
+    graph = SimpleNamespace(text=SimpleNamespace(texts=[title,body], method_version=EDITABLE_TEXT_METHOD))
+    source = np.full((45,55,3),244,np.uint8)
+    assert text_search_box(graph,title,source) == [7,2,36,13]
+    assert text_search_box(graph,body,source) == [7,15,36,23]
+    source[14:16,22] = 20
+    assert text_search_box(graph,title,source) == [7,2,36,16]
+    assert text_search_box(graph,body,source) == [7,12,36,26]
+
+
+def test_isolated_ocr_role_keeps_real_text_and_defers_ambiguous_icons():
+    from product.runtime.page_structure import isolated_label_neighbors, resolve_isolated_roles
+    line = {'id':'field','text':'甲','score':.98,'bbox':[10,12,20,20]}
+    label = {'id':'label','text':'示例说明','score':.98,'bbox':[40,12,45,20]}
+    digit = {'id':'digit','text':'1','score':.98,'bbox':[10,12,20,20]}
+    ocr={'lines':[line,label,digit]}
+    image=np.full((48,100,3),250,np.uint8)
+    image[16:28,14:23]=[0,113,216]
+    image[16:28,42:62]=24
+    layout={'regions':[{'label':'image','bbox':[9,11,22,22]}]}
+    neighbors=isolated_label_neighbors(ocr['lines'])
+    assert set(neighbors)=={'field'}
+    def resolve(review):
+        return resolve_isolated_roles(image,ocr,layout,{'isolated_roles':review},{},neighbors)
+    assert resolve([])['field']['disposition']=='graphic'
+    assert not resolve([{'ocr_id':'field','role':'readable_text'}])
+    assert resolve([{'ocr_id':'field','role':'graphic'}])['field']['visual_role']=='graphic'
+
+def test_cleared_page_reports_missing_text_and_a_graphic_written_as_text(tmp_path):
+    import json
+    from product.materialize import digest
+    from product.office_text_layer import export_text_layer
+    def save(name, value):
+        (tmp_path/name).write_text(json.dumps(value,ensure_ascii=False), 'utf8')
+    source = Image.new('RGB', (60,30), 'white')
+    ImageDraw.Draw(source).rectangle((7,6,12,18), fill='black')
+    source.save(tmp_path/'source.png')
+    box = [4,4,18,18]
+    save('slideir.json', {'nodes':[{'type':'text','id':'bad','bbox':box,'text':'田'}]})
+    save('scene.json', {'text':{'members':{'bad':['glyph']}}})
+    save('runtime-ocr-protection.json', {'source_sha256':digest(tmp_path/'source.png'),'lines':[
+        {'id':'glyph','text':'田','bbox':box}, {'id':'label','text':'独立文字','bbox':[31,4,22,18]}]})
+    save('page-structure.json', {'graphic_or_uncertain_ocr':{'glyph':{'disposition':'graphic'}}})
+    shape=SimpleNamespace(Name='bad', Type=17, HasTextFrame=True,
+                          TextFrame=SimpleNamespace(HasText=True,TextRange=SimpleNamespace(Text='田')))
+    def export(file, kind, width, height):
+        assert shape.TextFrame.TextRange.Text == ''
+        source.save(file)
+    slide=SimpleNamespace(Shapes=[shape],Export=export)
+    result=export_text_layer(slide,tmp_path/'slideir.json',tmp_path/'cleared.png',60,30)
+    assert result['type_conflicts']==[{'ocr_id':'glyph','wrong_text_objects':['bad']}]
+    assert result['fields'][1]['representation']=='no_native_text'
+    assert result['preview_sha256']==digest(tmp_path/'cleared.png')

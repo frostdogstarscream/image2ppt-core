@@ -8,6 +8,34 @@ from ..object_extract import rectangle
 from .background_adapter import RecoveryBlocked, _sha
 
 
+def text_search_box(graph, text, source):
+    """Split overlapping search margins at a measured clear line between two OCR fields."""
+    x, y, w, h = map(round, text.bbox)
+    top, bottom = y-3, y+h+3
+    from ..parallel_contracts import EDITABLE_TEXT_METHOD
+    if graph.text.method_version == EDITABLE_TEXT_METHOD:
+        for peer in graph.text.texts:
+            px, py, pw, ph = map(round, peer.bbox)
+            if min(x+w, px+pw)-max(x, px) < .6*min(w, pw) or peer.id == text.id:
+                continue
+            if 0 <= py-y-h < 6:
+                cut = (py+y+h)//2
+            elif 0 <= y-py-ph < 6:
+                cut = (y+py+ph)//2
+            else:
+                continue
+            # Sample both margins across this field. If strokes, a rule, or a
+            # textured backing meet here the ordinary ownership checks must decide.
+            strip = source[max(0,cut-1):cut+1,max(0,x-3):x+w+3].astype(float)
+            if not strip.size or np.ptp(strip, axis=(0, 1)).max() > 18:
+                continue
+            if py >= y+h:
+                bottom = min(bottom, cut)
+            else:
+                top = max(top, cut)
+    return [x-3, top, w+6, bottom-top]
+
+
 @dataclass(frozen=True)
 class TextMaskCompletion:
     evidence: dict

@@ -50,7 +50,7 @@ def unpack(data, target):
                 raise ValueError('Office packet hash mismatch')
 
 
-def submit(job, pptx, irs, directory, timeout=1800, *, target_ids=None, original_sites=False):
+def submit(job, pptx, irs, directory, timeout=1800, *, target_ids=None, original_sites=False, text_layer_audit=False):
     directory = Path(directory)
     request = directory/'worker-request'
     request.mkdir(parents=True)
@@ -60,6 +60,8 @@ def submit(job, pptx, irs, directory, timeout=1800, *, target_ids=None, original
     req_payload = {'irs': [f'page-{i}/slideir.json' for i in range(len(irs))]}
     if target_ids is not None:
         req_payload['target_ids'] = sorted(set(target_ids))
+    if text_layer_audit:
+        req_payload['text_layer_audit'] = True
     if original_sites:
         req_payload['original_sites'] = True
     write(request/'request.json', req_payload)
@@ -126,6 +128,8 @@ def execute_ticket(client,ticket,run,binding):
         raise ValueError('Office IR escaped packet')
     target_ids = request.get('target_ids')
     options = {'target_ids': target_ids} if target_ids is not None else {}
+    if request.get('text_layer_audit'):
+        options['text_layer_audit'] = True
     if request.get('original_sites'):
         options['original_sites'] = True
     result=check_local(run/'input/input.pptx',irs,run/'output/check',**options)
@@ -135,7 +139,7 @@ def execute_ticket(client,ticket,run,binding):
         suf = probe_file.suffix.lower()
         if suf == '.pptx':
             probe_file.unlink()
-        elif suf == '.png' and not probe_file.name.endswith(('-before.png','-delete.png','-site.png','-reopen.png')):
+        elif suf == '.png' and not probe_file.name.endswith(('-before.png','-delete.png','-site.png','-reopen.png','-text-cleared.png')):
             probe_file.unlink()
     result['files'] = {str(p): digest(p) for p in (run/'output/check').rglob('*') if p.is_file()}
     write(run/'output/check/checks.json', result)
@@ -159,6 +163,7 @@ def worker(url, token, root, once=False):
         'office_code': digest(Path(__file__).with_name('office.py')),
         'parallel_office_code': digest(pkg / 'parallel_office.py'),
         'office_site_code': digest(pkg / 'office_sites.py'),
+        'text_layer_code': digest(pkg / 'office_text_layer.py'),
         'parallel_probe_code': digest(pkg / 'parallel_edit_probe.py'),
     })
     with httpx.Client(base_url=url, headers={'Authorization': 'Bearer '+token,
