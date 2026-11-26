@@ -55,6 +55,52 @@ def test_soft_alpha_unmix_recovers_foreground_colour():
     assert np.abs(rgba[..., :3].astype(int) - fg).max() <= 2 and (rgba[..., 3] == 128).all()
 
 
+def test_line_art_route_requires_an_enclosed_background():
+    from product.runtime.batch_backbone import _has_line_art_hole
+    pixels = np.full((32, 32, 3), 235, np.uint8)
+    pixels[6:26, 6:26] = [10, 70, 140]
+    assert not _has_line_art_hole(pixels, [1, 1, 30, 30])
+    pixels[8:24, 8:24] = 235
+    assert _has_line_art_hole(pixels, [1, 1, 30, 30])
+
+
+@pytest.mark.parametrize('reject_matte', [False, True])
+def test_line_art_batch_uses_matte_then_recovers_if_staging_rejects(tmp_path, monkeypatch, reject_matte):
+    from product.runtime import batch_backbone
+    from product.recovery import agent_asset_stage, asset_retry
+    from test_r1205_agent_asset_stage import scene
+    graph, layers, baseline = scene(tmp_path)
+    calls = []
+    real_retry = asset_retry.retry_asset_extraction
+    real_stage = agent_asset_stage.stage_asset_candidate
+
+    def extract(*args, strategy, **kwargs):
+        calls.append(strategy)
+        # Use the same valid fixture candidate to isolate routing and staged rejection.
+        return real_retry(*args, strategy='source-halo', **kwargs)
+
+    def stage(*args, **kwargs):
+        if reject_matte and args[3].name == 'staged-matte':
+            raise ValueError('injected ownership rejection')
+        return real_stage(*args, **kwargs)
+
+    monkeypatch.setattr(matting, 'available', lambda: True)
+    monkeypatch.setattr(matting, 'binding', lambda: None)
+    monkeypatch.setattr(batch_backbone, '_has_line_art_hole', lambda *_: True)
+    monkeypatch.setattr(asset_retry, 'retry_asset_extraction', extract)
+    monkeypatch.setattr(agent_asset_stage, 'stage_asset_candidate', stage)
+    result, selected, errors = batch_backbone._chain_stage_from_spec(
+        initial_graph=graph, initial_baseline=baseline, fonts={'fonts': []},
+        source_path=str(layers/'source.png'), layers_dir=str(layers), deferred_path=None,
+        page_cache_dir=tmp_path/'cache', directory=tmp_path/'result', tag='pass',
+        trials_spec=[], frame_overrides={}, skip_ids=set(), include_assets=True,
+        include_containers=False, wanted_filter={'first'}, sam_enabled=not reject_matte,
+        prefer_rmbg_icons=True)
+    assert not errors, [error['reason'] for error in errors]
+    assert selected and result.is_dir()
+    assert calls == (['rmbg2','verified-backing'] if reject_matte else ['rmbg2'])
+
+
 def test_retry_asset_extraction_rmbg2_stages_through_shared_gates(tmp_path, monkeypatch):
     layers, _, _ = fixture(tmp_path)
     src_path = layers / 'source.png'

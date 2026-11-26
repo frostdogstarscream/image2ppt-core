@@ -1714,6 +1714,26 @@ def _collect_office_defects(office_result: dict, graph: SceneGraph, staged_ids: 
     return frame_repairs, bad_ids
 
 
+def _has_line_art_hole(source, bbox):
+    """Choose a matte proposal for sparse strokes with an enclosed area on a plain ground."""
+    x, y, w, h = map(round, bbox)
+    if min(w, h) < 5 or x < 0 or y < 0 or x + w > source.shape[1] or y + h > source.shape[0]:
+        return False
+    crop = source[y:y+h, x:x+w].astype(np.int16)
+    rim = np.concatenate((crop[0], crop[-1], crop[:, 0], crop[:, -1]))
+    ground = np.median(rim, axis=0)
+    if np.percentile(np.abs(rim - ground).max(axis=1), 65) > 20:
+        return False
+    ink = (np.abs(crop - ground).max(axis=2) > 42).astype(np.uint8)
+    if not .04 <= ink.mean() <= .55:
+        return False
+    contours, hierarchy = cv2.findContours(ink, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    return hierarchy is not None and any(
+        relation[3] >= 0 and cv2.contourArea(contour) >= 4
+        for contour, relation in zip(contours, hierarchy[0])
+    )
+
+
 def _chain_stage_from_spec(
     *,
     initial_graph: SceneGraph,
@@ -1739,6 +1759,7 @@ def _chain_stage_from_spec(
     sam_enabled: bool,
     experiment_profile: str | None = None,
     recover_light_tile_marks: bool = False,
+    prefer_rmbg_icons: bool = False,
     marked_routes: tuple | list = (),
     prepared_tables=None,
     post_text_checkpoint: dict | None = None,
@@ -1966,6 +1987,10 @@ def _chain_stage_from_spec(
             and (wanted_filter is None or a.id in wanted_filter)
         ]
         asset_cache_root = page_cache_dir / 'asset-extract-cache'
+        routing_pixels = None
+        if prefer_rmbg_icons and asset_targets and matting.available():
+            with Image.open(source_path) as image:
+                routing_pixels = np.asarray(image.convert('RGB'))
         for idx, asset in enumerate(asset_targets):
             step_dir = directory / tag / f'asset-{idx:03d}-{key(asset.id)[:12]}'
             step_dir.mkdir(parents=True, exist_ok=True)
@@ -2020,10 +2045,27 @@ def _chain_stage_from_spec(
                 return out_res
 
             try:
-                res = _cached_retry('verified-backing', step_dir / 'extract')
-                choices = [('verified-backing', res)]
+                choices = []
+                matte_ir = None
+                prefer_matte = (asset.kind == 'icon' and routing_pixels is not None
+                                and _has_line_art_hole(routing_pixels, asset.bbox))
+                if prefer_matte:
+                    try:
+                        matte = _cached_retry('rmbg2', step_dir / 'extract-rmbg2')
+                        if matte.get('status') == 'CANDIDATE_READY':
+                            matte_ir = stage_asset_candidate(
+                                matte['candidate_directory'], active_graph, cur_base,
+                                step_dir / 'staged-matte', layer_directory=layers_dir)
+                        choices.append(('rmbg2', matte))
+                    except Exception as exc:
+                        choices.append(('rmbg2', {'status':'REJECTED', 'reason':str(exc)[:300]}))
+                if matte_ir is None:
+                    res = _cached_retry('verified-backing', step_dir / 'extract')
+                    choices.append(('verified-backing', res))
+                else:
+                    res = matte
                 compare = asset.kind in ('icon', 'logo', 'decoration')
-                if (compare or res.get('status') != 'CANDIDATE_READY') and sam_enabled:
+                if matte_ir is None and (compare or res.get('status') != 'CANDIDATE_READY') and sam_enabled:
                     sam_root = page_cache_dir / 'sam-cache' / key(asset.id)[:12]
                     plan_file = sam_root / 'sam-plan.json'
                     sam_out = sam_root / 'sam'
@@ -2052,7 +2094,7 @@ def _chain_stage_from_spec(
                         except (ValueError,OSError,RuntimeError) as exc:
                             choices.append(('sam',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
                 need_rmbg2 = (
-                    compare and matting.available()
+                    not prefer_matte and compare and matting.available()
                     and (experiment_profile not in (None, 'baseline')
                          or not any(c.get('status') == 'CANDIDATE_READY' for _, c in choices))
                 )
@@ -2063,6 +2105,8 @@ def _chain_stage_from_spec(
                     except Exception as exc:
                         choices.append(('rmbg2',{'status':'UNAVAILABLE','reason':type(exc).__name__}))
                 for op in ('vitmatte','local-layerd'):
+                    if matte_ir is not None:
+                        break
                     if experiment_profile not in (op,'combined'):
                         continue
                     if op=='vitmatte' and not compare:
@@ -2098,13 +2142,14 @@ def _chain_stage_from_spec(
                     r['rank_score'] = r['recomposition_p95'] + (r['contrast_edge_proxy']['p90'] if comparable else 0)
                 scored.sort(key=lambda r:(r['rank_score'],r['background_error'],r['strategy']))
                 write(step_dir/'strategy-comparison.json',{
+                    'preferred_route':'rmbg2' if prefer_matte else 'verified-backing',
                     'attempts':[{'strategy':name,'status':c.get('status'),'reason':c.get('reason')} for name,c in choices],
                     'comparable_edge_support':comparable,
                     'ranked':[{k:v for k,v in r.items() if k!='candidate'} for r in scored]})
                 if scored:
                     res = scored[0]['candidate']
                 if res.get('status') == 'CANDIDATE_READY':
-                    ir = stage_asset_candidate(
+                    ir = matte_ir or stage_asset_candidate(
                         res['candidate_directory'], active_graph, cur_base,
                         step_dir / 'staged', layer_directory=layers_dir,
                     )
@@ -2432,6 +2477,7 @@ def restage_batch_candidate_subset(
             tag=f'stage-pass{attempt_idx + 1}',
             experiment_profile=spec.get('experiment_profile'),
             recover_light_tile_marks=spec.get('recover_light_tile_marks', False),
+            prefer_rmbg_icons=spec.get('prefer_rmbg_icons', False),
             marked_routes=spec.get('marked_routes', ()),
             trials_spec=spec['trials'],
             frame_overrides=merged_overrides,
@@ -2851,6 +2897,8 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
     current.setdefault('batch_unrecoverable_texts', {})[str(page)] = sorted(unrecoverable_text_ids)
 
     cand_ir_ref: list[Path] = []
+    prefer_rmbg_icons = (request.get('orchestrator') == 'editable_reconstruction'
+                         and request.get('experiment_profile') in (None, 'baseline'))
 
     def _enriched_failures() -> list[dict]:
         staged_crop_boxes: list[tuple[str, list[float]]] = []
@@ -2880,6 +2928,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
         prepared_tables=prepared_tables,
         experiment_profile=request.get('experiment_profile'),
         recover_light_tile_marks=request.get('orchestrator') == 'editable_reconstruction',
+        prefer_rmbg_icons=prefer_rmbg_icons,
         marked_routes=routes,
         trials_spec=trials_spec,
         frame_overrides={},
@@ -2930,6 +2979,7 @@ def batch_reconstruct_page(service, state, current, directory: Path, *, page: in
             'initial_baseline': str(initial_baseline),
             'experiment_profile':request.get('experiment_profile'),
             'recover_light_tile_marks':request.get('orchestrator') == 'editable_reconstruction',
+            'prefer_rmbg_icons':prefer_rmbg_icons,
             'marked_routes':routes,
             'cache_dir': str(directory),
             'trials': trials_spec,
