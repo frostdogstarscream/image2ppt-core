@@ -96,7 +96,7 @@ class Queue:
                     pass
                 if process.poll() is None:
                     self.kill(process)
-                    if not self.stop_event.is_set() and (job/'host-baseline/manifest.json').is_file():
+                    if not self.stop_event.is_set() and any((job/name/'manifest.json').is_file() for name in ('host-baseline','host-checkpoint')):
                         from .runtime.host_baseline import publish
                         outcome=publish(job,{'reason':'Job watchdog deadline expired'},['TIME_BUDGET_EXHAUSTED'])
                         self.set(id,outcome['status'])
@@ -105,7 +105,7 @@ class Queue:
                 else:
                     try:result=json.loads((job/'result.json').read_text(encoding='utf-8'))
                     except (OSError,ValueError):result={'status':'FAILED'}
-                    if (job/'host-baseline/manifest.json').is_file() and result.get('status')!='CANCELLED':
+                    if any((job/name/'manifest.json').is_file() for name in ('host-baseline','host-checkpoint')) and result.get('status')!='CANCELLED':
                         selection=job/'runtime/delivery-selection.json'
                         if not selection.is_file() or json.loads(selection.read_text('utf8')).get('result_sha256')!=digest(job/'result.json'):
                             from .runtime.host_baseline import publish
@@ -363,12 +363,24 @@ def create_app(root=None, token=None, run_worker=True):
     @app.get('/api/v1/jobs/{id}/artifacts',dependencies=[Depends(auth)])
     def artifacts(id:str):
         current=queue.status(id)
+        if current['status']=='RUNNING':
+            from .runtime.host_baseline import checkpoint_file
+            snap = checkpoint_file(root/id)
+            if snap:
+                return {'id':id,'status':'RUNNING','completion':'PARTIAL_EDITABLE','artifacts':[{
+                    'name':'checkpoint.pptx','sha256':snap[1],'url':f'/api/jobs/{id}/files/checkpoint.pptx'}]}
         return {'id':id,'status':current['status'],'artifacts':[
             {'name':name,'sha256':sha,'url':f'/api/jobs/{id}/files/{name}'}
             for name,sha in current.get('result',{}).get('artifacts',{}).items()]}
     @app.get('/api/jobs/{id}/files/{name}',dependencies=[Depends(auth)])
     def artifact(id:str,name:str):
         status=queue.status(id)
+        if name=='checkpoint.pptx':
+            from .runtime.host_baseline import checkpoint_file
+            snap = checkpoint_file(root/id)
+            if snap and status['status'] == 'RUNNING':
+                return FileResponse(snap[0],filename=name)
+            raise HTTPException(404)
         if status['status'] not in ('SUCCEEDED','REVIEW_REQUIRED'):raise HTTPException(409,'该任务尚无可交付文件')
         if status.get('result',{}).get('pipeline_mode','').startswith('parallel_') and status.get('result',{}).get('visual_review_backend')!='opencode':
             from .parallel_store import Store

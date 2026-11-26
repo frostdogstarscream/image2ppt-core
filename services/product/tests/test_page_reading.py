@@ -182,3 +182,10 @@ def test_multi_page_draft_contains_all_office_checked_pages(tmp_path,monkeypatch
     receipt = json.loads((tmp_path/'reading-draft.json').read_text('utf8'))
     assert receipt['pptx']==str(full) and receipt['pages']==2 and receipt['sha256']==digest(full)
 
+
+
+def test_only_text_in_the_measured_photo_caption_gets_priority():
+    objects = {'picture':{'kind':'asset','payload':{'source_frame':[10,20,120,80],'caption_boundary':80}}}
+    lines = {s:{'id':s,'score':.999,'bbox':b} for s,b in [
+        ('caption',[20,81,70,15]),('in-photo',[20,30,70,15]),('beside',[135,81,45,12])]}
+    assert reading.photo_caption_lines(objects,lines)=={'caption'}

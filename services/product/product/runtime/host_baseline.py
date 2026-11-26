@@ -217,6 +217,10 @@ def assess(job, current):
         replaced = {aid: {'field':tid, 'asset_sha256':proof['asset_sha256']}
                     for tid in editables for aid, proof in selected[tid].get('text_cutouts', {}).items()}
         pictures = {oid:r['asset_reference']['sha256'] for oid,r in selected.items() if r.get('asset_reference')}
+        confirmed = {v['ocr_id'] for v in readings.values() if v['status']=='model_confirmed'}
+        confirmed.update(v['ocr_id'] for oid,v in observed.items() if oid in selected
+                         and v.get('status') in ('agreed','model_confirmed')
+                         and v.get('before')==v.get('after',v.get('before')))
         pages.append({'unscoped_crops':unscoped, 'raster_text_in_artwork':artwork_text,
                       **({'graphic_plate':graphic_plate} if scoped else {}),
                       'plate_audit':plate,'page':page, 'source_sha256':current['host_evidence'][k]['source_sha256'],
@@ -226,6 +230,9 @@ def assess(job, current):
                       'ocr_native_hits':sorted(set(hits)-pending), 'revised_ocr_lines':sorted(updated),
                       'pending_readings':{i:v for i,v in readings.items() if v['status']=='pending_confirmation'},
                       'model_confirmed_readings':{i:v for i,v in readings.items() if v['status']=='model_confirmed'},
+                      'text_content':{'native_fields':len(fields),'ocr_matched_lines':sorted(hits),
+                                      'confirmed_source_ids':sorted(confirmed-set(pending)),
+                                      'pending_source_ids':sorted(pending)},
                       'native_field_count':len(fields), 'local_fidelity':local, 'minor_deviations':minor,
                       'max_local_mae':max((v['mae_rgb'] for v in local.values()), default=None), 'scorecard':measures})
     return {'pptx_sha256':sha,'office_status':office.get('status','UNKNOWN'),'verified':verified,
@@ -299,6 +306,40 @@ def regressions(base, candidate, *, reviewed_reading_draft=False):
     return reasons
 
 
+def _save_checked(root,current,score,request,sources,originals):
+    root.mkdir(exist_ok=True)
+    manifest = root/'manifest.json'
+    shutil.copyfile(current['composition']['artifacts']['pptx'],root/'baseline.pptx')
+    write(root/'state.json',current)
+    write(root/'scorecard.json',score)
+    files = ['baseline.pptx','state.json','scorecard.json']
+    office = current['composition']['office']
+    for p in score['pages']:
+        name = f"page-{p['page']:02d}-before.png"
+        preview = Path(office.get('office_directory',''))/name
+        if preview.is_file():
+            shutil.copyfile(preview,root/name)
+            files.append(name)
+    info = {'origin':ORIGIN,'native_variant':request.get('native_variant','combined'),
+            'text_profile':{name:bool(request.get(name,False)) for name in ('region_text','page_reading')},
+            'sources':sources,'uploaded_sha256':originals,'finished':time.time(),
+            'files':{n:digest(root/n) for n in files}}
+    if score['pptx_sha256'] != info['files']['baseline.pptx']:
+        raise RuntimeConflict('checked deck changed before snapshot')
+    write(manifest,info)
+    return info
+
+
+def checkpoint_file(job):
+    path = job/'host-checkpoint/baseline.pptx'
+    manifest = path.with_name('manifest.json')
+    if manifest.is_file() and path.is_file():
+        expected = read(manifest)['files']['baseline.pptx']
+        if digest(path) == expected:
+            return path, expected
+    return None
+
+
 def ensure_baseline(job):
     state = RuntimeState(job)
     svc = RuntimeService(job.parent)
@@ -323,8 +364,8 @@ def ensure_baseline(job):
     def step(name, fn):
         return state.mutate(name,{'sources':sources},None,'host-stage0-'+name,fn)
     step('prepare',lambda c,d:prepare_all(svc,state,c,d,sources=sources))
-    for page in range(1,len(sources)+1):
-        if request.get('object_scoped_delivery'):
+    if request.get('object_scoped_delivery'):
+        for page in range(1,len(sources)+1):
             def preserve_text(c, d):
                 graph = svc.graph(svc.page(c, page))
                 targets = [line.id for line in graph.text.texts if line.id not in graph.selected]
@@ -340,6 +381,34 @@ def ensure_baseline(job):
                     return svc.commit_region(state,c,d/'commit',candidate_id=outcome['candidate_id'])
                 return {'status':outcome['status']}
             step(f'preserve-text-{page}', preserve_text)
+    def save_first_checked():
+        target = job/'host-checkpoint'
+        if not request.get('object_scoped_delivery') or (target/'manifest.json').is_file():
+            return
+        view = state.read()
+        if len(view['pages']) != len(sources) or not all(svc.graph(row).selected for row in view['pages']):
+            return
+        directory = target/('assemble-'+uuid4().hex[:12])
+        directory.mkdir(parents=True)
+        from ..parallel_store import BudgetExceeded
+        from ..pipeline import PipelineError
+        try:
+            svc.compose_delivery(state,view,directory,recover_objects=False)
+            composition = svc.composition(view)
+            irs = [Path(row['ir']) for row in view['pages']]
+            office = svc.office_check(state,composition['artifacts']['pptx'],irs,directory/'office')
+        except (PipelineError, BudgetExceeded) as error:
+            state.event({'checkpoint':'unavailable','error_type':type(error).__name__})
+            return
+        composition['office'] = office
+        if office.get('status') == 'PASS':
+            score = assess(job,view)
+            defects = delivery_defects(score)
+            if score['verified'] and (not defects or _verified_partial_copy(score,score['pptx_sha256'],sources,defects)):
+                _save_checked(target,view,score,request,sources,originals)
+    save_first_checked()
+    for page in range(1,len(sources)+1):
+        if request.get('object_scoped_delivery'):
             if request.get('native_variant') != 'joint-only':
                 def preserve_panels(c, d):
                     inventory_path = c.get('experiment_marks', {}).get(str(page))
@@ -368,6 +437,8 @@ def ensure_baseline(job):
             write(d/'regional-failures.json',failures)
             return {'page':page,'status':outcome['status'],'failed_count':len(failures)}
         step(f'reconstruct-{page}',reconstruct)
+        if page == len(sources):
+            save_first_checked()
         def finish_photos(c,d):
             # Text repairs and their exclusions are settled before cropping or upgrading enclosing cards.
             candidate = svc.crop_region(state,c,d,page=page,upgrade_containers=request.get('native_variant')!='joint-only')
@@ -398,9 +469,19 @@ def ensure_baseline(job):
                             return svc.commit_region(state, current, directory/'commit', candidate_id=cid)
                         if checked.get('failure') == 'PREVIOUS_NATIVE_EDIT_LOST':
                             return {**checked, 'frame':frame['id'], 'committed_count':0}
-                        return {'status': checked['status'], 'frame': frame['id']}
+                        return {'status': checked['status'], 'frame': frame['id'], 'candidate_id':cid,
+                                'failure':checked.get('failure') or checked.get('office',{}).get('status'),
+                                'failed_regions':checked.get('failed_regions',[]),
+                                'failed_object_id':checked.get('office',{}).get('failed_object_id')}
                     return staged
-                step(f"photo-frame-{page}-{frame['id']}", finish_frame)
+                def record_frame(current, directory):
+                    outcome = finish_frame(current, directory)
+                    if outcome.get('status') != 'COMMITTED':
+                        detail = {'object_id':frame['id'], 'failure':outcome.get('failure') or outcome['status'],
+                                  'failed_regions':outcome.get('failed_regions',[])}
+                        current.setdefault('regional_failures',{}).setdefault(str(page),[]).append(detail)
+                    return outcome
+                step(f"photo-frame-{page}-{frame['id']}", record_frame)
         if inventory_path and request.get('object_scoped_delivery') and request.get('native_variant') != 'joint-only':
             def finish_groups(c, d):
                 from .marked_routes import bind_plan, plan_move_groups
@@ -450,7 +531,8 @@ def ensure_baseline(job):
     for page_score in score['pages']:
         page = page_score['page']
         statuses = ('retained','unresolved','residual') if request.get('object_scoped_delivery') else ('retained','unresolved')
-        retained = [r for r in page_score['plate_audit']['rows'] if r['status'] in statuses]
+        retained = [r for r in page_score['plate_audit']['rows'] if r['status'] in statuses and
+                    r.get('residual_location') != 'text_hidden_view_only']
         residual_ids = {oid for r in retained if r['status'] == 'residual' for oid in r.get('exact_native_fields', ())}
         ids = [*sorted(residual_ids), *sorted({oid for r in retained for oid in r['mark_ids']}-residual_ids)]
         if not ids or not score['verified']:
@@ -499,7 +581,8 @@ def ensure_baseline(job):
         for page_score in score['pages']:
             page = page_score['page']
             k = str(page)
-            issues = {oid:r['status'] for r in page_score['plate_audit']['rows']
+            issues = {oid:('unlocated_hidden_view_reading' if r.get('residual_location')=='text_hidden_view_only'
+                           else r['status']) for r in page_score['plate_audit']['rows']
                       if r['status'] in ('residual','retained','unresolved','plate_only') for oid in r['mark_ids']}
             if request.get('object_scoped_delivery'):
                 issues.update((oid,'source_reading_disagreement') for r in page_score['plate_audit']['rows']
@@ -511,23 +594,7 @@ def ensure_baseline(job):
         return {'pages':len(score['pages'])}
     step('background-questions', expose_plate_findings)
     current = state.read()
-    shutil.copyfile(current['composition']['artifacts']['pptx'],root/'baseline.pptx')
-    write(root/'state.json',current)
-    write(root/'scorecard.json',score)
-    files = ['baseline.pptx','state.json','scorecard.json']
-    office = current['composition']['office']
-    for p in score['pages']:
-        name = f"page-{p['page']:02d}-before.png"
-        preview = Path(office.get('office_directory',''))/name
-        if preview.is_file():
-            shutil.copyfile(preview,root/name)
-            files.append(name)
-    info = {'origin':ORIGIN,'native_variant':request.get('native_variant','combined'),
-            'text_profile':{name:bool(request.get(name,False)) for name in ('region_text','page_reading')},
-            'sources':sources,'uploaded_sha256':originals,'finished':time.time(),
-            'files':{n:digest(root/n) for n in files}}
-    write(manifest,info)
-    return info
+    return _save_checked(root,current,score,request,sources,originals)
 
 
 def summary(score):
@@ -628,8 +695,11 @@ def delivery_defects(score):
             reasons.append('SOURCE_PLATE_UNVERIFIED')
         retained = [row for row in audit.get('rows', [])
                     if row['status'] in ('retained', 'residual', 'plate_only')]
-        if retained:
+        layered = [r for r in retained if r.get('residual_location')=='text_hidden_view_only' or r.get('seen_on_named_plate') is False]
+        if len(layered) != len(retained):
             reasons.append('TEXT_STILL_ON_BACKGROUND')
+        if layered:
+            reasons.append('READING_IN_TEXT_HIDDEN_VIEW')
         unresolved = [r for r in audit.get('rows', []) if r['status'] == 'unresolved']
         if unresolved:
             reasons.append('SOURCE_TEXT_WITHOUT_NATIVE_FIELD')
@@ -650,7 +720,7 @@ def delivery_defects(score):
 
 def _verified_partial_copy(score, deck_sha, sources, defects):
     """Allow partial copies with measured text or graphic gaps and verified editable objects."""
-    reviewable = {'TEXT_STILL_ON_BACKGROUND', 'SOURCE_TEXT_WITHOUT_NATIVE_FIELD','GRAPHIC_STILL_ON_BACKGROUND'}
+    reviewable = {'READING_IN_TEXT_HIDDEN_VIEW','TEXT_STILL_ON_BACKGROUND', 'SOURCE_TEXT_WITHOUT_NATIVE_FIELD','GRAPHIC_STILL_ON_BACKGROUND'}
     if (not defects or not sources or not score.get('verified') or score.get('office_status') != 'PASS'
             or score.get('pptx_sha256') != deck_sha or len(score['pages']) != len(sources)
             or any(set(item['reasons']) - reviewable for item in defects)):
@@ -697,7 +767,23 @@ def _preserves_partial_edits(baseline_defects, candidate_defects):
 
 def _publish(job, agent, reasons, candidate):
     root = job/'host-baseline'
-    manifest = ensure_baseline(job)
+    fallback_copy = checkpoint_file(job) if reasons else None
+    early = bool(fallback_copy and not (root/'manifest.json').is_file())
+    if fallback_copy and not early:
+        final = ensure_baseline(job)
+        completed = read(root/'scorecard.json')
+        gaps = delivery_defects(completed)
+        early = bool(gaps and not _verified_partial_copy(completed,final['files']['baseline.pptx'],final['sources'],gaps))
+    if early:
+        root = job/'host-checkpoint'
+        manifest = read(root/'manifest.json')
+        sources = [digest(job/'inputs'/n) for n in read(job/'request.json')['sources']]
+        originals = [digest(job/ref['path']) for ref in read(job/'request.json').get('original_inputs',[])]
+        if (sources != manifest['sources'] or originals != manifest.get('uploaded_sha256',[])
+                or any(digest(root/k)!=v for k,v in manifest['files'].items())):
+            raise RuntimeConflict('verified checkpoint changed')
+    else:
+        manifest = ensure_baseline(job)
     base = read(root/'scorecard.json')
     delivery = job/'delivery'
     delivery.mkdir(exist_ok=True)
@@ -727,7 +813,7 @@ def _publish(job, agent, reasons, candidate):
                 reasons = ['AGENT_FAILED_OBJECT_SCOPE_GATE']
     fallback = bool(reasons)
     recovered_copy = None
-    if fallback and strict and base['verified'] and (state.root/'object-recovery').is_dir() and state.remaining_seconds() != 0:
+    if fallback and not early and strict and base['verified'] and (state.root/'object-recovery').is_dir() and state.remaining_seconds() != 0:
         # The frozen comparison stays immutable. Give individually useful edits one
         # source-bound reconstruction on that parent before selecting the review copy.
         from ..parallel_store import BudgetExceeded
@@ -833,6 +919,8 @@ def _publish(job, agent, reasons, candidate):
                                          and all(p.get('vlm_audit',{}).get('provider','opencode_go')=='opencode_go'
                                                  for p in agent['independent_audit'].get('pages',[])) else 'UNKNOWN'),
                   wps_acceptance='UNKNOWN', baseline_pages=summary(base))
+    if early:
+        result['checkpoint_delivery'] = True
     if recovered_copy:
         result.update(origin='object-incremental', restored_edits=recovered_copy[3])
         write(delivery/'recovered-scorecard.json',recovered_copy[1])

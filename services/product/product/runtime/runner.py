@@ -211,10 +211,17 @@ def run(job, client=None):
         return _agent_run(job,client)
     from .host_baseline import ensure_baseline, assess, regressions, publish, selected_result
     from .host_evidence import read
-    ensure_baseline(job)
     previous = selected_result(job)
     if previous:
         return previous
+    try:
+        ensure_baseline(job)
+    except Exception as error:
+        from .host_baseline import checkpoint_file
+        from .state import RuntimeConflict
+        if isinstance(error, RuntimeConflict) or (job/'cancel.requested').exists() or not checkpoint_file(job):
+            raise
+        return publish(job, {'reason':'Host refinement stopped: '+type(error).__name__}, ['HOST_REFINEMENT_FAILED'])
     request = read(job/'request.json')
     if request.get('baseline_only'):
         return publish(job, {'reason':'Deterministic comparison requested'}, ['BASELINE_ONLY'])

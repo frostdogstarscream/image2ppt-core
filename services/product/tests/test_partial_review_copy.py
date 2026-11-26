@@ -106,3 +106,46 @@ def test_new_plate_word_keeps_the_verified_baseline_download(frozen_job):
                           candidate=candidate)
     assert result['artifacts']['result.pptx'] == digest(job/'host-baseline/baseline.pptx')
     assert result['completion'] == 'PARTIAL_EDITABLE'
+
+
+def test_timeout_publishes_checked_deck_during_baseline_refinement(frozen_job, monkeypatch):
+    from product.runtime import runner
+    job = frozen_job
+    (job/'host-baseline').rename(job/'host-checkpoint')
+    request = host.read(job/'request.json')
+    write(job/'request.json', {**request, 'host_stage0':True})
+    expected = host.checkpoint_file(job)[1]
+    def expired(job):
+        raise TimeoutError('later frame work timed out')
+    monkeypatch.setattr(host,'ensure_baseline',expired)
+    result = runner.run(job)
+    assert result['status']=='REVIEW_REQUIRED' and result['checkpoint_delivery']
+    assert result['artifacts']['result.pptx']==expected
+    assert runner.run(job)==result
+    (job/'host-checkpoint/baseline.pptx').write_bytes(b'changed')
+    assert host.checkpoint_file(job) is None
+
+
+def test_unlocated_hidden_view_reading_stays_reviewable_without_blame_on_plate():
+    score = measured_score()
+    row = score['pages'][0]['plate_audit']['rows'][0]
+    row['residual_location'] = 'text_hidden_view_only'
+    defects = host.delivery_defects(score)
+    assert defects[0]['reasons']==['READING_IN_TEXT_HIDDEN_VIEW']
+    assert defects[0]['retained_fields']==[row]
+    assert host._verified_partial_copy(score,'deck',['source'],defects)
+
+
+def test_later_ineligible_baseline_keeps_earlier_verified_download(frozen_job):
+    import shutil
+    root = frozen_job/'host-baseline'
+    shutil.copytree(root,frozen_job/'host-checkpoint')
+    score = host.read(root/'scorecard.json')
+    score['verified'] = False
+    write(root/'scorecard.json',score)
+    manifest = host.read(root/'manifest.json')
+    manifest['files']['scorecard.json'] = digest(root/'scorecard.json')
+    write(root/'manifest.json',manifest)
+    result = host.publish(frozen_job, {'reason':'refinement unavailable'}, ['BASELINE_ONLY'])
+    assert result['checkpoint_delivery'] and result['office_pass']
+    assert result['artifacts']['result.pptx']==host.checkpoint_file(frozen_job)[1]

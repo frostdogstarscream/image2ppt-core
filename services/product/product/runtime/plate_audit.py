@@ -254,9 +254,11 @@ def audit(job, deck, sha, page, snapshot_row, lines, fields, marks, readings, *,
                 row['raster_reading'] = row['plate_reading']
                 row['plate_reading'] = ' '.join(evidence['lines'][i]['text']
                     for i in _visible_fragments(row, evidence['lines'])) or None
-            elif check_icon_fragments and row['status'] == 'plate_only':
-                row['seen_on_named_plate'] = any(_overlap(row['bbox'], item['bbox']) > 0
-                                                 for item in evidence['lines'])
+            elif row['status'] == 'plate_only':
+                row['seen_on_named_plate'] = bool(_visible_fragments(row,evidence['lines']))
+            if row['status'] in ('residual','retained','plate_only'):
+                on_plate = row.get('seen_on_named_plate', bool(row.get('plate_reading')))
+                row['residual_location'] = 'named_plate' if on_plate else 'text_hidden_view_only'
         return {'status':'MEASURED','pptx_sha256':sha,'source_sha256':snapshot_row['source_sha256'],
                 'plate_sha256':digest(path), 'text_hidden_sha256':view_receipt['sha256'],
                 'ocr_identity':composite['identity'],'rows':rows}

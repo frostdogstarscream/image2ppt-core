@@ -183,6 +183,8 @@ def stage_readings(service, state, current, directory, *, page, object_ids, expl
             targets,_=resolve_targets(scene,lines,{r['id']:r for r in inventory['rows']},split,
                                       current.get('marked_plans',{}).get(str(page),[]),
                                       [r['id'] for r in relations.get('logo_lockup_candidates',[])])
+        from .page_reading import photo_caption_lines
+        captions = photo_caption_lines(scene.selected, lines)
         for obj in scene.text.texts:
             members = scene.text.members.get(obj.id, [])
             if (obj.id not in object_ids or len(members) != 1 or obj.spans
@@ -191,8 +193,9 @@ def stage_readings(service, state, current, directory, *, page, object_ids, expl
             line = lines.get(members[0], {})
             flagged = any(intersection(obj.bbox, box) >= .5 * obj.bbox[2] * obj.bbox[3] for box in flagged_boxes)
             flagged |= current.get('plate_issues',{}).get(str(page),{}).get(obj.id)=='source_reading_disagreement'
-            if line.get('text') == obj.text and not line.get('reading_status') and (line.get('score', 1) < .94 or flagged):
+            if line.get('text') == obj.text and not line.get('reading_status') and (line.get('score', 1) < .94 or flagged or line['id'] in captions):
                 targets[obj.id] = (line, True)
+        targets = dict(sorted(targets.items(), key=lambda item: item[1][0]['id'] not in captions))
     for oid, (line, writable) in targets.items():
         before = line['text']
         x, y, w, h = map(round, line['bbox'])

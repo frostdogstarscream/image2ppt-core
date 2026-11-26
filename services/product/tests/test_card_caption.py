@@ -269,3 +269,26 @@ def test_tentative_reading_requires_two_crops_and_a_ranked_choice():
             scene(data['after']),
             {'source_sha256': 'source', 'changes': [{**data, 'choice_receipt': None}]},
         )
+
+
+def test_clean_caption_paper_survives_where_native_text_owned_strokes(tmp_path):
+    box = [10,10,120,90]
+    source = np.full((120,150,3),249,np.uint8)
+    patch = np.full((90,120,3),231,np.uint8)
+    blue = [20,65,150]
+    patch[50:70,20:100] = blue
+    source[10:100,10:130] = patch
+    mask = np.zeros(source.shape[:2],bool)
+    mask[66:71,42:47] = True
+    mask[72,44] = True
+    source[mask] = 255
+    backing = patch[55:64,31:39].copy()
+    backing[7,3] = 255  # The unproven pixel must stay with its owner.
+    owner = tmp_path/'word.npz'
+    np.savez_compressed(owner,mask=mask,restore_bbox=[41,65,8,9],backing_patch=backing)
+    child = {'kind':'text','bbox':[41,65,8,9],'owner_evidence':{'file':owner.name,'sha256':digest(owner)}}
+    result = frame_layers(patch,np.full_like(patch,249),box,[child],tmp_path,[],
+                          verified_assets={'photo':['prior-photo','owner']},source_rgb=source)
+    rgba = result[-1]
+    assert rgba[58,34].tolist()==[*blue,255]
+    assert rgba[62,34,3]==0

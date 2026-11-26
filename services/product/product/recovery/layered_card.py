@@ -209,6 +209,7 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes, *, child_fac
     sample = np.ones((h, w), bool)
     owned = np.zeros_like(sample)
     photos = np.zeros_like(sample)
+    cleaned_text = np.zeros_like(sample)
     native_children = np.zeros_like(sample)
     if child_faces is None:
         child_faces = native_child_faces(box, peers)
@@ -223,6 +224,12 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes, *, child_fac
                 px, py, pw, ph = map(int, proof['restore_bbox'])
                 if not (x <= px and y <= py and px+pw <= x+w and py+ph <= y+h):
                     return None
+                if r['kind'] == 'text':
+                    # The native text owns the original strokes. Its checked, cleaned
+                    # paper can belong to a coloured caption below those strokes.
+                    ys, xs = slice(py-y,py-y+ph), slice(px-x,px-x+pw)
+                    same_paper = np.abs(patch[ys,xs].astype(float) - proof['backing_patch']).max(2) <= 8
+                    cleaned_text[ys,xs] |= mask[ys,xs] & same_paper
             if r['kind'] == 'asset':
                 ax, ay, aw, ah = map(round, r['bbox'])
                 occupied = mask[ay-y:ay-y+ah, ax-x:ax-x+aw]
@@ -317,7 +324,7 @@ def frame_layers(patch, parent, box, peers, baseline, ignore_boxes, *, child_fac
         ink &= ~np.isin(components, exterior_components)
         # Make earlier children reveal the newly measured native face. Their
         # source owners remain unchanged and will be checked again in Office.
-        ink &= ~owned
+        ink &= (~owned | cleaned_text)
     # Paper tint must follow a new card colour. Preserve full-opacity photo and label
     # interiors; express the low-contrast shading elsewhere as a translucent tint.
     opacity = np.where(solid, 1.0, np.minimum(delta / 170.0, 0.24))

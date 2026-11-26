@@ -464,7 +464,7 @@ def adapt(graph,directory, *, group_issues=None):
         backing=directory/('plate-bands-'+array_sha(cleaned)[:16]+'.png')
         Image.fromarray(cleaned).save(backing)
     image('source-plate',[0,0,*graph.image_size],backing,'Safe source backing with only committed replacement ink cleared',0)
-    for band in bands:
+    def emit_band(band):
         x,y,width,height=band['bbox']
         members=[]
         for role,geometry,width_px,color in [
@@ -479,6 +479,8 @@ def adapt(graph,directory, *, group_issues=None):
                                 'z':len(ir['nodes']),'fill':color,'evidence_ids':[ev]})
             members.append(ident)
         ir['groups'].append({'id':band['id'],'member_ids':members})
+    for band in bands:
+        emit_band(band)
     for z,c in enumerate(surfaces,1):
         s=shape_by_id[c['id']];ev='ev-'+s.id
         ir['evidence'].append({'id':ev,'kind':'shape','bbox':s.bbox,'description':'source-confirmed flat backing'})
@@ -489,6 +491,8 @@ def adapt(graph,directory, *, group_issues=None):
         if s.fill_gradient is not None:
             snode['fill_gradient']=s.fill_gradient.model_dump()
         ir['nodes'].append(snode)
+        for band in c.get('title_bands', []):
+            emit_band(band)
     styles={s.id:s for s in graph.text.styles}
     def attrs(s):return {'font':{'ea':s.ea,'latin':s.latin,'size_pt':s.size_px*.75},'bold':s.bold,'color':s.color}
     container_assets=sorted([c for c in chosen if c['kind']=='asset' and c.get('container_layer')],

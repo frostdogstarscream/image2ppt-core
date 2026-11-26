@@ -46,6 +46,22 @@ CROP_PROMPT = (
 _NAME = re.compile(r'公司|集团|大学|医院|委员会|管理局|政府|研究院|分公司|项目名称|机构名称|《[^》]+》')
 
 
+def photo_caption_lines(selected, lines):
+    """Find OCR lines on caption bands measured when separating photos from their captions."""
+    captions = []
+    for record in selected.values():
+        proof = record.get('payload') or {}
+        frame, boundary = proof.get('source_frame'), proof.get('caption_boundary')
+        if record.get('kind') == 'asset' and frame and boundary is not None:
+            x, y, w, h = frame
+            if y < boundary < y + h:
+                captions.append([x, boundary, w, y + h - boundary])
+    return {line['id'] for line in lines.values()
+            if line['bbox'][2] * line['bbox'][3] > 0 and any(
+                intersection(line['bbox'], box) >= .65 * line['bbox'][2] * line['bbox'][3]
+                for box in captions)}
+
+
 def normalized(text):
     # Ignore formatting whitespace only. NFKC folds width, not simplified/traditional wording.
     return ' '.join(unicodedata.normalize('NFKC', text).split())
@@ -244,7 +260,8 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
     flagged = [d['bbox'] for p in current.get('independent_audit',{}).get('pages',[]) if p['page']==page
                for d in p.get('vlm_audit',{}).get('critical_defects',[])
                if d.get('category')=='text_corruption' and len(d.get('bbox') or [])==4]
-    doubtful_ids=set(relations.get('source_width_conflicts',[]))
+    captions = photo_caption_lines(scene.selected, lines)
+    doubtful_ids=set(relations.get('source_width_conflicts',[])) | captions
     for oid,reason in current.get('plate_issues',{}).get(str(page),{}).items():
         if reason=='source_reading_disagreement':
             doubtful_ids.update(scene.text.members.get(oid,[]))
@@ -263,6 +280,7 @@ def observe_page(model, state, current, directory, page, scene, lines, object_id
                 or any(intersection(line['bbox'],b)>=.5*line['bbox'][2]*line['bbox'][3] for b in flagged)):
             disputed.append((n,line))
             field_images[n] = crop
+    disputed.sort(key=lambda item: item[1]['id'] not in captions)
     local_views = {}
     for start in range(0,len(disputed),12):
         batch = disputed[start:start+12]
