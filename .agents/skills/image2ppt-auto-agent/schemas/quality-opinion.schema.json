@@ -1,0 +1,106 @@
+{
+  "$defs": {
+    "VisualDefect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "content_error",
+            "wrong_number",
+            "ghosting",
+            "neighbor_damage",
+            "incomplete_object",
+            "clipping",
+            "faint_backing_trace",
+            "font_difference",
+            "ownership_conflict",
+            "capability_unavailable",
+            "other"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "MINOR",
+            "MODERATE",
+            "MAJOR"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "evidence_ref": {
+          "pattern": "^e-[a-f0-9]{64}$",
+          "title": "Evidence Ref",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "severity",
+        "evidence_ref",
+        "description"
+      ],
+      "title": "VisualDefect",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Model proposal. Hard gates are intentionally absent.",
+  "properties": {
+    "region_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Region Id",
+      "type": "string"
+    },
+    "candidate_ids": {
+      "items": {
+        "pattern": "^[A-Za-z0-9_-]{1,100}$",
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Candidate Ids",
+      "type": "array"
+    },
+    "visual_defects": {
+      "items": {
+        "$ref": "#/$defs/VisualDefect"
+      },
+      "maxItems": 30,
+      "title": "Visual Defects",
+      "type": "array"
+    },
+    "recommendation": {
+      "enum": [
+        "ACCEPT",
+        "ACCEPT_WITH_MINOR_DEVIATION",
+        "RETRY_WITH_STRATEGY",
+        "REJECT",
+        "UNKNOWN"
+      ],
+      "title": "Recommendation",
+      "type": "string"
+    },
+    "reason": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "region_id",
+    "candidate_ids",
+    "visual_defects",
+    "recommendation",
+    "reason"
+  ],
+  "title": "QualityOpinion",
+  "type": "object"
+}

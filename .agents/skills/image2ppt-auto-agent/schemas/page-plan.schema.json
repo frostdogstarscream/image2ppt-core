@@ -1,0 +1,221 @@
+{
+  "$defs": {
+    "ProposedRelation": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Target",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "contains",
+            "label_on_backing",
+            "label_for",
+            "occludes",
+            "part_of",
+            "connects"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "kind"
+      ],
+      "title": "ProposedRelation",
+      "type": "object"
+    },
+    "RegionPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "AgentRegionPlan/1",
+          "title": "Schema",
+          "type": "string"
+        },
+        "job_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Job Id",
+          "type": "string"
+        },
+        "page_index": {
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Page Index",
+          "type": "integer"
+        },
+        "source_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Source Sha256",
+          "type": "string"
+        },
+        "scene_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Scene Sha256",
+          "type": "string"
+        },
+        "region_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Region Id",
+          "type": "string"
+        },
+        "region_kind": {
+          "enum": [
+            "text",
+            "complete_asset",
+            "mixed_visual_module",
+            "card"
+          ],
+          "title": "Region Kind",
+          "type": "string"
+        },
+        "object_ids": {
+          "description": "Actual scene IDs; include both endpoints of every proposed relation.",
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,100}$",
+            "type": "string"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Object Ids",
+          "type": "array"
+        },
+        "relations": {
+          "description": "Proposals only. Every source and target must belong to this region object_ids; omit unsupported relations.",
+          "items": {
+            "$ref": "#/$defs/ProposedRelation"
+          },
+          "maxItems": 100,
+          "title": "Relations",
+          "type": "array"
+        },
+        "strategy_preferences": {
+          "items": {
+            "enum": [
+              "T1_EXACT",
+              "T2_SOFT_ALPHA",
+              "JOINT_REGION",
+              "COMPLETE_PNG",
+              "LOCAL_RASTER_FALLBACK"
+            ],
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Strategy Preferences",
+          "type": "array"
+        },
+        "edit_priority": {
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ],
+          "title": "Edit Priority",
+          "type": "string"
+        },
+        "visual_sensitivity": {
+          "enum": [
+            "HIGH",
+            "MEDIUM",
+            "LOW"
+          ],
+          "title": "Visual Sensitivity",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "pattern": "^e-[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "maxItems": 40,
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "uncertainties": {
+          "items": {
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Uncertainties",
+          "type": "array"
+        },
+        "recommended_next_action": {
+          "enum": [
+            "inspect_region",
+            "inspect_conflict",
+            "request_candidate",
+            "request_joint_region",
+            "request_staging",
+            "request_edit_test",
+            "request_visual_review",
+            "propose_selection",
+            "stop_and_fallback"
+          ],
+          "title": "Recommended Next Action",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "job_id",
+        "page_index",
+        "source_sha256",
+        "scene_sha256",
+        "region_id",
+        "region_kind",
+        "object_ids",
+        "relations",
+        "strategy_preferences",
+        "edit_priority",
+        "visual_sensitivity",
+        "evidence_refs",
+        "uncertainties",
+        "recommended_next_action",
+        "reason"
+      ],
+      "title": "RegionPlan",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "AgentPagePlan/1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "regions": {
+      "items": {
+        "$ref": "#/$defs/RegionPlan"
+      },
+      "maxItems": 8,
+      "minItems": 1,
+      "title": "Regions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema",
+    "regions"
+  ],
+  "title": "PagePlan",
+  "type": "object"
+}

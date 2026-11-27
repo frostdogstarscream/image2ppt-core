@@ -1,0 +1,409 @@
+{
+  "$defs": {
+    "ExecutionArguments": {
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "anyOf": [
+            {
+              "enum": [
+                "T1_EXACT",
+                "T2_SOFT_ALPHA",
+                "T3_CARD_BIG_LAMA"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strategy"
+        },
+        "candidate_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,100}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Id"
+        },
+        "carrier_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,100}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Carrier Id"
+        },
+        "repair_code": {
+          "anyOf": [
+            {
+              "enum": [
+                "BACKGROUND_NONUNIFORM",
+                "PROTECTED_NEIGHBOR",
+                "OWNER_ESCAPES_SCOPE",
+                "REGION_CLOSURE_UNPROVEN",
+                "SOURCE_GLYPH_UNCERTAIN",
+                "EDIT_OVERFLOW",
+                "VISUAL_DEVIATION"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repair Code"
+        },
+        "proposal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SceneProposal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ExecutionArguments",
+      "type": "object"
+    },
+    "SceneProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "joint_region",
+            "add_contains",
+            "missing_object",
+            "merge_objects",
+            "split_object"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "object_ids": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,100}$",
+            "type": "string"
+          },
+          "maxItems": 40,
+          "minItems": 1,
+          "title": "Object Ids",
+          "type": "array"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,100}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "child_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,100}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Child Id"
+        },
+        "evidence_refs": {
+          "items": {
+            "pattern": "^e-[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "reason": {
+          "maxLength": 1500,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "object_ids",
+        "evidence_refs",
+        "reason"
+      ],
+      "title": "SceneProposal",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "AgentExecutionAction/1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "session_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "action_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Action Id",
+      "type": "string"
+    },
+    "region_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Region Id",
+      "type": "string"
+    },
+    "object_ids": {
+      "items": {
+        "pattern": "^[A-Za-z0-9_-]{1,100}$",
+        "type": "string"
+      },
+      "maxItems": 40,
+      "minItems": 1,
+      "title": "Object Ids",
+      "type": "array"
+    },
+    "evidence_refs": {
+      "items": {
+        "pattern": "^e-[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "maxItems": 30,
+      "minItems": 1,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "action": {
+      "enum": [
+        "inspect_region",
+        "inspect_conflict",
+        "request_candidate",
+        "request_joint_region",
+        "request_repair",
+        "propose_scene",
+        "request_staging",
+        "request_compile",
+        "request_edit_test",
+        "request_visual_review",
+        "propose_selection",
+        "stop_and_fallback"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "arguments": {
+      "$ref": "#/$defs/ExecutionArguments"
+    },
+    "reason": {
+      "maxLength": 1800,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "session_id",
+    "action_id",
+    "region_id",
+    "object_ids",
+    "evidence_refs",
+    "action",
+    "arguments",
+    "reason"
+  ],
+  "title": "ExecutionAction",
+  "type": "object",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "request_staging",
+              "request_compile",
+              "request_edit_test",
+              "request_visual_review",
+              "propose_selection"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "required": [
+              "candidate_id"
+            ],
+            "properties": {
+              "candidate_id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "arguments": {
+            "properties": {
+              "candidate_id": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "request_candidate",
+              "request_repair",
+              "request_joint_region"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "required": [
+              "strategy"
+            ],
+            "properties": {
+              "strategy": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "arguments": {
+            "properties": {
+              "strategy": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "request_repair"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "required": [
+              "repair_code"
+            ],
+            "properties": {
+              "repair_code": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "arguments": {
+            "properties": {
+              "repair_code": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "propose_scene"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "properties": {
+          "arguments": {
+            "required": [
+              "proposal"
+            ],
+            "properties": {
+              "proposal": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "arguments": {
+            "properties": {
+              "proposal": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

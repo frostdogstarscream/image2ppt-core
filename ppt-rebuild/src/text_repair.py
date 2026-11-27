@@ -345,12 +345,19 @@ def repair_page(delivery, output_root, *, inpaint_url, decisions=None, timeout=6
             protection |= rectangle(node["bbox"],pack.size)
         elif node["type"]=="shape" and node.get("fill")!="none":
             protection |= rectangle(node["bbox"],pack.size)
-    masks={line["id"]:glyph_mask(source,line,protection) for line in lines}
+    from background_models import precise_text_masks
+    mask_details={line["id"]:precise_text_masks(source,line,protection) for line in lines}
+    # Keep stroke evidence separate from the authorized repair footprint.
+    # Passing only glyph pixels to LaMa leaves antialiased edges and shadows
+    # outside its hole, even though the bounded repair mask already covers them.
+    masks={key:value["glyph"] for key,value in mask_details.items()}
+    repair_masks={key:value["repair"] for key,value in mask_details.items()}
     inspection={line["id"]:residue_inspection_mask(source,line,masks[line["id"]]) for line in lines}
-    union=np.logical_or.reduce(list(masks.values()))
+    union=np.logical_or.reduce(list(repair_masks.values()))
     (directory/"masks").mkdir()
     for line in lines:
         Image.fromarray(masks[line["id"]].astype(np.uint8)*255).save(directory/"masks"/(line["id"]+".png"))
+        Image.fromarray(repair_masks[line["id"]].astype(np.uint8)*255).save(directory/"masks"/(line["id"]+"-repair.png"))
         Image.fromarray(inspection[line["id"]].astype(np.uint8)*255).save(directory/"masks"/(line["id"]+"-inspection.png"))
     Image.fromarray(union.astype(np.uint8)*255).save(directory/"text-mask.png")
     write_json(directory/"text-inventory.json",{"source_sha256":sha256(pack.source_path),"lines":lines})
@@ -359,7 +366,7 @@ def repair_page(delivery, output_root, *, inpaint_url, decisions=None, timeout=6
     print(f"[text-repair] {delivery['page']} inpaint lines={len(lines)} paragraphs={len(groups)}",flush=True)
     regions=[]
     for group in groups:
-        selected=np.logical_or.reduce([masks[r["id"]] for r in group["lines"]])
+        selected=np.logical_or.reduce([repair_masks[r["id"]] for r in group["lines"]])
         color=group["lines"][0]["style"]["color"]
         foreground=np.mean([int(color[i:i+2],16) for i in (0,2,4)])
         regions.append({"id":group["id"],"mask":selected,"bright":foreground>210})

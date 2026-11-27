@@ -1,0 +1,68 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "max_decisions": {
+      "default": 12,
+      "maximum": 30,
+      "minimum": 1,
+      "title": "Max Decisions",
+      "type": "integer"
+    },
+    "max_tools": {
+      "default": 20,
+      "maximum": 40,
+      "minimum": 1,
+      "title": "Max Tools",
+      "type": "integer"
+    },
+    "max_repairs": {
+      "default": 2,
+      "maximum": 4,
+      "minimum": 0,
+      "title": "Max Repairs",
+      "type": "integer"
+    },
+    "max_candidates": {
+      "default": 4,
+      "maximum": 8,
+      "minimum": 1,
+      "title": "Max Candidates",
+      "type": "integer"
+    },
+    "deadline_seconds": {
+      "default": 1200,
+      "maximum": 3600,
+      "minimum": 30,
+      "title": "Deadline Seconds",
+      "type": "integer"
+    },
+    "max_cost_cny": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Max Cost Cny"
+    },
+    "per_call_ceiling_cny": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Per Call Ceiling Cny"
+    }
+  },
+  "title": "ExecutionBudget",
+  "type": "object"
+}
