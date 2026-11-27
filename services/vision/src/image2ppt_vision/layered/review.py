@@ -60,7 +60,9 @@ def review(directory, perception, *, remote=None, model=None, record_dir=None, q
     _attach(mask_file, elements)
     H, W = notext.shape[:2]
     grad = gradient(notext)
-    if remote is not None and model:
+    if perception.get('segmentation_plan'):
+        report['planning'] = 'saved_plan_applied_before_sam; no second object-model call'
+    if remote is not None and model and not perception.get('segmentation_plan'):
         from ..auto_provider import model_body, parse_object, save_new
         body = model_body(model, INSTRUCTION, {'width': W, 'height': H}, [directory/'source.png'], max_tokens=4000)
         request = {'request_id': uuid4().hex, 'operation': 'model', 'timeout': 180, 'body': body}

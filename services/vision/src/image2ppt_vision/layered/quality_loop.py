@@ -329,7 +329,14 @@ def build_page(name, raw_dir, page_dir, *, project_root, worker, job, source, re
 
 
 def _run(inputs, output, *, worker_config, project_root, remote=None, model=None, vision_model=None,
-        job=None, baseline_job=None, max_extra_vision_calls=2, max_repair_rounds=2):
+        job=None, baseline_job=None, max_extra_vision_calls=2, max_repair_rounds=2, segmentation_plans=None,
+        segmentation_backend='sam2-auto', sam3_worker_config=None, sam3_box_policy='prompt'):
+    if sam3_box_policy not in ('prompt', 'crop-hard') or (sam3_box_policy != 'prompt' and segmentation_backend != 'sam3-prompted'):
+        raise ValueError('SAM3 box policy requires sam3-prompted backend')
+    if segmentation_backend not in ('sam2-auto', 'sam3-prompted'):
+        raise ValueError('invalid segmentation backend')
+    if segmentation_backend == 'sam3-prompted' and (not segmentation_plans or not sam3_worker_config):
+        raise ValueError('SAM3 requires plans and independent worker config')
     policy = LoopPolicy(max_extra_vision_calls, max_repair_rounds)
     paths = [Path(p).resolve(strict=True) for p in inputs]
     names = [p.stem for p in paths]
@@ -343,6 +350,10 @@ def _run(inputs, output, *, worker_config, project_root, remote=None, model=None
         with Image.open(p) as image:
             if image.format != 'PNG': raise ValueError('layered inputs must be PNG screenshots')
         shutil.copyfile(p, root/'input'/(name+'.png'))
+    plan_files = []
+    if segmentation_plans:
+        from .plan_first import prepare
+        plan_files = prepare(segmentation_plans, sorted((root/'input').glob('*.png')), root/'plans')
     baseline = {}
     if baseline_job:
         base = Path(baseline_job).resolve(strict=True); manifest = read(base/'job.json')
@@ -361,6 +372,8 @@ def _run(inputs, output, *, worker_config, project_root, remote=None, model=None
              'local_code_sha256': checks.fingerprint(local_code), 'local_code_files': local_code,
              'configuration_fingerprint': checks.fingerprint({'worker': worker_config, 'model': model, 'vision_model': vision_model}),
              'baseline_job': str(baseline_job) if baseline_job else None,
+             'segmentation_plans': {p.name: digest(p) for p in plan_files},
+             'segmentation_backend': segmentation_backend, 'sam3_worker': sam3_worker_config, 'sam3_box_policy': sam3_box_policy,
              'inputs': {n: digest(p) for n, p in zip(names, paths)}})
     worker.upload(job, sorted((root/'input').glob('*.png')))
     worker.run(job, ['scan', '/job/in', '/job/scan'], source=source)
@@ -375,7 +388,21 @@ def _run(inputs, output, *, worker_config, project_root, remote=None, model=None
                              f'independent/{name}/pre')
         guard_file = root/'guards'/(name+'.json'); write(guard_file, guards); guard_files.append(guard_file); reviewers[name] = reviewer
     worker.upload(job, guard_files, subdir='guards')
-    log = worker.run(job, ['pages-quality', '/job/in', '/job/perception', '/job/scan', '/job/guards'], source=source)
+    worker_args = ['pages-quality', '/job/in', '/job/perception', '/job/scan', '/job/guards']
+    if plan_files:
+        worker.upload(job, plan_files, subdir='plans')
+        worker_args.append('/job/plans')
+    if segmentation_backend == 'sam3-prompted':
+        from .remote import SAM3Worker
+        sam3 = SAM3Worker(sam3_worker_config); _, sam3_source = sam3.sync_source()
+        sam3.upload(job, sorted((root/'input').glob('*.png')))
+        sam3.upload(job, plan_files, subdir='plans')
+        sam3_log = sam3.run(job, ['--inputs', '/job/in', '--plans', '/job/plans', '--output', '/job/sam3', '--box-policy', sam3_box_policy], source=sam3_source)
+        sam3.download(job, 'sam3', root)
+        write(root/'sam3-execution.json', {'source': sam3_source, 'log': sam3_log})
+        worker.upload(job, [root/'sam3'], subdir='sam3-transfer')
+        worker_args.append('/job/sam3-transfer/sam3')
+    log = worker.run(job, worker_args, source=source)
     worker.download(job, 'perception', root)
     raw_inventory = checks.inventory(root/'perception'); write(root/'perception-binding.json', raw_inventory)
     typography_cache = {}; training = []

@@ -86,3 +86,23 @@ class Worker:
         Path(local).mkdir(parents=True, exist_ok=True)
         self.scp(f'{self.host}:{self.root}/jobs/{job}/{subdir}', local)
         return Path(local)/Path(subdir).name
+
+
+class SAM3Worker(Worker):
+    """Separate offline GPU image; never changes the SAM2 development image."""
+    def sync_source(self):
+        data, digest = source_archive()
+        target = f'{self.root}/src/{digest[:16]}'
+        self.ssh(f'mkdir -p {shlex.quote(self.root)}/deploy')
+        self.ssh(f'test -d {shlex.quote(target)} || (mkdir -p {shlex.quote(target)}.tmp && '
+                 f'tar -x -C {shlex.quote(target)}.tmp && mv {shlex.quote(target)}.tmp {shlex.quote(target)})', data=data)
+        compose = COMPOSE.parent.parent/'sam3-worker'/'compose.yaml'
+        self.ssh(f'cat > {shlex.quote(self.root)}/deploy/compose.yaml', data=compose.read_bytes())
+        return digest, target
+
+    def run(self, job, mode_args, *, source):
+        env = (f'SAM3_ROOT={shlex.quote(self.root)} SAM3_SRC={shlex.quote(source)} '
+               f'SAM3_JOB={shlex.quote(self.root)}/jobs/{shlex.quote(job)}')
+        args = ' '.join(shlex.quote(a) for a in mode_args)
+        return self.ssh(f'cd {shlex.quote(self.root)}/deploy && {env} docker compose -f compose.yaml '
+                        f'run --rm -T worker {args}', timeout=3600)

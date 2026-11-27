@@ -1,0 +1,20 @@
+name: image2ppt-sam3-dev
+services:
+  worker:
+    image: image2ppt-sam3:20261030
+    network_mode: none
+    environment:
+      PYTHONPATH: /src
+      SAM3_CHECKPOINT: /models/sam3.pt
+      OMP_NUM_THREADS: "4"
+    volumes:
+      - ${SAM3_ROOT:?}/models:/models:ro
+      - ${SAM3_SRC:?}:/src:ro
+      - ${SAM3_JOB:?}:/job
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]

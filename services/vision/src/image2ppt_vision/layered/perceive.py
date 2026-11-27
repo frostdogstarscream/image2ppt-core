@@ -108,7 +108,7 @@ def _overlaps(box, mask, fraction):
     return window.size and window.mean() >= fraction
 
 
-def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None, scan=None, guards=None):
+def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None, scan=None, guards=None, plan=None, sam3_dir=None):
     """``mode`` 'rebuild' (default) measures components and never repairs under
     them with the model; 'objects' is the erase-and-repair path it replaces."""
     mode = mode or os.environ.get('IMAGE2PPT_LAYERED_MODE', 'rebuild')
@@ -152,12 +152,26 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None, scan=Non
         table_mask[max(0, y-3):y+h+3, max(0, x-3):x+w+3] = True
         table['id'] = f'tb{k:02d}'
         table['rows'], table['owned_text_ids'], table['cell_styles'] = fill_cells(notext, table, lines, by_id)
-    masks = sam(notext) if sam else []
+    segmentation_input = notext
+    plan_report = None
+    sam3_selected = None
+    if sam3_dir is not None:
+        from . import sam3_masks, plan_first
+        if plan is None: raise ValueError('SAM3 requires a plan')
+        segmentation_input, planned_mask, plan_report, sam3_selected = sam3_masks.guide(notext, lines, tables, plan, _sha(source), sam3_dir)
+    elif plan is not None:
+        from . import plan_first
+        segmentation_input, planned_mask, plan_report = plan_first.guide(notext, lines, tables, plan, _sha(source))
+    masks = sam(segmentation_input) if sam and sam3_dir is None else []
+    if plan_report is not None:
+        masks = plan_first.unclaimed_candidates(masks, planned_mask)
     timings['sam'] = time.time()-clock; clock = time.time()
-    contrast = contrast_candidates(notext, exclude=table_mask)
-    flats = [item for item in flat_region_candidates(notext)+circle_candidates(notext)
+    contrast = contrast_candidates(segmentation_input, exclude=table_mask)
+    flats = [item for item in flat_region_candidates(segmentation_input)+circle_candidates(segmentation_input)
              if not _overlaps(_box(item[0]), table_mask, .5)]
     extra = contrast+flats
+    if plan_report is not None:
+        extra = plan_first.unclaimed_candidates(extra, planned_mask)
     elements, _ = classify(notext, [m for m in masks if not _overlaps(_box(m[0]), table_mask, .5)],
                            text_mask=text_mask, icon_mask=icon_mask, extra=extra)
     icons = [b for r in records for b in r['icon_candidates']]
@@ -172,6 +186,13 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None, scan=Non
     rebuilt = mode == 'rebuild'
     if rebuilt:
         elements, erase = rebuild(notext, elements, W, H, grad, text_mask=text_mask, icon_mask=icon_mask)
+    if plan_report is not None:
+        if sam3_selected is not None:
+            elements, erase = sam3_masks.install(elements, plan_report, sam3_selected, H, W, out)
+        else:
+            elements, erase = plan_first.install(elements, plan_report, H, W)
+        plan_first.write(out/'plan-execution.json', plan_report)
+        plan_first.overlay(rgb, plan_report, out/'plan-boundaries.png')
     timings['segment'] = time.time()-clock; clock = time.time()
     # Layer k is the page with every object above level k repaired: a level-k
     # raster is cropped from it, and it is what shows when a level-k+1 object moves.
@@ -265,6 +286,8 @@ def perceive(source, out, *, ocr=_ocr, sam=_sam, model=None, mode=None, scan=Non
         result['protected_regions'] = protected
         result['original_ocr'] = scan['ocr']
         result['local_mask_repairs'] = local_repairs
+    if plan_report is not None:
+        result['segmentation_plan'] = plan_report
     result['files'] = {p.relative_to(out).as_posix(): _sha(p) for p in sorted(out.rglob('*')) if p.is_file()}
     _write(out/'perception.json', result)
     return result
@@ -299,11 +322,14 @@ def main(argv=None):
     summary = {'schema': 'LayeredPerceptionRun/1', 'lama_sha256': LAMA_SHA256 if model else None, 'pages': {}}
     for page in sorted(source_dir.glob('*.png')):
         started = time.time()
-        scan = guards = None
+        scan = guards = plan = None
         if mode == 'pages-quality':
             scan = json.loads((Path(argv[2])/page.stem/'scan.json').read_text(encoding='utf-8'))
             guards = json.loads((Path(argv[3])/(page.stem+'.json')).read_text(encoding='utf-8'))
-        result = perceive(page, out_dir/page.stem, model=model, scan=scan, guards=guards)
+            if len(argv) > 4:
+                plan = json.loads((Path(argv[4])/(page.stem+'.json')).read_text(encoding='utf-8'))
+        sam3_dir = Path(argv[5])/page.stem if len(argv) > 5 else None
+        result = perceive(page, out_dir/page.stem, model=model, scan=scan, guards=guards, plan=plan, sam3_dir=sam3_dir)
         summary['pages'][page.stem] = {'seconds': round(time.time()-started, 2), 'counts': result['counts']}
         print(page.stem, json.dumps(result['counts']), flush=True)
     _write(out_dir/'run.json', summary)

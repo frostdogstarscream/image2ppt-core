@@ -10,6 +10,7 @@ param(
   [string]$OutputPath,
   [ValidateSet('legacy','quality-loop')][string]$QualityPolicy = 'legacy',
   [string]$BaselineJob,
+  [string]$SegmentationPlans,
   [ValidateRange(0,2)][int]$MaxExtraVisionCalls = 2,
   [ValidateRange(0,2)][int]$MaxRepairRounds = 2
 )
@@ -40,6 +41,7 @@ if ($Command -in @('replay','regress','resume')) {
   if ($OutputPath) { $layeredArgs += @('--output', $OutputPath) }
   $layeredArgs += @('--quality-policy', $QualityPolicy, '--max-extra-vision-calls', "$MaxExtraVisionCalls", '--max-repair-rounds', "$MaxRepairRounds")
   if ($BaselineJob) { $layeredArgs += @('--baseline-job', $BaselineJob) }
+  if ($SegmentationPlans) { $layeredArgs += @('--segmentation-plans', $SegmentationPlans) }
   if ($env:IMAGE2PPT_LAYERED_WORKER) { $layeredArgs += @('--worker-config', $env:IMAGE2PPT_LAYERED_WORKER) }
   if ($env:IMAGE2PPT_MODEL_CONFIG) { $layeredArgs += @('--model-config', $env:IMAGE2PPT_MODEL_CONFIG) }
   & $pythonExecutable -X utf8 @layeredArgs

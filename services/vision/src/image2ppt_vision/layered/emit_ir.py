@@ -91,7 +91,9 @@ def emit(perception_dir, perception, styles, paragraphs, output, *, notes=(), so
         node = {'id': eid, 'type': kind, 'bbox': _clip(element['bbox'], W, H), 'z': z, 'evidence_ids': ['ev-'+eid]}
         if kind == 'shape':
             node.update(geometry=element['geometry'], fill=element['fill'])
-            if element.get('corner_radius_px'):
+            # The geometry fitter also stores a chevron's notch depth in this
+            # field. It is not a rounded corner and cannot become borderRadius.
+            if element['geometry'] in ('rect', 'roundRect') and element.get('corner_radius_px'):
                 node['corner_radius_px'] = min(element['corner_radius_px'], min(node['bbox'][2:])/2)
             if element.get('fill_gradient'):
                 node['fill_gradient'] = element['fill_gradient']
