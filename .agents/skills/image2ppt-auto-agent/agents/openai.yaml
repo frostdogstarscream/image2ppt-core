@@ -1,0 +1,4 @@
+interface:
+  display_name: "Image2PPT Regional Agent"
+  short_description: "Plan safe regional reconstruction from bound slide evidence"
+  default_prompt: "Use $image2ppt-auto-agent to inspect the frozen SceneGraph evidence and choose the next legal regional action."

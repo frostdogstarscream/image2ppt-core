@@ -1,0 +1,147 @@
+{
+  "$defs": {
+    "ActionArguments": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,100}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Id"
+        },
+        "context_padding_px": {
+          "default": 24,
+          "maximum": 128,
+          "minimum": 0,
+          "title": "Context Padding Px",
+          "type": "integer"
+        },
+        "view": {
+          "default": "source-context",
+          "enum": [
+            "source-context",
+            "owner-protection-overlay",
+            "edit-evidence"
+          ],
+          "title": "View",
+          "type": "string"
+        },
+        "strategy": {
+          "anyOf": [
+            {
+              "enum": [
+                "T1_EXACT",
+                "T2_SOFT_ALPHA",
+                "JOINT_REGION",
+                "COMPLETE_PNG",
+                "LOCAL_RASTER_FALLBACK"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strategy"
+        }
+      },
+      "title": "ActionArguments",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "AgentToolAction/1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "session_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "action_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Action Id",
+      "type": "string"
+    },
+    "action": {
+      "enum": [
+        "inspect_region",
+        "inspect_conflict",
+        "request_candidate",
+        "request_joint_region",
+        "request_staging",
+        "request_edit_test",
+        "request_visual_review",
+        "propose_selection",
+        "stop_and_fallback"
+      ],
+      "title": "Action",
+      "type": "string"
+    },
+    "region_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Region Id",
+      "type": "string"
+    },
+    "object_ids": {
+      "items": {
+        "pattern": "^[A-Za-z0-9_-]{1,100}$",
+        "type": "string"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Object Ids",
+      "type": "array"
+    },
+    "arguments": {
+      "$ref": "#/$defs/ActionArguments"
+    },
+    "evidence_refs": {
+      "items": {
+        "pattern": "^e-[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "maxItems": 40,
+      "minItems": 1,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "expected_information_gain": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Expected Information Gain",
+      "type": "string"
+    },
+    "reason": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "session_id",
+    "action_id",
+    "action",
+    "region_id",
+    "object_ids",
+    "arguments",
+    "evidence_refs",
+    "expected_information_gain",
+    "reason"
+  ],
+  "title": "ToolAction",
+  "type": "object"
+}
