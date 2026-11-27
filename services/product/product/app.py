@@ -339,9 +339,11 @@ def create_app(root=None, token=None, run_worker=True):
         from .experiment import PROFILES
         if agent_provider is not None and agent_provider not in ('deepseek','moma','opencode_go'):
             raise HTTPException(422,'未知模型供应商')
-        if native_variant not in ('combined','shape-only','joint-only'):
+        if native_variant not in ('combined','shape-only','joint-only','native_synthesis'):
             raise HTTPException(422,'unknown native ablation')
         editable = orchestrator == 'editable_reconstruction'
+        if native_variant == 'native_synthesis' and not editable:
+            raise HTTPException(422,'native_synthesis requires editable_reconstruction')
         if editable and (agent_provider not in (None,'moma') or experiment_profile or baseline_only):
             raise HTTPException(422,'editable_reconstruction requires MoMA and a regular reconstruction job')
         if experiment_profile is not None:

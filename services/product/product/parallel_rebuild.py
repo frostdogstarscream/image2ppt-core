@@ -406,7 +406,8 @@ def adapt(graph,directory):
             if list(image.size)!=[round(v) for v in record['bbox'][2:]]:raise ValueError('SceneGraph asset dimensions mismatch')
         return file
     if graph.raster_backing is None:raise ValueError('SceneGraph source backing missing')
-    backing=reference(graph.raster_backing)
+    synthesized = graph.raster_backing.get('method') == 'native_synthesis'
+    backing = None if synthesized else reference(graph.raster_backing)
     ir={'schema_version':'0.1','source_image':'source.png','source_sha256':graph.source_sha256,
         'canvas':{'source_px':graph.image_size,'target_px':graph.image_size},'background':{'color':graph.surface.background},
         'review_status':'needs_review','review_notes':['r10 parallel branches; human acceptance pending'],
@@ -446,7 +447,8 @@ def adapt(graph,directory):
         ir['nodes'].append(snode)
     surfaces=sorted([c for c in chosen if c['kind']=='surface' and not c.get('foreground_shape')],
                     key=lambda c:(shape_by_id[c['id']].z,-(shape_by_id[c['id']].bbox[2]*shape_by_id[c['id']].bbox[3])))
-    image('source-plate',[0,0,*graph.image_size],backing,'Safe source backing with only committed replacement ink cleared',0)
+    if backing is not None:
+        image('source-plate',[0,0,*graph.image_size],backing,'Safe source backing with only committed replacement ink cleared',0)
     for z,c in enumerate(surfaces,1):
         _emit_shape_node(shape_by_id[c['id']],z)
     styles={s.id:s for s in graph.text.styles}
@@ -515,7 +517,13 @@ def adapt(graph,directory):
                 node['paragraphs'].append(p)
             ir['nodes'].append(node)
     movement=[c['move_members'] for c in chosen if c.get('move_members')]
+    if synthesized:
+        from .runtime.native_synthesis import fit_editing_space
+        fit_editing_space(ir,[s.bbox for s in graph.surface.shapes if s.id in graph.selected])
     if movement:
         from .runtime.marked_routes import apply_move_groups
+        if synthesized:
+            from .runtime.native_synthesis import order_components
+            order_components(ir,movement)
         apply_move_groups(ir,movement)
     return ir

@@ -897,7 +897,10 @@ class RuntimeService(ExplorationTools):
         request = json.loads((state.job/'request.json').read_text('utf8'))
         for index in range(1, len(request['sources'])+1):
             if len(current['pages']) < index or not current['pages'][index-1]:
-                self.create_scene(state, current, directory/f'raster-page-{index}', page=index, evidence={})
+                if request.get('native_variant')=='native_synthesis':
+                    self.prepare_page_evidence(state,current,directory/f'page-evidence-{index}',page=index)
+                else:
+                    self.create_scene(state, current, directory/f'raster-page-{index}', page=index, evidence={})
         if not current['pages']:
             raise ValueError('perception is required')
         if current.get('composition'):
@@ -905,7 +908,23 @@ class RuntimeService(ExplorationTools):
             return {'status':'COMPOSED','pptx_sha256':digest(composition['artifacts']['pptx']),'cache_hit':True}
         from .compiler import compile_local as compile_pages
         from ..parallel_pipeline import effective_texts
-        irs = [Path(p['ir']) for p in current['pages']]
+        pages = current['pages']
+        if request.get('native_variant') == 'native_synthesis':
+            from .native_synthesis import synthesize_page
+            projected = []
+            for i,page in enumerate(pages,1):
+                # The native composition is a new candidate. Reuse a source-bound
+                # regional measurement, never a failed Office candidate or old deck.
+                parent = digest(page['ir'])
+                batches = [c for c in current['candidates'].values() if c['page']==i and c['kind']=='batch'
+                           and c['status'] in ('STAGED_LOCAL','VALIDATED') and c.get('parent_ir_sha256')==parent]
+                measured = page
+                if batches:
+                    ir,_,_,_ = self._verify_staged_candidate_graph(current,batches[-1])
+                    measured = {**page,'ir':str(ir),'scene':str(ir.parent/'scene.json')}
+                projected.append(synthesize_page(measured,directory/f'native-page-{i:02d}'))
+            pages = projected
+        irs = [Path(p['ir']) for p in pages]
         ir_digests = [digest(ir) for ir in irs]
         verified_bundle = current.get('last_verified_bundle')
         if (verified_bundle and verified_bundle.get('irs') == ir_digests
@@ -919,7 +938,7 @@ class RuntimeService(ExplorationTools):
         else:
             with lease('compiler'):
                 artifacts = compile_pages(irs, directory/'compiled',
-                                          [effective_texts(self.graph(p), ir) for p, ir in zip(current['pages'], irs)])
+                                          [effective_texts(self.graph(p), ir) for p, ir in zip(pages, irs)])
         binding = {str(p): digest(p) for p in [Path(artifacts['pptx']), *irs]}
         if current.get('marked_plans'):
             from xml.etree import ElementTree
@@ -941,6 +960,12 @@ class RuntimeService(ExplorationTools):
             write(directory/'delivery-route-trace.json',{'pptx_sha256':digest(artifacts['pptx']),'pages':traces})
             binding[str(directory/'delivery-route-trace.json')]=digest(directory/'delivery-route-trace.json')
         current['composition'] = {'artifacts': artifacts, 'files': binding, 'office': {'status': 'NOT_RUN'}}
+        if request.get('native_variant') == 'native_synthesis':
+            current['composition']['pages'] = pages
+            for page in pages:
+                for p in Path(page['ir']).parent.iterdir():
+                    if p.is_file():
+                        binding[str(p)] = digest(p)
         current.pop('visual_review', None)
         return {'status': 'COMPOSED', 'pptx_sha256': digest(artifacts['pptx'])}
 
@@ -1071,7 +1096,8 @@ class RuntimeService(ExplorationTools):
         composition = self.composition(current)
         direct = json.loads((state.job/'request.json').read_text('utf8')).get('orchestrator') == 'editable_reconstruction'
         options = {'text_layer_audit': True} if direct else {}
-        result = self.office_check(state, composition['artifacts']['pptx'], [Path(p['ir']) for p in current['pages']], directory, **options)
+        pages = composition.get('pages',current['pages'])
+        result = self.office_check(state, composition['artifacts']['pptx'], [Path(p['ir']) for p in pages], directory, **options)
         composition['office'] = result
         if result['status'] != 'PASS':
             return result
@@ -1079,7 +1105,7 @@ class RuntimeService(ExplorationTools):
         required = []
         site_options = ({'site_review':result['office']} if
                         json.loads((state.job/'request.json').read_text('utf8')).get('orchestrator') == 'editable_reconstruction' else {})
-        for i, page in enumerate(current['pages'], 1):
+        for i, page in enumerate(pages, 1):
             preview = Path(result['office_directory'])/f'page-{i:02d}-before.png'
             canonical_src = self.source(state, i)
             src_path = canonical_src if digest(canonical_src) == page['snapshot']['source_sha256'] else page['snapshot']['path']
@@ -1162,7 +1188,7 @@ class RuntimeService(ExplorationTools):
                 return {'status':'REVIEW_REQUIRED','reason':'WHOLE_PAGE_TEXT_INCOMPLETE'}
         for reference in composition['required_evidence']:
             state.evidence(reference['id'])
-        raw_selected = [self.graph(page).selected for page in current['pages']]
+        raw_selected = [self.graph(page).selected for page in composition.get('pages',current['pages'])]
         editable = [
             {oid: rec for oid, rec in sel.items()
              if not (rec.get('region_crop') and rec.get('move_safety') == 'MOVE_UNSAFE')}

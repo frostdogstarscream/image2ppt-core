@@ -276,6 +276,12 @@ def _run(state, service, request, actor):
                 except (OSError, ValueError):
                     return _stop(state, 'RECONSTRUCTION_POLICY_UNAVAILABLE')
                 system_prompt = PROMPT + '\n\n' + policy
+                if request.get('native_variant') == 'native_synthesis':
+                    system_prompt += (' This job composes onto an empty PowerPoint canvas. Obtain page structure '
+                        'and OCR evidence for every uploaded page, including layout and the visual component inventory. '
+                        'Use regional tools for editable typography and verified photo or icon assets. '
+                        'At compose_delivery the adapter emits native carriers, grouped components and local images. '
+                        'Inspect and review that final composition, including missed decorations and embedded lettering.')
                 prompt_sha = hashlib.sha256(system_prompt.encode('utf8')).hexdigest()
                 policy_sha = hashlib.sha256(policy_bytes).hexdigest()
             if actor is None:

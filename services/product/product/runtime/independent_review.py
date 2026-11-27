@@ -213,7 +213,7 @@ def run_delivery_audit(
     all_critical: list[dict] = []
     all_warnings: list[str] = []
 
-    for idx, page_row in enumerate(current['pages'], 1):
+    for idx, page_row in enumerate(composition.get('pages',current['pages']), 1):
         src_path = Path(service.source(state, idx))
         if digest(src_path) != page_row['snapshot']['source_sha256']:
             src_path = Path(page_row['snapshot']['path'])
