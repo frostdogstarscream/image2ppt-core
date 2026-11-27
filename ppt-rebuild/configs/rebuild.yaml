@@ -51,7 +51,7 @@ icons:
   fallback: png
 
 exporter:
-  library: python-pptx
+  library: artifact-tool-slideir
   slide_size_from: image
   min_font_pt: 6
   text_autofit: none

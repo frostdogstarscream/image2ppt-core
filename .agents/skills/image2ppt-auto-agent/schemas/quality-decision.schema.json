@@ -1,0 +1,150 @@
+{
+  "$defs": {
+    "VisualDefect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "content_error",
+            "wrong_number",
+            "ghosting",
+            "neighbor_damage",
+            "incomplete_object",
+            "clipping",
+            "faint_backing_trace",
+            "font_difference",
+            "ownership_conflict",
+            "capability_unavailable",
+            "other"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "MINOR",
+            "MODERATE",
+            "MAJOR"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "evidence_ref": {
+          "pattern": "^e-[a-f0-9]{64}$",
+          "title": "Evidence Ref",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "severity",
+        "evidence_ref",
+        "description"
+      ],
+      "title": "VisualDefect",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "AgentQualityDecision/1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "region_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Region Id",
+      "type": "string"
+    },
+    "candidate_ids": {
+      "items": {
+        "pattern": "^[A-Za-z0-9_-]{1,100}$",
+        "type": "string"
+      },
+      "title": "Candidate Ids",
+      "type": "array"
+    },
+    "hard_gate": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "UNKNOWN"
+      ],
+      "title": "Hard Gate",
+      "type": "string"
+    },
+    "office_edit": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "UNKNOWN"
+      ],
+      "title": "Office Edit",
+      "type": "string"
+    },
+    "residual": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "UNKNOWN"
+      ],
+      "title": "Residual",
+      "type": "string"
+    },
+    "independent_visual_review": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "UNKNOWN"
+      ],
+      "title": "Independent Visual Review",
+      "type": "string"
+    },
+    "visual_defects": {
+      "items": {
+        "$ref": "#/$defs/VisualDefect"
+      },
+      "title": "Visual Defects",
+      "type": "array"
+    },
+    "recommendation": {
+      "enum": [
+        "REVIEW_REQUIRED",
+        "REJECT"
+      ],
+      "title": "Recommendation",
+      "type": "string"
+    },
+    "publish_eligible": {
+      "const": false,
+      "default": false,
+      "title": "Publish Eligible",
+      "type": "boolean"
+    },
+    "reason": {
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "region_id",
+    "candidate_ids",
+    "hard_gate",
+    "office_edit",
+    "residual",
+    "independent_visual_review",
+    "visual_defects",
+    "recommendation",
+    "reason"
+  ],
+  "title": "QualityDecision",
+  "type": "object"
+}

@@ -1,0 +1,76 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "enum": [
+        "joint_region",
+        "add_contains",
+        "missing_object",
+        "merge_objects",
+        "split_object"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "object_ids": {
+      "items": {
+        "pattern": "^[A-Za-z0-9_-]{1,100}$",
+        "type": "string"
+      },
+      "maxItems": 40,
+      "minItems": 1,
+      "title": "Object Ids",
+      "type": "array"
+    },
+    "parent_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Id"
+    },
+    "child_id": {
+      "anyOf": [
+        {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Child Id"
+    },
+    "evidence_refs": {
+      "items": {
+        "pattern": "^e-[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "reason": {
+      "maxLength": 1500,
+      "minLength": 1,
+      "title": "Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "object_ids",
+    "evidence_refs",
+    "reason"
+  ],
+  "title": "SceneProposal",
+  "type": "object"
+}

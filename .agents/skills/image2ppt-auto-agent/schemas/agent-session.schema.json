@@ -1,0 +1,65 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "AgentSession/1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "job_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "page_index": {
+      "maximum": 1000,
+      "minimum": 1,
+      "title": "Page Index",
+      "type": "integer"
+    },
+    "source_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Source Sha256",
+      "type": "string"
+    },
+    "scene_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Scene Sha256",
+      "type": "string"
+    },
+    "skill_version_sha256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Skill Version Sha256",
+      "type": "string"
+    },
+    "mode": {
+      "default": "agent_shadow",
+      "enum": [
+        "agent_shadow",
+        "agent_review"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "editability_policy": {
+      "default": "BALANCED",
+      "enum": [
+        "BALANCED",
+        "VISUAL_FIRST",
+        "TEXT_FIRST"
+      ],
+      "title": "Editability Policy",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "job_id",
+    "page_index",
+    "source_sha256",
+    "scene_sha256",
+    "skill_version_sha256"
+  ],
+  "title": "SessionRequest",
+  "type": "object"
+}

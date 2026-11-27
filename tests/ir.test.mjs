@@ -294,10 +294,15 @@ test('every native capability lands in exactly one doctor list',()=>{
 // wordings have caused that, and both must stay gone: the original
 // unconditioned instruction, and the escape hatch that let one resisting
 // sub-region collapse an entire region back into a single crop.
-test('the skill asks for per-sub-region decomposition, not whole-region crops',async()=>{
+test('the manual reconstruction guidance keeps its sub-region fidelity checks',async()=>{
   const files=['../skills/image2ppt/SKILL.md','../skills/image2ppt-claude/SKILL.md'];
   for(const file of files){
-    const text=await fs.readFile(fileURLToPath(new URL(file,import.meta.url)),'utf8');
+    const entryUrl=new URL(file,import.meta.url);
+    const entry=await fs.readFile(fileURLToPath(entryUrl),'utf8');
+    // The automatic engineering skill links to the historical manual workflow.
+    // Check its original requirements wherever the maintained entry publishes them.
+    const manual='references/legacy-manual-workflow.md';
+    const text=entry.includes(manual) ? entry+'\n'+await fs.readFile(new URL(manual,entryUrl),'utf8') : entry;
     assert.doesNotMatch(text,/Keep complex visual modules as cropped images/,'整块裁图的无条件规则不得回归');
     assert.doesNotMatch(text,/Only when the background itself cannot be rebuilt does the whole region/,'整块保留的逃生舱不得回归');
     assert.match(text,/[Dd]ecompos/,`${file} 应保留下拆解要求`);
