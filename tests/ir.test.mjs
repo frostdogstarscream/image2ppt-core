@@ -15,6 +15,33 @@ function fixture() {
     nodes:[{id:'title',type:'text',bbox:[20,20,500,80],z:1,evidence_ids:['ev-title'],text:'收入增长 18%',font:{latin:'Arial',ea:'Microsoft YaHei',size_pt:24},color:'222222'}]};
 }
 
+test('connector outlines use bounded local vertices',()=>{
+  const slide=fixture();
+  const connector={id:'return',type:'shape',geometry:'line',z:2,bbox:[1,1,100,30],
+    fill:'75ACFA',evidence_ids:[],outline:[[0,0],[100000,0],[100000,100000]]};
+  slide.nodes.push(connector);
+  validateIR(slide);
+  connector.outline[1][0]=100001;
+  assert.throws(()=>validateIR(slide));
+});
+
+test('solid and stop transparency are optional, bounded and unambiguous',()=>{
+  const slide=fixture();
+  const shape={id:'caption-band',bbox:[0,0,200,40],z:2,type:'shape',geometry:'rect',
+    evidence_ids:[],fill:'123456',fill_opacity:0.35};
+  slide.nodes.push(shape);
+  validateIR(slide);
+  shape.fill_opacity=-0.01;
+  assert.throws(()=>validateIR(slide),/fill_opacity/);
+  shape.fill_opacity=0;
+  shape.fill_gradient={angle_deg:0,stops:[{offset:0,color:'123456',opacity:0},{offset:100000,color:'123456',opacity:1}]};
+  assert.throws(()=>validateIR(slide),/fill_opacity/);
+  delete shape.fill_opacity;
+  validateIR(slide);
+  shape.fill_gradient.stops[1].opacity=1.1;
+  assert.throws(()=>validateIR(slide),/opacity/);
+});
+
 test('paragraphs preserve independent styles with matching source evidence',()=>{
   const x=fixture(),n=x.nodes[0];
   n.text='第一行\n第二行'; x.evidence[0].text=n.text;
@@ -119,6 +146,18 @@ function tableFixture(overrides={}) {
 
 test('a table node validates and keeps its own evidence',()=>{
   assert.equal(validateIR(tableFixture()).owners.get('ev-tbl'),'tbl');
+});
+
+test('a contiguous child group can move within a parent',()=>{
+  const ir=fixture();
+  const base=ir.nodes[0];
+  ir.nodes=[0,1,2].map(i=>({...base,id:'node'+i,z:i,evidence_ids:['ev'+i]}));
+  ir.evidence=ir.nodes.map(n=>({id:n.evidence_ids[0],kind:'text',text:n.text,bbox:n.bbox}));
+  ir.assets=[];
+  ir.groups=[{id:'step',member_ids:['node1','node2']},{id:'flow',member_ids:['node0','step']}];
+  assert.doesNotThrow(()=>validateIR(ir));
+  ir.groups[0].member_ids=['node0','node2'];
+  assert.throws(()=>validateIR(ir),/不连续/);
 });
 
 test('a table node no longer falls through to the image-asset path',()=>{

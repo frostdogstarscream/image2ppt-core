@@ -34,13 +34,16 @@ export function validateIR(ir) {
     fields(a,'id path purpose sha256 contains_evidence_ids description','asset');
     expect(typeof a.path==='string' && a.path.length>0,'asset.path 无效。');
   }
-  for(const g of ir.groups) fields(g,'id member_ids','group');
+  for(const g of ir.groups) {
+    fields(g,'id member_ids display_name','group');
+    if(g.display_name!==undefined) expect(typeof g.display_name==='string' && g.display_name.trim().length>0,'分组显示名称为空。');
+  }
   for(const entry of [...ir.evidence,...ir.assets]) if(entry.description!==undefined) expect(typeof entry.description==='string','description 必须为字符串。');
   for(const node of ir.nodes) {
     expect(IR_NODE_TYPES.includes(node?.type), `${node?.id} 不支持的节点类型 ${node?.type}。`);
     const common='id type bbox z evidence_ids';
     const byType={text:'text font bold color align wrap line_spacing_pt runs paragraphs text_override_reason source_text_bbox insets vertical_anchor',
-      shape:'geometry fill line corner_radius_px fill_gradient',image:'asset_id',
+      shape:'geometry fill fill_opacity line corner_radius_px fill_gradient outline',image:'asset_id',
       table:'rows font column_tracks header_row banded_rows row_heights merges cell_styles',
       chart:'chart_type title font categories series has_legend legend_position'};
     fields(node,common+' '+(byType[node?.type]||''),'node');
@@ -88,7 +91,7 @@ export function validateIR(ir) {
     if(node.fill_gradient!==undefined) {
       fields(node.fill_gradient,'angle_deg stops','fill_gradient');
       expect(array(node.fill_gradient.stops),'gradient.stops 必须为数组。');
-      for(const stop of node.fill_gradient.stops) fields(stop,'offset color','gradient.stop');
+      for(const stop of node.fill_gradient.stops) fields(stop,'offset color opacity','gradient.stop');
     }
   }
   expect(ir.nodes.length > 0 && ir.nodes.length <= 500, '页面需要 1—500 个节点；准备模板不能直接交付。');
@@ -160,13 +163,22 @@ export function validateIR(ir) {
       }
     } else if (node.type==='shape') {
       expect(IR_SHAPE_GEOMETRIES.includes(node.geometry), `${node.id} 形状不支持。`);
+      if(node.outline!==undefined){
+        expect(node.geometry==='line' && color(node.fill) && array(node.outline) &&
+          node.outline.length>=3 && node.outline.length<=256 &&
+          node.outline.every(p=>array(p) && p.length===2 && p.every(v=>Number.isInteger(v)&&v>=0&&v<=100000)),
+          `${node.id} 线条轮廓坐标无效。`);
+      }
       expect(node.fill==='none' || color(node.fill), `${node.id} 填充无效。`);
+      if(node.fill_opacity!==undefined) expect(color(node.fill) && !node.fill_gradient &&
+        Number.isFinite(node.fill_opacity) && node.fill_opacity>=0 && node.fill_opacity<=1, `${node.id} fill_opacity requires a solid fill and a value from 0 to 1.`);
       if (node.line) expect(color(node.line.color) && Number.isFinite(node.line.width_pt) && node.line.width_pt>=0, `${node.id} 线条无效。`);
       if (node.corner_radius_px!==undefined) expect(Number.isFinite(node.corner_radius_px) && node.corner_radius_px>=0 && node.corner_radius_px<=Math.min(node.bbox[2],node.bbox[3])/2, `${node.id} 圆角半径无效。`);
       if (node.fill_gradient) {
         const g=node.fill_gradient;
         expect(Number.isFinite(g.angle_deg) && array(g.stops) && g.stops.length>=2 && g.stops.length<=8, `${node.id} 渐变无效。`);
         expect(g.stops.every(s=>Number.isFinite(s.offset) && s.offset>=0 && s.offset<=100000 && color(s.color)), `${node.id} 渐变色标无效。`);
+        expect(g.stops.every(s=>s.opacity===undefined || (Number.isFinite(s.opacity) && s.opacity>=0 && s.opacity<=1)), `${node.id} gradient stop opacity must be from 0 to 1.`);
         expect(g.stops[0].offset===0 && g.stops.at(-1).offset===100000 && g.stops.every((s,i)=>!i || s.offset>g.stops[i-1].offset), `${node.id} 渐变色标顺序无效。`);
       }
     } else if (node.type==='table') {
@@ -265,14 +277,16 @@ export function validateIR(ir) {
   expect(!unresolved.length || ir.review_status==='needs_review', '有未处理证据时必须 needs_review。');
   expect(owners.size===evidence.size, '存在未分配输出的源内容。');
   const ordered=[...ir.nodes].sort((a,b)=>a.z-b.z), grouped=new Set();
+  const spans = new Map(ordered.map((n,i)=>[n.id,[i,i]]));
   for (const group of ir.groups) {
     expect(array(group.member_ids) && group.member_ids.length>=2, `${group.id} 至少需要两个成员。`);
-    const indexes=group.member_ids.map(id=>ordered.findIndex(n=>n.id===id));
-    expect(indexes.every(i=>i>=0), `${group.id} 成员不存在。`);
+    const ranges=group.member_ids.map(id=>spans.get(id));
+    expect(ranges.every(Boolean), `${group.id} 成员不存在，子组须在父组之前声明。`);
     expect(new Set(group.member_ids).size===group.member_ids.length, `${group.id} 成员重复。`);
-    const sorted=[...indexes].sort((a,b)=>a-b);
-    expect(sorted.at(-1)-sorted[0]+1===sorted.length, `${group.id} 成员在 z 顺序中不连续，不能保持原遮挡顺序。`);
+    ranges.sort((a,b)=>a[0]-b[0]);
+    expect(ranges.every((r,i)=>!i||r[0]===ranges[i-1][1]+1), `${group.id} 成员在 z 顺序中不连续，不能保持原遮挡顺序。`);
     for (const id of group.member_ids) { expect(!grouped.has(id), `${id} 属于多个分组。`); grouped.add(id); }
+    spans.set(group.id,[ranges[0][0],ranges.at(-1)[1]]);
   }
   return {ordered, assets, owners, warnings: [
     ...ir.review_notes,

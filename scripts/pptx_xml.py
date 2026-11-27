@@ -78,6 +78,49 @@ def adapt_slide(xml, ir):
         item = objects.get(node["id"])
         if item is None:
             raise ValueError("导出对象没有保留节点名称: " + node["id"])
+        if node["type"] == "shape":
+            if "outline" in node:
+                props=item.find("p:spPr",NS)
+                preset=props.find("a:prstGeom",NS)
+                if preset is None:
+                    raise ValueError("Missing geometry for "+node["id"])
+                idx=list(props).index(preset)
+                props.remove(preset)
+                custom=ET.Element(q("a:custGeom"))
+                props.insert(idx,custom)
+                for name in ("avLst","gdLst","ahLst","cxnLst"):
+                    ET.SubElement(custom,q("a:"+name))
+                ET.SubElement(custom,q("a:rect"),dict(l="l",t="t",r="r",b="b"))
+                paths=ET.SubElement(custom,q("a:pathLst"))
+                drawing=ET.SubElement(paths,q("a:path"),dict(w="100000",h="100000",stroke="0"))
+                for vertex,(x,y) in enumerate(node["outline"]):
+                    move=ET.SubElement(drawing,q("a:moveTo" if vertex==0 else "a:lnTo"))
+                    ET.SubElement(move,q("a:pt"),dict(x=str(x),y=str(y)))
+                ET.SubElement(drawing,q("a:close"))
+                # A line preset can export only a stroke. The traced contour owns its fill.
+                for fill in list(props):
+                    if fill.tag in {q("a:"+k) for k in ("noFill","solidFill","gradFill")}:
+                        props.remove(fill)
+                paint=ET.Element(q("a:solidFill"))
+                ET.SubElement(paint,q("a:srgbClr"),{"val":node["fill"]})
+                props.insert(list(props).index(custom)+1,paint)
+            colors = []
+            if "fill_opacity" in node:
+                colors.append((item.find("p:spPr/a:solidFill/*", NS), node["fill_opacity"]))
+            stops = node.get("fill_gradient", {}).get("stops", [])
+            if any("opacity" in stop for stop in stops):
+                exported = item.findall("p:spPr/a:gradFill/a:gsLst/a:gs", NS)
+                if len(exported) != len(stops):
+                    raise ValueError("Gradient stop count changed for " + node["id"])
+                colors.extend((stop_xml.find("*"), stop["opacity"])
+                              for stop_xml, stop in zip(exported, stops) if "opacity" in stop)
+            for color, opacity in colors:
+                if color is None:
+                    raise ValueError("Missing fill color for " + node["id"])
+                previous = color.find("a:alpha", NS)
+                if previous is not None:
+                    color.remove(previous)
+                ET.SubElement(color, q("a:alpha"), {"val": str(round(opacity * 100000))})
         if node["type"] == "text":
             # Artifact Tool currently omits zero insets from bodyPr. OOXML
             # defaults would reintroduce 9.6px horizontal / 4.8px vertical
@@ -113,23 +156,25 @@ def adapt_slide(xml, ir):
                     if font is None:
                         font = ET.SubElement(rpr, q(key))
                     font.set("typeface", node["font"][field])
+    if not ir["groups"]:
+        return xml
     sw, sh = ir["canvas"]["source_px"]
     tw, th = ir["canvas"]["target_px"]
+    bounds = {n["id"]: n["bbox"] for n in ir["nodes"]}
     for group in ir["groups"]:
         members = [objects[id] for id in group["member_ids"]]
         first = min(list(tree).index(member) for member in members)
-        member_nodes = [n for n in ir["nodes"] if n["id"] in group["member_ids"]]
-        left = min(n["bbox"][0] for n in member_nodes)
-        top = min(n["bbox"][1] for n in member_nodes)
-        right = max(n["bbox"][0] + n["bbox"][2] for n in member_nodes)
-        bottom = max(n["bbox"][1] + n["bbox"][3] for n in member_nodes)
+        boxes = [bounds[key] for key in group["member_ids"]]
+        left, top = min(b[0] for b in boxes), min(b[1] for b in boxes)
+        right, bottom = max(b[0]+b[2] for b in boxes), max(b[1]+b[3] for b in boxes)
+        bounds[group["id"]] = [left, top, right-left, bottom-top]
         x, y = round(left / sw * tw * 9525), round(top / sh * th * 9525)
         w, h = round((right - left) / sw * tw * 9525), round((bottom - top) / sh * th * 9525)
         grp = ET.Element(q("p:grpSp"))
         nv = ET.SubElement(grp, q("p:nvGrpSpPr"))
         new_id = max(ids) + 1
         ids.append(new_id)
-        ET.SubElement(nv, q("p:cNvPr"), {"id": str(new_id), "name": group["id"]})
+        ET.SubElement(nv, q("p:cNvPr"), {"id": str(new_id), "name": group.get("display_name",group["id"]), "descr": group["id"]})
         ET.SubElement(nv, q("p:cNvGrpSpPr"))
         ET.SubElement(nv, q("p:nvPr"))
         props = ET.SubElement(grp, q("p:grpSpPr"))
@@ -141,6 +186,7 @@ def adapt_slide(xml, ir):
             tree.remove(member)
             grp.append(member)
         tree.insert(first, grp)
+        objects[group["id"]] = grp
     return xml
 
 

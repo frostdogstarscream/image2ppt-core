@@ -178,32 +178,26 @@ def remote_inpaint(image: np.ndarray, mask: np.ndarray, url: str, timeout: int =
     if url.startswith("ssh://"):
         import base64
         import json
-        import shlex
-        import subprocess
         from urllib.parse import urlsplit
+
+        from ssh_windows import DEFAULT_HOST, ssh_python
 
         endpoint = urlsplit(url)
         if not endpoint.hostname or endpoint.hostname.startswith("-") or endpoint.path != "/inpaint" or endpoint.port is None:
             raise ValueError("SSH inpainting URL requires host, loopback service port and /inpaint")
         payload = json.dumps({"body": base64.b64encode(body).decode("ascii"),
                               "boundary": boundary, "port": endpoint.port, "timeout": timeout}).encode()
-        # Execute the existing loopback HTTP API through SSH when forwarding is
-        # disabled. No remote files or service configuration are changed.
+        # Windows loopback BigLaMa through OpenSSH; WSL python cannot see that port.
         relay = ("import sys,json,base64,urllib.request; p=json.load(sys.stdin); "
                  "r=urllib.request.Request('http://127.0.0.1:'+str(p['port'])+'/inpaint',"
                  "data=base64.b64decode(p['body']),headers={'Content-Type':'multipart/form-data; boundary='+p['boundary']}); "
                  "sys.stdout.buffer.write(urllib.request.urlopen(r,timeout=p['timeout']).read())")
-        import time
-        for attempt in range(4):
-            result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
-                                     endpoint.hostname, "python3 -c " + shlex.quote(relay)],
-                                    input=payload, capture_output=True, timeout=timeout+20)
-            if result.returncode != 255 or attempt == 3:
-                break
-            time.sleep(10*(attempt+1))
-        if result.returncode:
-            raise RuntimeError("SSH inpainting failed: "+result.stderr.decode("utf-8",errors="replace")[-1800:])
-        return np.array(Image.open(io.BytesIO(result.stdout)).convert("RGB"))
+        host = f"{endpoint.username}@{endpoint.hostname}" if endpoint.username else endpoint.hostname
+        if "@" not in host:
+            user = DEFAULT_HOST.split("@", 1)[0] if "@" in DEFAULT_HOST else "CMCC"
+            host = f"{user}@{host}"
+        result = ssh_python(payload, relay, host=host, timeout=timeout)
+        return np.array(Image.open(io.BytesIO(result)).convert("RGB"))
     request = urllib.request.Request(
         url, data=body, method="POST",
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}",

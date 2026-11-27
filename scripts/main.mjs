@@ -53,7 +53,10 @@ export async function perturb(file,nodeId,action,value,{exportBatchSize=0}={}) {
   for (const a of ir.assets) delete a._file;
   const group=ir.groups.find(g=>g.id===nodeId), node=ir.nodes.find(n=>n.id===nodeId);
   if (!group && !node) throw new Error('找不到扰动目标。');
-  const ids=new Set(group?group.member_ids:[nodeId]);
+  const ids=new Set([nodeId]);
+  for (const g of [...ir.groups].reverse()) if (ids.has(g.id)) {
+    for (const id of g.member_ids) ids.add(id);
+  }
   if (action==='move') {
     const [dx,dy]=(value||'24,16').split(',').map(Number);
     if (![dx,dy].every(Number.isFinite)) throw new Error('移动 Value 为 dx,dy。');
@@ -71,7 +74,13 @@ export async function perturb(file,nodeId,action,value,{exportBatchSize=0}={}) {
     if (ir.background.asset_id) usedAssetIds.add(ir.background.asset_id);
     ir.nodes=ir.nodes.filter(n=>!ids.has(n.id)); ir.evidence=ir.evidence.filter(e=>!removed.has(e.id));
     ir.assets=ir.assets.filter(a=>usedAssetIds.has(a.id));
-    ir.groups=ir.groups.map(g=>({...g,member_ids:g.member_ids.filter(id=>!ids.has(id))})).filter(g=>g.member_ids.length>=2);
+    const dissolved=new Map();
+    ir.groups=ir.groups.flatMap(g=>{
+      const members=g.member_ids.filter(id=>!ids.has(id)).flatMap(id=>dissolved.get(id)??[id]);
+      if (members.length>=2) return [{...g,member_ids:members}];
+      dissolved.set(g.id,members);
+      return [];
+    });
   } else throw new Error('Action 只支持 delete/move/replace。');
   ir.review_status='needs_review'; ir.review_notes.push(`编辑扰动测试: ${action} ${nodeId}`);
   const target=path.join(data.base,`slideir.${action}.${randomUUID().slice(0,8)}.json`);

@@ -36,7 +36,7 @@ This protocol is a single-page reconstruction contract. It accepts `text`, `shap
 - Optional `paragraphs` is a nonempty array of up to 100 entries. Each entry has single-line `text`, full `font: {latin,ea,size_pt}`, `color`, and boolean `bold`. Optional fields are `align`, `line_spacing_pt`, nonnegative `space_before_pt` / `space_after_pt`, and nonnegative source-pixel `left_indent_px`. The entries' texts joined with `\n` must equal the node's `text`. Each entry becomes an actual paragraph inside the same native text box.
 - A paragraph may contain `runs: [{text,font?,color?,bold?}]`. Runs concatenate exactly to that paragraph's text. A run font, if present, declares all three font fields. Omitted run styling inherits the paragraph. Node-level legacy `runs` and `paragraphs` are mutually exclusive. Existing nodes without `paragraphs` retain their prior behavior. The compiler font policy includes paragraph and run fonts, and the OOXML adapter preserves these styles after Artifact Tool export.
 - Each text node requires a text evidence item whose content equals `text`; changes to content require `text_override_reason`. An override is retained in the quality report and requires review.
-- Shape `geometry` accepts `rect`, `roundRect`, `ellipse`, `line`, the flow-diagram presets `chevron`, `pentagon`, `rightArrow`, `leftArrow`, and the common presets `trapezoid`, `parallelogram`, `hexagon`, `diamond`, `triangle`. That is the whole list: the engine carries many more presets, but this pipeline only accepts what it has compiled and what `doctor` confirms the installed build still provides. `fill` is a six-digit RGB color or `none`, `line` is `{color,width_pt}` or omitted. Decorations recreated from a source are still evidence-backed shapes.
+- Shape `geometry` accepts `rect`, `roundRect`, `ellipse`, `line`, the flow-diagram presets `chevron`, `pentagon`, `rightArrow`, `leftArrow`, `upArrow`, `downArrow`, and the common presets `trapezoid`, `parallelogram`, `hexagon`, `diamond`, `triangle`. That is the whole list: the engine carries many more presets, but this pipeline only accepts what it has compiled and what `doctor` confirms the installed build still provides. `fill` is a six-digit RGB color or `none`, `line` is `{color,width_pt}` or omitted. Decorations recreated from a source are still evidence-backed shapes.
 - Optional `corner_radius_px` is a source-pixel radius, converted with the page geometry. Optional `fill_gradient` is `{angle_deg,stops:[{offset:0,color:"FFF8FA"},{offset:100000,color:"FFF0F4"}]}`; offsets are strictly increasing from 0 to 100000. These are native editable shape properties.
 
 ## Tables
@@ -71,8 +71,11 @@ A `chart` node is a native PowerPoint chart. It is accepted only where `doctor` 
 
 ## Groups and review
 
-- Group: `{id,member_ids:["card-background","card-title","card-body"]}`. Members must be consecutive in sorted z-order, each in at most one group. Nested groups are excluded from v0.1. Members retain absolute source coordinates; the PPTX postprocessor writes group transforms that preserve their positions.
+- A group contains an `id`, an ordered `member_ids` list and an optional `display_name` for PowerPoint's selection pane. Members may be nodes or groups. Each has at most one parent and occupies a consecutive span in stacking order. Coordinates are absolute source coordinates.
+- A source-traced connector can use `geometry: "line"`, a solid RGB `fill` and an `outline` of 3–256 vertices. Each vertex is an integer pair in the range 0–100000 relative to the node bounds. The compiler writes a closed native editable path.
 - `review_status` is `needs_review` or `source_checked`. `source_checked` records an agent source comparison; it does not mean human acceptance or PowerPoint/WPS acceptance.
 - A generated quality report records package checks, native object counts, image fallbacks, warnings, source hash, renderer identity and a separate `human_acceptance: false`.
 - Do not store model-generated code in the IR. The compiler runs only the fixed project code and local asset processing.
 
+
+A group may use an earlier group ID as a member. Children must have a single parent and occupy contiguous paint order within their parent.

@@ -4,11 +4,36 @@
 
 ## 运行
 
+在当前目录的 `auto` 入口显式传入 `--native-variant native_synthesis`，可先观察整页，再按模块规划，从空白背景绘制 PowerPoint。例子如下。
+
+带图标的列表按行保留编辑位置。编号流程的每个步骤在选择窗格里可以按标题单选。连续段落允许换行，短标题先利用标题条的空余宽度。复杂回路线从原图中提取可验证的笔画轮廓，写成可编辑的 Office 路径。局部原图复读结果在 `icon-reading-decisions.json`。安装 PowerPoint 的 Windows 主机还会记录实际字框边界，并对溢出字段最多重编译一次，结果见 `office-text-fit.json`。视觉环境缺少 COM 库时，可以用 `IMAGE2PPT_OFFICE_PYTHON` 指向已安装 pywin32 的解释器。
+
+```powershell
+& services/vision/.venv/Scripts/python.exe -X utf8 ppt-rebuild/rebuild.py auto `
+  --native-variant native_synthesis --inputs page.png --output runs/native
+```
+
+视觉规划沿用 `PLANNER_BASE_URL`、`PLANNER_MODEL` 和现有凭据配置。每页独立保存原始 OCR、整页观察、组件与文字归属、对象级图片清单、PPTX 和成品预览。核对已知招牌或徽章小字时查看 `object-report.json` 的 `embedded_text`。未确认转录保留在同一报告里。正文中的自然折行可以共用一个可编辑框。
+
+现有 `--pack` 接受与本次输入像素一致的 LayerD 图层包。没有图层包时，难以分离的图标按对象请求 `--layerd-url`。可用 `IMAGE2PPT_NATIVE_SAM_URL` 和 `IMAGE2PPT_NATIVE_SAM_TOKEN_FILE` 配置分割服务，或用 `IMAGE2PPT_NATIVE_RMBG_HOST`、`IMAGE2PPT_NATIVE_RMBG_WORKER`、`IMAGE2PPT_NATIVE_RMBG_MODEL` 指定远端抠图环境。SSH 解释器和身份文件使用现有的 `IMAGE2PPT_SSH_WIN_PYTHON`、`IMAGE2PPT_SSH_IDENTITY`。透明度采用 0 到 1，形状纯色使用 `fill_opacity`，渐变按每个色标的 `opacity` 控制。
+
 在项目根目录使用已有视觉服务 Python 环境，该环境包含 RapidOCR、ONNX Runtime、OpenCV、NumPy、Pillow、Pydantic 和 pytest。OCR 读取 `ppt-rebuild/models` 中的 PP-OCRv4 权重，禁用运行时下载。字体读取本机 Windows Fonts。
 
 业务图层包、逐页复核 JSON 和生成产物采用本地保存方式。运行前准备自己的 `configs/reviews/NN.json`、`configs/text-repair-reviews/NN.json` 或 `configs/surface-reviews/NN.json`，并按各阶段命令传入源批次和复核目录。下文的页号表示本地样例，复核记录需要与实际源图哈希、尺寸和对象证据对应。
 
 ```powershell
+# 全自动：截图 -> LayerD（默认 ssh://CMCC@192.168.1.103:18840）-> 本地测量 -> PPTX
+# 令牌只从文件读取；BigLaMa 默认 ssh://CMCC@192.168.1.103:18841/inpaint。Cursor 不参与。
+$env:PYTHONPATH=".runtime/core-installed;src;ppt-rebuild/src"
+$env:IMAGE2PPT_SSH_HOST="CMCC@192.168.1.103"
+& services/vision/.venv/Scripts/python.exe -X utf8 ppt-rebuild/rebuild.py auto `
+  --inputs PPT图片/13.png --output ppt-rebuild/outputs/auto `
+  --token-file .runtime/layerd/client-token
+
+# 已有 LayerD 包时跳过远程拆层
+& services/vision/.venv/Scripts/python.exe -X utf8 ppt-rebuild/rebuild.py auto `
+  --inputs <source.png> --pack <layerd-pack-dir> --output ppt-rebuild/outputs/auto --inpaint-url none
+
 # 读取全部图层包并核对来源、图层与复合结果
 & services/vision/.venv/Scripts/python.exe -X utf8 ppt-rebuild/rebuild.py baseline
 

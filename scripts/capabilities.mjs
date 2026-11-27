@@ -41,7 +41,7 @@ export const IR_NODE_TYPES = Object.freeze([
 export const IR_SHAPE_GEOMETRIES = Object.freeze([
   'rect', 'roundRect', 'ellipse', 'line',
   // ribbons and connectors
-  'chevron', 'pentagon', 'rightArrow', 'leftArrow',
+  'chevron', 'pentagon', 'rightArrow', 'leftArrow', 'upArrow', 'downArrow',
   // common slide presets
   'trapezoid', 'parallelogram', 'hexagon', 'diamond', 'triangle',
 ]);

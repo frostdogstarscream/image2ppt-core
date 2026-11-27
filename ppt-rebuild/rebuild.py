@@ -310,6 +310,39 @@ def cmd_rebuild_surfaces(args) -> int:
     return 2 if result["failures"] else 0
 
 
+def cmd_auto(args) -> int:
+    if args.native_variant == "native_synthesis":
+        from native_synthesis import run_native as run_auto
+    else:
+        from auto_rebuild import run_auto
+
+    token = args.token_file
+    if token is None:
+        token = str(ROOT.parent / ".runtime" / "layerd" / "client-token")
+    failures = []
+    deliveries = []
+    for image in args.inputs:
+        try:
+            inpaint = None if args.inpaint_url in ("", "none", "off") else args.inpaint_url
+            result = run_auto(
+                image, args.output,
+                pack=args.pack,
+                layerd_url=args.layerd_url,
+                token_file=token,
+                inpaint_url=inpaint,
+                max_iterations=args.max_iterations,
+                timeout=args.timeout,
+                probes=not args.skip_probes,
+            )
+            deliveries.append(result)
+        except Exception as error:
+            failures.append({"input": image, "error": str(error)})
+            print(json.dumps({"FAILED": image, "error": str(error)}, ensure_ascii=False), flush=True)
+    print(json.dumps({"pages": len(deliveries), "failures": failures,
+                      "directories": [d["directory"] for d in deliveries]}, ensure_ascii=False))
+    return 2 if failures else 0
+
+
 def cmd_eval(args) -> int:
     from visual_eval import evaluate
 
@@ -412,6 +445,22 @@ def main(argv=None) -> int:
     p.add_argument("--resume", help="prior surface batch or progress JSON with verified artifact hashes")
     p.add_argument("--timeout", type=int, default=600)
     p.set_defaults(func=cmd_rebuild_surfaces)
+
+    p = sub.add_parser("auto", help="fully automatic LayerD rebuild without review JSON or Cursor")
+    p.add_argument("--native-variant", choices=["native_synthesis"],
+                   help="observe the page, plan editable modules and draw on a blank slide")
+    p.add_argument("--inputs", nargs="+", required=True, help="one or more page screenshots")
+    p.add_argument("--output", default=str(OUT / "auto"))
+    p.add_argument("--pack", help="existing LayerD pack directory; skips the remote decompose call")
+    p.add_argument("--layerd-url", default="ssh://CMCC@192.168.1.103:18840",
+                   help="http://host:18840 or ssh://USER@host:18840 for Windows loopback LayerD")
+    p.add_argument("--token-file", help="LayerD bearer token file; never pass the token on the command line")
+    p.add_argument("--inpaint-url", default="ssh://CMCC@192.168.1.103:18841/inpaint",
+                   help="BigLaMa endpoint; ssh://USER@host:18841/inpaint uses OpenSSH; 'none' disables it")
+    p.add_argument("--max-iterations", type=int, default=3)
+    p.add_argument("--timeout", type=int, default=1200)
+    p.add_argument("--skip-probes", action="store_true")
+    p.set_defaults(func=cmd_auto)
 
     p = sub.add_parser("eval", help="M6 render comparison")
     p.add_argument("page")
