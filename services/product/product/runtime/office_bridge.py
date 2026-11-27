@@ -17,9 +17,10 @@ from ..materialize import digest, write
 from ..resource_lease import lease
 
 
-def pack(folder, target):
+def pack(folder, target, *, included=None):
     folder, target = Path(folder), Path(target)
-    files = {str(p.relative_to(folder)).replace('\\', '/'): digest(p) for p in folder.rglob('*') if p.is_file()}
+    files = {p.relative_to(folder).as_posix(): digest(p) for p in folder.rglob('*')
+             if p.is_file() and (included is None or p in included)}
     with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('packet-manifest.json', json.dumps(files))
         for name in files:
@@ -133,20 +134,15 @@ def execute_ticket(client,ticket,run,binding):
     if request.get('original_sites'):
         options['original_sites'] = True
     result=check_local(run/'input/input.pptx',irs,run/'output/check',**options)
-    for probe_file in list((run/'output/check').rglob('*')):
-        if not probe_file.is_file():
-            continue
-        suf = probe_file.suffix.lower()
-        if suf == '.pptx':
-            probe_file.unlink()
-        elif suf == '.png' and not probe_file.name.endswith(('-before.png','-delete.png','-site.png','-reopen.png','-text-cleared.png')):
-            probe_file.unlink()
-    result['files'] = {str(p): digest(p) for p in (run/'output/check').rglob('*') if p.is_file()}
+    retained={p for p in (run/'output/check').rglob('*') if p.is_file() and p.suffix.lower()!='.pptx'
+              and (p.suffix.lower()!='.png' or p.name.endswith(
+                  ('-before.png','-delete.png','-site.png','-reopen.png','-text-cleared.png')))}
+    result['files'] = {str(p):digest(p) for p in retained if p.name!='checks.json'}
     write(run/'output/check/checks.json', result)
     result['worker_binding']=binding
     result['input_sha256']=sha256(data.content).hexdigest()
     write(run/'output/result.json',result)
-    pack(run/'output',run/'output.zip')
+    pack(run/'output',run/'output.zip',included=retained|{run/'output/result.json',run/'output/check/checks.json'})
     response=client.post('/api/v1/office/result',params=ticket,content=(run/'output.zip').read_bytes())
     response.raise_for_status()
 

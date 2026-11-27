@@ -519,7 +519,8 @@ def adapt(graph,directory):
     movement=[c['move_members'] for c in chosen if c.get('move_members')]
     if synthesized:
         from .runtime.native_synthesis import fit_editing_space
-        fit_editing_space(ir,[s.bbox for s in graph.surface.shapes if s.id in graph.selected])
+        fit_editing_space(ir,[s.bbox for s in graph.surface.shapes if s.id in graph.selected],
+                          {c['id'] for c in chosen if c.get('source_width')})
     if movement:
         from .runtime.marked_routes import apply_move_groups
         if synthesized:

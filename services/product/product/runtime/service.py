@@ -893,7 +893,7 @@ class RuntimeService(ExplorationTools):
 
     commit_candidate = commit_region
 
-    def compose_delivery(self, state, current, directory):
+    def compose_delivery(self, state, current, directory, *, repair_page=None, finding=None, preview_id=None):
         request = json.loads((state.job/'request.json').read_text('utf8'))
         for index in range(1, len(request['sources'])+1):
             if len(current['pages']) < index or not current['pages'][index-1]:
@@ -903,7 +903,20 @@ class RuntimeService(ExplorationTools):
                     self.create_scene(state, current, directory/f'raster-page-{index}', page=index, evidence={})
         if not current['pages']:
             raise ValueError('perception is required')
-        if current.get('composition'):
+        previous = None
+        preview = None
+        if repair_page is not None:
+            if request.get('native_variant')!='native_synthesis' or type(repair_page) is not int or not 1<=repair_page<=len(current['pages']):
+                raise ValueError('invalid native repair page')
+            previous=self.composition(current)
+            if str(repair_page) in previous.get('repaired_pages',[]) or not isinstance(finding,str) or not finding.strip():
+                raise ValueError('one visually justified correction per page')
+            preview,ref=state.evidence(preview_id)
+            if not ref['provided_to_agent'] or previous.get('repair_previews',{}).get(str(repair_page))!=preview_id:
+                raise ValueError('inspect the current Office preview before repair')
+            current.pop('visual_review',None)
+            current.pop('independent_audit',None)
+        if current.get('composition') and previous is None:
             composition=self.composition(current)
             return {'status':'COMPOSED','pptx_sha256':digest(composition['artifacts']['pptx']),'cache_hit':True}
         from .compiler import compile_local as compile_pages
@@ -915,6 +928,9 @@ class RuntimeService(ExplorationTools):
             for i,page in enumerate(pages,1):
                 # The native composition is a new candidate. Reuse a source-bound
                 # regional measurement, never a failed Office candidate or old deck.
+                if previous and i!=repair_page:
+                    projected.append(previous['pages'][i-1])
+                    continue
                 parent = digest(page['ir'])
                 batches = [c for c in current['candidates'].values() if c['page']==i and c['kind']=='batch'
                            and c['status'] in ('STAGED_LOCAL','VALIDATED') and c.get('parent_ir_sha256')==parent]
@@ -922,7 +938,13 @@ class RuntimeService(ExplorationTools):
                 if batches:
                     ir,_,_,_ = self._verify_staged_candidate_graph(current,batches[-1])
                     measured = {**page,'ir':str(ir),'scene':str(ir.parent/'scene.json')}
-                projected.append(synthesize_page(measured,directory/f'native-page-{i:02d}'))
+                feedback=None
+                if previous:
+                    prior=Path(previous['pages'][i-1]['ir']).parent/'moma-plan.json'
+                    feedback={'defect':finding[:2000],'prior_plan':json.loads(prior.read_text('utf8')),
+                                'instructions':'The second image is the actual rendering. Retain good components and correct the specific defect.'}
+                projected.append(synthesize_page(measured,directory/f'native-page-{i:02d}',state=state,
+                                                 feedback=feedback,preview=preview))
             pages = projected
         irs = [Path(p['ir']) for p in pages]
         ir_digests = [digest(ir) for ir in irs]
@@ -962,6 +984,7 @@ class RuntimeService(ExplorationTools):
         current['composition'] = {'artifacts': artifacts, 'files': binding, 'office': {'status': 'NOT_RUN'}}
         if request.get('native_variant') == 'native_synthesis':
             current['composition']['pages'] = pages
+            current['composition']['repaired_pages'] = ([*previous.get('repaired_pages',[]),str(repair_page)] if previous else [])
             for page in pages:
                 for p in Path(page['ir']).parent.iterdir():
                     if p.is_file():
@@ -1099,6 +1122,14 @@ class RuntimeService(ExplorationTools):
         pages = composition.get('pages',current['pages'])
         result = self.office_check(state, composition['artifacts']['pptx'], [Path(p['ir']) for p in pages], directory, **options)
         composition['office'] = result
+        if 'pages' in composition and result.get('office_directory'):
+            previews={}
+            for index in range(1,len(pages)+1):
+                file=Path(result['office_directory'])/f'page-{index:02d}-before.png'
+                if file.is_file():
+                    previews[str(index)]=state.register(file,'office_preview')['id']
+            composition['repair_previews']=previews
+            result['repair_previews']=previews
         if result['status'] != 'PASS':
             return result
         from ..parallel_review import panels

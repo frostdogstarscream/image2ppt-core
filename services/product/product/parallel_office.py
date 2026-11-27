@@ -327,8 +327,13 @@ def inspect(pptx,irs,output,*,render_only=False,target_ids=None,original_sites=F
             if local_deck is not None:
                 try:local_deck.Close()
                 except Exception:pass
-            batch_file.unlink(missing_ok=True)
-            batch_png.unlink(missing_ok=True)
+            for temporary in (batch_file,batch_png):
+                try:
+                    temporary.unlink(missing_ok=True)
+                except PermissionError:
+                    # PowerPoint can hold a closed probe briefly. This uniquely
+                    # named diagnostic copy has no bearing on measured edits.
+                    pass
     try:
         pic_cache={}
         verify_pictures(pptx,irs,cache=pic_cache)

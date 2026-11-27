@@ -204,6 +204,48 @@ def run(job, *, actor=None, service=None):
     if (request.get('orchestrator'), request.get('visual_review_backend')) != ('editable_reconstruction', 'moma'):
         raise ValueError('direct runner requires editable_reconstruction and moma')
     with lease('editable-runner-'+key(str(job)), capacity=1):
+        if request.get('native_variant')=='native_synthesis':
+            # Prepare the observed components once. MoMA plans every native page
+            # inside composition and receives the resulting package for review.
+            def perform(tool, suffix, **arguments):
+                if (job/'cancel.requested').exists():
+                    raise InterruptedError('JOB_CANCELLED')
+                token='native-worker-'+suffix
+                saved=state.operation_directory(token)/'input.json'
+                parent=_read(saved)['parent_version'] if saved.exists() else state.read()['version']
+                return service.call(tool,job.name,expected_version=parent,idempotency_key=token,**arguments)
+            try:
+                for index in range(1,len(request['sources'])+1):
+                    perform('prepare_page_evidence',f'prepare-{index}',page=index,run_structure=True)
+                    # On an empty slide only overlays on retained artwork need a
+                    # clean backing. Plain paper and measured carriers are drawn.
+                    graph=service.graph(state.read()['pages'][index-1])
+                    requested=[text.id for text in graph.text.texts]
+                    structure=_read(Path(state.read()['pages'][index-1]['ir']).parent/'page-structure.json')
+                    from .native_synthesis import iou
+                    from PIL import Image
+                    import numpy as np
+                    pixels=np.asarray(Image.open(service.source(state,index)).convert('RGB'))
+                    for asset in graph.asset.objects:
+                        if asset.kind not in ('icon','logo','illustration'):
+                            continue
+                        if not any(e['category'] in ('icon','logo') and iou(e['bbox'],asset.bbox)>.55
+                                   for e in structure.get('elements',[])):
+                            continue
+                        x,y,w,h=map(round,asset.bbox)
+                        tile=pixels[max(0,y):max(0,y+h),max(0,x):max(0,x+w)]
+                        if not tile.size:
+                            continue
+                        edge=np.vstack((tile[0],tile[-1],tile[:,0],tile[:,-1]))
+                        if np.percentile(abs(edge-np.median(edge,axis=0)).max(1),75)>14:
+                            requested.append(asset.id)
+                    perform('batch_reconstruct_page',f'measure-{index}',page=index,
+                            object_ids=requested,include_region_crops=False,verify_office=False)
+                perform('compose_delivery','compose')
+            except InterruptedError:
+                return _stop(state,'JOB_CANCELLED','CANCELLED')
+            except (RuntimeError,OSError,ValueError) as exc:
+                return _stop(state,'NATIVE_PREPARATION_INCOMPLETE:'+type(exc).__name__+':'+str(exc)[:180])
         return _run(state, service, request, actor)
 
 
@@ -281,7 +323,7 @@ def _run(state, service, request, actor):
                         'and OCR evidence for every uploaded page, including layout and the visual component inventory. '
                         'Use regional tools for editable typography and verified photo or icon assets. '
                         'At compose_delivery the adapter emits native carriers, grouped components and local images. '
-                        'Inspect and review that final composition, including missed decorations and embedded lettering.')
+                        'The uploaded pages have already been prepared and composed by the worker. Start with validate_office on the current composition, then inspect actual Office and source evidence. For a material defect use compose_delivery with repair_page, finding and the viewed current preview_id from repair_previews. One correction per page. Record your visual review and finalize. Inspect missing decorations, connector directions, emphasis, image edges and embedded lettering.')
                 prompt_sha = hashlib.sha256(system_prompt.encode('utf8')).hexdigest()
                 policy_sha = hashlib.sha256(policy_bytes).hexdigest()
             if actor is None:
@@ -345,6 +387,14 @@ def _run(state, service, request, actor):
                 record['failure_key'] = attempt
                 seen_failures.add(attempt)
             outcome = {'error': type(exc).__name__, 'detail': str(exc)[:800]}
+        if (decision and decision.tool=='validate_office' and request.get('native_variant')=='native_synthesis'
+                and outcome.get('status')=='UNKNOWN'):
+            reason=outcome.get('failure') or outcome.get('reason') or 'OFFICE_RESULT_UNKNOWN'
+            _stop(state,'NATIVE_OFFICE_UNAVAILABLE:'+str(reason)[:180])
+            terminal=True
+        if decision and decision.tool=='validate_office' and 'repair_previews' in outcome:
+            previews=outcome['repair_previews']
+            outcome={**_review_checks(outcome),'repair_previews':previews,'view_next':list(previews.values())[:8]}
         if decision and decision.tool == 'batch_reconstruct_page' and 'failed_regions' in outcome:
             from .host_evidence import compact
             summary = compact(decision.tool, outcome)

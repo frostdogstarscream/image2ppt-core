@@ -113,5 +113,6 @@ def check_local(pptx, irs, directory, *, target_ids=None, original_sites=False, 
     except Exception as exc:
         result.update(error_type=type(exc).__name__, reason=str(exc)[:300], failure='QA_INFRASTRUCTURE_UNAVAILABLE')
     write(directory/'checks.json', result)
-    result['files'] = {str(p): digest(p) for p in directory.rglob('*') if p.is_file() and not p.name.startswith('~$')}
+    result['files'] = {str(p): digest(p) for p in directory.rglob('*') if p.is_file()
+                       and not p.name.startswith('~$') and not ('-batch-' in p.name and p.suffix=='.pptx')}
     return result

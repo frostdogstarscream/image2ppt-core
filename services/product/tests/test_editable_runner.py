@@ -40,6 +40,19 @@ def job(tmp_path, monkeypatch):
     return path, RuntimeService(tmp_path)
 
 
+def test_native_worker_stops_after_uncertain_office_response(job,monkeypatch):
+    from product.runtime import editable_runner
+    path,service=job
+    request=json.loads((path/'request.json').read_text('utf8'))
+    request['native_variant']='native_synthesis'
+    actor=Actor(lambda context,turn:{'tool':'validate_office','reason':'check the actual delivery'})
+    monkeypatch.setattr(editable_runner,'_dispatch',lambda *args:{
+        'status':'UNKNOWN','failure':'OFFICE_WORKER_TIMEOUT'})
+    result=editable_runner._run(service.state(path.name),service,request,actor)
+    assert result['status']=='REVIEW_REQUIRED' and 'OFFICE_WORKER_TIMEOUT' in result['reason']
+    assert len(actor.calls)==1
+
+
 def test_direct_tool_crop_and_view_journal_resume(job):
     path, service = job
 

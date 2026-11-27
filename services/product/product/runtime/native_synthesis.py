@@ -166,7 +166,10 @@ def carrier_style(rgb, box, child_boxes):
     interior[:,:margin] = interior[:,-margin:] = False
     samples = tile[interior] if interior.any() else tile.reshape(-1,3)
     fill = np.median(samples,axis=0)
-    line = np.median(tile[0,w//4:max(w//4+1,3*w//4)],axis=0)
+    edge_colors=[np.median(edge,axis=0) for edge in (tile[0],tile[-1],tile[:,0],tile[:,-1])]
+    line=np.median(edge_colors,axis=0)
+    if sum(np.max(abs(side-line))<12 for side in edge_colors)<3:
+        line=fill
     result = {'fill':color(fill),'line_color':color(line),'line_width_pt':.65 if np.abs(line-fill).max()>10 else 0}
     # Fit gradients from both sides on the same carrier. Reject textured bands.
     for axis,angle in ((0,90),(1,0)):
@@ -208,7 +211,7 @@ def text_backplate(rgb, box):
     return [lx,ty,rx-lx,by-ty]
 
 
-def fit_editing_space(ir, panels):
+def fit_editing_space(ir, panels, fixed_width=()):
     """Use free space inside the measured card or row for naturally wrapping prose."""
     texts=[n for n in ir['nodes'] if n['type']=='text']
     width,height=ir['canvas']['source_px']
@@ -229,7 +232,19 @@ def fit_editing_space(ir, panels):
             if x<px+pw and px<max(x+w,right) and py>=y+h-2:
                 bottom=min(bottom,py-1)
         n['bbox']=[x,y,max(w,min(right-x,w*1.6)),max(h,min(bottom-y,h*1.65))]
+        if n['id'] in fixed_width:
+            n['bbox'][2]=w
         n['wrap']=True
+        # Leave one extra wrapped line for edits to compact multi-item lists where
+        # the next row prevents growing the frame. Keep all run emphasis and text.
+        if len(n.get('paragraphs',[]))>=4 and any(v in n['text'] for v in ('·','•','●')):
+            lines=len(n['paragraphs'])+1
+            max_pitch=(n['bbox'][3]*.75-2)/lines
+            for paragraph in n['paragraphs']:
+                size=paragraph['font']['size_pt']
+                current_pitch=paragraph.get('line_spacing_pt',size*1.2)
+                if size <= max_pitch < current_pitch:
+                    paragraph['line_spacing_pt']=round(max_pitch,2)
 
 
 def order_components(ir, groups):
@@ -237,6 +252,8 @@ def order_components(ir, groups):
     member = {oid:i for i,group in enumerate(groups) for oid in group}
     # Ungrouped foreground must remain above carriers. Native groups form contiguous stacks.
     def order(node):
+        if node['id'].startswith('plan-bg-'):
+            return -1,0,0
         if node['id'] in member:
             return 1,member[node['id']],node['z']
         return (0 if node['type']=='shape' else 2),0,node['z']
@@ -244,7 +261,7 @@ def order_components(ir, groups):
         node['z'] = z
 
 
-def synthesize_page(page, destination):
+def synthesize_page(page, destination, *, state=None, feedback=None, preview=None, replay_directory=None):
     base = Path(page['ir']).parent
     graph = SceneGraph.model_validate_json((base/'scene.json').read_text('utf8'))
     structure = json.loads((base/'page-structure.json').read_text('utf8'))
@@ -423,22 +440,84 @@ def synthesize_page(page, destination):
             Image.fromarray(rgb[y:y+h,x:x+w]).save(file)
         ref={'path':file.name,'bbox':b,'sha256':digest(file),'source_sha256':graph.source_sha256}
         label='photo' if i<len(photo_boxes) else 'graphic'
+        if (state is not None or replay_directory is not None) and label=='graphic' and not matches:
+            from .component_plan import matte_symbol
+            matte_symbol(file)
+            ref['sha256']=digest(file)
         part={'name':label,'bbox':b,'layers':[file.name]}
         graph.asset.objects.append(ClosedObject(id=oid,description=label,prompt_en=label,bbox=b,layers=[file.name],
             text_policy='exclude_independent_text',components=[label],kind='illustration',parts=[part]))
         graph.ownership[oid]='RESOLVED'
         graph.selected[oid]={'id':oid,'kind':'asset','bbox':b,'asset_reference':ref,
                              'payload':{'method':'verified-layer' if matches else 'text-cleared-local-crop'}}
+    decisions=[]
+    if state is not None or replay_directory is not None:
+        from .component_plan import request_plan,apply_components,PagePlan
+        if replay_directory is None:
+            plan=request_plan(state,graph,base,destination,feedback=feedback,preview=preview)
+        else:
+            # Offline regression input, unavailable as an upload parameter.
+            from ..parallel_provider import parse_reply
+            receipt=Path(replay_directory)/'response.json'
+            observed=Path(replay_directory)/'observed-plan.json'
+            saved=json.loads(observed.read_text('utf8'))
+            original=json.loads((Path(replay_directory)/'source-receipt.json').read_text('utf8'))
+            if (saved['source_sha256']!=graph.source_sha256 or digest(receipt)!=saved['response_sha256']
+                    or digest(base/'slideir.json')!=original['ir'] or original['source']!=graph.source_sha256):
+                raise ValueError('replay evidence differs from the measured source or original model response')
+            plan=PagePlan.model_validate(parse_reply(json.loads(receipt.read_text('utf8'))))
+            if plan!=PagePlan.model_validate(saved):
+                raise ValueError('saved page plan differs from the received model response')
+            correction_file=Path(replay_directory)/'correction-response.json'
+            if correction_file.exists():
+                from .component_plan import PlanCorrection,apply_correction
+                binding=json.loads((Path(replay_directory)/'correction-binding.json').read_text('utf8'))
+                if (binding['prior_plan']!=digest(observed) or binding['source']!=graph.source_sha256
+                        or binding['response']!=digest(correction_file)
+                        or binding['preview']!=digest(Path(replay_directory)/'reviewed-preview.png')):
+                    raise ValueError('correction evidence mismatch')
+                patch=PlanCorrection.model_validate(parse_reply(json.loads(correction_file.read_text('utf8'))))
+                plan=apply_correction(plan,patch)
+                write(destination/'moma-plan.json',{**saved,**plan.model_dump(),'correction':binding})
+            else:
+                shutil.copyfile(observed,destination/'moma-plan.json')
+        decisions=apply_components(graph,rgb,plan,destination)
+        parent_shapes={s.id:list(s.bbox) for s in graph.surface.shapes if s.id in parent_shapes
+                       or graph.selected.get(s.id,{}).get('planned_panel')}
+        graph.raster_backing['component_plan_sha256']=digest(destination/'moma-plan.json')
+        # A card's rows and header must travel with the card. Flat compiler
+        # groups cannot give one child to both a row and its outer module.
+        roots={}
+        for oid,b in sorted(parent_shapes.items(),key=lambda pair:-area(pair[1])):
+            if not any(inside(b,parent) for parent in roots.values()):
+                roots[oid]=b
+        parent_shapes=roots
     for oid,rec in graph.selected.items():
-        if oid in parent_shapes:
+        if oid in parent_shapes or rec.get('page_decoration'):
             continue
         b = rec['bbox']
         parent = min((p for p in parent_shapes if inside(b,parent_shapes[p])),key=lambda p:area(parent_shapes[p]),default=None)
+        requested=rec.get('planned_parent')
+        if requested in parent_shapes:
+            parent=requested
         if parent:
             graph.selected[parent].setdefault('move_members',[parent]).append(oid)
     ir=adapt(graph,destination)
     write(destination/'scene.json',graph.model_dump(by_alias=True))
     write(destination/'slideir.json',ir)
-    write(destination/'synthesis.json',{'source_sha256':graph.source_sha256,'observed_panels':panels,
-          'pictures':picture_boxes,'skipped':skipped,'groups':ir['groups'],'background':ir['background']})
+    evidence=[]
+    for el,box in logical:
+        kind=el['category']
+        wanted=('text',) if kind in ('title','section_header','body_text') else (
+            ('asset',) if kind in ('photo','logo','icon','background_scenery') else ('surface','table','chart'))
+        matches=[(iou(box,rec['bbox']),oid) for oid,rec in graph.selected.items() if rec['kind'] in wanted]
+        score,oid=max(matches,default=(0,None))
+        resolved=score>.5
+        evidence.append({'source_id':el['id'],'category':kind,'source_bbox':box,'object_id':oid if resolved else None,
+                         'status':('PICTURE' if wanted==('asset',) else 'NATIVE') if resolved else 'REVIEW_REQUIRED'})
+    observed_ids={e['source_id'] for e in evidence}
+    evidence.extend({'source_id':e['id'],'category':e['category'],'status':'REVIEW_REQUIRED',
+                     'reason':'unresolved source geometry'} for e in elements if e['id'] not in observed_ids)
+    write(destination/'synthesis.json',{'source_sha256':graph.source_sha256,'observed_panels':panels,'inventory':evidence,
+          'component_decisions':decisions,'pictures':picture_boxes,'skipped':skipped,'groups':ir['groups'],'background':ir['background']})
     return {**page,'ir':str(destination/'slideir.json'),'scene':str(destination/'scene.json')}
